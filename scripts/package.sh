@@ -248,16 +248,21 @@ fi
 
 # ── Build remote delete commands (passed via env to avoid injection) ────────────
 DELETED_LIST=$(printf '%s' "$DELETED_FILES" | tr '\n' ':')
-# base64 传输：删除的文件名可能含空格，直接作为 ssh 命令行 env 赋值会被远端 shell
-# 二次分词而崩，故编码。
-DELETED_LIST_B64=$(printf '%s' "$DELETED_LIST" | base64 | tr -d '\n')
+# 所有传给远端的值一律 base64 编码。ssh 会把参数拼成一行交给远端 shell 重新解析，
+# 变量值（分支名、归档名、文件名）里若含 ; & | $ ` 等字符就会被当成命令执行，
+# 也可能因空格被二次分词。编码后远端只看到 [A-Za-z0-9+/=]，无注入面。
+b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
+REMOTE_DIR_B64=$(b64 "$REMOTE_DIR")
+LOCAL_BRANCH_B64=$(b64 "$LOCAL_BRANCH")
+ARCHIVE_NAME_B64=$(b64 "$ARCHIVE_NAME")
+DELETED_LIST_B64=$(b64 "$DELETED_LIST")
 
 # ── Remote: pull → extract → commit → push ────────────────────────────────────
 info "Syncing remote ..."
 ssh "${REMOTE_HOST}" \
-  REMOTE_DIR="${REMOTE_DIR}" \
-  LOCAL_BRANCH="${LOCAL_BRANCH}" \
-  ARCHIVE_NAME="${ARCHIVE_NAME}" \
+  REMOTE_DIR_B64="${REMOTE_DIR_B64}" \
+  LOCAL_BRANCH_B64="${LOCAL_BRANCH_B64}" \
+  ARCHIVE_NAME_B64="${ARCHIVE_NAME_B64}" \
   SKIP_ARCHIVE="${SKIP_ARCHIVE}" \
   DELETED_LIST_B64="${DELETED_LIST_B64}" \
   'bash -s' <<'REMOTE_SCRIPT'
@@ -265,6 +270,14 @@ set -euo pipefail
 
 info()  { echo "[INFO]  $*"; }
 error() { echo "[ERROR] $*" >&2; }
+
+# Values arrive base64-encoded (see the sender side); decode exactly once here so
+# nothing in them is ever parsed by the remote shell. --decode is spelled out
+# because GNU and BSD base64 differ on the short flag.
+b64d() { printf '%s' "$1" | base64 --decode 2>/dev/null || printf '%s' "$1" | base64 -d; }
+REMOTE_DIR=$(b64d "${REMOTE_DIR_B64:-}")
+LOCAL_BRANCH=$(b64d "${LOCAL_BRANCH_B64:-}")
+ARCHIVE_NAME=$(b64d "${ARCHIVE_NAME_B64:-}")
 
 cd "${REMOTE_DIR}"
 
@@ -307,7 +320,7 @@ fi
 find "${REMOTE_DIR}" -maxdepth 1 -name '*.tar.gz' -delete
 
 # Remove files deleted locally
-DELETED_LIST=$(printf '%s' "${DELETED_LIST_B64:-}" | base64 -d 2>/dev/null || true)
+DELETED_LIST=$(b64d "${DELETED_LIST_B64:-}")
 if [[ -n "${DELETED_LIST}" ]]; then
   info "Removing locally-deleted files on remote ..."
   IFS=':' read -ra del_files <<< "${DELETED_LIST}"
