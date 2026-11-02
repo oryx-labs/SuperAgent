@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/superagent-logo.png" alt="SuperAgent logo" width="300" />
+  <img src="docs/images/superagent-logo.png" alt="SuperAgent logo"  />
 </p>
 
 An open-source, self-hosted AI work platform for enterprises—model-agnostic, governed, and built to accumulate organizational knowledge.
