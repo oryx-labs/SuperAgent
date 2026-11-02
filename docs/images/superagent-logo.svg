@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="720" viewBox="0 0 800 720">
+  <rect width="800" height="720" fill="transparent"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M180 175 C251 175 282 215 339 248 C390 277 432 277 489 277" stroke="#182A6B" stroke-width="22"/>
+    <path d="M165 267 C236 267 284 267 339 267 C394 267 425 267 502 267" stroke="#2563EB" stroke-width="22"/>
+    <path d="M180 359 C251 359 282 319 339 286 C390 257 432 257 489 257" stroke="#182A6B" stroke-width="22"/>
+  </g>
+  <circle cx="519" cy="267" r="11" fill="#2563EB"/>
+  <text x="400" y="490" text-anchor="middle" fill="#182A6B" font-family="Inter, Arial, sans-serif" font-size="48" font-weight="500" letter-spacing="-1">SuperAgent</text>
+</svg>
