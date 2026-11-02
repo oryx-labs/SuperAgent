@@ -41,3 +41,5 @@ target/
 
 # OS
 .DS_Store
+docs
+docs/td/*

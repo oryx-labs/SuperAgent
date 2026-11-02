@@ -14,7 +14,7 @@
   <packaging>jar</packaging>
 
   <name>superagent-web</name>
-  <description>HTTP entry point: REST controllers, authentication and UI-facing endpoints</description>
+  <description>REST controllers, authentication and UI-facing endpoints. Packaged as a library; superagent-server provides the deployable boot jar.</description>
 
   <dependencies>
     <dependency>
@@ -43,13 +43,4 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
-
-  <build>
-    <plugins>
-      <plugin>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-maven-plugin</artifactId>
-      </plugin>
-    </plugins>
-  </build>
 </project>

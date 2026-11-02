@@ -23,6 +23,7 @@
     <module>superagent-core</module>
     <module>superagent-api</module>
     <module>superagent-web</module>
+    <module>superagent-server</module>
     <module>superagent-worker</module>
   </modules>
 
@@ -43,6 +44,16 @@
       <dependency>
         <groupId>com.superagent</groupId>
         <artifactId>superagent-api</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-web</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-server</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>
