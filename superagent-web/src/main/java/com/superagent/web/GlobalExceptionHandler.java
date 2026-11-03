@@ -1,6 +1,13 @@
 package com.superagent.web;
 
 import com.superagent.api.ApiResponse;
+import com.superagent.web.chat.SessionNotFoundException;
+import com.superagent.web.connector.ConnectorNotFoundException;
+import com.superagent.web.task.ArtifactNotFoundException;
+import com.superagent.web.task.TaskBusyException;
+import com.superagent.web.task.TaskNotFoundException;
+import com.superagent.web.user.UserNotFoundException;
+import com.superagent.web.user.UsernameTakenException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -15,12 +22,9 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import java.util.stream.Collectors;
 
 /**
- * Turns exceptions into the same {@link ApiResponse} envelope controllers return,
- * so clients parse one shape on success and failure alike.
- *
- * <p>Unexpected exceptions are logged with their stack trace and reported as a
- * generic {@code internal_error}: no exception message reaches the client, since
- * it can leak internal detail.
+ * Single central point for turning exceptions into the {@link ApiResponse}
+ * envelope: business code lets exceptions propagate here, where they are logged
+ * and reported to the client with a specific message.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -40,6 +44,46 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", "No such endpoint"));
     }
 
+    @ExceptionHandler(SessionNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSessionNotFound(SessionNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ConnectorNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConnectorNotFound(ConnectorNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(TaskNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTaskNotFound(TaskNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ArtifactNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleArtifactNotFound(ArtifactNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(TaskBusyException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTaskBusy(TaskBusyException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error("conflict", ex.getMessage()));
+    }
+
+    @ExceptionHandler(UserNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUserNotFound(UserNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(UsernameTakenException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUsernameTaken(UsernameTakenException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error("conflict", ex.getMessage()));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException ex) {
+        return ResponseEntity.badRequest().body(ApiResponse.error("invalid_argument", ex.getMessage()));
+    }
+
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiResponse<Void>> handleMethodNotAllowed(HttpRequestMethodNotSupportedException ex) {
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
@@ -55,7 +99,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception ex) {
         log.error("unhandled exception", ex);
+        String detail = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ApiResponse.error("internal_error", "Unexpected server error"));
+                .body(ApiResponse.error("internal_error", detail));
     }
 }

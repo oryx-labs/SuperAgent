@@ -1,0 +1,141 @@
+/* SuperAgent — black & white sign-in page.
+   Shares the monochrome tokens used by the workspace shell (app.css). */
+
+:root {
+  color-scheme: light;
+
+  --ink: #0a0a0a;
+  --paper: #ffffff;
+  --panel: #fafafa;
+  --line: #e4e4e7;
+  --line-strong: #d4d4d8;
+  --muted: #71717a;
+  --muted-2: #a1a1aa;
+
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #f4f4f5 0%, var(--paper) 60%);
+  -webkit-font-smoothing: antialiased;
+}
+
+[hidden] { display: none !important; }
+
+/* ---------- Layout ---------- */
+.auth {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: calc(env(safe-area-inset-top, 0px) + 32px) 20px
+           calc(env(safe-area-inset-bottom, 0px) + 32px);
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 32px 30px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.06);
+}
+
+/* ---------- Brand ---------- */
+.brand { display: flex; align-items: center; justify-content: center; margin-bottom: 30px; }
+.brand__logo { height: 80px; width: auto; display: block; }
+
+/* ---------- Form ---------- */
+.form { display: flex; flex-direction: column; gap: 16px; }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field__label { font-size: 13px; font-weight: 600; color: var(--ink); }
+.field__input {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--panel);
+  color: var(--ink);
+}
+.field__input::placeholder { color: var(--muted-2); }
+.field__input:focus { outline: none; border-color: var(--ink); background: var(--paper); }
+
+.form__row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: -2px;
+}
+.remember {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; color: var(--muted); cursor: pointer;
+}
+.remember input { accent-color: var(--ink); width: 14px; height: 14px; }
+
+.link { color: var(--ink); text-decoration: none; font-size: 13px; font-weight: 500; }
+.link:hover { text-decoration: underline; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  font-size: 14px; font-weight: 600;
+  cursor: pointer;
+}
+.btn--primary { border: 1px solid var(--ink); background: var(--ink); color: var(--paper); }
+.btn--primary:hover { background: #262626; }
+.btn--ghost { border: 1px solid var(--line-strong); background: var(--paper); color: var(--ink); }
+.btn--ghost:hover { background: var(--panel); }
+
+/* ---------- Divider ---------- */
+.divider {
+  display: flex; align-items: center; gap: 12px;
+  color: var(--muted-2); font-size: 12px;
+}
+.divider::before, .divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--line);
+}
+
+/* ---------- Footer ---------- */
+.card__foot { margin: 22px 0 0; text-align: center; color: var(--muted); font-size: 13px; }
+.auth__foot { color: var(--muted-2); font-size: 12px; }
+
+/* ---------- Method tabs ---------- */
+.tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--line); }
+.tab {
+  border: 0; background: none; cursor: pointer; font: inherit; font-size: 13px; color: var(--muted);
+  padding: 9px 10px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tab:hover { color: var(--ink); }
+.tab.is-active { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+
+.auth-error {
+  margin: 0 0 14px; padding: 9px 12px; border-radius: 8px; font-size: 13px;
+  background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca;
+}
+.code-row { display: flex; gap: 8px; }
+.code-row .field__input { flex: 1 1 auto; }
+.code-row .btn { flex: 0 0 auto; width: auto; padding: 0 14px; white-space: nowrap; }
+.method-hint { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.6; }
+a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+
+/* ---------- Language switch ---------- */
+.lang-switch { position: fixed; top: 16px; right: 16px; display: flex; gap: 2px; z-index: 10; }
+.lang-switch button {
+  border: 1px solid var(--line-strong); background: var(--paper); color: var(--muted);
+  font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer;
+}
+.lang-switch button:first-child { border-radius: 7px 0 0 7px; }
+.lang-switch button:last-child { border-radius: 0 7px 7px 0; border-left: 0; }
+.lang-switch button.is-active { background: var(--ink); color: var(--paper); border-color: var(--ink); }

@@ -1,0 +1,106 @@
+-- SuperAgent storage schema (ClickHouse): chat sessions/messages/events and MCP connectors.
+-- Backend selected by superagent.storage.type=clickhouse.
+-- Apply with: clickhouse client --queries-file db/clickhouse/schema.sql
+--
+-- Sessions use ReplacingMergeTree keyed by id with updated_at as the version,
+-- so an updated session is written as a new row and reads use FINAL to collapse
+-- to the latest version. Messages and events are append-only (MergeTree).
+
+CREATE DATABASE IF NOT EXISTS superagent;
+
+CREATE TABLE IF NOT EXISTS superagent.chat_session (
+  id               String,
+  title            String,
+  agent_type       String,
+  agent_session_id String,
+  workspace_dir    String,
+  status           String,
+  created_at       DateTime64(3, 'UTC'),
+  updated_at       DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+CREATE TABLE IF NOT EXISTS superagent.chat_message (
+  id         String,
+  session_id String,
+  role       String,
+  content    String,
+  created_at DateTime64(3, 'UTC')
+) ENGINE = MergeTree
+ORDER BY (session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS superagent.agent_event (
+  session_id String,
+  message_id String,
+  seq        Int64,
+  type       String,
+  payload    String,
+  created_at DateTime64(3, 'UTC')
+) ENGINE = MergeTree
+ORDER BY (session_id, created_at, seq);
+
+-- Connectors use ReplacingMergeTree keyed by id with updated_at as the version,
+-- mirroring chat_session: save re-inserts a newer row and reads use FINAL.
+CREATE TABLE IF NOT EXISTS superagent.connector (
+  id          String,
+  name        String,
+  description String,
+  type        String,
+  auth_method String,
+  status      String,
+  transport   String,
+  endpoint    String,
+  created_at  DateTime64(3, 'UTC'),
+  updated_at  DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+-- Per-connector secrets (e.g. OAuth access tokens), keyed by connector_id.
+CREATE TABLE IF NOT EXISTS superagent.connector_credential (
+  connector_id  String,
+  access_token  String,
+  account_label String,
+  updated_at    DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY connector_id;
+
+-- Provisioned users who may sign in (preprovision-only). The admin comes from config.
+CREATE TABLE IF NOT EXISTS superagent.app_user (
+  id            String,
+  username      String,
+  display_name  String,
+  roles         String,
+  enabled       UInt8,
+  password_hash String,
+  phone         String,
+  external_id   String,
+  source        String,
+  created_at    DateTime64(3, 'UTC'),
+  updated_at    DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+-- Document-driven agent runs; execution stream/steering messages live in
+-- agent_event / chat_message keyed by the task id.
+CREATE TABLE IF NOT EXISTS superagent.task (
+  id            String,
+  title         String,
+  brief         String,
+  source        String,
+  repo          String,
+  branch        String,
+  flow          String,
+  status        String,
+  progress      Int32,
+  spend         Decimal(12, 2),
+  model         String,
+  agent_type    String,
+  workspace_dir String,
+  created_by    String,
+  error         String,
+  created_at    DateTime64(3, 'UTC'),
+  started_at    Nullable(DateTime64(3, 'UTC')),
+  finished_at   Nullable(DateTime64(3, 'UTC')),
+  updated_at    DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;

@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title data-i18n="title.app">SuperAgent</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img class="brand__logo" src="/superagent-logo.png" alt="SuperAgent" />
+    </div>
+    <div class="topbar__right">
+      <div class="lang-switch" id="langSwitch">
+        <button type="button" data-lang="en">EN</button>
+        <button type="button" data-lang="zh">中文</button>
+      </div>
+      <div class="user">
+        <span class="user__avatar" aria-hidden="true"></span>
+        <span class="user__name" id="currentUser">—</span>
+        <button class="user__logout" id="logoutBtn" type="button" data-i18n="topbar.logout"
+                data-i18n-title="topbar.logout">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="rail">
+      <nav class="nav" aria-label="Primary">
+        <a class="nav__item is-active" href="#" data-view="chat"><span class="nav__dot"></span><span data-i18n="nav.chat">Chat</span></a>
+        <a class="nav__item" href="#" data-view="tasks"><span class="nav__dot"></span><span data-i18n="nav.tasks">Tasks</span></a>
+        <a class="nav__item" href="#" data-view="automation"><span class="nav__dot"></span><span data-i18n="nav.automation">Automation</span></a>
+      </nav>
+      <div class="nav__sep" id="adminSep"></div>
+      <nav class="nav" aria-label="Administration" id="adminNav">
+        <a class="nav__item" href="#" data-view="connectors"><span class="nav__dot"></span><span data-i18n="nav.connectors">Connectors</span></a>
+        <a class="nav__item" href="#" data-view="users"><span class="nav__dot"></span><span data-i18n="nav.users">Users</span></a>
+        <a class="nav__item" href="#" data-view="tokens"><span class="nav__dot"></span><span data-i18n="nav.tokens">Token Management</span></a>
+      </nav>
+    </aside>
+
+    <section class="threads" data-pane="chat" aria-label="Conversations">
+      <div class="threads__head">
+        <span class="threads__title" data-i18n="chat.heading">Chats</span>
+      </div>
+      <button class="new-chat" type="button" id="newChatBtn" data-i18n="chat.new">+ New Chat</button>
+      <div class="search">
+        <input type="search" data-i18n-ph="chat.search" aria-label="Search threads" id="searchInput" />
+      </div>
+      <ul class="thread-list" id="threadList"></ul>
+    </section>
+
+    <main class="chat" data-pane="chat" aria-label="Conversation">
+      <div class="messages" id="messages">
+        <div class="empty-state" id="emptyState">
+          <img class="empty-state__logo" src="/superagent-logo.png" alt="" aria-hidden="true" />
+          <p data-i18n="chat.empty">Start a new conversation and work with SuperAgent.</p>
+        </div>
+      </div>
+
+      <form class="composer" id="composer">
+        <textarea class="composer__input" id="composerInput" rows="1"
+                  data-i18n-ph="chat.composer" aria-label="Message"></textarea>
+        <div class="composer__row">
+          <span class="composer__hint" id="statusHint">claude</span>
+          <button class="send" type="submit" id="sendBtn" aria-label="Send">↑</button>
+        </div>
+      </form>
+    </main>
+
+    <aside class="panel" data-pane="chat" aria-label="Context">
+      <section class="panel__block">
+        <h3 class="panel__title" data-i18n="chat.progress">Progress</h3>
+        <p class="panel__status" id="progressStatus" data-i18n="chat.statusIdle">idle</p>
+      </section>
+      <section class="panel__block">
+        <h3 class="panel__title" data-i18n="chat.context">Context</h3>
+        <span class="panel__subhead" data-i18n="chat.agent">Agent</span>
+        <ul class="panel__list panel__list--plain">
+          <li>claude</li>
+        </ul>
+      </section>
+    </aside>
+
+    <section class="admin" data-pane="connectors" aria-label="Connectors" hidden>
+      <div class="admin__head">
+        <div>
+          <h2 class="admin__title" data-i18n="conn.title">Connectors</h2>
+          <p class="admin__sub" data-i18n="conn.sub">Manage the MCP services your models can connect to.</p>
+        </div>
+        <button class="btn btn--primary" id="addConnectorBtn" type="button" data-i18n="conn.add">+ Add Connector</button>
+      </div>
+      <div class="admin__body">
+        <table class="ctable">
+          <thead>
+            <tr>
+              <th data-i18n="conn.colConnector">Connector</th><th data-i18n="conn.colType">Type</th>
+              <th data-i18n="conn.colStatus">Status</th><th data-i18n="conn.colMethod">Method</th>
+              <th class="ctable__actions-col" data-i18n="conn.colActions">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="connectorRows"></tbody>
+        </table>
+        <p class="admin__empty" id="connectorsEmpty" data-i18n="conn.empty" hidden>No connectors yet.</p>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="tasks" aria-label="Tasks" hidden>
+      <div class="task-list-view" id="taskListView">
+        <div class="admin__head">
+          <div>
+            <h2 class="admin__title" data-i18n="tasks.title">Tasks</h2>
+            <p class="admin__sub" data-i18n="tasks.sub">Document-driven long-running tasks.</p>
+          </div>
+          <button class="btn btn--primary" id="newTaskBtn" type="button" data-i18n="tasks.new">+ New Task</button>
+        </div>
+        <div class="admin__body">
+          <table class="ttable">
+            <thead>
+              <tr>
+                <th data-i18n="tasks.colTask">Task</th><th data-i18n="tasks.colSource">Source</th>
+                <th data-i18n="tasks.colCreated">Created</th><th data-i18n="tasks.colSpend">Spend</th>
+                <th class="ttable__status-col" data-i18n="tasks.colStatus">Status</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="taskRows"></tbody>
+          </table>
+          <p class="admin__empty" id="tasksEmpty" data-i18n="tasks.empty" hidden>No tasks yet.</p>
+        </div>
+      </div>
+
+      <div class="task-detail-view" id="taskDetailView" hidden>
+        <div class="task-detail__head">
+          <button class="task-back" id="taskBackBtn" type="button" aria-label="Back">←</button>
+          <div class="task-detail__title-wrap">
+            <h2 class="task-detail__title" id="taskDetailTitle">Task</h2>
+            <div class="task-detail__meta" id="taskDetailMeta"></div>
+          </div>
+          <span class="status-badge" id="taskDetailStatus">pending</span>
+          <div class="task-detail__actions">
+            <button class="btn" id="taskStopBtn" type="button" data-i18n="tasks.stop">Stop</button>
+            <button class="btn" id="taskDeleteBtn" type="button" data-i18n="tasks.delete">Delete</button>
+          </div>
+        </div>
+        <div class="task-detail__body">
+          <div class="task-main">
+            <div class="task-tabs" id="taskTabs">
+              <button type="button" class="task-tab is-active" data-filter="all" data-i18n="tasks.tabAll">All events</button>
+              <button type="button" class="task-tab" data-filter="text" data-i18n="tasks.tabMessages">Messages</button>
+              <button type="button" class="task-tab" data-filter="tool" data-i18n="tasks.tabTools">Tools</button>
+              <button type="button" class="task-tab" data-filter="error" data-i18n="tasks.tabErrors">Errors</button>
+            </div>
+            <div class="task-stream" id="taskStream"></div>
+          </div>
+          <aside class="task-side">
+            <h3 class="panel__title" data-i18n="tasks.progress">Progress</h3>
+            <div class="progress"><div class="progress__bar" id="taskProgressBar"></div></div>
+            <p class="progress__pct" id="taskProgressPct">0%</p>
+            <dl class="task-facts" id="taskFacts"></dl>
+            <h3 class="panel__title panel__title--spaced" data-i18n="tasks.artifacts">Artifacts</h3>
+            <ul class="artifact-list" id="taskArtifacts"></ul>
+            <p class="artifact-empty" id="taskArtifactsEmpty" data-i18n="tasks.artifactsEmpty" hidden>No deliverables yet.</p>
+          </aside>
+        </div>
+        <form class="task-steer" id="taskSteerForm">
+          <textarea class="task-steer__input" id="taskSteerInput" rows="1" data-i18n-ph="tasks.steer"></textarea>
+          <button class="send" type="submit" id="taskSteerBtn" aria-label="Send">↑</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="users" aria-label="Users" hidden>
+      <div class="admin__head">
+        <div>
+          <h2 class="admin__title" data-i18n="users.title">Users</h2>
+          <p class="admin__sub" data-i18n="users.sub">Provision who may sign in.</p>
+        </div>
+        <button class="btn btn--primary" id="addUserBtn" type="button" data-i18n="users.add">+ Add User</button>
+      </div>
+      <div class="admin__body">
+        <table class="ctable">
+          <thead>
+            <tr>
+              <th data-i18n="users.colUser">User</th><th data-i18n="users.colRoles">Roles</th>
+              <th data-i18n="users.colSource">Source</th><th data-i18n="users.colStatus">Status</th>
+              <th class="ctable__actions-col" data-i18n="users.colActions">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="userRows"></tbody>
+        </table>
+        <p class="admin__empty" id="usersEmpty" data-i18n="users.empty" hidden>No provisioned users yet.</p>
+      </div>
+    </section>
+
+    <section class="admin admin--center" data-pane="placeholder" aria-label="Coming soon" hidden>
+      <div class="placeholder">
+        <img class="placeholder__logo" src="/superagent-logo.png" alt="" aria-hidden="true" />
+        <p id="placeholderText" data-i18n="placeholder.default">Coming soon.</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal" id="connectorModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="connectorForm">
+      <h3 class="modal__title" id="connectorModalTitle" data-i18n="conn.modalAdd">Add Connector</h3>
+      <label class="field"><span data-i18n="conn.fName">Name</span>
+        <input type="text" id="cfName" required placeholder="e.g. GitHub" />
+      </label>
+      <label class="field"><span data-i18n="conn.fEndpoint">Endpoint</span>
+        <input type="text" id="cfEndpoint" data-i18n-ph="conn.fEndpointPh" />
+      </label>
+      <label class="field"><span data-i18n="conn.fDescription">Description</span>
+        <input type="text" id="cfDescription" data-i18n-ph="common.optional" />
+      </label>
+      <div class="field-row">
+        <label class="field"><span data-i18n="conn.fTransport">Transport</span>
+          <select id="cfTransport">
+            <option value="stdio">stdio</option>
+            <option value="http">http</option>
+            <option value="sse">sse</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="conn.fType">Type</span>
+          <select id="cfType">
+            <option value="optional" data-i18n="conn.typeOptional">Optional</option>
+            <option value="required" data-i18n="conn.typeRequired">Required</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="conn.fMethod">Method</span>
+          <select id="cfAuthMethod">
+            <option value="system_oauth" data-i18n="conn.methodSystem">System OAuth</option>
+            <option value="personal_token" data-i18n="conn.methodToken">Personal Token</option>
+          </select>
+        </label>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="cfSubmit" data-i18n="common.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal" id="taskModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="taskForm">
+      <h3 class="modal__title" data-i18n="tasks.modalNew">New Task</h3>
+      <label class="field"><span data-i18n="tasks.fTitle">Title</span>
+        <input type="text" id="tfTitle" required data-i18n-ph="tasks.fTitlePh" />
+      </label>
+      <label class="field"><span data-i18n="tasks.fBrief">Brief</span>
+        <textarea id="tfBrief" rows="6" required data-i18n-ph="tasks.fBriefPh"></textarea>
+      </label>
+      <div class="field-row">
+        <label class="field"><span data-i18n="tasks.fRepo">Repo</span><input type="text" id="tfRepo" data-i18n-ph="common.optional" /></label>
+        <label class="field"><span data-i18n="tasks.fBranch">Branch</span><input type="text" id="tfBranch" data-i18n-ph="common.optional" /></label>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="tfSubmit" data-i18n="tasks.create">Create &amp; run</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal" id="userModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="userForm">
+      <h3 class="modal__title" id="userModalTitle" data-i18n="users.modalAdd">Add User</h3>
+      <label class="field"><span data-i18n="users.fUsername">Username (login name)</span>
+        <input type="text" id="ufUsername" required data-i18n-ph="users.fUsernamePh" />
+      </label>
+      <label class="field"><span data-i18n="users.fDisplay">Display name</span>
+        <input type="text" id="ufDisplayName" data-i18n-ph="common.optional" />
+      </label>
+      <div class="field-row">
+        <label class="field"><span data-i18n="users.fSource">Source</span>
+          <select id="ufSource">
+            <option value="local" data-i18n="src.local">Username / Password</option>
+            <option value="phone" data-i18n="src.phone">Phone code</option>
+            <option value="sso" data-i18n="src.sso">SSO</option>
+            <option value="wechat" data-i18n="src.wechat">WeChat</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="users.fRole">Role</span>
+          <select id="ufRole">
+            <option value="USER">USER</option>
+            <option value="ADMIN">ADMIN</option>
+          </select>
+        </label>
+      </div>
+      <label class="field" id="ufPasswordField"><span data-i18n="users.fPassword">Password</span>
+        <input type="password" id="ufPassword" data-i18n-ph="users.fPasswordPh" />
+      </label>
+      <div class="field-row">
+        <label class="field"><span data-i18n="users.fPhone">Phone</span><input type="text" id="ufPhone" data-i18n-ph="users.fPhonePh" /></label>
+        <label class="field"><span data-i18n="users.fExternal">External ID</span><input type="text" id="ufExternalId" data-i18n-ph="users.fExternalPh" /></label>
+      </div>
+      <label class="checkbox-row"><input type="checkbox" id="ufEnabled" checked /> <span data-i18n="users.fEnabled">Enabled (allow sign-in)</span></label>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="ufSubmit" data-i18n="common.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <script src="/i18n.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

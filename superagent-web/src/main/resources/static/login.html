@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title data-i18n="title.login">Sign in · SuperAgent</title>
+  <link rel="stylesheet" href="/login.css" />
+</head>
+<body>
+  <div class="lang-switch" id="langSwitch">
+    <button type="button" data-lang="en">EN</button>
+    <button type="button" data-lang="zh">中文</button>
+  </div>
+  <main class="auth">
+    <section class="card" aria-label="Sign in">
+      <div class="brand">
+        <img class="brand__logo" src="/superagent-logo.png" alt="SuperAgent" />
+      </div>
+
+      <div class="tabs" id="methodTabs">
+        <button type="button" class="tab is-active" data-method="password" data-i18n="login.methodPassword">Username / Password</button>
+        <button type="button" class="tab" data-method="phone" data-i18n="login.methodPhone">Phone code</button>
+        <button type="button" class="tab" data-method="sso" data-i18n="login.methodSso">SSO</button>
+        <button type="button" class="tab" data-method="wechat" data-i18n="login.methodWechat">WeChat</button>
+      </div>
+
+      <p class="auth-error" id="authError" hidden></p>
+
+      <form class="form" id="passwordForm" data-panel="password">
+        <label class="field">
+          <span class="field__label" data-i18n="login.username">Username</span>
+          <input class="field__input" type="text" id="pwUsername" autocomplete="username"
+                 data-i18n-ph="login.usernamePh" required />
+        </label>
+        <label class="field">
+          <span class="field__label" data-i18n="login.password">Password</span>
+          <input class="field__input" type="password" id="pwPassword" autocomplete="current-password"
+                 placeholder="••••••••" required />
+        </label>
+        <button class="btn btn--primary" type="submit" id="pwSubmit" data-i18n="login.signIn">Sign in</button>
+      </form>
+
+      <form class="form" id="phoneForm" data-panel="phone" hidden>
+        <label class="field">
+          <span class="field__label" data-i18n="login.phone">Phone</span>
+          <input class="field__input" type="tel" id="phNumber" autocomplete="tel" data-i18n-ph="login.phonePh" />
+        </label>
+        <label class="field">
+          <span class="field__label" data-i18n="login.code">Code</span>
+          <div class="code-row">
+            <input class="field__input" type="text" id="phCode" inputmode="numeric" data-i18n-ph="login.codePh" />
+            <button class="btn btn--ghost" type="button" id="phSend" data-i18n="login.sendCode">Get code</button>
+          </div>
+        </label>
+        <button class="btn btn--primary" type="submit" id="phSubmit" data-i18n="login.signIn">Sign in</button>
+      </form>
+
+      <div class="form" data-panel="sso" hidden>
+        <p class="method-hint" data-i18n="login.ssoHint">Sign in with your enterprise identity.</p>
+        <a class="btn btn--primary" id="ssoBtn" href="/oauth2/authorization/sso" data-i18n="login.ssoBtn">Sign in with SSO</a>
+      </div>
+
+      <div class="form" data-panel="wechat" hidden>
+        <p class="method-hint" data-i18n="login.wechatHint">Sign in by scanning with WeChat.</p>
+        <a class="btn btn--primary" id="wechatBtn" href="/api/v1/auth/wechat/authorize" data-i18n="login.wechatBtn">Sign in with WeChat</a>
+      </div>
+
+      <p class="card__foot">
+        <span data-i18n="login.noAccess">No access?</span>
+        <a class="link" href="#" data-i18n="login.contactAdmin">Contact your administrator</a>
+      </p>
+    </section>
+    <footer class="auth__foot" data-i18n="login.footer">SuperAgent · Self-hosted AI work platform</footer>
+  </main>
+
+  <script src="/i18n.js"></script>
+  <script src="/login.js"></script>
+</body>
+</html>

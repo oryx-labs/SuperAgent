@@ -14,7 +14,7 @@
   <packaging>jar</packaging>
 
   <name>superagent-worker</name>
-  <description>Background execution: long-running jobs, agent runs and scheduled tasks</description>
+  <description>Background execution library (long-running jobs, agent runs, scheduled tasks) invoked by superagent-server</description>
 
   <dependencies>
     <dependency>
@@ -23,8 +23,8 @@
     </dependency>
 
     <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-actuator</artifactId>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
     </dependency>
 
     <dependency>
@@ -33,13 +33,4 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
-
-  <build>
-    <plugins>
-      <plugin>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-maven-plugin</artifactId>
-      </plugin>
-    </plugins>
-  </build>
 </project>

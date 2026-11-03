@@ -51,3 +51,6 @@ Actuator exposes only `health,info` until real endpoints exist.
 
 - Prefer records for immutable data/DTOs (see `ApiError`).
 - Keep the core → api → app layering intact; don't introduce a dependency from a lower module to a higher one.
+- Keep tests convergent — cover the behaviour with a few meaningful cases, not one per permutation.
+- Keep comments sparse — prefer self-documenting code; don't document every field/parameter. Comment the non-obvious (why, invariants, gotchas), not the obvious.
+- Let exceptions propagate. Don't catch-and-log at the throw site; a single central handler (`GlobalExceptionHandler`) catches, logs, and returns a specific error to the client. (For streamed/async work that can't reach that handler, the stream's terminal error event is the equivalent central point.)

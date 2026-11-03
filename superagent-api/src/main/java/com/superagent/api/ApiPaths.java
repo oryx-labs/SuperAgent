@@ -14,6 +14,19 @@ public final class ApiPaths {
 
     public static final String META = V1 + "/meta";
 
+    public static final String SESSIONS = V1 + "/sessions";
+
+    public static final String CONNECTORS = V1 + "/connectors";
+
+    public static final String TASKS = V1 + "/tasks";
+
+    public static final String AUTH = V1 + "/auth";
+
+    public static final String USERS = V1 + "/users";
+
+    /** OAuth authorize/callback endpoints for connectors that use a provider handshake. */
+    public static final String OAUTH = V1 + "/oauth";
+
     private ApiPaths() {
     }
 }
