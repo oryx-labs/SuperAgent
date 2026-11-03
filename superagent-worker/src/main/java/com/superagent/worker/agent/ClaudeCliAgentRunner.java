@@ -138,6 +138,11 @@ public class ClaudeCliAgentRunner implements AgentRunner {
             cmd.add(request.model());
         }
 
+        if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
+            cmd.add("--append-system-prompt");
+            cmd.add(request.systemPrompt());
+        }
+
         if (mcpConfigFile != null) {
             cmd.add("--mcp-config");
             cmd.add(mcpConfigFile.toString());

@@ -8,6 +8,7 @@ public record SessionDto(
         String title,
         String agentType,
         String status,
+        String agentId,
         Instant createdAt,
         Instant updatedAt) {
 }

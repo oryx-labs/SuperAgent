@@ -27,6 +27,20 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content }),
       }).then(r => { if (!r.ok) throw new Error("edit failed"); return r.json(); }),
+    listAgents: () => fetch("/api/v1/agents").then(r => r.json()),
+    createAgent: body =>
+      fetch("/api/v1/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(r => r.json()),
+    updateAgent: (id, body) =>
+      fetch("/api/v1/agents/" + id, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(r => { if (!r.ok) throw new Error("update failed"); return r.json(); }),
+    deleteAgent: id => fetch("/api/v1/agents/" + id, { method: "DELETE" }),
   };
 
   const el = {
@@ -48,6 +62,30 @@
   function clearEmptyState() { if (el.emptyState) el.emptyState.hidden = true; }
   function scrollToBottom() { el.messages.scrollTop = el.messages.scrollHeight; }
 
+  if (window.marked && window.marked.setOptions) window.marked.setOptions({ gfm: true, breaks: true });
+
+  // Render assistant/agent markdown to sanitized HTML. Raw HTML in the source is
+  // passed through by marked, so DOMPurify is the XSS boundary (no script/on*/javascript:).
+  function renderMarkdown(content) {
+    const raw = content == null ? "" : String(content);
+    if (!window.marked || !window.DOMPurify) {
+      const d = document.createElement("div");
+      d.textContent = raw;
+      return d.innerHTML;
+    }
+    return window.DOMPurify.sanitize(window.marked.parse(raw));
+  }
+
+  const isUserRole = role => role === "user";
+
+  // Fill a bubble with a message body, keeping the raw markdown in dataset.md so
+  // inline edit can recover the source. User text stays plain; agent text is markdown.
+  function setBubbleContent(bubble, role, content) {
+    bubble.dataset.md = content == null ? "" : String(content);
+    if (isUserRole(role)) bubble.textContent = content;
+    else bubble.innerHTML = renderMarkdown(content);
+  }
+
   // ---------- stored messages (with inline edit) ----------
   function renderStoredMessage(role, content, id) {
     clearEmptyState();
@@ -56,7 +94,7 @@
     if (id) msg.dataset.mid = id;
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.textContent = content;
+    setBubbleContent(bubble, role, content);
     msg.appendChild(bubble);
     if (id) {
       const edit = document.createElement("button");
@@ -72,8 +110,9 @@
 
   function beginEdit(msgEl, mid) {
     if (streaming) return;
+    const role = msgEl.classList.contains("msg--user") ? "user" : "agent";
     const bubble = msgEl.querySelector(".bubble");
-    const original = bubble.textContent;
+    const original = bubble.dataset.md != null ? bubble.dataset.md : bubble.textContent;
     const ta = document.createElement("textarea");
     ta.className = "edit-area";
     ta.value = original;
@@ -90,15 +129,15 @@
     ta.focus();
     ta.style.height = Math.min(ta.scrollHeight, 220) + "px";
 
-    cancel.addEventListener("click", () => bubble.replaceChildren(document.createTextNode(original)));
+    cancel.addEventListener("click", () => setBubbleContent(bubble, role, original));
     save.addEventListener("click", async () => {
       const val = ta.value;
       save.disabled = true;
       try {
         await api.editMessage(activeSessionId, mid, val);
-        bubble.replaceChildren(document.createTextNode(val));
+        setBubbleContent(bubble, role, val);
       } catch (e) {
-        bubble.replaceChildren(document.createTextNode(original));
+        setBubbleContent(bubble, role, original);
       }
     });
   }
@@ -306,6 +345,14 @@
     }
   }
 
+  // Streamed text arrives incrementally; accumulate the full source in dataset.md
+  // and re-render the whole bubble each tick so markdown stays well-formed (and we
+  // avoid per-token flicker from re-parsing partial tokens into throwaway nodes).
+  function renderStreamText(textEl, fullRaw) {
+    textEl.dataset.md = fullRaw;
+    textEl.innerHTML = renderMarkdown(fullRaw);
+  }
+
   function handleFrame(frame, handles) {
     const dataLine = frame.split("\n").find(l => l.startsWith("data:"));
     if (!dataLine) return;
@@ -318,7 +365,7 @@
         handles.thinkingBody.textContent += ev.payload;
         break;
       case "text":
-        handles.text.textContent += ev.payload;
+        renderStreamText(handles.text, (handles.text.dataset.md || "") + (ev.payload || ""));
         break;
       case "tool_use": {
         handles.tools.hidden = false;
@@ -328,8 +375,13 @@
         handles.tools.appendChild(chip);
         break;
       }
+      case "tool_result": {
+        const created = parseCreatedTask(ev.payload);
+        if (created) appendTaskLink(handles, created);
+        break;
+      }
       case "result":
-        if (ev.payload) handles.text.textContent = ev.payload;
+        if (ev.payload) renderStreamText(handles.text, ev.payload);
         break;
       case "stopped": {
         const chip = document.createElement("span");
@@ -349,6 +401,31 @@
         break;
     }
     scrollToBottom();
+  }
+
+  // Only create_task results carry this prefix, so other tool results stay out of the bubble.
+  function parseCreatedTask(payload) {
+    if (!payload) return null;
+    const m = /已创建任务\s+([0-9a-fA-F-]{36})（([^）]+)）/.exec(payload);
+    return m ? { id: m[1], title: m[2] } : null;
+  }
+
+  // Inline, clickable task card appended to the assistant bubble — jumps straight to
+  // the task detail view; no polling, shown the moment creation succeeds.
+  function appendTaskLink(handles, created) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "task-link";
+    card.title = L("chat.openTask");
+    const icon = document.createElement("span");
+    icon.className = "task-link__icon";
+    icon.textContent = "📋";
+    const title = document.createElement("span");
+    title.className = "task-link__title";
+    title.textContent = created.title || created.id; // textContent → no XSS from task title
+    card.append(icon, title);
+    card.addEventListener("click", () => { setView("tasks"); openTask(created.id); });
+    handles.text.parentNode.appendChild(card);
   }
 
   function setStreaming(on) {
@@ -388,12 +465,6 @@
     sendMessage(text);
   });
 
-  el.input.addEventListener("keydown", e => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      el.composer.requestSubmit();
-    }
-  });
   el.input.addEventListener("input", autoGrow);
 
   el.search.addEventListener("input", () => {
@@ -684,6 +755,7 @@
     brief: document.getElementById("tfBrief"),
     repo: document.getElementById("tfRepo"),
     branch: document.getElementById("tfBranch"),
+    kind: document.getElementById("tfKind"),
     submit: document.getElementById("tfSubmit"),
     back: document.getElementById("taskBackBtn"),
     dTitle: document.getElementById("taskDetailTitle"),
@@ -699,6 +771,8 @@
     progressBar: document.getElementById("taskProgressBar"),
     progressPct: document.getElementById("taskProgressPct"),
     facts: document.getElementById("taskFacts"),
+    phasesPanel: document.getElementById("taskPhasesPanel"),
+    phases: document.getElementById("taskPhases"),
     steerForm: document.getElementById("taskSteerForm"),
     steerInput: document.getElementById("taskSteerInput"),
     steerBtn: document.getElementById("taskSteerBtn"),
@@ -842,6 +916,8 @@
 
     updateStatusUi(t);
     renderFacts(t);
+    renderPhases(d.phases);
+    task.hasPhases = !!(d.phases && d.phases.length);
     tel.stream.dataset.filter = "all";
     setActiveTab("all");
     loadArtifacts(t.id);
@@ -907,12 +983,30 @@
     return s + "s";
   }
 
+  // text/result are agent natural-language output → render markdown. Everything
+  // else (thinking/tool/cmd/error) is technical text and stays plain.
+  const MD_KINDS = { text: 1, result: 1 };
+
+  // Fill an event body. Markdown kinds keep the full source in dataset.md and
+  // re-render sanitized HTML each tick (like renderStreamText) to avoid flicker;
+  // other kinds stay plain text.
+  function setEvBody(bodyEl, kind, fullRaw) {
+    if (MD_KINDS[kind]) {
+      bodyEl.dataset.md = fullRaw;
+      bodyEl.innerHTML = renderMarkdown(fullRaw);
+    } else {
+      bodyEl.textContent = fullRaw;
+    }
+  }
+
   function appendStreamItem(item) {
     const type = item.kind;
     if (type === "system") return; // bootstrap noise
     const mergeable = type === "text" || type === "thinking";
     if (mergeable && task.mergeType === type && task.mergeEl) {
-      task.mergeEl.querySelector(".ev__body").textContent += item.payload || "";
+      const bodyEl = task.mergeEl.querySelector(".ev__body");
+      const prev = MD_KINDS[type] ? (bodyEl.dataset.md || "") : bodyEl.textContent;
+      setEvBody(bodyEl, type, prev + (item.payload || ""));
       scrollStream();
       return;
     }
@@ -933,7 +1027,7 @@
     }
     const body = document.createElement("div");
     body.className = "ev__body";
-    body.textContent = item.payload || "";
+    setEvBody(body, type, item.payload || "");
     ev.appendChild(body);
     tel.stream.appendChild(ev);
 
@@ -979,6 +1073,42 @@
     });
   }
 
+  // The coding flow's three steps: a status chip per step, plus the PRD markdown
+  // and the acceptance evidence inline. Hidden entirely for non-coding tasks.
+  function renderPhases(phases) {
+    if (!tel.phasesPanel || !tel.phases) return;
+    if (!phases || !phases.length) { tel.phasesPanel.hidden = true; tel.phases.innerHTML = ""; return; }
+    tel.phasesPanel.hidden = false;
+    tel.phases.innerHTML = "";
+    phases.forEach(p => {
+      const li = document.createElement("li");
+      li.className = "phase phase--" + p.status;
+      const head = document.createElement("div");
+      head.className = "phase__head";
+      const name = document.createElement("span");
+      name.className = "phase__name";
+      name.textContent = p.name;
+      const chip = document.createElement("span");
+      chip.className = "phase__status";
+      chip.textContent = L("tasks.phaseStatus." + p.status) || p.status;
+      head.append(name, chip);
+      li.appendChild(head);
+      if (p.content) {
+        const body = document.createElement("div");
+        body.className = "phase__doc";
+        body.innerHTML = renderMarkdown(p.content);
+        li.appendChild(body);
+      }
+      if (p.evidence) {
+        const ev = document.createElement("div");
+        ev.className = "phase__doc";
+        ev.innerHTML = renderMarkdown(p.evidence);
+        li.appendChild(ev);
+      }
+      tel.phases.appendChild(li);
+    });
+  }
+
   function startTaskPolling() {
     stopTaskPolling();
     task.pollTimer = setInterval(pollTask, 1500);
@@ -999,6 +1129,9 @@
       if (!t) return;
       updateStatusUi(t);
       renderFacts(t);
+      if (task.hasPhases) {
+        try { const dRes = await api.taskDetail(id); if (dRes && dRes.data) renderPhases(dRes.data.phases); } catch (e) { /* ignore */ }
+      }
       if (!isActiveStatus(t.status)) { stopTaskPolling(); loadArtifacts(id); }
     } catch (e) { /* ignore transient poll errors */ }
   }
@@ -1053,6 +1186,7 @@
       source: "task_form",
       repo: tel.repo.value.trim() || null,
       branch: tel.branch.value.trim() || null,
+      kind: tel.kind ? tel.kind.value : "auto",
     };
     if (!body.title || !body.brief) return;
     tel.submit.disabled = true;

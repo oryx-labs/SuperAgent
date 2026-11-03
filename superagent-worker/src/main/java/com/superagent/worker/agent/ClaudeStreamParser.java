@@ -19,6 +19,7 @@ import java.util.Optional;
  *   <li>{@code {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":...}}}} → TEXT</li>
  *   <li>…{@code "delta":{"type":"thinking_delta","thinking":...}} → THINKING</li>
  *   <li>{@code "content_block_start"} with {@code content_block.type=="tool_use"} → TOOL_USE</li>
+ *   <li>{@code {"type":"user","message":{"content":[{"type":"tool_result",...}]}}} → TOOL_RESULT (the tool's returned text)</li>
  *   <li>{@code {"type":"result","result":...,"is_error":...}} → RESULT (or ERROR)</li>
  * </ul>
  */
@@ -47,6 +48,7 @@ public class ClaudeStreamParser {
         return switch (type) {
             case "system" -> parseSystem(root);
             case "stream_event" -> parseStreamEvent(root.path("event"));
+            case "user" -> parseUser(root);
             case "result" -> parseResult(root);
             default -> Optional.empty();
         };
@@ -86,6 +88,44 @@ public class ClaudeStreamParser {
                 return Optional.empty();
             }
         }
+    }
+
+    /**
+     * A tool's return value arrives as a {@code user} message carrying a
+     * {@code tool_result} content block; surface its text so the chat UI can act
+     * on it (e.g. turn a create_task result into a clickable link). The block's
+     * {@code content} is either a plain string or an array of text blocks.
+     */
+    private Optional<ParsedEvent> parseUser(JsonNode root) {
+        JsonNode content = root.path("message").path("content");
+        if (!content.isArray()) {
+            return Optional.empty();
+        }
+        for (JsonNode block : content) {
+            if ("tool_result".equals(block.path("type").asText(""))) {
+                String text = toolResultText(block.path("content"));
+                if (!text.isBlank()) {
+                    return Optional.of(new ParsedEvent(AgentEventType.TOOL_RESULT, text));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private String toolResultText(JsonNode content) {
+        if (content.isTextual()) {
+            return content.asText();
+        }
+        if (content.isArray()) {
+            StringBuilder sb = new StringBuilder();
+            for (JsonNode b : content) {
+                if ("text".equals(b.path("type").asText(""))) {
+                    sb.append(b.path("text").asText(""));
+                }
+            }
+            return sb.toString();
+        }
+        return "";
     }
 
     private Optional<ParsedEvent> parseResult(JsonNode root) {

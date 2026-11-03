@@ -1,9 +1,11 @@
 package com.superagent.storage.jdbc;
 
 import com.superagent.core.chat.ChatStore;
+import com.superagent.core.agent.AgentStore;
 import com.superagent.core.connector.ConnectorCredentialStore;
 import com.superagent.core.connector.ConnectorStore;
 import com.superagent.core.task.TaskStore;
+import com.superagent.core.task.TaskPhaseStore;
 import com.superagent.core.user.UserStore;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
@@ -60,6 +62,11 @@ public class JdbcStorageConfiguration {
         }
 
         @Bean
+        AgentStore mysqlAgentStore(JdbcTemplate mysqlJdbcTemplate) {
+            return new MysqlAgentStore(mysqlJdbcTemplate);
+        }
+
+        @Bean
         ConnectorStore mysqlConnectorStore(JdbcTemplate mysqlJdbcTemplate) {
             return new MysqlConnectorStore(mysqlJdbcTemplate);
         }
@@ -72,6 +79,11 @@ public class JdbcStorageConfiguration {
         @Bean
         TaskStore mysqlTaskStore(JdbcTemplate mysqlJdbcTemplate) {
             return new MysqlTaskStore(mysqlJdbcTemplate);
+        }
+
+        @Bean
+        TaskPhaseStore mysqlTaskPhaseStore(JdbcTemplate mysqlJdbcTemplate) {
+            return new MysqlTaskPhaseStore(mysqlJdbcTemplate);
         }
 
         @Bean
@@ -99,6 +111,11 @@ public class JdbcStorageConfiguration {
         }
 
         @Bean
+        AgentStore clickHouseAgentStore(JdbcTemplate clickHouseJdbcTemplate) {
+            return new ClickHouseAgentStore(clickHouseJdbcTemplate);
+        }
+
+        @Bean
         ConnectorStore clickHouseConnectorStore(JdbcTemplate clickHouseJdbcTemplate) {
             return new ClickHouseConnectorStore(clickHouseJdbcTemplate);
         }
@@ -111,6 +128,11 @@ public class JdbcStorageConfiguration {
         @Bean
         TaskStore clickHouseTaskStore(JdbcTemplate clickHouseJdbcTemplate) {
             return new ClickHouseTaskStore(clickHouseJdbcTemplate);
+        }
+
+        @Bean
+        TaskPhaseStore clickHouseTaskPhaseStore(JdbcTemplate clickHouseJdbcTemplate) {
+            return new ClickHouseTaskPhaseStore(clickHouseJdbcTemplate);
         }
 
         @Bean

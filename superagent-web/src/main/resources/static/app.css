@@ -193,16 +193,44 @@ img { max-width: 100%; }
 }
 .msg--user .bubble { background: var(--bubble-user); color: var(--bubble-user-ink); border-bottom-right-radius: 5px; }
 .msg--agent .bubble { background: var(--bubble-agent); color: var(--ink); border-bottom-left-radius: 5px; }
-.bubble p { margin: 0 0 8px; }
-.bubble p:last-child { margin-bottom: 0; }
-.bubble ul { margin: 0; padding-left: 18px; }
-.bubble code {
+.bubble p, .ev__body p { margin: 0 0 8px; }
+.bubble p:last-child, .ev__body p:last-child { margin-bottom: 0; }
+.bubble ul, .ev__body ul { margin: 0; padding-left: 18px; }
+.bubble code, .ev__body code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;
   background: rgba(0,0,0,.06);
   padding: 1px 5px; border-radius: 5px;
 }
 .msg--user .bubble code { background: rgba(255,255,255,.18); }
+
+/* ---------- Rendered markdown (agent bubbles + task event bodies) ---------- */
+.bubble h1, .bubble h2, .bubble h3, .bubble h4,
+.ev__body h1, .ev__body h2, .ev__body h3, .ev__body h4 { margin: 10px 0 6px; line-height: 1.3; font-weight: 650; }
+.bubble h1, .ev__body h1 { font-size: 18px; }
+.bubble h2, .ev__body h2 { font-size: 16px; }
+.bubble h3, .ev__body h3 { font-size: 15px; }
+.bubble h4, .ev__body h4 { font-size: 14px; }
+.bubble ol, .ev__body ol { margin: 0; padding-left: 20px; }
+.bubble li, .ev__body li { margin: 2px 0; }
+.bubble a, .ev__body a { color: inherit; text-decoration: underline; }
+.bubble blockquote, .ev__body blockquote {
+  margin: 8px 0; padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--line-strong); color: var(--muted);
+}
+.bubble pre, .ev__body pre {
+  margin: 8px 0; padding: 10px 12px; overflow-x: auto;
+  background: rgba(0,0,0,.06); border-radius: 8px;
+}
+.bubble pre code, .ev__body pre code {
+  display: block; padding: 0; background: none; white-space: pre;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px;
+}
+.bubble table, .ev__body table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+.bubble th, .bubble td, .ev__body th, .ev__body td { border: 1px solid var(--line-strong); padding: 4px 8px; text-align: left; }
+.bubble hr, .ev__body hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+.bubble > *:first-child, .bubble .text > *:first-child { margin-top: 0; }
+.bubble > *:last-child, .bubble .text > *:last-child { margin-bottom: 0; }
 
 /* ---------- Composer ---------- */
 .composer {
@@ -265,7 +293,7 @@ img { max-width: 100%; }
   border: 1px solid var(--line-strong); border-radius: 6px; padding: 2px 8px;
 }
 
-.msg--agent .bubble .text { white-space: pre-wrap; }
+.msg--agent .bubble .text { white-space: normal; }
 .text.is-streaming::after {
   content: "▋"; margin-left: 1px; color: var(--muted-2);
   animation: sa-blink 1s steps(2, start) infinite;
@@ -281,6 +309,17 @@ img { max-width: 100%; }
   font-size: 11.5px; color: var(--muted);
   border: 1px solid var(--line-strong); border-radius: 6px; padding: 1px 8px;
 }
+
+/* ---------- Inline task link (agent-created task) ---------- */
+.task-link {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
+  font: inherit; font-size: 13px; color: var(--accent); font-weight: 500;
+  background: var(--paper); border: 1px solid var(--line-strong); border-radius: 8px;
+  padding: 6px 10px; cursor: pointer; text-align: left; transition: border-color .12s, background .12s;
+}
+.task-link:hover { border-color: var(--accent); background: rgba(37,99,235,.06); }
+.task-link__icon { font-size: 13px; filter: grayscale(1); }
+.task-link__title { text-decoration: underline; }
 
 /* ---------- Inline message edit ---------- */
 .msg { position: relative; }
@@ -513,6 +552,20 @@ img { max-width: 100%; }
 .task-facts dd { margin: 0; text-align: right; word-break: break-word; }
 .task-facts dd code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
 .panel__title--spaced { margin-top: 22px; }
+.phases { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.phase { border: 1px solid var(--line); border-left: 3px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; }
+.phase--running { border-left-color: #2563eb; }
+.phase--done { border-left-color: #16a34a; }
+.phase__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.phase__name { font-size: 12.5px; font-weight: 600; }
+.phase__status { font-size: 11px; color: var(--muted-2); white-space: nowrap; }
+.phase--running .phase__status { color: #2563eb; }
+.phase--done .phase__status { color: #16a34a; }
+.phase__doc {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
+  font-size: 12px; color: var(--ink); max-height: 320px; overflow: auto; word-break: break-word;
+}
+.phase__doc pre { white-space: pre-wrap; }
 .artifact-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .artifact-list a {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -533,6 +586,8 @@ img { max-width: 100%; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px;
 }
 .ev--result .ev__body { border-left: 3px solid #16a34a; padding-left: 12px; }
+/* text/result bodies hold rendered markdown HTML — don't preserve inter-tag whitespace */
+.ev--text .ev__body, .ev--result .ev__body { white-space: normal; }
 .ev--error .ev__body { color: #b91c1c; border-left: 3px solid #dc2626; padding-left: 12px; }
 .ev--cmd .ev__body {
   background: var(--bubble-user); color: var(--bubble-user-ink); border-radius: 10px; padding: 8px 12px;

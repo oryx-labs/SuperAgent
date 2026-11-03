@@ -95,7 +95,8 @@ public class McpController {
         ArrayNode tools = mapper.createArrayNode();
         tools.add(tool("create_task", "创建并立即执行一个任务（文档驱动的长任务）。",
                 props(req("title", "string", "任务标题"), req("brief", "string", "任务说明：目标、范围、验收标准"),
-                        opt("repo", "string", "可选代码库"), opt("branch", "string", "可选分支")),
+                        opt("repo", "string", "可选代码库"), opt("branch", "string", "可选分支"),
+                        opt("kind", "string", "可选任务类型：coding/writing/research/stats/general；不填则自动分类")),
                 "title", "brief"));
         tools.add(tool("list_tasks", "列出所有任务及其状态。", props(), (String[]) null));
         tools.add(tool("get_task", "查看某个任务的状态与进度。",
@@ -116,7 +117,8 @@ public class McpController {
             case "create_task" -> {
                 TaskDto t = tasks.create(new CreateTaskRequest(
                         str(args, "title"), str(args, "brief"), "web_chat",
-                        strOrNull(args, "repo"), strOrNull(args, "branch"), null, null, null));
+                        strOrNull(args, "repo"), strOrNull(args, "branch"), null, null, null,
+                        strOrNull(args, "kind")));
                 yield "已创建任务 " + t.id() + "（" + t.title() + "），状态 " + t.status() + "。可用 get_task 查询进度。";
             }
             case "list_tasks" -> {

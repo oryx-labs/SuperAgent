@@ -1,6 +1,7 @@
 package com.superagent.web;
 
 import com.superagent.api.ApiResponse;
+import com.superagent.web.agent.AgentNotFoundException;
 import com.superagent.web.chat.SessionNotFoundException;
 import com.superagent.web.connector.ConnectorNotFoundException;
 import com.superagent.web.task.ArtifactNotFoundException;
@@ -16,6 +17,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -46,6 +48,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(SessionNotFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleSessionNotFound(SessionNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(AgentNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAgentNotFound(AgentNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
     }
 
@@ -94,6 +101,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.error("invalid_argument", "Parameter '" + ex.getName() + "' has the wrong type"));
+    }
+
+    /**
+     * The client (e.g. an SSE reader) disconnected mid-response. The container
+     * notifies us, but there is no usable response left to write — any attempt
+     * would fail against the already-committed {@code text/event-stream}. Return
+     * void so nothing is written, and record it at debug: this is expected, not an error.
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleClientDisconnect(AsyncRequestNotUsableException ex) {
+        log.debug("SSE client disconnected: {}", ex.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

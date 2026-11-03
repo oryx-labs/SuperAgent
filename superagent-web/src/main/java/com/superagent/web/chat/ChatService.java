@@ -5,6 +5,8 @@ import com.superagent.api.chat.MessageDto;
 import com.superagent.api.chat.SessionDetailDto;
 import com.superagent.api.chat.SessionDto;
 import com.superagent.api.chat.StreamEventDto;
+import com.superagent.core.agent.Agent;
+import com.superagent.core.agent.AgentStore;
 import com.superagent.core.chat.AgentEvent;
 import com.superagent.core.chat.AgentEventSink;
 import com.superagent.core.chat.AgentEventType;
@@ -54,6 +56,7 @@ public class ChatService {
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
 
     private final ChatStore store;
+    private final AgentStore agentStore;
     private final Map<AgentType, AgentRunner> runners = new EnumMap<>(AgentType.class);
     private final Map<String, Cancellation> activeRuns = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
@@ -76,6 +79,7 @@ public class ChatService {
 
     public ChatService(
             ChatStore store,
+            AgentStore agentStore,
             List<AgentRunner> agentRunners,
             com.superagent.web.mcp.McpToken mcpToken,
             @Value("${superagent.agent.workspace-dir:./data/workspaces}") String workspaceDir,
@@ -86,6 +90,7 @@ public class ChatService {
             @Value("${superagent.mcp.enabled-in-chat:true}") boolean mcpInChat,
             @Value("${superagent.mcp.self-url:http://127.0.0.1:8080/mcp}") String mcpSelfUrl) {
         this.store = store;
+        this.agentStore = agentStore;
         for (AgentRunner runner : agentRunners) {
             this.runners.put(runner.type(), runner);
         }
@@ -133,11 +138,13 @@ public class ChatService {
         }
         String title = request != null && request.title() != null && !request.title().isBlank()
                 ? request.title().trim() : "New chat";
+        String agentId = request != null && request.agentId() != null && !request.agentId().isBlank()
+                ? request.agentId().trim() : null;
         Instant now = Instant.now();
         ChatSession session = new ChatSession(id, title, agentType, null,
-                workspace.toString(), SessionStatus.ACTIVE, now, now);
+                workspace.toString(), agentId, SessionStatus.ACTIVE, now, now);
         store.createSession(session);
-        log.info("created session {} ({})", id, agentType);
+        log.info("created session {} ({}, agent={})", id, agentType, agentId);
         return toDto(session);
     }
 
@@ -147,11 +154,19 @@ public class ChatService {
                 .map(ChatService::toDto).toList();
     }
 
+    /** The id of the agent's owning session (phase 1 is 1:1), or null if it has none. */
+    public String primarySessionId(String agentId) {
+        return store.listSessionsByAgent(agentId).stream()
+                .filter(s -> s.status() != SessionStatus.DELETED)
+                .map(ChatSession::id)
+                .findFirst().orElse(null);
+    }
+
     public SessionDto renameSession(String sessionId, String title) {
         ChatSession s = store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
         String clean = title == null || title.isBlank() ? "Untitled" : title.trim();
         ChatSession renamed = new ChatSession(s.id(), clean, s.agentType(), s.agentSessionId(),
-                s.workspaceDir(), s.status(), s.createdAt(), s.updatedAt());
+                s.workspaceDir(), s.agentId(), s.status(), s.createdAt(), s.updatedAt());
         store.updateSession(renamed);
         return toDto(renamed);
     }
@@ -160,7 +175,7 @@ public class ChatService {
     public void deleteSession(String sessionId) {
         ChatSession s = store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
         store.updateSession(new ChatSession(s.id(), s.title(), s.agentType(), s.agentSessionId(),
-                s.workspaceDir(), SessionStatus.DELETED, s.createdAt(), Instant.now()));
+                s.workspaceDir(), s.agentId(), SessionStatus.DELETED, s.createdAt(), Instant.now()));
     }
 
     public SessionDetailDto getSession(String sessionId) {
@@ -231,9 +246,22 @@ public class ChatService {
         };
 
         try {
+            String systemPrompt = null;
+            String model = defaultModel;
+            if (session.agentId() != null && !session.agentId().isBlank()) {
+                Agent agent = agentStore.find(session.agentId()).orElse(null);
+                if (agent != null) {
+                    if (agent.persona() != null && !agent.persona().isBlank()) {
+                        systemPrompt = agent.persona().trim();
+                    }
+                    if (agent.model() != null && !agent.model().isBlank()) {
+                        model = agent.model().trim();
+                    }
+                }
+            }
             AgentRunRequest request = new AgentRunRequest(
                     session.id(), session.agentSessionId(), session.workspaceDir(),
-                    prompt, defaultModel, allowedTools, skipPermissions, mcpConfig);
+                    prompt, model, allowedTools, skipPermissions, mcpConfig, systemPrompt);
             runner.run(request, sink, cancellation);
 
             boolean stopped = cancellation.isCancelled();
@@ -286,7 +314,7 @@ public class ChatService {
 
     private static SessionDto toDto(ChatSession s) {
         return new SessionDto(s.id(), s.title(), s.agentType().name().toLowerCase(),
-                s.status().name().toLowerCase(), s.createdAt(), s.updatedAt());
+                s.status().name().toLowerCase(), s.agentId(), s.createdAt(), s.updatedAt());
     }
 
     private static MessageDto toMessageDto(ChatMessage m) {

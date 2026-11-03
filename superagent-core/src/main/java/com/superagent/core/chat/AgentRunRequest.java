@@ -7,6 +7,8 @@ import java.util.List;
  * agent mints a new session) and set thereafter to resume it; {@code skipPermissions}
  * bypasses all permission prompts and is only safe in a trusted sandbox.
  * {@code mcpConfig} is an optional MCP-servers JSON config to expose to the agent.
+ * {@code systemPrompt} is an optional persona appended to the agent's system
+ * prompt (Claude CLI {@code --append-system-prompt}); null means none.
  */
 public record AgentRunRequest(
         String sessionId,
@@ -16,7 +18,8 @@ public record AgentRunRequest(
         String model,
         List<String> allowedTools,
         boolean skipPermissions,
-        String mcpConfig) {
+        String mcpConfig,
+        String systemPrompt) {
 
     /** True when this is the first turn and the agent should mint a new session. */
     public boolean isFirstTurn() {

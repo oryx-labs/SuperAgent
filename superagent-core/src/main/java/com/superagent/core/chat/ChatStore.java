@@ -22,6 +22,9 @@ public interface ChatStore {
 
     List<ChatSession> listSessions();
 
+    /** Sessions owned by {@code agentId}, newest first; empty for an unknown agent. */
+    List<ChatSession> listSessionsByAgent(String agentId);
+
     /** Replaces the stored session metadata for {@code session.id()}. */
     void updateSession(ChatSession session);
 

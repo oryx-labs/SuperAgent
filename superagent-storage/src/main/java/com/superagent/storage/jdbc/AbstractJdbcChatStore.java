@@ -44,12 +44,14 @@ abstract class AbstractJdbcChatStore implements ChatStore {
 
     private final RowMapper<ChatSession> sessionMapper = (rs, n) -> {
         String agentSessionId = rs.getString("agent_session_id");
+        String agentId = rs.getString("agent_id");
         return new ChatSession(
                 rs.getString("id"),
                 rs.getString("title"),
                 AgentType.valueOf(rs.getString("agent_type")),
                 agentSessionId == null || agentSessionId.isEmpty() ? null : agentSessionId,
                 rs.getString("workspace_dir"),
+                agentId == null || agentId.isEmpty() ? null : agentId,
                 SessionStatus.valueOf(rs.getString("status")),
                 instant(rs, "created_at"),
                 instant(rs, "updated_at"));
@@ -96,10 +98,10 @@ abstract class AbstractJdbcChatStore implements ChatStore {
 
     protected void insertSession(ChatSession s) {
         jdbc.update("INSERT INTO chat_session "
-                        + "(id, title, agent_type, agent_session_id, workspace_dir, status, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        + "(id, title, agent_type, agent_session_id, workspace_dir, agent_id, status, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 s.id(), nn(s.title()), s.agentType().name(), nn(s.agentSessionId()),
-                nn(s.workspaceDir()), s.status().name(), utc(s.createdAt()), utc(s.updatedAt()));
+                nn(s.workspaceDir()), nn(s.agentId()), s.status().name(), utc(s.createdAt()), utc(s.updatedAt()));
     }
 
     @Override
@@ -112,6 +114,12 @@ abstract class AbstractJdbcChatStore implements ChatStore {
     @Override
     public List<ChatSession> listSessions() {
         return jdbc.query("SELECT * FROM chat_session" + sessionFinal() + " ORDER BY updated_at DESC", sessionMapper);
+    }
+
+    @Override
+    public List<ChatSession> listSessionsByAgent(String agentId) {
+        return jdbc.query("SELECT * FROM chat_session" + sessionFinal() + " WHERE agent_id = ? ORDER BY updated_at DESC",
+                sessionMapper, agentId);
     }
 
     // updateSession is backend-specific (MySQL UPDATE vs ClickHouse re-insert).

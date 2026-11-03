@@ -38,6 +38,22 @@ class ClaudeStreamParserTest {
     }
 
     @Test
+    void surfacesToolResultText() {
+        // Array-of-text-blocks form (what the create_task MCP tool returns).
+        assertThat(parser.parse("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":"
+                + "[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":"
+                + "[{\"type\":\"text\",\"text\":\"已创建任务 abc（标题）\"}]}]}}"))
+                .get().extracting(ClaudeStreamParser.ParsedEvent::type, ClaudeStreamParser.ParsedEvent::payload)
+                .containsExactly(AgentEventType.TOOL_RESULT, "已创建任务 abc（标题）");
+
+        // Plain-string content form.
+        assertThat(parser.parse("{\"type\":\"user\",\"message\":{\"content\":"
+                + "[{\"type\":\"tool_result\",\"content\":\"ok\"}]}}"))
+                .get().extracting(ClaudeStreamParser.ParsedEvent::type, ClaudeStreamParser.ParsedEvent::payload)
+                .containsExactly(AgentEventType.TOOL_RESULT, "ok");
+    }
+
+    @Test
     void ignoresNoiseAndBookkeepingFrames() {
         assertThat(type("{\"type\":\"system\",\"subtype\":\"hook_started\"}")).isNull();
         assertThat(type("{\"type\":\"user\",\"message\":{}}")).isNull();

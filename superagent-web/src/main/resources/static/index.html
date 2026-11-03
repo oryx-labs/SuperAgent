@@ -40,13 +40,13 @@
       </nav>
     </aside>
 
-    <section class="threads" data-pane="chat" aria-label="Conversations">
+    <section class="threads" data-pane="chat" aria-label="Agents">
       <div class="threads__head">
-        <span class="threads__title" data-i18n="chat.heading">Chats</span>
+        <span class="threads__title" data-i18n="agent.heading">Agents</span>
       </div>
-      <button class="new-chat" type="button" id="newChatBtn" data-i18n="chat.new">+ New Chat</button>
+      <button class="new-chat" type="button" id="newChatBtn" data-i18n="agent.new">+ New Agent</button>
       <div class="search">
-        <input type="search" data-i18n-ph="chat.search" aria-label="Search threads" id="searchInput" />
+        <input type="search" data-i18n-ph="agent.search" aria-label="Search agents" id="searchInput" />
       </div>
       <ul class="thread-list" id="threadList"></ul>
     </section>
@@ -157,6 +157,10 @@
             <h3 class="panel__title" data-i18n="tasks.progress">Progress</h3>
             <div class="progress"><div class="progress__bar" id="taskProgressBar"></div></div>
             <p class="progress__pct" id="taskProgressPct">0%</p>
+            <section id="taskPhasesPanel" hidden>
+              <h3 class="panel__title panel__title--spaced" data-i18n="tasks.phases">Flow</h3>
+              <ol class="phases" id="taskPhases"></ol>
+            </section>
             <dl class="task-facts" id="taskFacts"></dl>
             <h3 class="panel__title panel__title--spaced" data-i18n="tasks.artifacts">Artifacts</h3>
             <ul class="artifact-list" id="taskArtifacts"></ul>
@@ -256,6 +260,16 @@
         <label class="field"><span data-i18n="tasks.fRepo">Repo</span><input type="text" id="tfRepo" data-i18n-ph="common.optional" /></label>
         <label class="field"><span data-i18n="tasks.fBranch">Branch</span><input type="text" id="tfBranch" data-i18n-ph="common.optional" /></label>
       </div>
+      <label class="field"><span data-i18n="tasks.fKind">Kind</span>
+        <select id="tfKind">
+          <option value="auto" data-i18n="tasks.kind.auto">Auto (classify)</option>
+          <option value="coding" data-i18n="tasks.kind.coding">Coding</option>
+          <option value="writing" data-i18n="tasks.kind.writing">Writing</option>
+          <option value="research" data-i18n="tasks.kind.research">Research</option>
+          <option value="stats" data-i18n="tasks.kind.stats">Stats</option>
+          <option value="general" data-i18n="tasks.kind.general">General</option>
+        </select>
+      </label>
       <div class="modal__actions">
         <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
         <button type="submit" class="btn btn--primary" id="tfSubmit" data-i18n="tasks.create">Create &amp; run</button>
@@ -304,7 +318,29 @@
     </form>
   </div>
 
+  <div class="modal" id="agentModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="agentForm">
+      <h3 class="modal__title" id="agentModalTitle" data-i18n="agent.modalAdd">New Agent</h3>
+      <label class="field"><span data-i18n="agent.fName">Name</span>
+        <input type="text" id="afName" required data-i18n-ph="agent.fNamePh" />
+      </label>
+      <label class="field"><span data-i18n="agent.fPersona">Persona</span>
+        <textarea id="afPersona" rows="6" data-i18n-ph="agent.fPersonaPh"></textarea>
+      </label>
+      <label class="field"><span data-i18n="agent.fModel">Default model</span>
+        <input type="text" id="afModel" data-i18n-ph="common.optional" />
+      </label>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="afSubmit" data-i18n="common.save">Save</button>
+      </div>
+    </form>
+  </div>
+
   <script src="/i18n.js"></script>
+  <script src="/vendor/marked.min.js"></script>
+  <script src="/vendor/purify.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

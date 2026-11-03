@@ -23,6 +23,7 @@ public class MysqlChatStore extends AbstractJdbcChatStore {
               agent_type       VARCHAR(32)  NOT NULL,
               agent_session_id VARCHAR(64),
               workspace_dir    VARCHAR(1024),
+              agent_id         VARCHAR(64),
               status           VARCHAR(32)  NOT NULL,
               created_at       DATETIME(3)  NOT NULL,
               updated_at       DATETIME(3)  NOT NULL,

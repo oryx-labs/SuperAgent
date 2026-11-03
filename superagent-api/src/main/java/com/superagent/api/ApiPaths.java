@@ -16,6 +16,8 @@ public final class ApiPaths {
 
     public static final String SESSIONS = V1 + "/sessions";
 
+    public static final String AGENTS = V1 + "/agents";
+
     public static final String CONNECTORS = V1 + "/connectors";
 
     public static final String TASKS = V1 + "/tasks";

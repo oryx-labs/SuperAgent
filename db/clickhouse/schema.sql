@@ -14,9 +14,23 @@ CREATE TABLE IF NOT EXISTS superagent.chat_session (
   agent_type       String,
   agent_session_id String,
   workspace_dir    String,
+  agent_id         String,
   status           String,
   created_at       DateTime64(3, 'UTC'),
   updated_at       DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+-- Agents (personas): a named role with free-text persona, commanded through chat.
+-- ReplacingMergeTree keyed by id with updated_at as the version; reads use FINAL.
+CREATE TABLE IF NOT EXISTS superagent.agent (
+  id         String,
+  name       String,
+  persona    String,
+  model      String,
+  status     String,
+  created_at DateTime64(3, 'UTC'),
+  updated_at DateTime64(3, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY id;
 
@@ -104,3 +118,12 @@ CREATE TABLE IF NOT EXISTS superagent.task (
   updated_at    DateTime64(3, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY id;
+
+-- One row per task holding its flow phase array as JSON (PRD markdown, per-step
+-- status, verification evidence). ReplacingMergeTree keyed by task_id; reads use FINAL.
+CREATE TABLE IF NOT EXISTS superagent.task_phase (
+  task_id     String,
+  phases_json String,
+  updated_at  DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY task_id;

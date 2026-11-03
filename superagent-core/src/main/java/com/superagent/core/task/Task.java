@@ -51,6 +51,11 @@ public record Task(
                 model, agentType, workspaceDir, createdBy, error, createdAt, startedAt, finishedAt, Instant.now());
     }
 
+    public Task withWorkspaceDir(String newWorkspaceDir) {
+        return new Task(id, title, brief, source, repo, branch, flow, status, progress, spend,
+                model, agentType, newWorkspaceDir, createdBy, error, createdAt, startedAt, finishedAt, Instant.now());
+    }
+
     public Task started() {
         Instant now = Instant.now();
         return new Task(id, title, brief, source, repo, branch, flow, TaskStatus.RUNNING, progress, spend,
