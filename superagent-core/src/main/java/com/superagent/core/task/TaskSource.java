@@ -5,5 +5,7 @@ public enum TaskSource {
     WEB_CHAT,
     TASK_FORM,
     /** Started by an automation's schedule or API trigger. */
-    AUTOMATION
+    AUTOMATION,
+    /** Converted from a to-do the inbox extracted from received messages. */
+    INBOX
 }

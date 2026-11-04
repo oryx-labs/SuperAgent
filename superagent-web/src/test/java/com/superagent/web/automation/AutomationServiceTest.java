@@ -138,7 +138,7 @@ class AutomationServiceTest {
 
         tasks.statuses.put("t1", TaskStatus.NEEDS_CONFIRMATION); // waiting on a human must not block later runs
         assertThat(service.runNow(id, "alice", false).taskId()).isEqualTo("t2");
-        assertThat(service.detail(id).runs()).extracting(AutomationRunDto::status)
+        assertThat(service.detail(id, "alice", false).runs()).extracting(AutomationRunDto::status)
                 .containsExactlyInAnyOrder("running", "skipped", "needs_confirmation");
     }
 
@@ -161,6 +161,9 @@ class AutomationServiceTest {
 
         assertThatThrownBy(() -> service.setEnabled(a.id(), false, "bob", false))
                 .isInstanceOf(AutomationForbiddenException.class);
+        // Reads are scoped too: someone else's automation (and its prompt) doesn't exist for bob.
+        assertThat(service.list("bob", false)).isEmpty();
+        assertThatThrownBy(() -> service.detail(a.id(), "bob", false)).isInstanceOf(AutomationNotFoundException.class);
         assertThat(service.setEnabled(a.id(), false, "root", true).enabled()).isFalse(); // admin may
         assertThatThrownBy(() -> service.trigger(a.id(), fresh, null)).isInstanceOf(IllegalArgumentException.class);
     }

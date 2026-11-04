@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.superagent.api.skill.SkillDto;
 import com.superagent.api.superagent.SuperAgentPlanDto;
 import com.superagent.core.agent.Agent;
+import com.superagent.core.agent.SuperAgentWork;
 import com.superagent.core.task.Task;
 import com.superagent.web.agent.AgentNotFoundException;
 import com.superagent.web.mcp.McpGrants;
@@ -143,12 +144,12 @@ public class SuperAgentTools {
                     yield "已派出任务 " + taskId + "，正在执行。结束后你会收到系统消息。";
                 }
                 case "list_assigned_tasks" -> {
-                    List<SuperAgentService.Tracked> tracked = service.assigned(owner);
+                    List<SuperAgentWork> tracked = service.assigned(owner);
                     if (tracked.isEmpty()) {
                         yield "目前没有在跟进的任务。";
                     }
                     StringBuilder sb = new StringBuilder();
-                    for (SuperAgentService.Tracked t : tracked) {
+                    for (SuperAgentWork t : tracked) {
                         String status = service.task(owner, t.taskId()).map(x -> x.status().name()).orElse("DELETED");
                         sb.append("- ").append(t.taskId()).append(" | ").append(t.title()).append(" | ")
                                 .append(t.memberName()).append(" | ").append(status).append("\n");

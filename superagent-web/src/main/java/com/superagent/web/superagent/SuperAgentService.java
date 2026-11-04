@@ -1,18 +1,22 @@
 package com.superagent.web.superagent;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.superagent.api.agent.UpdateAgentRequest;
 import com.superagent.api.chat.ImageUploadDto;
 import com.superagent.api.superagent.SuperAgentPlanDto;
 import com.superagent.api.superagent.SuperAgentStateDto;
+import com.superagent.api.superagent.SuperAgentWorkDto;
+import com.superagent.api.superagent.SuperAgentWorkEventDto;
 import com.superagent.api.task.CreateTaskRequest;
 import com.superagent.core.agent.Agent;
 import com.superagent.core.agent.AgentCharacters;
 import com.superagent.core.agent.SuperAgentState;
 import com.superagent.core.agent.SuperAgentStateStore;
+import com.superagent.core.agent.SuperAgentWork;
+import com.superagent.core.agent.SuperAgentWorkEvent;
+import com.superagent.core.agent.SuperAgentWorkStore;
 import com.superagent.core.chat.AgentEvent;
 import com.superagent.core.chat.AgentEventSink;
 import com.superagent.core.chat.AgentRunRequest;
@@ -41,6 +45,8 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -50,6 +56,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -61,6 +68,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Each user's SuperAgent: a leader that takes requests through an inbox instead of answering live.
@@ -82,7 +91,6 @@ import java.util.concurrent.atomic.AtomicReference;
 public class SuperAgentService {
 
     private static final Logger log = LoggerFactory.getLogger(SuperAgentService.class);
-    private static final TypeReference<List<Tracked>> TRACKED = new TypeReference<>() { };
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.ROOT);
     private static final int REPORT_CHARS = 1500;
 
@@ -90,11 +98,9 @@ public class SuperAgentService {
     static final List<String> ROUND_TOOLS = SuperAgentTools.NAMES.stream().map(n -> "mcp__superagent__" + n).toList();
 
     /** A task the SuperAgent assigned; {@code reported} is the last status it told the user about. */
-    record Tracked(String taskId, String memberId, String memberName, String title, String reported) {
-        Tracked reportedAs(String status) {
-            return new Tracked(taskId, memberId, memberName, title, status);
-        }
-    }
+    /** Recognizes a task the SuperAgent assigned (its brief opens with this), to back-fill the work record. */
+    private static final Pattern ASSIGNED_BRIEF = Pattern.compile("^你是团队成员「(.+?)」，由 SuperAgent 分派本任务");
+    private static final int SUMMARY_CHARS = 300;
 
     /** A member as the tools describe it. */
     record TeamMember(String id, String name, String persona, String model, List<String> skillIds, boolean hired) {
@@ -111,6 +117,7 @@ public class SuperAgentService {
     private final McpGrants grants;
     private final ChatService chatService;
     private final AgentMemoryService memory;
+    private final SuperAgentWorkStore works;
     private final SkillService skills;
     private final Map<AgentType, AgentRunner> runners = new EnumMap<>(AgentType.class);
     private final Duration quiet;
@@ -133,7 +140,7 @@ public class SuperAgentService {
     public SuperAgentService(AgentService agents, SuperAgentStateStore states, ChatStore chats, TaskService taskService,
                              TaskStore tasks, ProviderService providers, SettingsService settings,
                              ImageAttachmentStore images, McpGrants grants, SkillService skills,
-                             ChatService chatService, AgentMemoryService memory,
+                             ChatService chatService, AgentMemoryService memory, SuperAgentWorkStore works,
                              List<AgentRunner> agentRunners,
                              @Value("${superagent.superagent.quiet-seconds:10}") long quietSeconds,
                              @Value("${superagent.superagent.max-wait-seconds:60}") long maxWaitSeconds,
@@ -150,6 +157,7 @@ public class SuperAgentService {
         this.grants = grants;
         this.chatService = chatService;
         this.memory = memory;
+        this.works = works;
         this.skills = skills;
         for (AgentRunner r : agentRunners) {
             runners.put(r.type(), r);
@@ -342,43 +350,65 @@ public class SuperAgentService {
         return sb.toString();
     }
 
+    /**
+     * Follows up the work still open: a task that finished, failed or needs a decision is reported into the
+     * inbox (so the next round tells the user) and recorded in the work history, once per change.
+     */
     private void reportTrackedTasks(String owner) {
         synchronized (stateLock) {
             SuperAgentState s = states.find(owner).orElse(null);
             if (s == null) {
                 return;
             }
-            List<Tracked> tracked = tracked(s);
-            if (tracked.isEmpty()) {
+            List<SuperAgentWork> open = works.list(owner).stream().filter(SuperAgentWork::open).toList();
+            if (open.isEmpty()) {
                 return;
             }
             String sessionId = sessionId(agents.require(s.agentId(), owner));
-            List<Tracked> next = new ArrayList<>();
-            boolean changed = false;
-            for (Tracked t : tracked) {
-                Optional<Task> task = tasks.findTask(t.taskId());
+            for (SuperAgentWork w : open) {
+                Optional<Task> task = tasks.findTask(w.taskId());
                 TaskStatus status = task.map(Task::status).orElse(TaskStatus.DELETED);
-                switch (SuperAgentInbox.watch(status, t.reported())) {
-                    case KEEP -> next.add(t);
-                    case REPORT_AND_KEEP -> {
-                        note(sessionId, report(t, status, task.orElse(null)));
-                        next.add(t.reportedAs(status.name()));
-                        changed = true;
-                    }
-                    case REPORT_AND_DROP -> {
-                        note(sessionId, report(t, status, task.orElse(null)));
-                        changed = true;
-                    }
-                    case DROP -> changed = true;
+                // The inbox rules speak task statuses; an open work item has only ever reported a question.
+                String reported = SuperAgentWork.NEEDS_CONFIRMATION.equals(w.status())
+                        ? TaskStatus.NEEDS_CONFIRMATION.name() : null;
+                SuperAgentInbox.Watch watch = SuperAgentInbox.watch(status, reported);
+                if (watch == SuperAgentInbox.Watch.KEEP) {
+                    continue;
                 }
-            }
-            if (changed) {
-                states.save(s.withTracked(toJson(next)));
+                if (watch != SuperAgentInbox.Watch.DROP) {
+                    note(sessionId, report(w, status, task.orElse(null)));
+                }
+                boolean finished = watch != SuperAgentInbox.Watch.REPORT_AND_KEEP;
+                String summary = outcome(w.taskId(), status, task.orElse(null));
+                works.save(w.withStatus(status(status), summary, finished ? Instant.now() : null));
+                event(w.taskId(), owner, status(status), summary);
             }
         }
     }
 
-    private String report(Tracked t, TaskStatus status, Task task) {
+    private static String status(TaskStatus status) {
+        return status.name().toLowerCase(Locale.ROOT);
+    }
+
+    /** A short snapshot of how a task ended (or what it asks), for the history; the task has the rest. */
+    private String outcome(String taskId, TaskStatus status, Task task) {
+        String text = switch (status) {
+            case DONE, NEEDS_CONFIRMATION -> lastAgentText(taskId);
+            case ERROR -> task != null && task.error() != null ? task.error() : "未知错误";
+            default -> null;
+        };
+        if (text == null) {
+            return null;
+        }
+        String flat = text.replaceAll("\\s+", " ").strip();
+        return flat.length() <= SUMMARY_CHARS ? flat : flat.substring(0, SUMMARY_CHARS) + "…";
+    }
+
+    private void event(String taskId, String owner, String kind, String detail) {
+        works.appendEvent(new SuperAgentWorkEvent(UUID.randomUUID().toString(), taskId, owner, kind, detail, Instant.now()));
+    }
+
+    private String report(SuperAgentWork t, TaskStatus status, Task task) {
         String head = "任务「" + t.title() + "」（" + t.taskId() + "，成员 " + t.memberName() + "）";
         return switch (status) {
             case DONE -> head + "已完成。产出：\n" + clip(lastAgentText(t.taskId()));
@@ -485,26 +515,92 @@ public class SuperAgentService {
         String taskId = taskService.create(new CreateTaskRequest(title.strip(), fullBrief, "web_chat", null, null, null,
                 model, providers.cliFor(model).orElse(null), null), owner, m.id()).id();
         synchronized (stateLock) {
-            SuperAgentState s = ensureState(owner);
-            List<Tracked> tracked = new ArrayList<>(tracked(s));
-            tracked.add(new Tracked(taskId, m.id(), m.name(), title.strip(), null));
-            states.save(s.withTracked(toJson(tracked)));
+            Instant now = Instant.now();
+            works.save(new SuperAgentWork(taskId, owner, ensureState(owner).planId(), title.strip(), m.id(), m.name(),
+                    SuperAgentWork.RUNNING, null, now, null, now));
+            event(taskId, owner, "assigned", "派给 " + m.name());
         }
         log.info("superagent of {} assigned task {} to {}", owner, taskId, m.name());
         return taskId;
     }
 
-    /** Answers a tracked task that is waiting for a decision. */
+    /** Answers a task it assigned that is waiting for a decision. */
     void replyToTask(String owner, String taskId, String content) {
-        SuperAgentState s = ensureState(owner);
-        if (tracked(s).stream().noneMatch(t -> t.taskId().equals(taskId))) {
+        if (works.find(taskId).filter(w -> w.owner().equals(owner)).isEmpty()) {
             throw new IllegalArgumentException("Not a task you assigned: " + taskId);
         }
         taskService.sendMessage(taskId, content);
+        works.find(taskId).ifPresent(w -> works.save(w.withStatus(SuperAgentWork.RUNNING, null, null)));
+        event(taskId, owner, "replied", content.length() <= SUMMARY_CHARS ? content : content.substring(0, SUMMARY_CHARS) + "…");
     }
 
-    List<Tracked> assigned(String owner) {
-        return tracked(ensureState(owner));
+    /** Work still open (running or waiting for a decision). */
+    List<SuperAgentWork> assigned(String owner) {
+        return works.list(owner).stream().filter(SuperAgentWork::open).toList();
+    }
+
+    // --- the work history (what the SuperAgent actually got done) ---
+
+    /**
+     * The user's SuperAgent work, newest first. {@code status}: all | open | finished | a task status
+     * (done / error / stopped / needs_confirmation); {@code memberId} null = everyone; finished work is
+     * ordered by when it finished.
+     */
+    public List<SuperAgentWorkDto> work(String owner, String status, String memberId, int limit) {
+        Map<String, String> avatars = new HashMap<>();
+        agents.owned(owner).forEach(a -> avatars.put(a.id(), a.avatar()));
+        boolean finishedOnly = "finished".equals(status);
+        return works.list(owner).stream()
+                .filter(w -> status == null || status.isBlank() || "all".equals(status)
+                        || ("open".equals(status) ? w.open() : finishedOnly ? !w.open() : status.equals(w.status())))
+                .filter(w -> memberId == null || memberId.isBlank() || memberId.equals(w.memberId()))
+                .sorted(finishedOnly
+                        ? Comparator.comparing(SuperAgentWork::finishedAt, Comparator.nullsLast(Comparator.reverseOrder()))
+                        : Comparator.comparing(SuperAgentWork::assignedAt, Comparator.reverseOrder()))
+                .limit(Math.max(1, Math.min(limit, 500)))
+                .map(w -> new SuperAgentWorkDto(w.taskId(), w.planId(), w.title(), w.memberId(), w.memberName(),
+                        avatars.get(w.memberId()), w.status(), w.summary(), w.assignedAt(), w.finishedAt()))
+                .toList();
+    }
+
+    public List<SuperAgentWorkEventDto> workEvents(String owner, String taskId) {
+        works.find(taskId).filter(w -> w.owner().equals(owner))
+                .orElseThrow(() -> new IllegalArgumentException("No such work: " + taskId));
+        return works.events(taskId).stream().map(e -> new SuperAgentWorkEventDto(e.kind(), e.detail(), e.at())).toList();
+    }
+
+    /**
+     * Work assigned before the history existed has no record; rebuild it from the tasks themselves (their brief
+     * names the member). Plans and in-between events weren't kept, so those stay empty. Safe to repeat.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    void backfillWork() {
+        int added = 0;
+        for (Task t : tasks.listTasks()) {
+            Matcher m = t.brief() == null ? null : ASSIGNED_BRIEF.matcher(t.brief());
+            if (m == null || !m.find() || t.status() == TaskStatus.DELETED || works.find(t.id()).isPresent()) {
+                continue;
+            }
+            String member = m.group(1);
+            String memberId = agents.owned(t.createdBy()).stream().filter(a -> a.name().equals(member))
+                    .map(Agent::id).findFirst().orElse(null);
+            boolean open = t.status() == TaskStatus.PENDING || t.status() == TaskStatus.RUNNING
+                    || t.status() == TaskStatus.NEEDS_CONFIRMATION;
+            String status = open ? SuperAgentWork.RUNNING : status(t.status());
+            Instant finished = open ? null : (t.finishedAt() != null ? t.finishedAt() : t.updatedAt());
+            works.save(new SuperAgentWork(t.id(), t.createdBy(), null, t.title(), memberId, member, status,
+                    open ? null : outcome(t.id(), t.status(), t), t.createdAt(), finished, Instant.now()));
+            works.appendEvent(new SuperAgentWorkEvent(UUID.randomUUID().toString(), t.id(), t.createdBy(), "assigned",
+                    "派给 " + member + "（补录）", t.createdAt()));
+            if (!open) {
+                works.appendEvent(new SuperAgentWorkEvent(UUID.randomUUID().toString(), t.id(), t.createdBy(), status,
+                        "（补录）", finished));
+            }
+            added++;
+        }
+        if (added > 0) {
+            log.info("back-filled {} SuperAgent work record(s) from existing tasks", added);
+        }
     }
 
     Optional<Task> task(String owner, String taskId) {
@@ -559,17 +655,6 @@ public class SuperAgentService {
             return new SuperAgentPlanDto(p.id(), s.planStatus(), p.summary(), p.members(), p.tasks(), p.proposedAt());
         } catch (JsonProcessingException e) {
             return null; // unreadable plan: as if none; the next proposal replaces it
-        }
-    }
-
-    private List<Tracked> tracked(SuperAgentState s) {
-        if (s.trackedJson() == null) {
-            return List.of();
-        }
-        try {
-            return json.readValue(s.trackedJson(), TRACKED);
-        } catch (JsonProcessingException e) {
-            return List.of();
         }
     }
 

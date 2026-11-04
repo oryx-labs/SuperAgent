@@ -33,6 +33,10 @@
     superSubmit: body => fetch("/api/v1/superagent/messages", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     }).then(r => r.json()),
+    superWork: (status, memberId, limit) => fetch("/api/v1/superagent/work?status=" + encodeURIComponent(status)
+      + (memberId ? "&memberId=" + encodeURIComponent(memberId) : "") + "&limit=" + limit).then(r => r.json()),
+    superWorkEvents: taskId => fetch("/api/v1/superagent/work/" + encodeURIComponent(taskId) + "/events")
+      .then(r => r.json()),
     superApprove: planId => fetch("/api/v1/superagent/plans/" + encodeURIComponent(planId) + "/approve",
       { method: "POST" }).then(r => r.json()),
     createAgent: body =>
@@ -60,7 +64,6 @@
     input: document.getElementById("composerInput"),
     newChatBtn: document.getElementById("newChatBtn"),
     sendBtn: document.getElementById("sendBtn"),
-    search: document.getElementById("searchInput"),
   };
 
   let agents = [];
@@ -323,9 +326,9 @@
   function renderThreads(list) {
     el.threadList.innerHTML = "";
     list.forEach(a => {
+      if (a.kind === "super") { el.threadList.append(superThread(a), threadSeparator()); return; }
       const li = document.createElement("li");
-      const isSuper = a.kind === "super";
-      li.className = "thread" + (isSuper ? " thread--super" : "") + (a.id === activeAgentId ? " is-active" : "");
+      li.className = "thread" + (a.id === activeAgentId ? " is-active" : "");
       li.dataset.id = a.id;
 
       const avatar = document.createElement("span");
@@ -361,13 +364,41 @@
       del.title = L("common.delete");
       del.textContent = "×";
       del.addEventListener("click", e => { e.stopPropagation(); deleteThread(li, a); });
-      // The leader's name and character are the platform's, and it can't be deleted.
-      if (!isSuper) actions.append(rename, del);
+      actions.append(rename, del);
 
       li.append(avatar, name, time, actions);
       li.addEventListener("click", () => selectAgent(a));
       el.threadList.appendChild(li);
     });
+  }
+
+  // The SuperAgent isn't one more row: it leads the list as an orb with its role under the name.
+  function superThread(a) {
+    const li = document.createElement("li");
+    li.className = "thread thread--super" + (a.id === activeAgentId ? " is-active" : "");
+    li.dataset.id = a.id;
+    const orb = document.createElement("span");
+    orb.className = "super-orb";
+    orb.setAttribute("aria-hidden", "true");
+    const body = document.createElement("span");
+    body.className = "super-body";
+    const name = document.createElement("span");
+    name.className = "thread__name super-name";
+    name.textContent = a.name || "SuperAgent";
+    const role = document.createElement("span");
+    role.className = "super-role";
+    role.textContent = L("super.role");
+    body.append(name, role);
+    li.append(orb, body);
+    li.addEventListener("click", () => selectAgent(a));
+    return li;
+  }
+
+  function threadSeparator() {
+    const li = document.createElement("li");
+    li.className = "thread-sep";
+    li.setAttribute("aria-hidden", "true");
+    return li;
   }
 
   function beginRename(li, agent, nameEl) {
@@ -454,6 +485,8 @@
     const editBtn = document.getElementById("agentEditBtn");
     if (editBtn) editBtn.hidden = agent.kind === "super";
     panel.classList.toggle("agent-info--super", agent.kind === "super");
+    document.getElementById("agentInfoDetails").hidden = agent.kind === "super";
+    document.getElementById("superIntro").hidden = agent.kind !== "super";
     const persona = document.getElementById("agentInfoPersona");
     persona.textContent = agent.persona || "";
     persona.hidden = !agent.persona;
@@ -877,12 +910,6 @@
     const text = el.input.value.trim();
     const hasImages = chatImages.count() > 0;
     if (!text && !hasImages) return;
-    if (text.startsWith("/task") && !hasImages) {
-      el.input.value = "";
-      autoGrow();
-      handleTaskCommand(text.slice(5).trim());
-      return;
-    }
     let images;
     try { images = await chatImages.payload(); } catch (err) { showToast(L("img.readFailed"), true); return; }
     const urls = chatImages.previewUrls();
@@ -895,13 +922,6 @@
 
   el.input.addEventListener("input", autoGrow);
 
-  el.search.addEventListener("input", () => {
-    const q = el.search.value.toLowerCase();
-    el.threadList.querySelectorAll(".thread").forEach(t => {
-      const name = t.querySelector(".thread__name").textContent.toLowerCase();
-      t.hidden = q && !name.includes(q);
-    });
-  });
 
   // ---------- SuperAgent inbox mode ----------
   // The SuperAgent doesn't answer live: messages are dropped into its inbox and worked through in
@@ -920,6 +940,8 @@
     }, 3000) : null;
     el.input.setAttribute("placeholder", on ? L("super.placeholder") : composerPlaceholder);
     el.composer.classList.toggle("composer--inbox", on);
+    document.getElementById("superWorkPanel").hidden = !on;
+    if (on) loadSuperRecent();
     el.messages.classList.toggle("messages--super", on);
   }
 
@@ -952,6 +974,7 @@
       state.plan && state.plan.id, state.plan && state.plan.status].join("|");
     if (fp === superFingerprint) return;
     superFingerprint = fp;
+    loadSuperRecent(); // a finished task always lands a report in the inbox, which changes the fingerprint
     const nearBottom = el.messages.scrollHeight - el.messages.scrollTop - el.messages.clientHeight < 80;
     el.messages.innerHTML = "";
     if (!messages.length) {
@@ -1053,6 +1076,171 @@
     return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
+  // ---------- SuperAgent work history ----------
+  // What the SuperAgent actually got done: every task it assigned, who ran it, and how it ended.
+  const wel = {
+    recent: document.getElementById("superWorkList"),
+    recentEmpty: document.getElementById("superWorkEmpty"),
+    drawer: document.getElementById("superWorkDrawer"),
+    list: document.getElementById("workList"),
+    empty: document.getElementById("workEmpty"),
+    count: document.getElementById("workCount"),
+    status: document.getElementById("workStatusFilter"),
+    member: document.getElementById("workMemberFilter"),
+  };
+
+  async function loadSuperRecent() {
+    const res = await api.superWork("finished", null, 10).catch(() => null);
+    const items = (res && res.data) || [];
+    wel.recent.replaceChildren(...items.map(recentRow));
+    wel.recentEmpty.hidden = items.length > 0;
+  }
+
+  // Side-panel row: a status dot, the title, then who ran it and how long ago (exact time on hover).
+  function recentRow(w) {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sw-row";
+    btn.title = (TASK_STATUS_LABEL[w.status] || L("status." + w.status)) + " · " + formatDateTime(w.finishedAt);
+    const dot = document.createElement("span");
+    dot.className = "sw-dot is-" + w.status;
+    const body = document.createElement("span");
+    body.className = "sw-body";
+    const title = document.createElement("span");
+    title.className = "sw-title";
+    title.textContent = w.title;
+    const meta = document.createElement("span");
+    meta.className = "sw-meta";
+    const who = document.createElement("span");
+    who.className = "sw-who";
+    who.textContent = (w.memberAvatar ? w.memberAvatar + " " : "") + (w.memberName || "—");
+    const when = document.createElement("span");
+    when.className = "sw-when";
+    when.textContent = w.finishedAt ? relativeTime(w.finishedAt) : "";
+    meta.append(who, when);
+    body.append(title, meta);
+    btn.append(dot, body);
+    btn.addEventListener("click", () => openTaskFromWork(w.taskId));
+    li.appendChild(btn);
+    return li;
+  }
+
+  function workBadge(status) {
+    const b = document.createElement("span");
+    b.className = "status-badge is-" + status;
+    b.textContent = TASK_STATUS_LABEL[status] || L("status." + status);
+    return b;
+  }
+
+  // One work item: status, title, who ran it and when; the drawer also shows the outcome summary.
+  function workItem(w, withSummary, onClick) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "work-item";
+    const top = document.createElement("div");
+    top.className = "work-item__top";
+    const title = document.createElement("span");
+    title.className = "work-item__title";
+    title.textContent = w.title;
+    title.title = w.title;
+    top.append(workBadge(w.status), title);
+    const meta = document.createElement("div");
+    meta.className = "work-item__meta";
+    const who = document.createElement("span");
+    who.textContent = (w.memberAvatar ? w.memberAvatar + " " : "") + (w.memberName || "—");
+    const when = document.createElement("span");
+    when.textContent = w.finishedAt ? L("work.finished", { time: formatDateTime(w.finishedAt) })
+      : L("work.assigned", { time: formatDateTime(w.assignedAt) });
+    meta.append(who, when);
+    btn.append(top, meta);
+    if (withSummary && w.summary) {
+      const sum = document.createElement("div");
+      sum.className = "work-item__summary";
+      sum.textContent = w.summary;
+      btn.appendChild(sum);
+    }
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
+  async function openTaskFromWork(taskId) {
+    wel.drawer.hidden = true;
+    setView("tasks");
+    await openTask(taskId);
+  }
+
+  function openWorkDrawer() {
+    // Members to filter by: the user's agents other than the SuperAgent (its hires and the user's own alike).
+    const current = wel.member.value;
+    wel.member.replaceChildren();
+    const all = document.createElement("option");
+    all.value = "";
+    all.textContent = L("work.fMembers");
+    wel.member.appendChild(all);
+    agents.filter(a => a.kind !== "super").forEach(a => {
+      const o = document.createElement("option");
+      o.value = a.id;
+      o.textContent = (a.avatar ? a.avatar + " " : "") + a.name;
+      wel.member.appendChild(o);
+    });
+    wel.member.value = [...wel.member.options].some(o => o.value === current) ? current : "";
+    wel.drawer.hidden = false;
+    loadWorkList();
+  }
+
+  async function loadWorkList() {
+    const res = await api.superWork(wel.status.value, wel.member.value, 500).catch(() => null);
+    const items = (res && res.data) || [];
+    wel.count.textContent = L("work.count", { n: items.length });
+    wel.list.replaceChildren(...items.map(workRow));
+    wel.empty.hidden = items.length > 0;
+  }
+
+  // A row expands in place to the item's timeline, with a way into the task itself.
+  function workRow(w) {
+    const li = document.createElement("li");
+    li.className = "work-row";
+    const detail = document.createElement("div");
+    detail.className = "work-row__detail";
+    detail.hidden = true;
+    li.append(workItem(w, true, async () => {
+      if (!detail.hidden) { detail.hidden = true; return; }
+      detail.hidden = false;
+      detail.replaceChildren();
+      const res = await api.superWorkEvents(w.taskId).catch(() => null);
+      const ul = document.createElement("ul");
+      ul.className = "work-events";
+      ((res && res.data) || []).forEach(e => {
+        const item = document.createElement("li");
+        const t = document.createElement("time");
+        t.textContent = formatDateTime(e.at);
+        const k = document.createElement("b");
+        k.textContent = L("work.ev." + e.kind);
+        item.append(t, k, document.createTextNode(e.detail || ""));
+        ul.appendChild(item);
+      });
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "btn";
+      open.textContent = L("work.openTask");
+      open.addEventListener("click", () => openTaskFromWork(w.taskId));
+      detail.append(ul);
+      if (!w.planId) {
+        const note = document.createElement("p");
+        note.className = "super-work__empty";
+        note.textContent = L("work.backfilled");
+        detail.appendChild(note);
+      }
+      detail.appendChild(open);
+    }), detail);
+    return li;
+  }
+
+  document.getElementById("superWorkAllBtn").addEventListener("click", openWorkDrawer);
+  wel.drawer.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", () => { wel.drawer.hidden = true; }));
+  [wel.status, wel.member].forEach(x => x.addEventListener("change", loadWorkList));
+
   // ---------- views (sidebar routing) ----------
   const navItems = Array.from(document.querySelectorAll(".nav__item[data-view]"));
   const chatPanes = Array.from(document.querySelectorAll('[data-pane="chat"]'));
@@ -1067,6 +1255,231 @@
   const placeholderLabels = {
     automation: "placeholder.automation",
   };
+
+  // ---------- inbox ----------
+  // Messages the user's own Feishu bot receives for them, the to-dos extracted from them, and the bot settings.
+  Object.assign(api, {
+    ibSource: () => fetch("/api/v1/inbox/source").then(kbJson),
+    ibSave: body => fetch("/api/v1/inbox/source", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(kbJson),
+    ibBindCode: () => kbPost("/api/v1/inbox/source/bind-code", {}),
+    ibEvents: () => fetch("/api/v1/inbox/events?limit=200").then(kbJson),
+    ibTodos: () => fetch("/api/v1/inbox/todos").then(kbJson),
+    ibTodoStatus: (id, status) => fetch("/api/v1/inbox/todos/" + id, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
+    }).then(kbJson),
+    ibTodoTask: id => kbPost("/api/v1/inbox/todos/" + id + "/task", {}),
+  });
+
+  const ibPane = document.querySelector('[data-pane="inbox"]');
+  const ibel = {
+    status: document.getElementById("ibStatus"),
+    tabs: document.getElementById("ibTabs"),
+    todos: document.getElementById("ibTodos"),
+    todosEmpty: document.getElementById("ibTodosEmpty"),
+    showClosed: document.getElementById("ibShowClosed"),
+    events: document.getElementById("ibEvents"),
+    eventsEmpty: document.getElementById("ibEventsEmpty"),
+    form: document.getElementById("ibForm"),
+    appId: document.getElementById("ibAppId"),
+    appSecret: document.getElementById("ibAppSecret"),
+    secretHint: document.getElementById("ibSecretHint"),
+    bind: document.getElementById("ibBind"),
+    vip: document.getElementById("ibVip"),
+    keywords: document.getElementById("ibKeywords"),
+    digest: document.getElementById("ibDigest"),
+    timezone: document.getElementById("ibTimezone"),
+    enabled: document.getElementById("ibEnabled"),
+    error: document.getElementById("ibError"),
+  };
+  let ibTab = "todos";
+  let ibTodoList = [];
+
+  function showIbTab(tab) {
+    ibTab = tab;
+    ibel.tabs.querySelectorAll(".model-tab").forEach(b => b.classList.toggle("is-active", b.dataset.tab === tab));
+    ibPane.querySelectorAll("[data-ib]").forEach(p => { p.hidden = p.dataset.ib !== tab; });
+    if (tab === "todos") loadIbTodos();
+    if (tab === "events") loadIbEvents();
+    if (tab === "settings") loadIbSource();
+  }
+  ibel.tabs.querySelectorAll(".model-tab").forEach(b => b.addEventListener("click", () => showIbTab(b.dataset.tab)));
+
+  async function loadInbox() {
+    loadIbSource(true);
+    showIbTab(ibTab);
+  }
+
+  function renderIbStatus(src) {
+    const configured = src && src.configured;
+    ibel.status.hidden = !configured;
+    if (!configured) return;
+    const state = !src.enabled ? "off" : src.status || "connecting";
+    ibel.status.className = "status-badge is-ib-" + state;
+    ibel.status.textContent = L("ib.status." + state);
+    ibel.status.title = src.lastError || "";
+  }
+
+  async function loadIbSource(statusOnly) {
+    let src;
+    try { src = await api.ibSource(); } catch (e) { showToast(e.message, true); return; }
+    renderIbStatus(src);
+    if (statusOnly) return;
+    ibel.appId.value = src.appId || "";
+    ibel.appSecret.value = "";
+    ibel.appSecret.required = !src.hasSecret;
+    ibel.appSecret.placeholder = src.hasSecret ? "••••••••" : "";
+    ibel.secretHint.hidden = !src.hasSecret;
+    ibel.vip.value = src.vipNames || "";
+    ibel.keywords.value = src.urgentKeywords || "";
+    ibel.digest.value = src.digestTime || "09:00";
+    ibel.timezone.value = src.timezone || "Asia/Shanghai";
+    ibel.enabled.checked = src.configured ? src.enabled : true;
+    ibel.error.hidden = !src.lastError;
+    ibel.error.textContent = src.lastError || "";
+    renderIbBind(src);
+  }
+
+  function renderIbBind(src) {
+    ibel.bind.hidden = !src.configured;
+    ibel.bind.innerHTML = "";
+    if (!src.configured) return;
+    const p = document.createElement("div");
+    if (src.bound) {
+      p.textContent = L("ib.bound");
+    } else if (!src.bindCode) {
+      p.textContent = L("ib.codeBurned");
+    } else {
+      p.append(document.createTextNode(L("ib.bindStep")));
+      const code = document.createElement("code");
+      code.textContent = L("ib.bindWord") + " " + (src.bindCode || "");
+      p.append(code);
+    }
+    const again = document.createElement("button");
+    again.type = "button";
+    again.className = "link-btn";
+    again.textContent = L(src.bound ? "ib.rebind" : "ib.newCode");
+    again.addEventListener("click", async () => {
+      try { renderIbBind(await api.ibBindCode()); } catch (e) { showToast(e.message, true); }
+    });
+    p.append(document.createTextNode(" "), again);
+    ibel.bind.appendChild(p);
+  }
+
+  ibel.form.addEventListener("submit", async e => {
+    e.preventDefault();
+    ibel.error.hidden = true;
+    try {
+      const src = await api.ibSave({
+        appId: ibel.appId.value.trim(), appSecret: ibel.appSecret.value, enabled: ibel.enabled.checked,
+        vipNames: ibel.vip.value, urgentKeywords: ibel.keywords.value,
+        digestTime: ibel.digest.value, timezone: ibel.timezone.value.trim(),
+      });
+      showToast(L("ib.saved"), false);
+      renderIbStatus(src);
+      renderIbBind(src);
+      ibel.appSecret.value = "";
+      ibel.secretHint.hidden = false;
+      setTimeout(() => { if (!ibPane.hidden && ibTab === "settings") loadIbSource(); }, 4000); // connection status settles
+    } catch (err) {
+      ibel.error.textContent = err.message;
+      ibel.error.hidden = false;
+    }
+  });
+
+  async function loadIbTodos() {
+    try { ibTodoList = (await api.ibTodos()) || []; } catch (e) { ibTodoList = []; showToast(e.message, true); }
+    renderIbTodos();
+  }
+  ibel.showClosed.addEventListener("change", renderIbTodos);
+
+  function renderIbTodos() {
+    const closed = t => t.status === "done" || t.status === "dismissed";
+    const shown = ibTodoList.filter(t => ibel.showClosed.checked || !closed(t));
+    ibel.todos.innerHTML = "";
+    ibel.todosEmpty.hidden = shown.length > 0;
+    shown.forEach(t => {
+      const tr = document.createElement("tr");
+      tr.className = "ib-todo" + (closed(t) ? " is-closed" : "");
+      const main = document.createElement("td");
+      const title = document.createElement("div");
+      title.className = "ib-todo__title";
+      title.textContent = t.title;
+      const meta = document.createElement("div");
+      meta.className = "ib-todo__meta";
+      meta.textContent = [t.requester && L("ib.from", { who: t.requester }), t.due && L("ib.due", { due: t.due }),
+        t.source, formatDateTime(t.createdAt), t.status !== "open" && L("ib.todo." + t.status)].filter(Boolean).join(" · ");
+      main.append(title, meta);
+      if (t.detail) {
+        const d = document.createElement("div");
+        d.className = "ib-todo__detail";
+        d.textContent = t.detail;
+        main.appendChild(d);
+      }
+      const actions = document.createElement("td");
+      actions.className = "ib-actions";
+      const btn = (label, fn, danger) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "link-btn" + (danger ? " link-btn--muted" : "");
+        b.textContent = label;
+        b.addEventListener("click", async () => {
+          b.disabled = true;
+          try { await fn(); await loadIbTodos(); } catch (e) { showToast(e.message, true); b.disabled = false; }
+        });
+        actions.appendChild(b);
+      };
+      if (t.status === "tasked" && t.taskId) {
+        btn(L("ib.openTask"), async () => { setView("tasks"); openTask(t.taskId); });
+      } else if (t.status === "open") {
+        btn(L("ib.toTask"), async () => { const r = await api.ibTodoTask(t.id); showToast(L("ib.tasked"), false); return r; });
+        btn(L("ib.done"), () => api.ibTodoStatus(t.id, "done"));
+        btn(L("ib.dismiss"), () => api.ibTodoStatus(t.id, "dismissed"), true);
+      } else {
+        btn(L("ib.reopen"), () => api.ibTodoStatus(t.id, "open"));
+      }
+      tr.append(main, actions);
+      ibel.todos.appendChild(tr);
+    });
+  }
+
+  async function loadIbEvents() {
+    let list = [];
+    try { list = (await api.ibEvents()) || []; } catch (e) { showToast(e.message, true); }
+    ibel.events.innerHTML = "";
+    ibel.eventsEmpty.hidden = list.length > 0;
+    list.forEach(ev => {
+      const tr = document.createElement("tr");
+      const prio = document.createElement("td");
+      const badge = document.createElement("span");
+      badge.className = "ib-prio ib-prio--" + ev.priority;
+      badge.textContent = ev.priority === "IGNORE" ? L("ib.ignored") : ev.priority;
+      prio.appendChild(badge);
+      if (!ev.processed) {
+        const pend = document.createElement("span");
+        pend.className = "ib-reason";
+        pend.textContent = L("ib.pending");
+        prio.appendChild(pend);
+      }
+      const from = document.createElement("td");
+      from.textContent = (ev.senderName || "—") + " · " + (ev.chatName || "—");
+      const text = document.createElement("td");
+      text.className = "ib-text";
+      text.textContent = ev.text || "";
+      if (ev.triageReason) {
+        const r = document.createElement("span");
+        r.className = "ib-reason";
+        r.textContent = ev.triageReason;
+        text.appendChild(r);
+      }
+      const when = document.createElement("td");
+      when.className = "kb-list__meta";
+      when.textContent = formatDateTime(ev.receivedAt);
+      tr.append(prio, from, text, when);
+      ibel.events.appendChild(tr);
+    });
+  }
 
   // ---------- skills ----------
   // Shared working standards. Agents get the skills attached to them; their tasks inherit those.
@@ -1758,8 +2171,8 @@
   // View state lives in the URL hash (#tasks, #connectors, …) so a refresh or
   // back/forward restores the same view. Admin-only views fall back to the default
   // for non-admins. See initialView().
-  const KNOWN_VIEWS = new Set(["chat", "tasks", "knowledge", "skills", "automation", "connectors", "models", "users", "settings"]);
-  const ADMIN_VIEWS = new Set(["connectors", "models", "users", "settings"]);
+  const KNOWN_VIEWS = new Set(["chat", "tasks", "inbox", "knowledge", "skills", "automation", "connectors", "models", "users", "settings"]);
+  const ADMIN_VIEWS = new Set(["models", "users", "settings"]);
   const DEFAULT_VIEW = "chat";
   let isAdmin = false;
 
@@ -1784,6 +2197,7 @@
     const isKnowledge = view === "knowledge";
     const isAutomation = view === "automation";
     const isSkills = view === "skills";
+    const isInbox = view === "inbox";
     chatPanes.forEach(p => { p.hidden = !isChat; });
     automationPane.hidden = !isAutomation;
     connectorsPane.hidden = !isConnectors;
@@ -1793,20 +2207,52 @@
     settingsPane.hidden = !isSettings;
     kbPane.hidden = !isKnowledge;
     skPane.hidden = !isSkills;
+    ibPane.hidden = !isInbox;
     placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isSettings || isKnowledge
-      || isAutomation || isSkills;
+      || isAutomation || isSkills || isInbox;
     if (!placeholderPane.hidden) placeholderText.textContent = L(placeholderLabels[view] || "placeholder.default");
     if (isConnectors) loadConnectors();
     if (isUsers) loadUsers();
     if (isSettings) loadSettingsForm();
     if (isKnowledge) loadKnowledge();
     if (isSkills) loadSkills();
+    if (isInbox) loadInbox();
     if (isAutomation) { showAutoList(); loadAutomations(); }
     if (isTasks) { showTaskList(); loadTasks(); } else { stopTaskPolling(); }
     if (isModels) { showModelList(); startModelPolling(); } else { stopModelPolling(); }
   }
 
-  navItems.forEach(a => a.addEventListener("click", e => { e.preventDefault(); setView(a.dataset.view); }));
+  navItems.forEach(a => a.addEventListener("click", e => {
+    e.preventDefault();
+    setView(a.dataset.view);
+    closeUserMenu();
+  }));
+
+  // The account menu opens on hover; a click (touch screens) toggles it, and choosing an item or
+  // clicking elsewhere closes it. Blurring the focused item matters: :focus-within would keep it open.
+  const userMenu = document.getElementById("userMenu");
+  const userMenuBtn = document.getElementById("userMenuBtn");
+  function closeUserMenu() {
+    userMenu.classList.remove("is-open");
+    userMenuBtn.setAttribute("aria-expanded", "false");
+    if (userMenu.contains(document.activeElement)) document.activeElement.blur();
+  }
+  userMenuBtn.addEventListener("click", e => {
+    e.stopPropagation();
+    const open = !userMenu.classList.contains("is-open");
+    userMenu.classList.toggle("is-open", open);
+    userMenuBtn.setAttribute("aria-expanded", String(open));
+  });
+  document.addEventListener("click", e => { if (!userMenu.contains(e.target)) closeUserMenu(); });
+
+  // The logo goes home: the Agent page with the user's SuperAgent open.
+  document.getElementById("brandHome").addEventListener("click", e => {
+    e.preventDefault();
+    setView("chat");
+    const home = agents.find(a => a.kind === "super") || agents[0];
+    if (home && home.id !== activeAgentId) selectAgent(home);
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeUserMenu(); });
 
   // Back/forward (and manual hash edits) re-drive the view from the URL.
   window.addEventListener("hashchange", () => setView(initialView()));
@@ -1895,6 +2341,10 @@
     const actions = document.createElement("td");
     const cell = document.createElement("div");
     cell.className = "cell-actions";
+    actions.appendChild(cell);
+    tr.append(name, type, status, method, actions);
+    // Connections are shared by the whole platform, so only admins (dis)connect, edit or delete.
+    if (!isAdmin) return tr;
     const reconnect = c.oauthProvider
       ? () => oauthConnect(c)
       : () => connectorAction(api.connectConnector, c.id);
@@ -1914,9 +2364,6 @@
     const del = linkBtn("×", () => deleteConnector(c), "link-btn--danger");
     del.title = L("common.delete");
     cell.append(edit, del);
-    actions.appendChild(cell);
-
-    tr.append(name, type, status, method, actions);
     return tr;
   }
 
@@ -2026,10 +2473,7 @@
 
   // ---------- tasks ----------
   Object.assign(api, {
-    listTasks: () => fetch("/api/v1/tasks").then(r => r.json()),
-    createTask: body => fetch("/api/v1/tasks", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    }).then(r => r.json()),
+    listTasks: page => fetch("/api/v1/tasks?page=" + page + "&size=" + TASK_PAGE_SIZE).then(r => r.json()),
     taskDetail: id => fetch("/api/v1/tasks/" + id).then(r => r.json()),
     taskAgents: () => fetch("/api/v1/tasks/agents").then(r => r.json()),
     taskStatus: id => fetch("/api/v1/tasks/" + id + "/status").then(r => r.json()),
@@ -2056,21 +2500,10 @@
     detailView: document.getElementById("taskDetailView"),
     rows: document.getElementById("taskRows"),
     empty: document.getElementById("tasksEmpty"),
-    newBtn: document.getElementById("newTaskBtn"),
-    modal: document.getElementById("taskModal"),
-    form: document.getElementById("taskForm"),
-    title: document.getElementById("tfTitle"),
-    brief: document.getElementById("tfBrief"),
-    repo: document.getElementById("tfRepo"),
-    branch: document.getElementById("tfBranch"),
-    kind: document.getElementById("tfKind"),
-    agent: document.getElementById("tfAgent"),
-    model: document.getElementById("tfModel"),
-    modelHint: document.getElementById("tfModelHint"),
-    saveKb: document.getElementById("tfSaveKb"),
-    kbFolderField: document.getElementById("tfKbFolderField"),
-    kbFolder: document.getElementById("tfKbFolder"),
-    submit: document.getElementById("tfSubmit"),
+    pager: document.getElementById("taskPager"),
+    pagerInfo: document.getElementById("taskPagerInfo"),
+    pagerPrev: document.getElementById("taskPagerPrev"),
+    pagerNext: document.getElementById("taskPagerNext"),
     back: document.getElementById("taskBackBtn"),
     dTitle: document.getElementById("taskDetailTitle"),
     dMeta: document.getElementById("taskDetailMeta"),
@@ -2106,12 +2539,28 @@
     tel.listView.hidden = false;
   }
 
+  const TASK_PAGE_SIZE = 20;
+  let taskPage = 1;
   let agentOptions = [];  // [{key, name, models:[ProviderModelDto]}] from /tasks/agents
+
+  // Tasks are only ever created by agents and automations, so the list just pages through them.
+  function renderTaskPager(page) {
+    const pages = page ? Math.max(1, Math.ceil(page.total / page.size)) : 1;
+    tel.pager.hidden = !page || pages <= 1;
+    if (!page) return;
+    tel.pagerInfo.textContent = L("tasks.pageInfo", { total: page.total, page: page.page, pages });
+    tel.pagerPrev.disabled = page.page <= 1;
+    tel.pagerNext.disabled = page.page >= pages;
+  }
 
   async function loadTasks() {
     if (!agentOptions.length) await loadAgentOptions();
     let list = [];
-    try { const res = await api.listTasks(); list = (res && res.data) || []; } catch (e) { /* ignore */ }
+    let page = null;
+    try { const res = await api.listTasks(taskPage); page = res && res.data; } catch (e) { /* ignore */ }
+    list = (page && page.items) || [];
+    if (page) taskPage = page.page; // the server clamps a page past the end (e.g. after deletes)
+    renderTaskPager(page);
     tel.rows.innerHTML = "";
     tel.empty.hidden = list.length > 0;
     list.forEach(t => tel.rows.appendChild(taskRow(t)));
@@ -2555,6 +3004,8 @@
   }
 
   tel.back.addEventListener("click", () => { showTaskList(); loadTasks(); });
+  tel.pagerPrev.addEventListener("click", () => { taskPage = Math.max(1, taskPage - 1); loadTasks(); });
+  tel.pagerNext.addEventListener("click", () => { taskPage += 1; loadTasks(); });
   tel.stopBtn.addEventListener("click", async () => { if (task.id) { try { await api.stopTask(task.id); } catch (e) { /* ignore */ } } });
   tel.deleteBtn.addEventListener("click", async () => {
     if (!task.id || !window.confirm(L("tasks.deleteConfirm2"))) return;
@@ -2563,8 +3014,6 @@
     showTaskList();
     await loadTasks();
   });
-
-  // create
 
   async function loadAgentOptions() {
     try { const res = await api.taskAgents(); agentOptions = (res && res.data) || []; } catch (e) { agentOptions = []; }
@@ -2576,119 +3025,7 @@
     return opt ? opt.name : (key || "—");
   }
 
-  function fillAgentSelect() {
-    tel.agent.innerHTML = "";
-    agentOptions.forEach(a => {
-      const o = document.createElement("option");
-      o.value = a.key;
-      o.textContent = a.name;
-      tel.agent.appendChild(o);
-    });
-    fillModelSelect();
-  }
 
-  // Native models first, then models a gateway serves through this CLI (listed, not verified to run).
-  function fillModelSelect() {
-    const agent = agentOptions.find(a => a.key === tel.agent.value);
-    const models = (agent && agent.models) || [];
-    tel.model.innerHTML = "";
-    const def = document.createElement("option");
-    def.value = "";
-    def.textContent = L("tasks.modelDefault");
-    tel.model.appendChild(def);
-    const addGroup = (label, list) => {
-      if (!list.length) return;
-      const g = document.createElement("optgroup");
-      g.label = label;
-      list.forEach(m => {
-        const o = document.createElement("option");
-        o.value = m.id;
-        o.textContent = m.displayName && m.displayName !== m.id ? m.id + " · " + m.displayName : m.id;
-        g.appendChild(o);
-      });
-      tel.model.appendChild(g);
-    };
-    addGroup(L("tasks.modelsNative"), models.filter(m => m.nativeModel));
-    addGroup(L("tasks.modelsNonNative"), models.filter(m => !m.nativeModel));
-    tel.modelHint.hidden = models.length > 0;
-    tel.modelHint.textContent = models.length ? "" : L("tasks.modelsMissing");
-  }
-  tel.agent.addEventListener("change", fillModelSelect);
-
-  // "Save to knowledge base": the folder list is loaded only when the option is ticked.
-  tel.saveKb.addEventListener("change", async () => {
-    tel.kbFolderField.hidden = !tel.saveKb.checked;
-    if (!tel.saveKb.checked) return;
-    let folders = [];
-    try { folders = await api.kbFolders(); } catch (e) { /* auto still works */ }
-    tel.kbFolder.innerHTML = "";
-    const add = (value, label) => {
-      const o = document.createElement("option");
-      o.value = value;
-      o.textContent = label;
-      tel.kbFolder.appendChild(o);
-    };
-    add("*", L("tasks.kbFolderAuto"));
-    folders.forEach(f => add(f, f ? "/ " + f.split("/").join(" / ") : L("kb.root")));
-  });
-
-  async function openTaskModal(prefill) {
-    tel.title.value = (prefill && prefill.title) || "";
-    tel.brief.value = (prefill && prefill.brief) || "";
-    tel.repo.value = "";
-    tel.branch.value = "";
-    tel.saveKb.checked = false;
-    tel.kbFolderField.hidden = true;
-    tel.modal.hidden = false;
-    tel.title.focus();
-    await loadAgentOptions();
-    fillAgentSelect();
-  }
-  function closeTaskModal() { tel.modal.hidden = true; }
-  tel.newBtn.addEventListener("click", () => openTaskModal(null));
-  tel.modal.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", closeTaskModal));
-  tel.form.addEventListener("submit", async e => {
-    e.preventDefault();
-    const body = {
-      title: tel.title.value.trim(),
-      brief: tel.brief.value.trim(),
-      source: "task_form",
-      repo: tel.repo.value.trim() || null,
-      branch: tel.branch.value.trim() || null,
-      kind: tel.kind ? tel.kind.value : "auto",
-      agentType: tel.agent.value || null,
-      model: tel.model.value || null,
-      saveToKnowledge: tel.saveKb.checked,
-      // "*" = let the agent choose; "" = the knowledge-base root.
-      knowledgeFolder: tel.saveKb.checked && tel.kbFolder.value !== "*" ? (tel.kbFolder.value || "/") : null,
-    };
-    if (!body.title || !body.brief) return;
-    tel.submit.disabled = true;
-    try {
-      const res = await api.createTask(body);
-      if (!res || !res.data) {
-        showToast((res && res.message) || L("tasks.createFailed"), true);
-        return;
-      }
-      closeTaskModal();
-      await loadTasks();
-      openTask(res.data.id);
-    } catch (err) {
-      showToast(L("tasks.createFailed"), true);
-    } finally { tel.submit.disabled = false; }
-  });
-
-  // /task slash-command from the chat composer
-  async function handleTaskCommand(rest) {
-    setView("tasks");
-    if (!rest) { openTaskModal(null); return; }
-    const title = rest.split("\n")[0].slice(0, 48);
-    try {
-      const res = await api.createTask({ title, brief: rest, source: "web_chat" });
-      await loadTasks();
-      if (res && res.data) openTask(res.data.id);
-    } catch (e) { /* ignore */ }
-  }
 
   // ---------- auth (session guard + user management) ----------
   Object.assign(api, {
@@ -2715,13 +3052,15 @@
     if (res.status === 401) { window.location.href = "/login"; return false; }
     const me = (await res.json()).data;
     currentUsername = me.username;
-    document.getElementById("currentUser").textContent = me.displayName || me.username;
+    const shown = me.displayName || me.username || "";
+    document.getElementById("currentUser").textContent = shown;
+    document.getElementById("userAvatar").textContent = shown.trim().charAt(0).toUpperCase();
     // Admin-only sections: hide for non-admins.
     const showAdmin = !!me.admin;
     isAdmin = showAdmin;
     adminNav.hidden = !showAdmin;
     adminSep.hidden = !showAdmin;
-    document.getElementById("connectorsNav").hidden = !showAdmin; // its API is admin-only
+    document.getElementById("addConnectorBtn").hidden = !showAdmin; // the list is for all; managing it is not
     return true;
   }
 

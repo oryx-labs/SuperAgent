@@ -11,6 +11,7 @@ import com.superagent.api.task.TaskAgentOptionDto;
 import com.superagent.api.task.TaskDetailDto;
 import com.superagent.api.task.TaskDto;
 import com.superagent.api.task.TaskEventDto;
+import com.superagent.api.task.TaskPageDto;
 import com.superagent.core.chat.AgentType;
 import com.superagent.core.provider.ProviderCatalog;
 import com.superagent.web.attachment.ImageAttachmentStore;
@@ -69,8 +70,9 @@ public class TaskController {
     }
 
     @GetMapping(ApiPaths.TASKS)
-    public ApiResponse<List<TaskDto>> list() {
-        return ApiResponse.ok(taskService.list());
+    public ApiResponse<TaskPageDto> list(@RequestParam(defaultValue = "1") int page,
+                                         @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.ok(taskService.page(page, size));
     }
 
     @GetMapping(ApiPaths.TASKS + "/{id}")

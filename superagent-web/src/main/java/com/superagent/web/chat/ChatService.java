@@ -135,6 +135,7 @@ public class ChatService {
             this.mcpGrants = mcpGrants;
             tools.addAll(SUPERAGENT_MCP_TOOLS);
             tools.addAll(McpGrants.KNOWLEDGE_TOOLS);
+            tools.addAll(McpGrants.INBOX_TOOLS);
         } else {
             this.mcpGrants = null;
         }

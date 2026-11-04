@@ -9,6 +9,8 @@ import com.superagent.api.automation.AutomationDto;
 import com.superagent.api.automation.AutomationRunDto;
 import com.superagent.api.automation.SaveAutomationRequest;
 import com.superagent.api.task.CreateTaskRequest;
+import com.superagent.api.inbox.InboxEventDto;
+import com.superagent.api.inbox.InboxTodoDto;
 import com.superagent.api.knowledge.KnowledgeEntryDto;
 import com.superagent.api.skill.SkillDto;
 import com.superagent.api.skill.SkillRequest;
@@ -20,6 +22,7 @@ import com.superagent.web.automation.AutomationService;
 import com.superagent.web.knowledge.KnowledgeConflictException;
 import com.superagent.web.superagent.SuperAgentTools;
 import com.superagent.web.knowledge.KnowledgeNotFoundException;
+import com.superagent.web.inbox.UserInboxService;
 import com.superagent.web.knowledge.KnowledgeService;
 import com.superagent.web.skill.SkillNotFoundException;
 import com.superagent.web.skill.SkillService;
@@ -60,6 +63,7 @@ public class McpController {
     private static final String PROTOCOL_VERSION = "2024-11-05";
 
     private final TaskService tasks;
+    private final UserInboxService inbox;
     private final McpGrants grants;
     private final KnowledgeService knowledge;
     private final AutomationService automations;
@@ -69,7 +73,9 @@ public class McpController {
     private final ObjectMapper mapper = new ObjectMapper();
 
     public McpController(TaskService tasks, McpGrants grants, KnowledgeService knowledge,
-                         AutomationService automations, SkillService skills, SuperAgentTools superAgentTools) {
+                         AutomationService automations, SkillService skills, SuperAgentTools superAgentTools,
+                         UserInboxService inbox) {
+        this.inbox = inbox;
         this.tasks = tasks;
         this.grants = grants;
         this.knowledge = knowledge;
@@ -168,7 +174,53 @@ public class McpController {
     private ObjectNode chatToolsResult() {
         ObjectNode result = toolsListResult();
         ((ArrayNode) result.get("tools")).addAll((ArrayNode) knowledgeToolsResult().get("tools"));
+        ArrayNode tools = (ArrayNode) result.get("tools");
+        tools.add(tool("inbox_recent", "查看最近收到的消息（飞书等渠道），含优先级和分拣理由。",
+                props(opt("limit", "integer", "条数，默认 50")), (String[]) null));
+        tools.add(tool("todo_list", "列出从收到的消息里提炼的待办及其状态（open/tasked/done/dismissed）。",
+                props(), (String[]) null));
+        tools.add(tool("todo_update", "把一条待办标记为完成（done）、忽略（dismissed）或重新打开（open）。",
+                props(req("id", "string", "待办 id"), req("status", "string", "done / dismissed / open")), "id", "status"));
+        tools.add(tool("todo_to_task", "把一条待办转成任务并开始执行（仅在主人要求时使用）。",
+                props(req("id", "string", "待办 id"), opt("note", "string", "给任务的补充要求")), "id"));
         return result;
+    }
+
+    /** The chatting user's inbox: received messages and the to-dos extracted from them. */
+    private ObjectNode callInboxTool(McpGrants.Grant grant, String name, JsonNode args) {
+        if (grant.owner() == null || grant.owner().isBlank()) {
+            throw new ToolException("收件箱需要登录用户，本次运行没有关联用户。");
+        }
+        try {
+            String text = switch (name) {
+                case "inbox_recent" -> {
+                    List<InboxEventDto> list = inbox.events(grant.owner(), args.path("limit").asInt(50));
+                    yield list.isEmpty() ? "还没有收到任何消息。" : String.join("\n", list.stream().map(e ->
+                            "- [" + e.priority() + (e.processed() ? "" : " 待处理") + "] " + e.receivedAt() + " "
+                                    + e.chatName() + " / " + e.senderName() + "：" + e.text()).toList());
+                }
+                case "todo_list" -> {
+                    List<InboxTodoDto> list = inbox.todos(grant.owner());
+                    yield list.isEmpty() ? "没有待办。" : String.join("\n", list.stream().map(t ->
+                            "- " + t.id() + " | " + t.status() + " | " + t.title()
+                                    + (t.requester() == null ? "" : " | 提出人 " + t.requester())
+                                    + (t.due() == null ? "" : " | 截止 " + t.due())
+                                    + (t.taskId() == null ? "" : " | 任务 " + t.taskId())).toList());
+                }
+                case "todo_update" -> {
+                    InboxTodoDto t = inbox.setTodoStatus(grant.owner(), require(args, "id"), require(args, "status"));
+                    yield "已将「" + t.title() + "」标记为 " + t.status() + "。";
+                }
+                case "todo_to_task" -> {
+                    InboxTodoDto t = inbox.toTask(grant.owner(), require(args, "id"), strOrNull(args, "note"));
+                    yield "已把「" + t.title() + "」转成任务 " + t.taskId() + "，正在执行。";
+                }
+                default -> throw new ToolException("Unknown tool: " + name);
+            };
+            return textContent(text, false);
+        } catch (IllegalArgumentException e) {
+            throw new ToolException(e.getMessage());
+        }
     }
 
     private ObjectNode knowledgeToolsResult() {
@@ -309,6 +361,9 @@ public class McpController {
             return callKnowledgeTool(grant, params);
         }
         JsonNode args = params.path("arguments");
+        if (name.startsWith("inbox_") || name.startsWith("todo_")) {
+            return callInboxTool(grant, name, args);
+        }
         if (name.endsWith("_automation") || name.equals("list_automations") || name.equals("get_current_time")) {
             try {
                 return textContent(callAutomationTool(grant, name, args), false);
@@ -404,11 +459,10 @@ public class McpController {
         return switch (name) {
             case "create_automation" -> {
                 AutomationDto a = automations.create(saveRequest(args), user, "chat");
-                yield "已创建自动化 " + a.id() + "\n" + describe(automations.detail(a.id()));
+                yield "已创建自动化 " + a.id() + "\n" + describe(automations.detail(a.id(), user, false));
             }
             case "list_automations" -> {
-                List<AutomationDto> mine = automations.list().stream()
-                        .filter(a -> Objects.equals(a.owner(), user)).toList();
+                List<AutomationDto> mine = automations.list(user, false);
                 if (mine.isEmpty()) {
                     yield "当前没有自动化。";
                 }
@@ -421,10 +475,10 @@ public class McpController {
                 }
                 yield sb.toString();
             }
-            case "get_automation" -> describe(automations.detail(require(args, "id")));
+            case "get_automation" -> describe(automations.detail(require(args, "id"), user, false));
             case "update_automation" -> {
                 AutomationDto a = automations.update(require(args, "id"), saveRequest(args), user, false);
-                yield "已更新。\n" + describe(automations.detail(a.id()));
+                yield "已更新。\n" + describe(automations.detail(a.id(), user, false));
             }
             case "set_automation_enabled" -> {
                 if (!args.has("enabled")) {
@@ -432,7 +486,7 @@ public class McpController {
                 }
                 AutomationDto a = automations.setEnabled(require(args, "id"), args.path("enabled").asBoolean(),
                         user, false);
-                yield (a.enabled() ? "已恢复。" : "已暂停。") + "\n" + describe(automations.detail(a.id()));
+                yield (a.enabled() ? "已恢复。" : "已暂停。") + "\n" + describe(automations.detail(a.id(), user, false));
             }
             case "run_automation_now" -> {
                 AutomationRunDto run = automations.runNow(require(args, "id"), user, false);

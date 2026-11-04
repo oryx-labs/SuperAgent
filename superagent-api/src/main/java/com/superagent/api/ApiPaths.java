@@ -47,6 +47,9 @@ public final class ApiPaths {
     /** Shared skills (working standards) that agents and tasks follow. */
     public static final String SKILLS = V1 + "/skills";
 
+    /** Messages received on the user's behalf (their Feishu bot, ...), triage, and extracted to-dos. */
+    public static final String INBOX = V1 + "/inbox";
+
     private ApiPaths() {
     }
 }

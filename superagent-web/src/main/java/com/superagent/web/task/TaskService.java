@@ -8,6 +8,7 @@ import com.superagent.api.task.CreateTaskRequest;
 import com.superagent.api.task.TaskDetailDto;
 import com.superagent.api.task.TaskDto;
 import com.superagent.api.task.TaskEventDto;
+import com.superagent.api.task.TaskPageDto;
 import com.superagent.api.task.TaskPhaseDto;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -56,6 +57,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -282,6 +284,20 @@ public class TaskService implements TaskRecovery {
         return tasks.listTasks().stream()
                 .filter(t -> t.status() != TaskStatus.DELETED)
                 .map(this::toListDto).toList();
+    }
+
+    /** One page of the list, newest first; a page past the end is clamped to the last one. */
+    public TaskPageDto page(int page, int size) {
+        int pageSize = Math.max(1, Math.min(size, 100));
+        List<Task> live = tasks.listTasks().stream()
+                .filter(t -> t.status() != TaskStatus.DELETED)
+                .sorted(Comparator.comparing(Task::createdAt).reversed())
+                .toList();
+        int pages = Math.max(1, (live.size() + pageSize - 1) / pageSize);
+        int current = Math.min(Math.max(1, page), pages);
+        List<TaskDto> items = live.stream().skip((long) (current - 1) * pageSize).limit(pageSize)
+                .map(this::toListDto).toList();
+        return new TaskPageDto(items, live.size(), current, pageSize);
     }
 
     public TaskDetailDto detail(String id) {

@@ -1,34 +1,23 @@
 ## 验收结论：通过 ✅
 
-3 个 skill 都已建好，`skill_get` 取回的正文首尾与源文件一致。但没做到逐字节比对：正文存在 MySQL 里，读库需要凭证，我没有去拿。所以这次的核对是首尾和结构层面的比对，不是逐字节的 diff。
+《开写前确认清单》已保存到知识库，**21 条决定项都附有选项**，可以直接按编号作答。正文没有编造讲师经历或数据，也没有暗示这是 DeepSeek 官方课程。这是文档类任务，所以没有可跑的测试或构建，下面是逐项检查的结果。
 
-| skill | id | 首行一致 | 末尾 3 行一致 | 标题 / 代码块 / 表格 / 分隔线 |
-|---|---|---|---|---|
-| `ai-course-writing-original` | `4174c2a3-1dd3-4409-b991-b6edc8b799b3` | ✅ `# AI 课程写作：原始文风` | ✅ 以 "…fewer packaged conclusions." 结尾 | 51 / 8 / 0 / 3 ✅ |
-| `oker-writing-style` | `ba489068-8537-4798-9a91-0acf25f117eb` | ✅ `# Oker 写作风格` | ✅ 以 "…the work carries the confidence." 结尾 | 63 / 16 / 18 / 3 ✅ |
-| `ai-course-writing` | `0a356a5a-f7b2-4137-99ac-8be4e8a36e9d` | ✅ `# AI 课程写作` | ✅ 以 "- 是否为了显得完整，塞入了本节不需要的技术和边界？" 结尾 | 82 / 16 / 9 / 3 ✅ |
+| 检查项 | 结果 | 证据 |
+|---|---|---|
+| 文件已保存到正确位置 | ✅ | 知识库工具返回「已保存到知识库：/DeepSeek Super Agent 行动营/04-开写前确认清单.md」；`ls` 显示文件 9852 字节，修改时间 11-05 01:25 |
+| 篇幅在 1～2 页 | ✅ | 99 行，去掉空白后约 3900 字 |
+| 每条决定都有选项 | ✅ | 共 21 条（A1、B1～B5、C1～C5、D1～D8、E1～E2）。19 条在标题行里就有选项；D2、D5 的选项在下一行或分行列出，已逐条确认存在 |
+| 没有替用户做决定 | ✅ | 只有 A1 和 D1 标了推荐或给了理由，选择权仍在用户 |
+| 讲师经历和数据 | ✅ | 「主导」只出现在 C5，是把旧版的写法作为选项引用；C4 明确写了「作者不会补写经历」；字数和时长标为建议区间，不当作事实 |
+| 非官方表述 | ✅ | 「官方」只出现在 C3，用来讨论怎样说明这不是官方课程 |
+| 仓库事实属实 | ✅ | 在 `superagent-worker` 和 `superagent-web` 下都找到了 `ClaudeCliAgentRunner`、`CodexCliAgentRunner`、`TaskWatchdog`、`McpController` 的类定义，`superagent-event` 目录也存在。Attempt、Artifact、Router 的命中数为 0，项目里也找不到 compose 文件，和 D2、D5 的说法一致 |
+| 没改动原有材料 | ✅ | 00～03 的修改时间都还是 11-04 23:45:39 |
 
-### 验收证据
+**文件位置**：知识库 `/DeepSeek Super Agent 行动营/04-开写前确认清单.md`，磁盘上的路径是 `/Users/oker/SuperAgent/superagent-server/data/knowledge/admin/DeepSeek Super Agent 行动营/04-开写前确认清单.md`。
 
-1. **`skill_list`**：能看到这 3 个 skill，分类都是「写作」，description 与任务给定的文字逐字一致。原有的 3 个 skill（写作规范、画图规范（设计师）、运营文案）没有变化。
-2. **`skill_get` 逐个取回正文**：三个 skill 的元数据都是"图片：无"，正文从首行到末行都和源文件对得上。其中最容易出错的几处单独看过，都与源文件一致：
-   - 代码块的语言标记（`text`、`markdown`、不带标记的 ```）；
-   - 两张评分表的表格行；
-   - 中文弯引号「“”」和英文弯撇号 `’`；
-   - 附录 A、B、C 的分隔线。
-3. **源文件侧的统计**（shell 计算）：
+**还需要你决定的**：清单里的 21 项。最影响后续进度的是这三项：
+- **A1 写作顺序**；
+- **D2** Attempt、Artifact、Router 这三个对象，是补代码还是只讲概念；
+- **D3** 教学仓库从现有仓库裁剪，还是从零写。
 
-```
-ai-course-writing-original.md  lines=454 bytes=18257 headings=51 fences=8  tablerows=0  hr=3
-oker-writing-style.md          lines=632 bytes=30115 headings=63 fences=16 tablerows=18 hr=3
-ai-course-writing.md           lines=835 bytes=43040 headings=82 fences=16 tablerows=9  hr=3
-```
-
-   用这些计数去对照 `skill_get` 返回的正文，章节顺序、层级和数量都一致。
-
-### 其他情况
-
-- **核对方式的局限**：正文都是我从源文件转写进工具参数的。按上面的方式核对，首尾、全部标题和表格都一致。但如果某段中间改了一个字，这种比对不一定能发现。要做 sha256 级别的比对，可以有权限的人从 `skills` 表导出这 3 条记录的 content，和源文件做 diff。
-- **范围**：没有把这些 skill 挂给任何 Agent；没有改仓库代码；没有构建、部署或调用 `scripts/package.sh`。因为不是前端任务，也没有截图。
-
-**产出在哪里**：在平台的共享 Skills 库（侧边栏 Skills），存在 MySQL 数据库里，磁盘上没有对应文件。源文件仍在 `/Users/oker/SuperAgent/superagent-server/data/workspaces/bb8c2e92-8061-47be-8cfc-55e166d2bcd7/skills-build/`，没有改动。
+收到答复后，我先出大纲修订稿（05 号文件），再写第一周讲义。

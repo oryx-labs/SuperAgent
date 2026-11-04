@@ -8,9 +8,9 @@ import java.time.Instant;
  * <p>{@code processedUntil}: inbox messages created at or before this have been worked through.
  * {@code planId}/{@code planStatus}/{@code planJson}: the latest plan it proposed — status
  * {@code proposed} (waiting for the user), {@code approved} (it may hire and assign), or null when
- * there is none; the JSON is the plan's shape as the web layer defines it. {@code trackedJson}: the
- * tasks it assigned that it still has to report on (a JSON list owned by the web layer, since core
- * has no JSON library).
+ * there is none; the JSON is the plan's shape as the web layer defines it. {@code trackedJson} is no
+ * longer written — assigned tasks are followed in {@link SuperAgentWork} — and is kept only because
+ * existing rows have the column.
  */
 public record SuperAgentState(
         String owner,
@@ -31,9 +31,5 @@ public record SuperAgentState(
 
     public SuperAgentState withPlan(String id, String status, String json) {
         return new SuperAgentState(owner, agentId, processedUntil, id, status, json, trackedJson, Instant.now());
-    }
-
-    public SuperAgentState withTracked(String json) {
-        return new SuperAgentState(owner, agentId, processedUntil, planId, planStatus, planJson, json, Instant.now());
     }
 }

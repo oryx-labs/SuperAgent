@@ -2,6 +2,8 @@ package com.superagent.web.task;
 
 import com.superagent.api.chat.ImageUploadDto;
 import com.superagent.api.task.CreateTaskRequest;
+import com.superagent.api.task.TaskDto;
+import com.superagent.api.task.TaskPageDto;
 import com.superagent.api.task.TaskDetailDto;
 import com.superagent.core.chat.AgentEvent;
 import com.superagent.core.chat.AgentEventSink;
@@ -188,6 +190,21 @@ class TaskServiceTest {
         await().atMost(Duration.ofSeconds(2)).until(() ->
                 tasks.findTask(id).map(t -> t.status().name()).orElse("").equals("RUNNING"));
         assertThatThrownBy(() -> service.sendMessage(id, "hi")).isInstanceOf(TaskBusyException.class);
+    }
+
+    @Test
+    void theListIsPagedNewestFirstAndAPagePastTheEndShowsTheLastOne() throws InterruptedException {
+        TaskService service = service(new FakeRunner(() -> "done."), new InMemoryTaskStore());
+        for (String title : List.of("A", "B", "C")) {
+            service.create(brief(title));
+            Thread.sleep(5); // distinct creation times, so "newest first" is well defined
+        }
+
+        TaskPageDto first = service.page(1, 2);
+        assertThat(first.total()).isEqualTo(3);
+        assertThat(first.items()).extracting(TaskDto::title).containsExactly("C", "B");
+        assertThat(service.page(2, 2).items()).extracting(TaskDto::title).containsExactly("A");
+        assertThat(service.page(9, 2).page()).isEqualTo(2);
     }
 
     @Test

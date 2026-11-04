@@ -70,12 +70,14 @@ public class AutomationService {
         this.settings = settings;
     }
 
-    public List<AutomationDto> list() {
-        return store.list().stream().map(a -> toDto(a, null)).toList();
+    /** The caller's own automations (an admin sees everyone's): prompts can hold anything, so reads are scoped too. */
+    public List<AutomationDto> list(String user, boolean admin) {
+        return store.list().stream().filter(a -> admin || Objects.equals(a.owner(), user))
+                .map(a -> toDto(a, null)).toList();
     }
 
-    public AutomationDetailDto detail(String id) {
-        Automation a = require(id);
+    public AutomationDetailDto detail(String id, String user, boolean admin) {
+        Automation a = requireVisible(id, user, admin);
         List<AutomationRunDto> runs = store.listRuns(id, RECENT_RUNS).stream().map(this::toRunDto).toList();
         return new AutomationDetailDto(toDto(a, null), runs, upcoming(a));
     }
@@ -350,6 +352,15 @@ public class AutomationService {
 
     private Automation require(String id) {
         return store.find(id).orElseThrow(() -> new AutomationNotFoundException(id));
+    }
+
+    /** Someone else's automation reads as "not found", so ids can't be probed. */
+    private Automation requireVisible(String id, String user, boolean admin) {
+        Automation a = require(id);
+        if (!admin && !Objects.equals(a.owner(), user)) {
+            throw new AutomationNotFoundException(id);
+        }
+        return a;
     }
 
     private Automation requireEditable(String id, String user, boolean admin) {

@@ -38,8 +38,8 @@ public class AutomationController {
     }
 
     @GetMapping(ApiPaths.AUTOMATIONS)
-    public ApiResponse<List<AutomationDto>> list() {
-        return ApiResponse.ok(service.list());
+    public ApiResponse<List<AutomationDto>> list(Authentication auth) {
+        return ApiResponse.ok(service.list(auth.getName(), isAdmin(auth)));
     }
 
     @PostMapping(ApiPaths.AUTOMATIONS)
@@ -54,8 +54,8 @@ public class AutomationController {
     }
 
     @GetMapping(ApiPaths.AUTOMATIONS + "/{id}")
-    public ApiResponse<AutomationDetailDto> detail(@PathVariable String id) {
-        return ApiResponse.ok(service.detail(id));
+    public ApiResponse<AutomationDetailDto> detail(@PathVariable String id, Authentication auth) {
+        return ApiResponse.ok(service.detail(id, auth.getName(), isAdmin(auth)));
     }
 
     @PutMapping(ApiPaths.AUTOMATIONS + "/{id}")
