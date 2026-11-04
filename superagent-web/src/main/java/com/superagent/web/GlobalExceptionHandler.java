@@ -2,10 +2,17 @@ package com.superagent.web;
 
 import com.superagent.api.ApiResponse;
 import com.superagent.web.agent.AgentNotFoundException;
+import com.superagent.web.attachment.AttachmentNotFoundException;
+import com.superagent.web.automation.AutomationForbiddenException;
+import com.superagent.web.automation.AutomationNotFoundException;
 import com.superagent.web.chat.SessionNotFoundException;
 import com.superagent.web.connector.ConnectorNotFoundException;
+import com.superagent.web.knowledge.KnowledgeConflictException;
+import com.superagent.web.knowledge.KnowledgeNotFoundException;
 import com.superagent.web.provider.ProviderAlreadyAddedException;
 import com.superagent.web.provider.ProviderNotFoundException;
+import com.superagent.web.skill.SkillForbiddenException;
+import com.superagent.web.skill.SkillNotFoundException;
 import com.superagent.web.task.ArtifactNotFoundException;
 import com.superagent.web.task.TaskBusyException;
 import com.superagent.web.task.TaskNotFoundException;
@@ -73,6 +80,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
     }
 
+    @ExceptionHandler(AutomationNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAutomationNotFound(AutomationNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(AutomationForbiddenException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAutomationForbidden(AutomationForbiddenException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error("forbidden", ex.getMessage()));
+    }
+
+    @ExceptionHandler(AttachmentNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAttachmentNotFound(AttachmentNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
+    }
+
     @ExceptionHandler(TaskBusyException.class)
     public ResponseEntity<ApiResponse<Void>> handleTaskBusy(TaskBusyException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error("conflict", ex.getMessage()));
@@ -95,6 +117,26 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ProviderAlreadyAddedException.class)
     public ResponseEntity<ApiResponse<Void>> handleProviderAlreadyAdded(ProviderAlreadyAddedException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error("conflict", ex.getMessage()));
+    }
+
+    @ExceptionHandler(SkillNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSkillNotFound(SkillNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(SkillForbiddenException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSkillForbidden(SkillForbiddenException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error("forbidden", ex.getMessage()));
+    }
+
+    @ExceptionHandler(KnowledgeNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleKnowledgeNotFound(KnowledgeNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(KnowledgeConflictException.class)
+    public ResponseEntity<ApiResponse<Void>> handleKnowledgeConflict(KnowledgeConflictException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error("conflict", ex.getMessage()));
     }
 

@@ -1,5 +1,7 @@
 package com.superagent.web.task;
 
+import com.superagent.api.ApiPaths;
+import com.superagent.api.chat.ImageUploadDto;
 import com.superagent.api.chat.MessageDto;
 import com.superagent.api.task.ArtifactDto;
 import com.superagent.api.task.CreateTaskRequest;
@@ -19,6 +21,7 @@ import com.superagent.core.chat.AgentType;
 import com.superagent.core.chat.Cancellation;
 import com.superagent.core.chat.ChatMessage;
 import com.superagent.core.chat.ChatStore;
+import com.superagent.core.chat.ImageAttachment;
 import com.superagent.core.chat.MessageRole;
 import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskKind;
@@ -32,6 +35,9 @@ import com.superagent.core.task.TaskSource;
 import com.superagent.core.task.TaskStatus;
 import com.superagent.core.task.TaskStore;
 import jakarta.annotation.PreDestroy;
+import com.superagent.web.attachment.ImageAttachmentStore;
+import com.superagent.web.mcp.McpGrants;
+import com.superagent.web.skill.SkillService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -42,6 +48,7 @@ import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -98,6 +105,14 @@ public class TaskService implements TaskRecovery {
     private final ChatStore runStore;
     private final Map<AgentType, AgentRunner> runners = new EnumMap<>(AgentType.class);
     private final Map<String, Cancellation> activeRuns = new ConcurrentHashMap<>();
+    /**
+     * Images attached to a steering message, handed to the next turn this task runs (the one that
+     * carries that message) and then dropped, so later phase turns don't re-send them. A side
+     * channel rather than a parameter because a steering message can wait in the queue and then
+     * enter any of the run flows; after a restart it is rebuilt from the stored message.
+     */
+    private final Map<String, List<ImageAttachment>> nextTurnImages = new ConcurrentHashMap<>();
+    private final ImageAttachmentStore images;
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "task-run");
         t.setDaemon(true);
@@ -109,6 +124,8 @@ public class TaskService implements TaskRecovery {
     private final List<String> allowedTools;
     private final boolean skipPermissions;
     private final String defaultOwner;
+    private final McpGrants mcpGrants;   // null = task runs get no knowledge-base tools
+    private final SkillService skills;   // null = tasks run without skills (tests)
     private final String codingFlowTemplate = loadCodingFlowTemplate();
 
     // Session reuse + per-owner parallelism. All pool/queue access is under schedulerLock.
@@ -129,16 +146,20 @@ public class TaskService implements TaskRecovery {
             TaskRunStateStore runStates,
             ChatStore runStore,
             List<AgentRunner> agentRunners,
+            ImageAttachmentStore images,
             @Value("${superagent.task.workspace-dir:./data/tasks}") String workspaceDir,
             @Value("${superagent.agent.default-model:}") String defaultModel,
             @Value("${superagent.task.allowed-tools:}") String allowedTools,
             @Value("${superagent.task.skip-permissions:false}") boolean skipPermissions,
             @Value("${superagent.task.max-parallel:50}") int maxParallel,
-            @Value("${superagent.task.default-owner:local}") String defaultOwner) {
+            @Value("${superagent.task.default-owner:local}") String defaultOwner,
+            McpGrants mcpGrants,
+            SkillService skills) {
         this.tasks = tasks;
         this.phaseStore = phaseStore;
         this.runStates = runStates;
         this.runStore = runStore;
+        this.images = images;
         for (AgentRunner runner : agentRunners) {
             this.runners.put(runner.type(), runner);
         }
@@ -147,6 +168,8 @@ public class TaskService implements TaskRecovery {
         this.allowedTools = parseTools(allowedTools);
         this.skipPermissions = skipPermissions;
         this.defaultOwner = defaultOwner;
+        this.mcpGrants = mcpGrants != null && mcpGrants.available() ? mcpGrants : null;
+        this.skills = skills;
         this.pool = new TaskSessionPool(maxParallel, workspaceRoot);
         if (skipPermissions) {
             log.warn("superagent.task.skip-permissions=true: tasks run the agent WITHOUT tool-permission prompts "
@@ -202,11 +225,16 @@ public class TaskService implements TaskRecovery {
                 if (t.status() != TaskStatus.PENDING) {
                     continue;
                 }
-                String content = lastUserMessage(t.id());
-                if (content == null) {
+                ChatMessage last = lastUserMessage(t.id());
+                if (last == null) {
                     tasks.save(t.withStatus(TaskStatus.STOPPED)); // nothing to resume with
                     continue;
                 }
+                List<ImageAttachment> attached = images.list(t.id(), last.id());
+                if (!attached.isEmpty()) {
+                    nextTurnImages.put(t.id(), attached);
+                }
+                String content = agentPrompt(last.content(), attached);
                 queues.computeIfAbsent(t.createdBy(), k -> new ArrayDeque<>())
                         .addLast(new QueuedRun(t.id(), content, false, boundSessionId(t)));
                 owners.add(t.createdBy());
@@ -220,11 +248,11 @@ public class TaskService implements TaskRecovery {
                 .forEach(this::schedule);
     }
 
-    private String lastUserMessage(String taskId) {
+    private ChatMessage lastUserMessage(String taskId) {
         List<ChatMessage> messages = runStore.listMessages(taskId);
         for (int i = messages.size() - 1; i >= 0; i--) {
             if (messages.get(i).role() == MessageRole.USER) {
-                return messages.get(i).content();
+                return messages.get(i);
             }
         }
         return null;
@@ -258,7 +286,7 @@ public class TaskService implements TaskRecovery {
 
     public TaskDetailDto detail(String id) {
         Task task = require(id);
-        List<MessageDto> messages = runStore.listMessages(id).stream().map(TaskService::toMessageDto).toList();
+        List<MessageDto> messages = runStore.listMessages(id).stream().map(m -> toMessageDto(id, m)).toList();
         List<TaskEventDto> events = runStore.listEvents(id).stream().map(TaskService::toEventDto).toList();
         List<TaskPhaseDto> phases = TaskKind.fromStorage(task.flow()) == TaskKind.CODING
                 ? loadPhases(id).stream().map(TaskService::toPhaseDto).toList()
@@ -304,20 +332,44 @@ public class TaskService implements TaskRecovery {
 
     /** Reads one artifact by name, guarding against path traversal out of the workspace. */
     public byte[] readArtifact(String id, String name) {
-        Task task = require(id);
-        if (task.workspaceDir() == null) {
-            throw new ArtifactNotFoundException(name);
-        }
-        Path dir = Path.of(task.workspaceDir()).toAbsolutePath().normalize();
-        Path file = dir.resolve(name).normalize();
-        if (!file.startsWith(dir) || !Files.isRegularFile(file)) {
-            throw new ArtifactNotFoundException(name);
-        }
+        Path file = artifactFile(id, name);
         try {
             return Files.readAllBytes(file);
         } catch (IOException e) {
             throw new ArtifactNotFoundException(name);
         }
+    }
+
+    /** An artifact's path, confined to the task workspace (no traversal, no symlink out of it). */
+    public Path artifactFile(String id, String name) {
+        Task task = require(id);
+        if (task.workspaceDir() == null || name == null) {
+            throw new ArtifactNotFoundException(name);
+        }
+        Path dir = Path.of(task.workspaceDir()).toAbsolutePath().normalize();
+        Path file = dir.resolve(name).normalize();
+        if (!file.startsWith(dir) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            throw new ArtifactNotFoundException(name);
+        }
+        return file;
+    }
+
+    /**
+     * "Save the main output to the knowledge base" is carried as an instruction in the brief: the
+     * agent does the save with its knowledge tools, and the request stays visible in the Prompt tab.
+     */
+    private static String withKnowledgeNote(String brief, CreateTaskRequest request) {
+        if (!Boolean.TRUE.equals(request.saveToKnowledge())) {
+            return brief;
+        }
+        // Blank folder = the agent decides; "/" = the root.
+        String raw = request.knowledgeFolder() == null ? "" : request.knowledgeFolder().strip();
+        String folder = raw.replaceAll("^/+|/+$", "");
+        String where = raw.isEmpty()
+                ? "根据内容选择合适的目录（先用 knowledge_list_folders 查看已有目录，没有合适的就用 knowledge_create_folder 新建）"
+                : folder.isEmpty() ? "根目录" : "「" + folder + "」目录";
+        String note = "完成后：用 knowledge_save 把本任务的主要产出文件保存到知识库的" + where + "，并在最终回复里写明保存位置。";
+        return (brief == null ? "" : brief + "\n\n") + "---\n" + note;
     }
 
     private static long sizeOf(Path p) {
@@ -331,6 +383,18 @@ public class TaskService implements TaskRecovery {
     // --- lifecycle ---
 
     public TaskDto create(CreateTaskRequest request) {
+        return create(request, null);
+    }
+
+    public TaskDto create(CreateTaskRequest request, String owner) {
+        return create(request, owner, null);
+    }
+
+    /**
+     * {@code owner} is the requesting user (null = the default owner); their knowledge base receives saves.
+     * {@code agentId} is the agent creating it, whose skills the task then uses (null = all skills).
+     */
+    public TaskDto create(CreateTaskRequest request, String owner, String agentId) {
         String id = UUID.randomUUID().toString();
         AgentType agentType = AgentType.fromString(request.agentType());
         if (!runners.containsKey(agentType)) {
@@ -343,13 +407,17 @@ public class TaskService implements TaskRecovery {
         Instant now = Instant.now();
         // No workspace yet: it comes from the session this task is scheduled onto.
         // The kind is stored in the (otherwise unused) flow column — zero migration.
-        Task task = new Task(id, cleanTitle(request.title()), blankToNull(request.brief()), source,
+        Task task = new Task(id, cleanTitle(request.title()), withKnowledgeNote(blankToNull(request.brief()), request),
+                source,
                 blankToNull(request.repo()), blankToNull(request.branch()), kind.storageName(),
                 TaskStatus.PENDING, 0, BigDecimal.ZERO, blankToNull(request.model()), agentType,
-                null, defaultOwner, null, now, null, null, now);
+                null, owner == null || owner.isBlank() ? defaultOwner : owner, null, now, null, null, now);
         tasks.save(task);
         if (kind == TaskKind.CODING) {
             persistPhases(id, initialCodingPhases());
+        }
+        if (agentId != null && skills != null) {
+            skills.bindTaskToAgent(id, agentId); // before scheduling, so the first turn already has them
         }
         log.info("created task {} ({}), kind={}", id, task.title(), kind.storageName());
         schedule(task);
@@ -432,6 +500,10 @@ public class TaskService implements TaskRecovery {
      * currently holds that session, the steering run queues until it frees.
      */
     public void sendMessage(String id, String content) {
+        sendMessage(id, content, List.of());
+    }
+
+    public void sendMessage(String id, String text, List<ImageUploadDto> uploads) {
         Task task = require(id);
         if (task.status() == TaskStatus.RUNNING || task.workspaceDir() == null) {
             throw new TaskBusyException(id); // running, or queued and never started
@@ -442,8 +514,14 @@ public class TaskService implements TaskRecovery {
             if (q != null && q.stream().anyMatch(r -> r.taskId().equals(id))) {
                 throw new TaskBusyException(id); // a steering run is already waiting for this session
             }
-            runStore.appendMessage(new ChatMessage(UUID.randomUUID().toString(), id,
-                    MessageRole.USER, content, Instant.now()));
+            String messageId = UUID.randomUUID().toString();
+            List<ImageAttachment> attached = images.save(id, messageId, uploads);
+            runStore.appendMessage(new ChatMessage(messageId, id,
+                    MessageRole.USER, text == null ? "" : text, Instant.now()));
+            if (!attached.isEmpty()) {
+                nextTurnImages.put(id, attached);
+            }
+            String content = agentPrompt(text, attached);
             TaskSessionPool.Lease lease = pool.acquireSession(task.createdBy(), task.agentType(), id, sessionId, task.workspaceDir());
             if (lease != null) {
                 resumeRun(task, lease, content);
@@ -456,6 +534,12 @@ public class TaskService implements TaskRecovery {
                 log.info("task {} steering queued: its session {} is held by another task", id, sessionId);
             }
         }
+    }
+
+    /** The prompt to run for a user message: an image-only message still needs some text for the CLI. */
+    private static String agentPrompt(String text, List<ImageAttachment> attached) {
+        boolean blank = text == null || text.isBlank();
+        return blank && !attached.isEmpty() ? ImageAttachmentStore.IMAGE_ONLY_PROMPT : (text == null ? "" : text);
     }
 
     /** Continues a task in the leased session, keeping its workspace and start time. Call under schedulerLock. */
@@ -516,6 +600,7 @@ public class TaskService implements TaskRecovery {
             }
             pool.dropReservation(id);    // a reservation it held while another task ran in the session
         }
+        nextTurnImages.remove(id);
         tasks.save(task.withStatus(TaskStatus.DELETED));
         tryDispatch(task.createdBy());
     }
@@ -664,12 +749,28 @@ public class TaskService implements TaskRecovery {
 
         // agentSessionId is the pool session's id: --session-id on its first turn, --resume after,
         // so a reused session keeps its accumulated context. Events are re-keyed to task.id above.
+        // A per-turn token gives this run the knowledge tools for its owner only, revoked after the turn.
+        McpGrants.Grant grant = mcpGrants == null || task.workspaceDir() == null ? null
+                : mcpGrants.openTask(task.createdBy(), task.id(), task.workspaceDir());
+        List<String> tools = allowedTools;
+        if (grant != null) {
+            tools = new ArrayList<>(allowedTools);
+            tools.addAll(McpGrants.KNOWLEDGE_TOOLS);
+        }
         AgentRunRequest request = new AgentRunRequest(
                 agentSessionId, sessionFirstTurn ? null : agentSessionId, task.workspaceDir(),
                 wrapBriefPrompt ? wrapBrief(prompt) : prompt,
                 effectiveModel(task),
-                allowedTools, skipPermissions, null, null);
-        runner.run(request, sink, cancellation);
+                tools, skipPermissions, grant == null ? null : mcpGrants.mcpConfig(grant),
+                skills == null ? null : skills.install(task.workspaceDir(), skills.forTask(task.id()), grant != null),
+                nextTurnImages.remove(task.id()));
+        try {
+            runner.run(request, sink, cancellation);
+        } finally {
+            if (grant != null) {
+                mcpGrants.close(grant);
+            }
+        }
 
         String finalText = result.get() != null ? result.get() : text.toString();
         if (!cancellation.isCancelled() && error.get() != null && finalText.isBlank()) {
@@ -1032,8 +1133,10 @@ public class TaskService implements TaskRecovery {
         }
     }
 
-    private static MessageDto toMessageDto(ChatMessage m) {
-        return new MessageDto(m.id(), m.role().name().toLowerCase(), m.content(), m.createdAt());
+    private MessageDto toMessageDto(String taskId, ChatMessage m) {
+        List<String> urls = m.role() == MessageRole.USER
+                ? images.urls(ApiPaths.TASKS + "/" + taskId + "/messages", taskId, m.id()) : List.of();
+        return new MessageDto(m.id(), m.role().name().toLowerCase(), m.content(), m.createdAt(), urls);
     }
 
     private static TaskEventDto toEventDto(AgentEvent e) {

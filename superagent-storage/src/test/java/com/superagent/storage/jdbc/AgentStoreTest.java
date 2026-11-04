@@ -1,6 +1,7 @@
 package com.superagent.storage.jdbc;
 
 import com.superagent.core.agent.Agent;
+import com.superagent.core.agent.AgentKind;
 import com.superagent.core.agent.AgentStatus;
 import com.superagent.core.chat.AgentType;
 import com.superagent.core.chat.ChatSession;
@@ -26,15 +27,20 @@ class AgentStoreTest {
     void createsFindsUpsertsAndKeepsSoftDeletedRows() {
         MysqlAgentStore store = new MysqlAgentStore(h2()); // constructor creates the table
         Instant now = Instant.now();
-        Agent a = new Agent("a1", "Researcher", "🧑‍🔬", "You dig deep.", "sonnet", AgentStatus.ACTIVE, now, now);
+        Agent a = new Agent("a1", "Researcher", "🧑‍🔬", "researcher", "You dig deep.", "sonnet", AgentStatus.ACTIVE,
+                "alice", AgentKind.STANDARD, null, now, now);
 
         store.create(a);
         assertThat(store.find("a1")).hasValueSatisfying(got -> {
             assertThat(got.name()).isEqualTo("Researcher");
             assertThat(got.avatar()).isEqualTo("🧑‍🔬");
+            assertThat(got.character()).isEqualTo("researcher");
             assertThat(got.persona()).isEqualTo("You dig deep.");
             assertThat(got.model()).isEqualTo("sonnet");
             assertThat(got.status()).isEqualTo(AgentStatus.ACTIVE);
+            assertThat(got.owner()).isEqualTo("alice");
+            assertThat(got.kind()).isEqualTo(AgentKind.STANDARD);
+            assertThat(got.managedBy()).isNull();
         });
         assertThat(store.list()).hasSize(1);
 

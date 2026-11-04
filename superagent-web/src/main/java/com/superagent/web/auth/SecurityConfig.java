@@ -55,6 +55,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/login", "/api/v1/auth/phone/**").permitAll()
                         .requestMatchers("/oauth2/**", "/login/oauth2/**", "/api/v1/auth/wechat/**").permitAll()
                         .requestMatchers("/mcp").permitAll() // gated by X-MCP-Token in McpController
+                        // External callers: gated by the automation's own X-Automation-Token in AutomationService.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/automations/*/trigger").permitAll()
                         .requestMatchers("/api/v1/users/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/providers/**").hasRole("ADMIN") // runs install commands on the host
                         .requestMatchers("/api/v1/connectors/**", "/api/v1/oauth/**").hasRole("ADMIN")

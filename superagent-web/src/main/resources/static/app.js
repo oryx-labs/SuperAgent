@@ -28,6 +28,13 @@
         body: JSON.stringify({ content }),
       }).then(r => { if (!r.ok) throw new Error("edit failed"); return r.json(); }),
     listAgents: () => fetch("/api/v1/agents").then(r => r.json()),
+    agentHistory: id => fetch("/api/v1/agents/" + id + "/history").then(r => r.json()),
+    superState: () => fetch("/api/v1/superagent").then(r => r.json()),
+    superSubmit: body => fetch("/api/v1/superagent/messages", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => r.json()),
+    superApprove: planId => fetch("/api/v1/superagent/plans/" + encodeURIComponent(planId) + "/approve",
+      { method: "POST" }).then(r => r.json()),
     createAgent: body =>
       fetch("/api/v1/agents", {
         method: "POST",
@@ -35,6 +42,7 @@
         body: JSON.stringify(body),
       }).then(r => r.json()),
     agentAvatars: () => fetch("/api/v1/agents/avatars").then(r => r.json()),
+    agentCharacters: () => fetch("/api/v1/agents/characters").then(r => r.json()),
     updateAgent: (id, body) =>
       fetch("/api/v1/agents/" + id, {
         method: "PUT",
@@ -52,7 +60,6 @@
     input: document.getElementById("composerInput"),
     newChatBtn: document.getElementById("newChatBtn"),
     sendBtn: document.getElementById("sendBtn"),
-    status: document.getElementById("progressStatus"),
     search: document.getElementById("searchInput"),
   };
 
@@ -93,15 +100,125 @@
     else bubble.innerHTML = renderMarkdown(content);
   }
 
+  // ---------- image attachments (agent + task composers) ----------
+  // Mirrors the server's limits (ImageAttachmentStore) so a bad pick fails here, not after upload.
+  const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+  const MAX_IMAGES = 5;
+  const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+  // Pick (button), paste and drop images into a composer; shows them as removable thumbnails.
+  function imageAttacher({ button, fileInput, tray, pasteTarget, dropZone }) {
+    let picked = []; // [{ file, url }]
+
+    function render() {
+      tray.replaceChildren();
+      tray.hidden = picked.length === 0;
+      picked.forEach((p, i) => {
+        const item = document.createElement("div");
+        item.className = "image-tray__item";
+        const img = document.createElement("img");
+        img.src = p.url;
+        img.alt = p.file.name || "";
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "image-tray__remove";
+        remove.textContent = "×";
+        remove.title = L("img.remove");
+        remove.addEventListener("click", () => {
+          URL.revokeObjectURL(p.url);
+          picked.splice(i, 1);
+          render();
+        });
+        item.append(img, remove);
+        tray.appendChild(item);
+      });
+    }
+
+    function add(files) {
+      for (const file of files) {
+        if (!IMAGE_TYPES.includes(file.type)) { showToast(L("img.badType"), true); continue; }
+        if (file.size > MAX_IMAGE_BYTES) { showToast(L("img.tooBig"), true); continue; }
+        if (picked.length >= MAX_IMAGES) { showToast(L("img.tooMany", { max: MAX_IMAGES }), true); break; }
+        picked.push({ file, url: URL.createObjectURL(file) });
+      }
+      render();
+    }
+
+    button.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", () => { add(Array.from(fileInput.files)); fileInput.value = ""; });
+    pasteTarget.addEventListener("paste", e => {
+      const files = Array.from(e.clipboardData ? e.clipboardData.files : []).filter(f => f.type.startsWith("image/"));
+      if (files.length) { e.preventDefault(); add(files); }
+    });
+    dropZone.addEventListener("dragover", e => {
+      if (!button.disabled) { e.preventDefault(); dropZone.classList.add("is-dragover"); }
+    });
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("is-dragover"));
+    dropZone.addEventListener("drop", e => {
+      dropZone.classList.remove("is-dragover");
+      if (button.disabled || !e.dataTransfer || !e.dataTransfer.files.length) return;
+      e.preventDefault();
+      add(Array.from(e.dataTransfer.files));
+    });
+
+    return {
+      count: () => picked.length,
+      // Object URLs for the optimistic bubble; they stay valid until the page unloads.
+      previewUrls: () => picked.map(p => p.url),
+      payload: () => Promise.all(picked.map(p => readBase64(p.file).then(data => ({ mediaType: p.file.type, data })))),
+      clear() { picked = []; render(); },
+      setDisabled(on) { button.disabled = on; },
+    };
+  }
+
+  function readBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Thumbnails of a message's images; each opens full size in a new tab.
+  function imageStrip(urls) {
+    const strip = document.createElement("div");
+    strip.className = "msg-images";
+    urls.forEach(url => {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = "";
+      img.loading = "lazy";
+      a.appendChild(img);
+      strip.appendChild(a);
+    });
+    return strip;
+  }
+
   // ---------- stored messages (with inline edit) ----------
-  function renderStoredMessage(role, content, id) {
+  function renderStoredMessage(role, content, id, images, sessionId) {
     clearEmptyState();
     const msg = document.createElement("div");
-    msg.className = "msg " + (role === "user" ? "msg--user" : "msg--agent");
+    msg.className = "msg " + (role === "user" ? "msg--user" : role === "system" ? "msg--system" : "msg--agent");
     if (id) msg.dataset.mid = id;
+    if (sessionId) msg.dataset.sid = sessionId;
+    if (role === "system") { // SuperAgent inbox notes: task reports, plan approvals
+      const note = document.createElement("div");
+      note.className = "msg__note";
+      note.textContent = content;
+      msg.appendChild(note);
+      el.messages.appendChild(msg);
+      return msg;
+    }
+    if (images && images.length) msg.appendChild(imageStrip(images));
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     setBubbleContent(bubble, role, content);
+    bubble.hidden = !content && !!(images && images.length); // image-only message: no empty bubble
     msg.appendChild(bubble);
     if (id) {
       const edit = document.createElement("button");
@@ -141,7 +258,7 @@
       const val = ta.value;
       save.disabled = true;
       try {
-        await api.editMessage(activeSessionId, mid, val);
+        await api.editMessage(msgEl.dataset.sid || activeSessionId, mid, val);
         setBubbleContent(bubble, role, val);
       } catch (e) {
         setBubbleContent(bubble, role, original);
@@ -150,13 +267,15 @@
   }
 
   // ---------- streaming bubbles ----------
-  function addUserBubble(text) {
+  function addUserBubble(text, imageUrls) {
     clearEmptyState();
     const msg = document.createElement("div");
     msg.className = "msg msg--user";
+    if (imageUrls && imageUrls.length) msg.appendChild(imageStrip(imageUrls));
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     bubble.textContent = text;
+    bubble.hidden = !text;
     msg.appendChild(bubble);
     el.messages.appendChild(msg);
     scrollToBottom();
@@ -205,7 +324,8 @@
     el.threadList.innerHTML = "";
     list.forEach(a => {
       const li = document.createElement("li");
-      li.className = "thread" + (a.id === activeAgentId ? " is-active" : "");
+      const isSuper = a.kind === "super";
+      li.className = "thread" + (isSuper ? " thread--super" : "") + (a.id === activeAgentId ? " is-active" : "");
       li.dataset.id = a.id;
 
       const avatar = document.createElement("span");
@@ -216,6 +336,14 @@
       const name = document.createElement("span");
       name.className = "thread__name";
       name.textContent = a.name || "";
+
+      if (a.managedBy) {
+        const tag = document.createElement("span");
+        tag.className = "thread__tag";
+        tag.textContent = L("super.teamTag");
+        tag.title = L("super.teamHint");
+        name.appendChild(tag);
+      }
 
       const time = document.createElement("span");
       time.className = "thread__time";
@@ -233,7 +361,8 @@
       del.title = L("common.delete");
       del.textContent = "×";
       del.addEventListener("click", e => { e.stopPropagation(); deleteThread(li, a); });
-      actions.append(rename, del);
+      // The leader's name and character are the platform's, and it can't be deleted.
+      if (!isSuper) actions.append(rename, del);
 
       li.append(avatar, name, time, actions);
       li.addEventListener("click", () => selectAgent(a));
@@ -260,7 +389,9 @@
       const value = input.value.trim();
       if (save && value && value !== original) {
         try {
-          await api.updateAgent(agent.id, { name: value, persona: agent.persona, model: agent.model });
+          await api.updateAgent(agent.id, {
+            name: value, avatar: agent.avatar, character: agent.character, persona: agent.persona, model: agent.model,
+          });
           agent.name = value;
           span.textContent = value;
         } catch (e) { span.textContent = original; }
@@ -301,6 +432,7 @@
     activeAgent = agent;
     renderAgentPanel(agent);
     markActiveThread();
+    setSuperMode(agent.kind === "super");
     if (!agent.sessionId) {
       activeSessionId = null;
       el.messages.innerHTML = '<div class="empty-state"><p>' + L("agent.emptyChat") + '</p></div>';
@@ -316,10 +448,20 @@
     panel.hidden = false;
     document.getElementById("agentInfoName").textContent = agent.name || "Agent";
     document.getElementById("agentInfoAvatar").textContent = agent.avatar || "🙂";
-    document.getElementById("agentInfoPersona").textContent = agent.persona || "—";
+    const ch = characterByKey(agent.character);
+    document.getElementById("agentInfoCharacter").textContent = agent.kind === "super" ? L("super.role")
+      : ch ? ch.emoji + " " + characterName(ch) : L("agent.characterCustom");
+    const editBtn = document.getElementById("agentEditBtn");
+    if (editBtn) editBtn.hidden = agent.kind === "super";
+    panel.classList.toggle("agent-info--super", agent.kind === "super");
+    const persona = document.getElementById("agentInfoPersona");
+    persona.textContent = agent.persona || "";
+    persona.hidden = !agent.persona;
+    if (!characterChoices.length) loadCharacters().then(() => { if (activeAgent === agent && agent.character) renderAgentPanel(agent); });
     const model = agent.model || systemSettings.agentDefaultModel || "default";
     document.getElementById("agentInfoModel").textContent = model;
     renderComposerModel(agent);
+    renderAgentSkills(agent);
   }
 
   // Composer model picker: the agent's model override, limited to Claude models the background probe saw answer.
@@ -375,7 +517,8 @@
     if (!agent) return;
     try {
       const res = await api.updateAgent(agent.id, {
-        name: agent.name, avatar: agent.avatar, persona: agent.persona, model: composerModel.value || null,
+        name: agent.name, avatar: agent.avatar, character: agent.character, persona: agent.persona,
+        model: composerModel.value || null,
       });
       activeAgent = res.data;
       renderAgentPanel(res.data);
@@ -386,30 +529,66 @@
   });
 
   async function selectSession(id) {
+    if (superMode) { activeSessionId = id; superFingerprint = null; await refreshSuper(); return; }
     activeSessionId = id;
     el.messages.innerHTML = "";
-    const res = await api.getSession(id);
-    const messages = (res.data && res.data.messages) || [];
-    if (messages.length === 0) {
+    let messages;
+    if (activeAgent) {
+      const res = await api.agentHistory(activeAgent.id);
+      const segments = (res && res.data) || [];
+      // The next turn continues the newest session.
+      if (segments.length) activeSessionId = segments[segments.length - 1].sessionId;
+      messages = flattenHistory(segments);
+    } else {
+      const res = await api.getSession(id);
+      messages = (res.data && res.data.messages) || [];
+    }
+    if (!messages.some(m => !m.divider)) {
       el.messages.innerHTML = '<div class="empty-state"><p>' + L("chat.startState") + '</p></div>';
     }
-    messages.forEach(m => renderStoredMessage(m.role, m.content, m.id));
+    messages.forEach(renderHistoryItem);
     scrollToBottom();
   }
 
+  // An agent has many sessions over time (a model change starts a new one, which picks up from the
+  // agent's memory rather than the old conversation). Show them as one thread, marking each new start.
+  function flattenHistory(segments) {
+    const out = [];
+    segments.forEach((seg, i) => {
+      if (!seg.messages.length) return;
+      if (out.length) out.push({ divider: true, at: seg.startedAt });
+      seg.messages.forEach(m => out.push(Object.assign({ sessionId: seg.sessionId }, m)));
+    });
+    return out;
+  }
+
+  function renderHistoryItem(m) {
+    if (m.divider) {
+      const d = document.createElement("div");
+      d.className = "session-divider";
+      d.textContent = L("chat.newSession", { time: formatDateTime(m.at) });
+      el.messages.appendChild(d);
+      return null;
+    }
+    return renderStoredMessage(m.role, m.content, m.role === "system" ? null : m.id, m.images, m.sessionId);
+  }
+
   // ---------- send / stream / stop ----------
-  async function sendMessage(text) {
+  async function sendMessage(text, images, imageUrls) {
     if (!activeSessionId) { openAgentModal(); return; }
-    addUserBubble(text);
+    addUserBubble(text, imageUrls);
     const handles = addAssistantBubble();
     setStreaming(true);
-    el.status.textContent = L("chat.statusRunning");
     try {
       const resp = await fetch("/api/v1/sessions/" + activeSessionId + "/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text }),
+        body: JSON.stringify({ content: text, images: images || [] }),
       });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => null);
+        throw new Error((err && err.message) || "HTTP " + resp.status);
+      }
       await consumeSse(resp, handles);
     } catch (e) {
       handles.text.classList.remove("is-streaming");
@@ -417,7 +596,6 @@
     } finally {
       handles.text.classList.remove("is-streaming");
       setStreaming(false);
-      el.status.textContent = L("chat.statusIdle");
       await selectSession(activeSessionId); // refresh with ids so messages become editable
       loadAgents();
     }
@@ -530,6 +708,7 @@
   function setStreaming(on) {
     streaming = on;
     el.input.disabled = on;
+    chatImages.setDisabled(on);
     el.sendBtn.classList.toggle("is-stop", on);
     el.sendBtn.textContent = on ? "■" : "↑";
     el.sendBtn.title = on ? L("msg.stop") : L("msg.send");
@@ -559,6 +738,8 @@
     name: document.getElementById("afName"),
     persona: document.getElementById("afPersona"),
     avatars: document.getElementById("afAvatars"),
+    characters: document.getElementById("afCharacters"),
+    personaLabel: document.getElementById("afPersonaLabel"),
   };
   let avatarChoices = [];   // built-in emoji avatars, loaded once from the server
   let chosenAvatar = null;
@@ -589,6 +770,56 @@
     });
   }
 
+  // Characters: built-in "what kind of person" presets from the server, plus a custom one written in the persona box.
+  let characterChoices = [];
+  let chosenCharacter = null;   // preset key, or null = custom
+  const zh = () => window.I18N.getLang() === "zh";
+  function characterByKey(key) { return characterChoices.find(c => c.key === key) || null; }
+  function characterName(c) { return zh() ? c.nameZh : c.nameEn; }
+  async function loadCharacters() {
+    if (characterChoices.length) return;
+    try { const res = await api.agentCharacters(); characterChoices = (res && res.data) || []; } catch (e) { characterChoices = []; }
+  }
+
+  async function renderCharacterPicker(current) {
+    await loadCharacters();
+    chosenCharacter = current;
+    ael.characters.innerHTML = "";
+    const card = (key, emoji, name, summary) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "character-option";
+      b.dataset.key = key || "";
+      b.setAttribute("role", "radio");
+      const head = document.createElement("span");
+      head.className = "character-option__name";
+      head.textContent = emoji + " " + name;
+      const sub = document.createElement("span");
+      sub.className = "character-option__summary";
+      sub.textContent = summary;
+      b.append(head, sub);
+      b.addEventListener("click", () => selectCharacter(key));
+      ael.characters.appendChild(b);
+    };
+    characterChoices.forEach(c => card(c.key, c.emoji, characterName(c), zh() ? c.summaryZh : c.summaryEn));
+    card(null, "✏️", L("agent.characterCustom"), L("agent.characterCustomHint"));
+    selectCharacter(current);
+  }
+
+  // Custom: the persona box IS the character (required). Preset: it's optional extra instructions.
+  function selectCharacter(key) {
+    chosenCharacter = key;
+    ael.characters.querySelectorAll(".character-option").forEach(x => {
+      const on = x.dataset.key === (key || "");
+      x.classList.toggle("is-selected", on);
+      x.setAttribute("aria-checked", String(on));
+    });
+    const custom = !key;
+    ael.personaLabel.textContent = L(custom ? "agent.fPersonaCustom" : "agent.fPersonaExtra");
+    ael.persona.placeholder = L(custom ? "agent.fPersonaPh" : "agent.fPersonaExtraPh");
+    ael.persona.required = custom;
+  }
+
   function openAgentModal(agent) {
     if (streaming) return;
     editingAgentId = agent && agent.id ? agent.id : null;
@@ -599,6 +830,9 @@
     ael.modal.hidden = false;
     ael.name.focus();
     renderAvatarPicker(agent && agent.avatar ? agent.avatar : null);
+    // A new agent starts on the first preset; an edit keeps its character (or custom).
+    renderCharacterPicker(agent ? agent.character || null : "rigorous-engineer");
+    renderSkillPicker(agent ? agent.skillIds : []);
   }
   function closeAgentModal() { ael.modal.hidden = true; }
 
@@ -609,7 +843,7 @@
     if (!name) return;
     // No model: new agents chat with the admin-set system default (System Settings).
     const body = { name, persona: ael.persona.value.trim(), model: editingAgentId ? editingAgentModel : null,
-      avatar: chosenAvatar };
+      avatar: chosenAvatar, character: chosenCharacter, skillIds: Array.from(chosenSkills) };
     const res = editingAgentId
       ? await api.updateAgent(editingAgentId, body)
       : await api.createAgent(body);
@@ -629,15 +863,34 @@
 
   el.newChatBtn.addEventListener("click", () => openAgentModal());
 
-  el.composer.addEventListener("submit", e => {
+  const chatImages = imageAttacher({
+    button: document.getElementById("chatAttachBtn"),
+    fileInput: document.getElementById("chatImageInput"),
+    tray: document.getElementById("chatImageTray"),
+    pasteTarget: el.input,
+    dropZone: el.composer,
+  });
+
+  el.composer.addEventListener("submit", async e => {
     e.preventDefault();
     if (streaming) { stopGeneration(); return; }
     const text = el.input.value.trim();
-    if (!text) return;
+    const hasImages = chatImages.count() > 0;
+    if (!text && !hasImages) return;
+    if (text.startsWith("/task") && !hasImages) {
+      el.input.value = "";
+      autoGrow();
+      handleTaskCommand(text.slice(5).trim());
+      return;
+    }
+    let images;
+    try { images = await chatImages.payload(); } catch (err) { showToast(L("img.readFailed"), true); return; }
+    const urls = chatImages.previewUrls();
+    if (superMode) { submitToSuper(text, images); return; }
     el.input.value = "";
     autoGrow();
-    if (text.startsWith("/task")) { handleTaskCommand(text.slice(5).trim()); return; }
-    sendMessage(text);
+    chatImages.clear();
+    sendMessage(text, images, urls);
   });
 
   el.input.addEventListener("input", autoGrow);
@@ -650,6 +903,156 @@
     });
   });
 
+  // ---------- SuperAgent inbox mode ----------
+  // The SuperAgent doesn't answer live: messages are dropped into its inbox and worked through in
+  // rounds once input goes quiet. The view polls its state and conversation while it is open.
+  let superMode = false;
+  let superTimer = null;
+  let superFingerprint = null;
+  const composerPlaceholder = el.input.getAttribute("placeholder");
+
+  function setSuperMode(on) {
+    superMode = on;
+    clearInterval(superTimer);
+    // Only while the conversation is actually on screen (tab visible, chat view shown).
+    superTimer = on ? setInterval(() => {
+      if (!document.hidden && el.messages.offsetParent !== null) refreshSuper();
+    }, 3000) : null;
+    el.input.setAttribute("placeholder", on ? L("super.placeholder") : composerPlaceholder);
+    el.composer.classList.toggle("composer--inbox", on);
+    el.messages.classList.toggle("messages--super", on);
+  }
+
+  async function submitToSuper(text, images) {
+    el.sendBtn.disabled = true;
+    const res = await api.superSubmit({ content: text, images }).catch(() => null);
+    el.sendBtn.disabled = false;
+    if (!res || !res.data) { showToast((res && res.message) || L("super.sendFailed"), true); return; }
+    el.input.value = ""; // only now, so a failed send keeps the text
+    autoGrow();
+    chatImages.clear();
+    superFingerprint = null;
+    await refreshSuper();
+  }
+
+  async function refreshSuper() {
+    if (!superMode || !activeSessionId) return;
+    const agentId = activeAgentId;
+    const [stateRes, historyRes] = await Promise.all([
+      api.superState().catch(() => null), api.agentHistory(agentId).catch(() => null)]);
+    if (!superMode || activeAgentId !== agentId) return; // switched away meanwhile
+    const state = stateRes && stateRes.data;
+    const items = flattenHistory((historyRes && historyRes.data) || []);
+    const messages = items.filter(m => !m.divider);
+    if (!state) return;
+    if (state.sessionId) activeSessionId = state.sessionId;
+    // Re-render only on change, so polling doesn't reset scroll or flicker.
+    const last = messages[messages.length - 1];
+    const fp = [messages.length, last && last.id, state.processedUntil, state.running, state.roundCutoff,
+      state.plan && state.plan.id, state.plan && state.plan.status].join("|");
+    if (fp === superFingerprint) return;
+    superFingerprint = fp;
+    const nearBottom = el.messages.scrollHeight - el.messages.scrollTop - el.messages.clientHeight < 80;
+    el.messages.innerHTML = "";
+    if (!messages.length) {
+      el.messages.innerHTML = '<div class="empty-state"><p>' + escapeHtml(L("super.welcome")) + "</p></div>";
+    }
+    const processed = state.processedUntil ? new Date(state.processedUntil) : null;
+    const cutoff = state.roundCutoff ? new Date(state.roundCutoff) : null;
+    // The plan sits in the conversation where it was made: right under the reply of the round that
+    // proposed it. That reply is written when the round ends, so until then the card waits at the end.
+    const planAt = state.plan && state.plan.proposedAt ? new Date(state.plan.proposedAt) : null;
+    let planShown = !state.plan;
+    items.forEach(m => {
+      const msgEl = renderHistoryItem(m);
+      if (!planShown && planAt && !m.divider && m.role === "assistant" && new Date(m.createdAt) >= planAt) {
+        el.messages.appendChild(planCard(state.plan));
+        planShown = true;
+      }
+      if (m.divider || m.role !== "user") return;
+      const at = new Date(m.createdAt);
+      if (processed && at <= processed) return; // handled in an earlier round
+      const chip = document.createElement("span");
+      const thinking = state.running && cutoff && at <= cutoff;
+      chip.className = "msg__status" + (thinking ? " is-thinking" : "");
+      chip.textContent = L(thinking ? "super.thinking" : "super.received");
+      msgEl.appendChild(chip);
+    });
+    if (!planShown) el.messages.appendChild(planCard(state.plan));
+    if (state.running) {
+      const working = document.createElement("div");
+      working.className = "super-working";
+      working.textContent = L("super.working");
+      el.messages.appendChild(working);
+    }
+    if (nearBottom || !last || last.role !== "assistant") scrollToBottom();
+  }
+
+  function planCard(plan) {
+    const card = document.createElement("div");
+    card.className = "plan-card" + (plan.status === "approved" ? " is-approved" : "");
+    const head = document.createElement("div");
+    head.className = "plan-card__head";
+    const title = document.createElement("span");
+    title.className = "plan-card__title";
+    title.textContent = L("super.planTitle") + " #" + plan.id;
+    const badge = document.createElement("span");
+    badge.className = "status-badge " + (plan.status === "approved" ? "is-done" : "is-needs_confirmation");
+    badge.textContent = L(plan.status === "approved" ? "super.approved" : "super.awaiting");
+    head.append(title, badge);
+    const summary = document.createElement("p");
+    summary.className = "plan-card__summary";
+    summary.textContent = plan.summary;
+    card.append(head, summary);
+
+    const section = (label, items) => {
+      if (!items.length) return;
+      const h = document.createElement("div");
+      h.className = "plan-card__label";
+      h.textContent = label;
+      const ul = document.createElement("ul");
+      ul.className = "plan-card__list";
+      items.forEach(node => { const li = document.createElement("li"); li.append(...node); ul.appendChild(li); });
+      card.append(h, ul);
+    };
+    const strong = t => { const b = document.createElement("b"); b.textContent = t; return b; };
+    const muted = t => { const m = document.createElement("span"); m.className = "plan-card__muted"; m.textContent = t; return m; };
+    section(L("super.planMembers"), (plan.members || []).map(m => [
+      strong(m.name), muted(" · " + L(m.agentId ? "super.planReuse" : "super.planNew")),
+      document.createTextNode(m.specialty ? " — " + m.specialty : "")]));
+    section(L("super.planTasks"), (plan.tasks || []).map(t => [
+      strong(t.title), muted(t.assignee ? " → " + t.assignee : ""),
+      document.createTextNode(t.brief ? " — " + t.brief : "")]));
+
+    if (plan.status === "proposed") {
+      const foot = document.createElement("div");
+      foot.className = "plan-card__foot";
+      const hint = muted(L("super.approveHint"));
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn--primary";
+      btn.textContent = L("super.approve");
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        const res = await api.superApprove(plan.id).catch(() => null);
+        if (!res || !res.data) {
+          btn.disabled = false;
+          showToast((res && res.message) || L("super.approveFailed"), true);
+          return;
+        }
+        superFingerprint = null;
+        refreshSuper();
+      });
+      foot.append(hint, btn);
+      card.appendChild(foot);
+    }
+    return card;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
   // ---------- views (sidebar routing) ----------
   const navItems = Array.from(document.querySelectorAll(".nav__item[data-view]"));
   const chatPanes = Array.from(document.querySelectorAll('[data-pane="chat"]'));
@@ -659,10 +1062,694 @@
   const modelsPane = document.querySelector('[data-pane="models"]');
   const settingsPane = document.querySelector('[data-pane="settings"]');
   const placeholderPane = document.querySelector('[data-pane="placeholder"]');
+  const automationPane = document.querySelector('[data-pane="automation"]');
   const placeholderText = document.getElementById("placeholderText");
   const placeholderLabels = {
     automation: "placeholder.automation",
   };
+
+  // ---------- skills ----------
+  // Shared working standards. Agents get the skills attached to them; their tasks inherit those.
+  Object.assign(api, {
+    listSkills: () => fetch("/api/v1/skills").then(kbJson),
+    createSkill: body => kbPost("/api/v1/skills", body),
+    updateSkill: (id, body) => fetch("/api/v1/skills/" + id, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(kbJson),
+    deleteSkill: id => fetch("/api/v1/skills/" + id, { method: "DELETE" }).then(kbJson),
+    addSkillImage: (id, name, data) => kbPost("/api/v1/skills/" + id + "/images", { name, data }),
+    deleteSkillImage: (id, name) => fetch("/api/v1/skills/" + id + "/images/" + encodeURIComponent(name),
+      { method: "DELETE" }).then(kbJson),
+  });
+  const skillImageUrl = (id, name) => "/api/v1/skills/" + id + "/images/" + encodeURIComponent(name);
+
+  const skPane = document.querySelector('[data-pane="skills"]');
+  const skel = {
+    list: document.getElementById("skList"),
+    search: document.getElementById("skSearch"),
+    newBtn: document.getElementById("skNewBtn"),
+    heading: document.getElementById("skHeading"),
+    actions: document.getElementById("skActions"),
+    edit: document.getElementById("skEditBtn"),
+    del: document.getElementById("skDeleteBtn"),
+    view: document.getElementById("skView"),
+    form: document.getElementById("skForm"),
+    name: document.getElementById("sfName"),
+    category: document.getElementById("sfCategory"),
+    categories: document.getElementById("skCategories"),
+    description: document.getElementById("sfDescription"),
+    content: document.getElementById("sfContent"),
+    enabled: document.getElementById("sfEnabled"),
+    imagesField: document.getElementById("sfImagesField"),
+    images: document.getElementById("sfImages"),
+    imageInput: document.getElementById("sfImageInput"),
+    error: document.getElementById("sfError"),
+    cancel: document.getElementById("sfCancel"),
+  };
+  let skills = [];             // SkillDto[] from the server
+  let skSelectedId = null;
+  let skEditing = null;        // null = viewing; "new" or a skill id = editing
+
+  async function loadSkillList() {
+    try { skills = (await api.listSkills()) || []; } catch (e) { skills = []; showToast(e.message, true); }
+    return skills;
+  }
+
+  async function loadSkills() {
+    await loadSkillList();
+    if (skSelectedId && !skills.some(s => s.id === skSelectedId)) skSelectedId = null;
+    if (!skSelectedId && skills.length) skSelectedId = skills[0].id;
+    skEditing = null;
+    renderSkillList();
+    renderSkill();
+  }
+
+  function renderSkillList() {
+    const q = skel.search.value.trim().toLowerCase();
+    const shown = skills.filter(s => !q || [s.name, s.description, s.category].some(v => (v || "").toLowerCase().includes(q)));
+    skel.list.innerHTML = "";
+    if (!shown.length) {
+      skel.list.innerHTML = '<p class="kb-empty">' + L(skills.length ? "sk.noMatch" : "sk.empty") + "</p>";
+      return;
+    }
+    let group = undefined;
+    shown.forEach(s => {
+      const cat = s.category || L("sk.uncategorized");
+      if (cat !== group) {
+        group = cat;
+        const h = document.createElement("div");
+        h.className = "sk-group";
+        h.textContent = cat;
+        skel.list.appendChild(h);
+      }
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "sk-item" + (s.id === skSelectedId ? " is-selected" : "") + (s.enabled ? "" : " is-off");
+      const name = document.createElement("span");
+      name.className = "sk-item__name";
+      name.textContent = s.name;
+      const desc = document.createElement("span");
+      desc.className = "sk-item__desc";
+      desc.textContent = s.description || "";
+      b.append(name, desc);
+      b.addEventListener("click", () => { skSelectedId = s.id; skEditing = null; renderSkillList(); renderSkill(); });
+      skel.list.appendChild(b);
+    });
+  }
+  skel.search.addEventListener("input", renderSkillList);
+
+  // Markdown references images as images/<name>; point those at the skill's image endpoint.
+  function renderSkillMarkdown(skill) {
+    const div = document.createElement("div");
+    div.className = "markdown";
+    div.innerHTML = renderMarkdown(skill.content || "");
+    div.querySelectorAll("img").forEach(img => {
+      const m = /^(?:\.\/)?images\/(.+)$/.exec(img.getAttribute("src") || "");
+      if (m) img.src = skillImageUrl(skill.id, decodeURIComponent(m[1]));
+    });
+    return div;
+  }
+
+  function renderSkill() {
+    const skill = skills.find(s => s.id === skSelectedId);
+    skel.form.hidden = !skEditing;
+    skel.view.hidden = !!skEditing;
+    skel.actions.hidden = !!skEditing || !skill;
+    if (skEditing) return;
+    skel.view.innerHTML = "";
+    if (!skill) {
+      skel.heading.textContent = L("sk.title");
+      skel.view.innerHTML = '<p class="kb-empty">' + L("sk.pick") + "</p>";
+      return;
+    }
+    skel.heading.textContent = skill.name;
+    const meta = document.createElement("p");
+    meta.className = "sk-meta";
+    meta.textContent = [skill.category || L("sk.uncategorized"), skill.enabled ? null : L("sk.disabled"),
+      L("sk.updatedBy", { user: skill.updatedBy || skill.createdBy || "—", time: formatDateTime(skill.updatedAt) })]
+      .filter(Boolean).join(" · ");
+    skel.view.appendChild(meta);
+    if (skill.description) {
+      const d = document.createElement("p");
+      d.className = "sk-desc";
+      d.textContent = L("sk.whenToUse") + skill.description;
+      skel.view.appendChild(d);
+    }
+    skel.view.appendChild(renderSkillMarkdown(skill));
+  }
+
+  function openSkillForm(skill) {
+    skEditing = skill ? skill.id : "new";
+    skel.heading.textContent = skill ? L("sk.editTitle", { name: skill.name }) : L("sk.newTitle");
+    skel.name.value = skill ? skill.name : "";
+    skel.category.value = skill ? skill.category || "" : "";
+    skel.description.value = skill ? skill.description || "" : "";
+    skel.content.value = skill ? skill.content || "" : "";
+    skel.enabled.checked = skill ? skill.enabled : true;
+    skel.error.hidden = true;
+    skel.categories.innerHTML = "";
+    Array.from(new Set(skills.map(s => s.category).filter(Boolean))).forEach(c => {
+      const o = document.createElement("option");
+      o.value = c;
+      skel.categories.appendChild(o);
+    });
+    skel.imagesField.hidden = !skill; // images attach to a saved skill
+    if (skill) renderSkillImages(skill);
+    renderSkill();
+    skel.name.focus();
+  }
+
+  function renderSkillImages(skill) {
+    skel.images.innerHTML = "";
+    (skill.images || []).forEach(name => {
+      const box = document.createElement("div");
+      box.className = "sk-image";
+      const img = document.createElement("img");
+      img.src = skillImageUrl(skill.id, name);
+      img.alt = name;
+      const row = document.createElement("div");
+      row.className = "sk-image__row";
+      const label = document.createElement("span");
+      label.textContent = name;
+      label.title = name;
+      const actions = document.createElement("span");
+      const insert = document.createElement("button");
+      insert.type = "button";
+      insert.className = "link-btn";
+      insert.textContent = L("sk.insert");
+      insert.addEventListener("click", () => insertAtCursor(skel.content, "![" + name + "](images/" + name + ")"));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "link-btn link-btn--danger";
+      remove.textContent = "×";
+      remove.title = L("kb.delete");
+      remove.addEventListener("click", async () => {
+        try { replaceSkill(await api.deleteSkillImage(skill.id, name)); renderSkillImages(skills.find(s => s.id === skill.id)); }
+        catch (e) { showToast(e.message, true); }
+      });
+      actions.append(insert, remove);
+      row.append(label, actions);
+      box.append(img, row);
+      skel.images.appendChild(box);
+    });
+  }
+
+  function insertAtCursor(textarea, text) {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(textarea.selectionEnd ?? start);
+    textarea.focus();
+    textarea.selectionStart = textarea.selectionEnd = start + text.length;
+  }
+
+  function replaceSkill(updated) {
+    skills = skills.map(s => s.id === updated.id ? updated : s);
+  }
+
+  skel.imageInput.addEventListener("change", async () => {
+    const file = skel.imageInput.files && skel.imageInput.files[0];
+    skel.imageInput.value = "";
+    if (!file || !skEditing || skEditing === "new") return;
+    try {
+      const data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      const updated = await api.addSkillImage(skEditing, file.name, data);
+      replaceSkill(updated);
+      renderSkillImages(updated);
+    } catch (e) { showToast(e.message, true); }
+  });
+
+  skel.newBtn.addEventListener("click", () => openSkillForm(null));
+  skel.edit.addEventListener("click", () => {
+    const skill = skills.find(s => s.id === skSelectedId);
+    if (skill) openSkillForm(skill);
+  });
+  skel.cancel.addEventListener("click", () => { skEditing = null; renderSkill(); });
+  skel.form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const body = {
+      name: skel.name.value.trim(), category: skel.category.value.trim(),
+      description: skel.description.value.trim(), content: skel.content.value, enabled: skel.enabled.checked,
+    };
+    skel.error.hidden = true;
+    try {
+      const saved = skEditing === "new" ? await api.createSkill(body) : await api.updateSkill(skEditing, body);
+      skSelectedId = saved.id;
+      await loadSkills();
+    } catch (err) {
+      skel.error.textContent = err.message;
+      skel.error.hidden = false;
+    }
+  });
+  skel.del.addEventListener("click", () => {
+    const skill = skills.find(s => s.id === skSelectedId);
+    if (!skill) return;
+    kbOpenModal({
+      title: L("sk.deleteTitle"), submit: L("kb.delete"), danger: true,
+      message: L("sk.deleteConfirm", { name: skill.name }),
+      action: async () => { await api.deleteSkill(skill.id); skSelectedId = null; await loadSkills(); },
+    });
+  });
+
+  // Agent form: pick skills (all enabled ones; a disabled one already attached stays visible).
+  let chosenSkills = new Set();
+  async function renderSkillPicker(current) {
+    await loadSkillList();
+    chosenSkills = new Set(current || []);
+    const box = document.getElementById("afSkills");
+    box.innerHTML = "";
+    const offered = skills.filter(s => s.enabled || chosenSkills.has(s.id));
+    if (!offered.length) {
+      box.innerHTML = '<span class="skill-chips__empty">' + L("sk.noneYet") + "</span>";
+      return;
+    }
+    offered.forEach(s => {
+      const label = document.createElement("label");
+      label.className = chosenSkills.has(s.id) ? "is-on" : "";
+      label.title = s.description || "";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = chosenSkills.has(s.id);
+      cb.addEventListener("change", () => {
+        if (cb.checked) chosenSkills.add(s.id); else chosenSkills.delete(s.id);
+        label.className = cb.checked ? "is-on" : "";
+      });
+      label.append(cb, document.createTextNode(s.name));
+      box.appendChild(label);
+    });
+  }
+
+  // Agent side panel: its skills as chips that open the skill.
+  async function renderAgentSkills(agent) {
+    const box = document.getElementById("agentInfoSkills");
+    if (!box) return;
+    const ids = agent.skillIds || [];
+    if (ids.length && !ids.every(id => skills.some(s => s.id === id))) await loadSkillList();
+    if (activeAgent !== agent) return;
+    box.innerHTML = "";
+    const attached = ids.map(id => skills.find(s => s.id === id)).filter(Boolean);
+    if (!attached.length) {
+      box.innerHTML = '<span class="skill-chips__empty">' + L("sk.agentNone") + "</span>";
+      return;
+    }
+    attached.forEach(s => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "skill-chip";
+      chip.textContent = s.name + (s.enabled ? "" : " (" + L("sk.disabled") + ")");
+      chip.title = s.description || "";
+      chip.addEventListener("click", () => { skSelectedId = s.id; setView("skills"); });
+      box.appendChild(chip);
+    });
+  }
+
+  // ---------- knowledge ----------
+  // The signed-in user's private file-system knowledge base. Paths are "/"-separated, "" is the root.
+  // Declared before setView: the initial view (from the URL hash) may be #knowledge.
+  Object.assign(api, {
+    kbList: path => fetch("/api/v1/knowledge/entries?path=" + encodeURIComponent(path)).then(kbJson),
+    kbFolders: () => fetch("/api/v1/knowledge/folders").then(kbJson),
+    kbCreateFolder: path => kbPost("/api/v1/knowledge/folders", { path }),
+    kbRename: (path, newName) => kbPost("/api/v1/knowledge/rename", { path, newName }),
+    kbMove: (path, targetDir) => kbPost("/api/v1/knowledge/move", { path, targetDir }),
+    kbDelete: path => fetch("/api/v1/knowledge/entries?path=" + encodeURIComponent(path), { method: "DELETE" }).then(kbJson),
+  });
+  // Server errors come back as {code, message}; surface the message.
+  async function kbJson(r) {
+    const body = await r.json().catch(() => null);
+    if (!r.ok) throw new Error((body && body.message) || ("HTTP " + r.status));
+    return body ? body.data : null;
+  }
+  function kbPost(url, body) {
+    return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(kbJson);
+  }
+  const kbFileUrl = (path, download) =>
+    "/api/v1/knowledge/file?path=" + encodeURIComponent(path) + (download ? "&download=true" : "");
+
+  const kbPane = document.querySelector('[data-pane="knowledge"]');
+  const kel = {
+    tree: document.getElementById("kbTree"),
+    crumbs: document.getElementById("kbCrumbs"),
+    view: document.getElementById("kbView"),
+    up: document.getElementById("kbUpBtn"),
+    newFolder: document.getElementById("kbNewFolderBtn"),
+    rename: document.getElementById("kbRenameBtn"),
+    move: document.getElementById("kbMoveBtn"),
+    del: document.getElementById("kbDeleteBtn"),
+    download: document.getElementById("kbDownloadBtn"),
+    modal: document.getElementById("kbModal"),
+    form: document.getElementById("kbForm"),
+    modalTitle: document.getElementById("kbModalTitle"),
+    modalMsg: document.getElementById("kbModalMsg"),
+    nameField: document.getElementById("kbNameField"),
+    nameInput: document.getElementById("kbNameInput"),
+    targetField: document.getElementById("kbTargetField"),
+    targetSelect: document.getElementById("kbTargetSelect"),
+    modalError: document.getElementById("kbModalError"),
+    modalSubmit: document.getElementById("kbModalSubmit"),
+  };
+  const kbChildren = new Map();      // folder path -> entries, filled lazily as folders are opened
+  const kbExpanded = new Set([""]);  // folders open in the tree
+  let kbSelected = { path: "", dir: true, name: "" };
+  let kbModalAction = null;
+
+  const kbParent = path => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+  const kbBaseName = path => path.slice(path.lastIndexOf("/") + 1);
+  const kbCurrentFolder = () => kbSelected.dir ? kbSelected.path : kbParent(kbSelected.path);
+  const KB_IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
+  const KB_MARKDOWN = /\.(md|markdown)$/i;
+  const KB_TEXT = /\.(txt|log|csv|json|ya?ml|xml|html)$/i;
+  const kbIcon = e => e.dir ? "📁" : KB_IMAGE.test(e.name) ? "🖼️" : KB_MARKDOWN.test(e.name) ? "📝" : "📄";
+
+  async function kbLoad(path) {
+    const entries = await api.kbList(path);
+    kbChildren.set(path, entries || []);
+    return kbChildren.get(path);
+  }
+
+  async function loadKnowledge() {
+    kbChildren.clear();
+    // Re-read every open folder; ones deleted since (e.g. on disk) just close.
+    for (const path of Array.from(kbExpanded)) {
+      try { await kbLoad(path); } catch (e) { kbExpanded.delete(path); }
+    }
+    if (!kbExpanded.has("")) { kbExpanded.add(""); await kbLoad(""); }
+    renderKbTree();
+    await kbSelect(kbSelected.path, kbSelected.dir, true);
+  }
+
+  function renderKbTree() {
+    kel.tree.innerHTML = "";
+    const walk = (folder, depth) => {
+      (kbChildren.get(folder) || []).forEach(e => {
+        const row = document.createElement("div");
+        row.className = "kb-node" + (e.path === kbSelected.path ? " is-selected" : "");
+        row.style.paddingLeft = (6 + depth * 14) + "px";
+        row.setAttribute("role", "treeitem");
+        const open = e.dir && kbExpanded.has(e.path);
+        if (e.dir) row.setAttribute("aria-expanded", String(open));
+        const twisty = document.createElement("span");
+        twisty.className = "kb-node__twisty";
+        twisty.textContent = e.dir ? (open ? "▾" : "▸") : "";
+        const name = document.createElement("span");
+        name.className = "kb-node__name";
+        name.textContent = kbIcon(e) + " " + e.name;
+        row.append(twisty, name);
+        twisty.addEventListener("click", ev => { ev.stopPropagation(); if (e.dir) kbToggle(e.path); });
+        row.addEventListener("click", () => kbSelect(e.path, e.dir));
+        kel.tree.appendChild(row);
+        if (open) walk(e.path, depth + 1);
+      });
+    };
+    walk("", 0);
+    if (!(kbChildren.get("") || []).length) {
+      kel.tree.innerHTML = '<p class="kb-empty kb-empty--tree">' + L("kb.treeEmpty") + "</p>";
+    }
+  }
+
+  async function kbToggle(path) {
+    if (kbExpanded.has(path)) {
+      kbExpanded.delete(path);
+    } else {
+      kbExpanded.add(path);
+      if (!kbChildren.has(path)) {
+        try { await kbLoad(path); } catch (e) { kbExpanded.delete(path); showToast(e.message, true); }
+      }
+    }
+    renderKbTree();
+  }
+
+  // Selecting a folder opens it in the tree and lists it; selecting a file previews it.
+  async function kbSelect(path, dir, quiet) {
+    kbSelected = { path, dir, name: kbBaseName(path) };
+    if (dir) {
+      // Open every ancestor too, so the selection is visible in the tree.
+      let p = path;
+      while (p) { kbExpanded.add(p); p = kbParent(p); }
+      for (const f of Array.from(kbExpanded)) {
+        if (!kbChildren.has(f)) { try { await kbLoad(f); } catch (e) { kbExpanded.delete(f); } }
+      }
+    }
+    renderKbTree();
+    renderKbBar();
+    try {
+      if (dir) renderKbFolder(kbChildren.has(path) ? kbChildren.get(path) : await kbLoad(path));
+      else await renderKbFile(path);
+    } catch (e) {
+      if (!quiet) showToast(e.message, true);
+      if (path) { kbSelect("", true, true); return; } // gone: fall back to the root
+      kel.view.innerHTML = "";
+    }
+  }
+
+  function renderKbBar() {
+    kel.crumbs.innerHTML = "";
+    const parts = kbSelected.path ? kbSelected.path.split("/") : [];
+    const crumb = (label, path, isDir, current) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      if (current) b.className = "is-current";
+      b.addEventListener("click", () => kbSelect(path, isDir));
+      kel.crumbs.appendChild(b);
+    };
+    crumb(L("kb.root"), "", true, !parts.length);
+    parts.forEach((part, i) => {
+      const sep = document.createElement("span");
+      sep.className = "kb-crumbs__sep";
+      sep.textContent = "/";
+      kel.crumbs.appendChild(sep);
+      const last = i === parts.length - 1;
+      crumb(part, parts.slice(0, i + 1).join("/"), last ? kbSelected.dir : true, last);
+    });
+    const atRoot = !kbSelected.path;
+    kel.up.disabled = atRoot;
+    [kel.rename, kel.move, kel.del].forEach(b => { b.disabled = atRoot; });
+    kel.download.hidden = kbSelected.dir;
+    if (!kbSelected.dir) kel.download.href = kbFileUrl(kbSelected.path, true);
+  }
+
+  function renderKbFolder(entries) {
+    kel.view.innerHTML = "";
+    if (!entries.length) {
+      kel.view.innerHTML = '<p class="kb-empty">' + L("kb.folderEmpty") + "</p>";
+      return;
+    }
+    const table = document.createElement("table");
+    table.className = "kb-list";
+    table.innerHTML = "<thead><tr><th>" + L("kb.name") + "</th><th>" + L("kb.size") + "</th><th>"
+      + L("kb.modified") + "</th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    entries.forEach(e => {
+      const tr = document.createElement("tr");
+      tr.className = "kb-row";
+      const name = document.createElement("td");
+      name.textContent = kbIcon(e) + " " + e.name;
+      const size = document.createElement("td");
+      size.className = "kb-list__meta";
+      size.textContent = e.dir ? "—" : kbFormatSize(e.size);
+      const when = document.createElement("td");
+      when.className = "kb-list__meta";
+      when.textContent = formatDateTime(e.modifiedAt);
+      tr.append(name, size, when);
+      tr.addEventListener("click", () => kbSelect(e.path, e.dir));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    kel.view.appendChild(table);
+  }
+
+  async function renderKbFile(path) {
+    const entry = (kbChildren.get(kbParent(path)) || []).find(e => e.path === path);
+    kel.view.innerHTML = "";
+    const meta = document.createElement("p");
+    meta.className = "kb-preview__meta";
+    meta.textContent = entry ? kbFormatSize(entry.size) + " · " + formatDateTime(entry.modifiedAt) : "";
+    kel.view.appendChild(meta);
+    const name = kbBaseName(path);
+    if (KB_IMAGE.test(name)) {
+      const img = document.createElement("img");
+      img.className = "kb-preview__img";
+      img.alt = name;
+      img.src = kbFileUrl(path);
+      kel.view.appendChild(img);
+      return;
+    }
+    if (!KB_MARKDOWN.test(name) && !KB_TEXT.test(name)) {
+      const p = document.createElement("p");
+      p.className = "kb-empty";
+      p.textContent = L("kb.noPreview");
+      kel.view.appendChild(p);
+      return;
+    }
+    const res = await fetch(kbFileUrl(path));
+    if (!res.ok) throw new Error(((await res.json().catch(() => null)) || {}).message || "HTTP " + res.status);
+    const text = await res.text();
+    if (kbSelected.path !== path) return; // selection moved on while loading
+    if (KB_MARKDOWN.test(name)) {
+      const div = document.createElement("div");
+      div.className = "markdown";
+      div.innerHTML = renderMarkdown(text);
+      // Relative image links in a note resolve against the note's own folder in the knowledge base.
+      div.querySelectorAll("img").forEach(img => {
+        const src = img.getAttribute("src") || "";
+        if (!src || /^([a-z]+:|\/|#)/i.test(src)) return;
+        const parts = kbParent(path) ? kbParent(path).split("/") : [];
+        src.split("/").forEach(seg => { if (seg === "..") parts.pop(); else if (seg && seg !== ".") parts.push(seg); });
+        img.src = kbFileUrl(parts.join("/"));
+      });
+      kel.view.appendChild(div);
+    } else {
+      const pre = document.createElement("pre");
+      pre.className = "kb-preview__text";
+      pre.textContent = text;
+      kel.view.appendChild(pre);
+    }
+  }
+
+  function kbFormatSize(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / 1024 / 1024).toFixed(1) + " MB";
+  }
+
+  // One small dialog for new folder / rename / move / delete; action() does the request.
+  function kbOpenModal({ title, submit, danger, message, name, nameLabel, targets, action }) {
+    kbModalAction = action;
+    kel.modalTitle.textContent = title;
+    kel.modalSubmit.textContent = submit;
+    kel.modalSubmit.classList.toggle("btn--danger", !!danger);
+    kel.modalMsg.hidden = !message;
+    kel.modalMsg.textContent = message || "";
+    kel.nameField.hidden = name === undefined;
+    kel.nameField.querySelector("span").textContent = nameLabel || L("kb.name");
+    kel.nameInput.value = name || "";
+    kel.targetField.hidden = !targets;
+    kel.targetSelect.innerHTML = "";
+    (targets || []).forEach(t => {
+      const o = document.createElement("option");
+      o.value = t;
+      o.textContent = t ? "/ " + t.split("/").join(" / ") : L("kb.root");
+      kel.targetSelect.appendChild(o);
+    });
+    kel.modalError.hidden = true;
+    kel.modal.hidden = false;
+    if (name !== undefined) { kel.nameInput.focus(); kel.nameInput.select(); }
+  }
+  const kbCloseModal = () => { kel.modal.hidden = true; kbModalAction = null; };
+  kel.modal.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", kbCloseModal));
+  kel.form.addEventListener("submit", async e => {
+    e.preventDefault();
+    if (!kbModalAction) return;
+    kel.modalSubmit.disabled = true;
+    try {
+      await kbModalAction();
+      kbCloseModal();
+    } catch (err) {
+      kel.modalError.textContent = err.message;
+      kel.modalError.hidden = false;
+    } finally {
+      kel.modalSubmit.disabled = false;
+    }
+  });
+
+  kel.newFolder.addEventListener("click", () => {
+    const parent = kbCurrentFolder();
+    kbOpenModal({
+      title: parent ? L("kb.newFolderIn", { folder: parent }) : L("kb.newFolderTitle"),
+      submit: L("kb.create"), name: "",
+      action: async () => {
+        const name = kel.nameInput.value.trim();
+        if (!name) throw new Error(L("kb.nameRequired"));
+        const created = await api.kbCreateFolder(parent ? parent + "/" + name : name);
+        kbExpanded.add(parent);
+        kbSelected = { path: created.path, dir: true, name: created.name };
+        await loadKnowledge();
+      },
+    });
+  });
+  kel.rename.addEventListener("click", () => {
+    const { path, dir, name } = kbSelected;
+    if (!path) return;
+    kbOpenModal({
+      title: L("kb.renameTitle"), submit: L("kb.rename"), name,
+      action: async () => {
+        const updated = await api.kbRename(path, kel.nameInput.value.trim());
+        if (dir) kbRemapExpanded(path, updated.path);
+        kbSelected = { path: updated.path, dir, name: updated.name };
+        await loadKnowledge();
+      },
+    });
+  });
+  kel.move.addEventListener("click", async () => {
+    const { path, dir, name } = kbSelected;
+    if (!path) return;
+    let folders = [];
+    try { folders = await api.kbFolders(); } catch (e) { showToast(e.message, true); return; }
+    // A folder can't go into itself, and moving to where it already is is a no-op.
+    const targets = folders.filter(f => f !== kbParent(path) && (!dir || (f !== path && !f.startsWith(path + "/"))));
+    if (!targets.length) { showToast(L("kb.noTargets"), true); return; }
+    kbOpenModal({
+      title: L("kb.moveTitle", { name }), submit: L("kb.move"), targets,
+      action: async () => {
+        const target = kel.targetSelect.value;
+        const moved = await api.kbMove(path, target);
+        if (dir) kbRemapExpanded(path, moved.path);
+        kbExpanded.add(target);
+        kbSelected = { path: moved.path, dir, name: moved.name };
+        await loadKnowledge();
+      },
+    });
+  });
+  kel.del.addEventListener("click", () => {
+    const { path, dir, name } = kbSelected;
+    if (!path) return;
+    kbOpenModal({
+      title: L("kb.deleteTitle"), submit: L("kb.delete"), danger: true,
+      message: L(dir ? "kb.deleteFolderConfirm" : "kb.deleteFileConfirm", { name }),
+      action: async () => {
+        await api.kbDelete(path);
+        kbRemapExpanded(path, null);
+        kbSelected = { path: kbParent(path), dir: true, name: kbBaseName(kbParent(path)) };
+        await loadKnowledge();
+      },
+    });
+  });
+  kel.up.addEventListener("click", () => {
+    if (kbSelected.path) kbSelect(kbParent(kbSelected.path), true);
+  });
+
+  // Task artifact → the signed-in user's knowledge base: pick a folder, optionally a new subfolder in it.
+  async function saveArtifactToKb(taskId, name) {
+    let folders = [];
+    try { folders = await api.kbFolders(); } catch (e) { showToast(e.message, true); return; }
+    kbOpenModal({
+      title: L("tasks.saveToKbTitle", { name }), submit: L("tasks.saveToKbSubmit"),
+      targets: folders, name: "", nameLabel: L("tasks.kbNewSubfolder"),
+      action: async () => {
+        const sub = kel.nameInput.value.trim();
+        const folder = [kel.targetSelect.value, sub].filter(Boolean).join("/");
+        const saved = await kbPost("/api/v1/tasks/" + encodeURIComponent(taskId) + "/artifacts/"
+          + encodeURIComponent(name) + "/knowledge", { folder });
+        kbSelected = { path: saved.path, dir: false, name: saved.name };
+        kbExpanded.add(kbParent(saved.path));
+        showToast(L("tasks.savedToKb", { path: saved.path }), false);
+      },
+    });
+  }
+
+  // Keep open folders open across a rename/move (or drop them on delete).
+  function kbRemapExpanded(from, to) {
+    Array.from(kbExpanded).forEach(p => {
+      if (p === from || p.startsWith(from + "/")) {
+        kbExpanded.delete(p);
+        if (to !== null) kbExpanded.add(to + p.slice(from.length));
+      }
+    });
+  }
 
   // Declared before setView: setView can run during load (OAuth return) and calls stopModelPolling.
   let modelPollTimer = null;
@@ -671,7 +1758,7 @@
   // View state lives in the URL hash (#tasks, #connectors, …) so a refresh or
   // back/forward restores the same view. Admin-only views fall back to the default
   // for non-admins. See initialView().
-  const KNOWN_VIEWS = new Set(["chat", "tasks", "automation", "connectors", "models", "users", "settings"]);
+  const KNOWN_VIEWS = new Set(["chat", "tasks", "knowledge", "skills", "automation", "connectors", "models", "users", "settings"]);
   const ADMIN_VIEWS = new Set(["connectors", "models", "users", "settings"]);
   const DEFAULT_VIEW = "chat";
   let isAdmin = false;
@@ -694,17 +1781,27 @@
     const isUsers = view === "users";
     const isModels = view === "models";
     const isSettings = view === "settings";
+    const isKnowledge = view === "knowledge";
+    const isAutomation = view === "automation";
+    const isSkills = view === "skills";
     chatPanes.forEach(p => { p.hidden = !isChat; });
+    automationPane.hidden = !isAutomation;
     connectorsPane.hidden = !isConnectors;
     tasksPane.hidden = !isTasks;
     usersPane.hidden = !isUsers;
     modelsPane.hidden = !isModels;
     settingsPane.hidden = !isSettings;
-    placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isSettings;
+    kbPane.hidden = !isKnowledge;
+    skPane.hidden = !isSkills;
+    placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isSettings || isKnowledge
+      || isAutomation || isSkills;
     if (!placeholderPane.hidden) placeholderText.textContent = L(placeholderLabels[view] || "placeholder.default");
     if (isConnectors) loadConnectors();
     if (isUsers) loadUsers();
     if (isSettings) loadSettingsForm();
+    if (isKnowledge) loadKnowledge();
+    if (isSkills) loadSkills();
+    if (isAutomation) { showAutoList(); loadAutomations(); }
     if (isTasks) { showTaskList(); loadTasks(); } else { stopTaskPolling(); }
     if (isModels) { showModelList(); startModelPolling(); } else { stopModelPolling(); }
   }
@@ -938,8 +2035,9 @@
     taskStatus: id => fetch("/api/v1/tasks/" + id + "/status").then(r => r.json()),
     taskEvents: (id, offset) => fetch("/api/v1/tasks/" + id + "/events?offset=" + offset).then(r => r.json()),
     taskArtifacts: id => fetch("/api/v1/tasks/" + id + "/artifacts").then(r => r.json()),
-    taskMessage: (id, content) => fetch("/api/v1/tasks/" + id + "/messages", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }),
+    taskMessage: (id, content, images) => fetch("/api/v1/tasks/" + id + "/messages", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, images: images || [] }),
     }),
     stopTask: id => fetch("/api/v1/tasks/" + id + "/stop", { method: "POST" }),
     deleteTask: id => fetch("/api/v1/tasks/" + id, { method: "DELETE" }),
@@ -949,7 +2047,9 @@
     pending: L("status.pending"), running: L("status.running"), needs_confirmation: L("status.needs_confirmation"),
     done: L("status.done"), error: L("status.error"), stopped: L("status.stopped"),
   };
-  const TASK_SOURCE_LABEL = { web_chat: L("tasks.srcWebChat"), task_form: L("tasks.srcTaskForm") };
+  const TASK_SOURCE_LABEL = {
+    web_chat: L("tasks.srcWebChat"), task_form: L("tasks.srcTaskForm"), automation: L("tasks.srcAutomation"),
+  };
 
   const tel = {
     listView: document.getElementById("taskListView"),
@@ -967,6 +2067,9 @@
     agent: document.getElementById("tfAgent"),
     model: document.getElementById("tfModel"),
     modelHint: document.getElementById("tfModelHint"),
+    saveKb: document.getElementById("tfSaveKb"),
+    kbFolderField: document.getElementById("tfKbFolderField"),
+    kbFolder: document.getElementById("tfKbFolder"),
     submit: document.getElementById("tfSubmit"),
     back: document.getElementById("taskBackBtn"),
     dTitle: document.getElementById("taskDetailTitle"),
@@ -1131,7 +2234,9 @@
     // Interleave agent events with the user's steering messages by time.
     const timeline = [];
     (d.events || []).forEach(e => timeline.push({ kind: e.type, payload: e.payload, at: e.createdAt }));
-    (d.messages || []).forEach(m => { if (m.role === "user") timeline.push({ kind: "cmd", payload: m.content, at: m.createdAt }); });
+    (d.messages || []).forEach(m => {
+      if (m.role === "user") timeline.push({ kind: "cmd", payload: m.content, images: m.images, at: m.createdAt });
+    });
     timeline.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
     tel.stream.innerHTML = "";
     task.mergeEl = null;
@@ -1190,7 +2295,12 @@
       size.className = "artifact-size";
       size.textContent = formatBytes(a.size);
       link.append(name, size);
-      li.appendChild(link);
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "link-btn artifact-kb";
+      save.textContent = L("tasks.saveToKb");
+      save.addEventListener("click", () => saveArtifactToKb(id, a.name));
+      li.append(link, save);
       tel.artifacts.appendChild(li);
     });
   }
@@ -1265,9 +2375,11 @@
       lab.textContent = label;
       ev.appendChild(lab);
     }
+    if (item.images && item.images.length) ev.appendChild(imageStrip(item.images));
     const body = document.createElement("div");
     body.className = "ev__body";
     setEvBody(body, type, item.payload || "");
+    body.hidden = type === "cmd" && !item.payload && !!(item.images && item.images.length);
     ev.appendChild(body);
     tel.stream.appendChild(ev);
 
@@ -1293,6 +2405,7 @@
     const busy = isActiveStatus(t.status);
     tel.steerInput.disabled = busy;
     tel.steerBtn.disabled = busy;
+    taskImages.setDisabled(busy);
     // PENDING with a session = a steering message queued until that session is free (another task's
     // agent is running in it); say so instead of "running".
     const waiting = t.status === "pending" && !!t.sessionId;
@@ -1404,20 +2517,32 @@
   }
 
   // steering: always resumes this task's own session (see TaskService.sendMessage)
+  const taskImages = imageAttacher({
+    button: document.getElementById("taskAttachBtn"),
+    fileInput: document.getElementById("taskImageInput"),
+    tray: document.getElementById("taskImageTray"),
+    pasteTarget: tel.steerInput,
+    dropZone: tel.steerForm,
+  });
+
   tel.steerForm.addEventListener("submit", async e => {
     e.preventDefault();
     const text = tel.steerInput.value.trim();
-    if (!text || !task.id) return;
+    if ((!text && taskImages.count() === 0) || !task.id) return;
     let res;
-    try { res = await api.taskMessage(task.id, text); } catch (err) { res = null; }
+    try {
+      res = await api.taskMessage(task.id, text, await taskImages.payload());
+    } catch (err) { res = null; }
     if (!res || !res.ok) {
-      showToast(L("tasks.steerFailed"), true); // keep the text so it can be resent
+      showToast(L("tasks.steerFailed"), true); // keep the text and images so they can be resent
       return;
     }
+    const urls = taskImages.previewUrls();
     tel.steerInput.value = "";
     autoGrowSteer();
+    taskImages.clear();
     setTaskTab("run");
-    appendStreamItem({ kind: "cmd", payload: text });
+    appendStreamItem({ kind: "cmd", payload: text, images: urls });
     startTaskPolling();
   });
   tel.steerInput.addEventListener("keydown", e => {
@@ -1490,11 +2615,30 @@
   }
   tel.agent.addEventListener("change", fillModelSelect);
 
+  // "Save to knowledge base": the folder list is loaded only when the option is ticked.
+  tel.saveKb.addEventListener("change", async () => {
+    tel.kbFolderField.hidden = !tel.saveKb.checked;
+    if (!tel.saveKb.checked) return;
+    let folders = [];
+    try { folders = await api.kbFolders(); } catch (e) { /* auto still works */ }
+    tel.kbFolder.innerHTML = "";
+    const add = (value, label) => {
+      const o = document.createElement("option");
+      o.value = value;
+      o.textContent = label;
+      tel.kbFolder.appendChild(o);
+    };
+    add("*", L("tasks.kbFolderAuto"));
+    folders.forEach(f => add(f, f ? "/ " + f.split("/").join(" / ") : L("kb.root")));
+  });
+
   async function openTaskModal(prefill) {
     tel.title.value = (prefill && prefill.title) || "";
     tel.brief.value = (prefill && prefill.brief) || "";
     tel.repo.value = "";
     tel.branch.value = "";
+    tel.saveKb.checked = false;
+    tel.kbFolderField.hidden = true;
     tel.modal.hidden = false;
     tel.title.focus();
     await loadAgentOptions();
@@ -1514,6 +2658,9 @@
       kind: tel.kind ? tel.kind.value : "auto",
       agentType: tel.agent.value || null,
       model: tel.model.value || null,
+      saveToKnowledge: tel.saveKb.checked,
+      // "*" = let the agent choose; "" = the knowledge-base root.
+      knowledgeFolder: tel.saveKb.checked && tel.kbFolder.value !== "*" ? (tel.kbFolder.value || "/") : null,
     };
     if (!body.title || !body.brief) return;
     tel.submit.disabled = true;
@@ -1560,11 +2707,14 @@
   const adminNav = document.getElementById("adminNav");
   const adminSep = document.getElementById("adminSep");
 
+  let currentUsername = null;
+
   async function initAuth() {
     let res;
     try { res = await api.me(); } catch (e) { window.location.href = "/login"; return false; }
     if (res.status === 401) { window.location.href = "/login"; return false; }
     const me = (await res.json()).data;
+    currentUsername = me.username;
     document.getElementById("currentUser").textContent = me.displayName || me.username;
     // Admin-only sections: hide for non-admins.
     const showAdmin = !!me.admin;
@@ -2099,6 +3249,539 @@
     } catch (err) {
       sel.status.textContent = L("settings.saveFailed") + " " + err.message;
     }
+  });
+
+  // ---------- automations ----------
+  Object.assign(api, {
+    listAutomations: () => fetch("/api/v1/automations").then(r => r.json()),
+    automationDetail: id => fetch("/api/v1/automations/" + id).then(r => r.json()),
+    saveAutomation: (id, body) => fetch("/api/v1/automations" + (id ? "/" + id : ""), {
+      method: id ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => r.json()),
+    previewAutomation: body => fetch("/api/v1/automations/preview", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => r.json()),
+    setAutomationEnabled: (id, on) => fetch("/api/v1/automations/" + id + "/enabled?value=" + on, { method: "POST" })
+      .then(r => r.json()),
+    runAutomation: id => fetch("/api/v1/automations/" + id + "/run", { method: "POST" }).then(r => r.json()),
+    regenerateAutomationToken: id => fetch("/api/v1/automations/" + id + "/token", { method: "POST" })
+      .then(r => r.json()),
+    deleteAutomation: id => fetch("/api/v1/automations/" + id, { method: "DELETE" }).then(r => r.json()),
+  });
+
+  const ael2 = {
+    listView: document.getElementById("autoListView"),
+    detailView: document.getElementById("autoDetailView"),
+    rows: document.getElementById("autoRows"),
+    empty: document.getElementById("autoEmpty"),
+    tabs: document.getElementById("autoTabs"),
+    search: document.getElementById("autoSearch"),
+    owner: document.getElementById("autoOwnerFilter"),
+    addBtn: document.getElementById("autoAddBtn"),
+    back: document.getElementById("autoBackBtn"),
+    dTitle: document.getElementById("autoDetailTitle"),
+    dMeta: document.getElementById("autoDetailMeta"),
+    dActions: document.getElementById("autoDetailActions"),
+    facts: document.getElementById("autoFacts"),
+    prompt: document.getElementById("autoPrompt"),
+    runRows: document.getElementById("autoRunRows"),
+    runsEmpty: document.getElementById("autoRunsEmpty"),
+    tokenBox: document.getElementById("autoTokenBox"),
+    tokenValue: document.getElementById("autoTokenValue"),
+    tokenCurl: document.getElementById("autoTokenCurl"),
+    drawer: document.getElementById("autoDrawer"),
+    form: document.getElementById("autoForm"),
+    formTitle: document.getElementById("autoFormTitle"),
+    fPrompt: document.getElementById("afPrompt"),
+    fName: document.getElementById("afAutoName"),
+    fType: document.getElementById("afType"),
+    fModel: document.getElementById("afAutoModel"),
+    fRecurring: document.getElementById("afRecurring"),
+    fPreset: document.getElementById("afPreset"),
+    fWeekday: document.getElementById("afWeekday"),
+    fDay: document.getElementById("afDay"),
+    fHour: document.getElementById("afHour"),
+    fMinute: document.getElementById("afMinute"),
+    fCron: document.getElementById("afCron"),
+    fRunAt: document.getElementById("afRunAt"),
+    fTimezone: document.getElementById("afTimezone"),
+    fOverlap: document.getElementById("afOverlap"),
+    fPreview: document.getElementById("afPreview"),
+    fError: document.getElementById("afAutoError"),
+    fSubmit: document.getElementById("afAutoSubmit"),
+  };
+  let automations = [];
+  let autoFilter = "all";
+  let autoDetailId = null;
+  let autoEditing = null; // the automation being edited, or null for a new one
+
+  const AUTO_TIMEZONES = ["Asia/Shanghai", "Asia/Hong_Kong", "Asia/Singapore", "Asia/Tokyo", "UTC",
+    "Europe/London", "Europe/Berlin", "America/New_York", "America/Los_Angeles"];
+  const pad2 = n => String(n).padStart(2, "0");
+
+  function fillOptions(select, entries) {
+    select.replaceChildren(...entries.map(([value, label]) => {
+      const o = document.createElement("option");
+      o.value = value;
+      o.textContent = label;
+      return o;
+    }));
+  }
+  fillOptions(ael2.fMinute, Array.from({ length: 12 }, (_, i) => [String(i * 5), pad2(i * 5)]));
+  fillOptions(ael2.fHour, Array.from({ length: 24 }, (_, i) => [String(i), pad2(i) + ":00"]));
+  fillOptions(ael2.fDay, Array.from({ length: 28 }, (_, i) => [String(i + 1), String(i + 1)]));
+  fillOptions(ael2.fWeekday, [1, 2, 3, 4, 5, 6, 0].map(d => [String(d), L("auto.wd" + d)]));
+  (() => {
+    let zones = AUTO_TIMEZONES.slice();
+    try {
+      const local = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (local && !zones.includes(local)) zones = [local].concat(zones);
+    } catch (e) { /* keep the list */ }
+    fillOptions(ael2.fTimezone, zones.map(z => [z, z]));
+  })();
+
+  // --- schedule <-> preset (the form's friendly controls are just a cron builder) ---
+  function presetToCron() {
+    const m = ael2.fMinute.value, h = ael2.fHour.value;
+    switch (ael2.fPreset.value) {
+      case "hourly": return m + " * * * *";
+      case "daily": return m + " " + h + " * * *";
+      case "weekdays": return m + " " + h + " * * 1-5";
+      case "weekly": return m + " " + h + " * * " + ael2.fWeekday.value;
+      case "monthly": return m + " " + h + " " + ael2.fDay.value + " * *";
+      default: return ael2.fCron.value.trim();
+    }
+  }
+
+  // Recognize the crons the presets produce; anything else is shown as custom.
+  function cronToPreset(cron) {
+    const f = (cron || "").trim().split(/\s+/);
+    const num = v => /^\d+$/.test(v);
+    const fiveMin = v => num(v) && Number(v) % 5 === 0 && Number(v) < 60;
+    if (f.length === 5 && fiveMin(f[0])) {
+      const [m, h, dom, mon, dow] = f;
+      if (h === "*" && dom === "*" && mon === "*" && dow === "*") return { preset: "hourly", m };
+      if (num(h) && mon === "*") {
+        if (dom === "*" && dow === "*") return { preset: "daily", m, h };
+        if (dom === "*" && dow === "1-5") return { preset: "weekdays", m, h };
+        if (dom === "*" && /^[0-6]$/.test(dow)) return { preset: "weekly", m, h, wd: dow };
+        if (num(dom) && Number(dom) <= 28 && dow === "*") return { preset: "monthly", m, h, d: dom };
+      }
+    }
+    return { preset: "custom" };
+  }
+
+  function describeSchedule(a) {
+    if (a.type === "api") return L("auto.typeApi");
+    if (a.type === "once") return L("auto.descOnce", { time: formatDateTime(a.runAt) });
+    const p = cronToPreset(a.cron);
+    const hm = (p.h != null ? pad2(p.h) : "") + ":" + pad2(p.m);
+    switch (p.preset) {
+      case "hourly": return L("auto.descHourly", { m: pad2(p.m) });
+      case "daily": return L("auto.descDaily", { time: hm });
+      case "weekdays": return L("auto.descWeekdays", { time: hm });
+      case "weekly": return L("auto.descWeekly", { wd: L("auto.wd" + p.wd), time: hm });
+      case "monthly": return L("auto.descMonthly", { d: p.d, time: hm });
+      default: return "cron " + a.cron;
+    }
+  }
+
+  // --- list ---
+  function showAutoList() {
+    autoDetailId = null;
+    ael2.listView.hidden = false;
+    ael2.detailView.hidden = true;
+  }
+
+  async function loadAutomations() {
+    try { const res = await api.listAutomations(); automations = (res && res.data) || []; } catch (e) { automations = []; }
+    renderAutomations();
+  }
+
+  function autoMatches(a, filter) {
+    switch (filter) {
+      case "active": return a.enabled;
+      case "once": case "recurring": case "api": return a.type === filter;
+      default: return true;
+    }
+  }
+
+  function renderAutomations() {
+    const mine = ael2.owner.value === "mine";
+    const q = ael2.search.value.trim().toLowerCase();
+    const scoped = automations.filter(a => !mine || a.owner === currentUsername);
+    ael2.tabs.querySelectorAll(".auto-tab").forEach(t => {
+      t.classList.toggle("is-active", t.dataset.filter === autoFilter);
+      t.querySelector("b").textContent = scoped.filter(a => autoMatches(a, t.dataset.filter)).length;
+    });
+    const shown = scoped.filter(a => autoMatches(a, autoFilter) && (!q || a.name.toLowerCase().includes(q)));
+    ael2.rows.replaceChildren(...shown.map(autoRow));
+    ael2.empty.hidden = shown.length > 0;
+  }
+
+  const canEditAuto = a => isAdmin || a.owner === currentUsername;
+
+  function autoRow(a) {
+    const tr = document.createElement("tr");
+
+    const tdName = document.createElement("td");
+    tdName.className = "c-name";
+    tdName.appendChild(linkBtn(a.name, () => openAutomation(a.id)));
+
+    const tdSched = document.createElement("td");
+    tdSched.className = "auto-cell";
+    tdSched.textContent = describeSchedule(a);
+    if (a.type === "recurring") {
+      const c = document.createElement("small");
+      c.className = "auto-cron";
+      c.textContent = a.cron + " · " + a.timezone;
+      tdSched.appendChild(c);
+    }
+
+    const tdModel = document.createElement("td");
+    tdModel.textContent = a.model || L("auto.modelDefault");
+    const tdSource = document.createElement("td");
+    tdSource.textContent = L(a.source === "chat" ? "auto.sourceChat" : "auto.sourceManual");
+
+    const tdLast = document.createElement("td");
+    if (a.lastRunAt) {
+      tdLast.appendChild(document.createTextNode(formatDateTime(a.lastRunAt) + " "));
+      if (a.lastStatus) tdLast.appendChild(taskStatusBadge(a.lastStatus));
+    } else {
+      tdLast.textContent = "—";
+    }
+    const tdNext = document.createElement("td");
+    tdNext.textContent = a.nextRunAt ? formatDateTime(a.nextRunAt) : "—";
+    const tdOwner = document.createElement("td");
+    tdOwner.textContent = a.owner || "—";
+
+    const tdOn = document.createElement("td");
+    tdOn.appendChild(enabledSwitch(a));
+
+    const tdActions = document.createElement("td");
+    tdActions.className = "ctable__actions";
+    if (canEditAuto(a)) {
+      tdActions.append(
+        linkBtn(L("auto.runNow"), () => runAutomationNow(a)),
+        linkBtn(L("common.edit"), () => openAutoForm(a)),
+        linkBtn(L("common.delete"), () => deleteAutomation(a), "link-btn--danger"));
+    }
+    tr.append(tdName, tdSched, tdModel, tdSource, tdLast, tdNext, tdOwner, tdOn, tdActions);
+    return tr;
+  }
+
+  function taskStatusBadge(status) {
+    const b = document.createElement("span");
+    b.className = "status-badge is-" + status;
+    b.textContent = status === "skipped" ? L("auto.skipped")
+      : status === "deleted" ? L("auto.taskDeleted") : (TASK_STATUS_LABEL[status] || status);
+    return b;
+  }
+
+  function enabledSwitch(a) {
+    const label = document.createElement("label");
+    label.className = "auto-switch";
+    label.title = L(a.enabled ? "auto.pause" : "auto.resume");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = a.enabled;
+    input.disabled = !canEditAuto(a);
+    input.addEventListener("change", async () => {
+      const res = await api.setAutomationEnabled(a.id, input.checked).catch(() => null);
+      if (!res || !res.data) {
+        input.checked = !input.checked;
+        showToast((res && res.message) || L("auto.actionFailed"), true);
+        return;
+      }
+      await refreshAutomationViews();
+    });
+    label.append(input, document.createElement("span"));
+    return label;
+  }
+
+  async function refreshAutomationViews() {
+    if (autoDetailId) await openAutomation(autoDetailId);
+    await loadAutomations();
+  }
+
+  async function runAutomationNow(a) {
+    const res = await api.runAutomation(a.id).catch(() => null);
+    const run = res && res.data;
+    if (!run) { showToast((res && res.message) || L("auto.actionFailed"), true); return; }
+    showToast(run.taskId ? L("auto.started") : L("auto.notStarted", { why: run.skippedReason || "" }), !run.taskId);
+    await refreshAutomationViews();
+  }
+
+  async function deleteAutomation(a) {
+    if (!window.confirm(L("auto.deleteConfirm", { name: a.name }))) return;
+    const res = await api.deleteAutomation(a.id).catch(() => null);
+    if (!res || res.code !== "ok") { showToast((res && res.message) || L("auto.actionFailed"), true); return; }
+    showAutoList();
+    await loadAutomations();
+  }
+
+  ael2.tabs.addEventListener("click", e => {
+    const t = e.target.closest(".auto-tab");
+    if (t) { autoFilter = t.dataset.filter; renderAutomations(); }
+  });
+  ael2.search.addEventListener("input", renderAutomations);
+  ael2.owner.addEventListener("change", renderAutomations);
+  ael2.back.addEventListener("click", () => { showAutoList(); loadAutomations(); });
+
+  // --- detail ---
+  async function openAutomation(id, freshToken) {
+    const res = await api.automationDetail(id).catch(() => null);
+    const d = res && res.data;
+    if (!d) { showAutoList(); return; }
+    autoDetailId = id;
+    const a = d.automation;
+    ael2.listView.hidden = true;
+    ael2.detailView.hidden = false;
+    ael2.dTitle.textContent = a.name;
+    ael2.dMeta.textContent = [L(a.source === "chat" ? "auto.sourceChat" : "auto.sourceManual"), a.owner,
+      L(a.enabled ? "auto.enabled" : "auto.paused")].filter(Boolean).join(" · ");
+
+    ael2.dActions.replaceChildren();
+    ael2.dActions.appendChild(enabledSwitch(a));
+    if (canEditAuto(a)) {
+      const run = document.createElement("button");
+      run.type = "button";
+      run.className = "btn";
+      run.textContent = L("auto.runNow");
+      run.addEventListener("click", () => runAutomationNow(a));
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "btn";
+      edit.textContent = L("common.edit");
+      edit.addEventListener("click", () => openAutoForm(a));
+      ael2.dActions.append(run, edit);
+      if (a.type === "api") {
+        const regen = document.createElement("button");
+        regen.type = "button";
+        regen.className = "btn";
+        regen.textContent = L("auto.regenToken");
+        regen.addEventListener("click", async () => {
+          if (!window.confirm(L("auto.regenConfirm"))) return;
+          const r = await api.regenerateAutomationToken(a.id).catch(() => null);
+          if (!r || !r.data) { showToast((r && r.message) || L("auto.actionFailed"), true); return; }
+          openAutomation(a.id, r.data.apiToken);
+        });
+        ael2.dActions.appendChild(regen);
+      }
+    }
+
+    // A token is only ever shown right after it is minted.
+    ael2.tokenBox.hidden = !freshToken;
+    if (freshToken) {
+      ael2.tokenValue.textContent = freshToken;
+      ael2.tokenCurl.textContent = "curl -X POST " + window.location.origin + a.triggerPath + " \\\n"
+        + "  -H 'X-Automation-Token: " + freshToken + "' \\\n"
+        + "  -H 'Content-Type: application/json' \\\n"
+        + "  -d '{\"input\": \"" + L("auto.curlInput") + "\"}'";
+    }
+
+    const facts = [
+      [L("auto.type"), L(a.type === "recurring" ? "auto.typeRecurringLong" : a.type === "once" ? "auto.typeOnceLong" : "auto.typeApi")],
+      [L("auto.colSchedule"), describeSchedule(a) + (a.type === "recurring" ? "  (" + a.cron + ")" : "")],
+      [L("auto.timezone"), a.timezone],
+      [L("auto.colModel"), a.model || L("auto.modelDefault")],
+      [L("auto.overlap"), L(a.overlap === "parallel" ? "auto.overlapParallel" : "auto.overlapSkip")],
+      [L("auto.upcoming"), d.upcoming.length ? d.upcoming.map(formatDateTime).join("  ·  ") : "—"],
+    ];
+    if (a.type === "api") facts.push([L("auto.endpoint"), "POST " + a.triggerPath]);
+    ael2.facts.replaceChildren(...facts.flatMap(([k, v]) => {
+      const dt = document.createElement("dt");
+      dt.textContent = k;
+      const dd = document.createElement("dd");
+      dd.textContent = v;
+      return [dt, dd];
+    }));
+    ael2.prompt.textContent = a.prompt;
+
+    ael2.runRows.replaceChildren(...d.runs.map(r => {
+      const tr = document.createElement("tr");
+      const tdAt = document.createElement("td");
+      tdAt.textContent = formatDateTime(r.firedAt);
+      const tdTrig = document.createElement("td");
+      tdTrig.textContent = L("auto.trigger." + r.trigger);
+      const tdTask = document.createElement("td");
+      if (r.taskId) {
+        tdTask.appendChild(linkBtn(L("auto.openTask"), async () => { setView("tasks"); await openTask(r.taskId); }));
+      } else {
+        tdTask.textContent = r.skippedReason || "—";
+      }
+      const tdStatus = document.createElement("td");
+      tdStatus.appendChild(taskStatusBadge(r.status));
+      tr.append(tdAt, tdTrig, tdTask, tdStatus);
+      return tr;
+    }));
+    ael2.runsEmpty.hidden = d.runs.length > 0;
+  }
+
+  // --- form (drawer) ---
+  async function loadAutoModelOptions(selected) {
+    let options = [];
+    try { const res = await api.taskAgents(); options = (res && res.data) || []; } catch (e) { /* default only */ }
+    ael2.fModel.replaceChildren();
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = L("auto.modelDefault");
+    ael2.fModel.appendChild(def);
+    let found = !selected;
+    options.forEach(o => {
+      const ok = (o.models || []).filter(m => m.inferStatus === "ok"); // same rule as the server
+      if (!ok.length) return;
+      const g = document.createElement("optgroup");
+      g.label = o.name;
+      ok.forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = m.id;
+        opt.textContent = m.displayName && m.displayName !== m.id ? m.displayName + " (" + m.id + ")" : m.id;
+        if (m.id === selected) found = true;
+        g.appendChild(opt);
+      });
+      ael2.fModel.appendChild(g);
+    });
+    if (!found) { // keep a saved model selectable even if it stopped passing the check
+      const opt = document.createElement("option");
+      opt.value = selected;
+      opt.textContent = selected + " · " + L("auto.modelUnhealthy");
+      ael2.fModel.appendChild(opt);
+    }
+    ael2.fModel.value = selected || "";
+  }
+
+  function syncAutoForm() {
+    const type = ael2.fType.value;
+    const preset = ael2.fPreset.value;
+    ael2.fRecurring.hidden = type !== "recurring";
+    document.getElementById("afRunAtField").hidden = type !== "once";
+    document.getElementById("afTimezoneField").hidden = type === "api";
+    document.getElementById("afWeekdayField").hidden = preset !== "weekly";
+    document.getElementById("afDayField").hidden = preset !== "monthly";
+    document.getElementById("afHourField").hidden = preset === "hourly" || preset === "custom";
+    document.getElementById("afMinuteField").hidden = preset === "custom";
+    document.getElementById("afCronField").hidden = preset !== "custom";
+    schedulePreview();
+  }
+
+  function autoFormBody() {
+    const type = ael2.fType.value;
+    return {
+      name: ael2.fName.value.trim(),
+      prompt: ael2.fPrompt.value,
+      type,
+      cron: type === "recurring" ? presetToCron() : null,
+      runAt: type === "once" ? ael2.fRunAt.value || null : null,
+      timezone: ael2.fTimezone.value,
+      model: ael2.fModel.value,
+      overlap: ael2.fOverlap.value,
+    };
+  }
+
+  // Server-side preview: the same validation and time-zone math the scheduler uses.
+  let previewTimer = null;
+  function schedulePreview() {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(async () => {
+      const body = autoFormBody();
+      if (body.type === "api") {
+        ael2.fPreview.className = "field-hint auto-preview";
+        ael2.fPreview.textContent = L("auto.apiHint");
+        return;
+      }
+      if ((body.type === "once" && !body.runAt) || (body.type === "recurring" && !body.cron)) {
+        ael2.fPreview.textContent = "";
+        return;
+      }
+      const res = await api.previewAutomation(body).catch(() => null);
+      const ok = res && Array.isArray(res.data);
+      ael2.fPreview.className = "field-hint auto-preview" + (ok ? "" : " is-error");
+      ael2.fPreview.textContent = ok
+        ? (res.data.length ? L("auto.nextRuns", { times: res.data.map(formatDateTime).join("  ·  ") }) : "")
+        : ((res && res.message) || L("auto.actionFailed"));
+    }, 250);
+  }
+
+  function toLocalInput(iso, timezone) {
+    if (!iso) return "";
+    try {
+      // en-CA formats as YYYY-MM-DD, HH:MM — close to what datetime-local wants.
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      }).formatToParts(new Date(iso)).reduce((o, p) => (o[p.type] = p.value, o), {});
+      return parts.year + "-" + parts.month + "-" + parts.day + "T" + parts.hour + ":" + parts.minute;
+    } catch (e) { return ""; }
+  }
+
+  async function openAutoForm(a) {
+    autoEditing = a || null;
+    ael2.formTitle.textContent = L(a ? "auto.formEdit" : "auto.formNew");
+    ael2.fError.hidden = true;
+    ael2.fPrompt.value = a ? a.prompt : "";
+    ael2.fName.value = a ? a.name : "";
+    ael2.fType.value = a ? a.type : "recurring";
+    ael2.fOverlap.value = a ? a.overlap : "skip";
+    if (a && a.timezone) {
+      if (![...ael2.fTimezone.options].some(o => o.value === a.timezone)) {
+        const o = document.createElement("option");
+        o.value = o.textContent = a.timezone;
+        ael2.fTimezone.appendChild(o);
+      }
+      ael2.fTimezone.value = a.timezone;
+    } else {
+      ael2.fTimezone.value = ael2.fTimezone.options.length && [...ael2.fTimezone.options].some(o => o.value === "Asia/Shanghai")
+        ? "Asia/Shanghai" : ael2.fTimezone.options[0].value;
+    }
+    const p = a && a.type === "recurring" ? cronToPreset(a.cron) : { preset: "daily", m: "0", h: "9" };
+    ael2.fPreset.value = p.preset;
+    ael2.fMinute.value = String(Number(p.m || 0));
+    ael2.fHour.value = String(Number(p.h || 9));
+    ael2.fWeekday.value = p.wd || "1";
+    ael2.fDay.value = p.d || "1";
+    ael2.fCron.value = a && a.type === "recurring" ? a.cron : "";
+    ael2.fRunAt.value = a && a.type === "once" ? toLocalInput(a.runAt, a.timezone) : "";
+    ael2.drawer.hidden = false;
+    syncAutoForm();
+    await loadAutoModelOptions(a ? a.model : null);
+    ael2.fPrompt.focus();
+  }
+
+  function closeAutoForm() { ael2.drawer.hidden = true; clearTimeout(previewTimer); }
+
+  ael2.addBtn.addEventListener("click", () => openAutoForm(null));
+  ael2.drawer.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", closeAutoForm));
+  [ael2.fType, ael2.fPreset].forEach(x => x.addEventListener("change", syncAutoForm));
+  [ael2.fWeekday, ael2.fDay, ael2.fHour, ael2.fMinute, ael2.fTimezone, ael2.fRunAt]
+    .forEach(x => x.addEventListener("change", schedulePreview));
+  ael2.fCron.addEventListener("input", schedulePreview);
+
+  ael2.form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const body = autoFormBody();
+    if (!body.prompt.trim()) {
+      ael2.fError.textContent = L("auto.promptRequired");
+      ael2.fError.hidden = false;
+      return;
+    }
+    // Untouched one-off time on edit: leave it out so the server keeps it (and doesn't re-check "in the past").
+    if (autoEditing && body.type === "once" && autoEditing.type === "once"
+        && body.runAt === toLocalInput(autoEditing.runAt, autoEditing.timezone)
+        && body.timezone === autoEditing.timezone) {
+      body.runAt = null;
+    }
+    ael2.fSubmit.disabled = true;
+    const res = await api.saveAutomation(autoEditing && autoEditing.id, body).catch(() => null);
+    ael2.fSubmit.disabled = false;
+    if (!res || !res.data) {
+      ael2.fError.textContent = (res && res.message) || L("auto.actionFailed");
+      ael2.fError.hidden = false;
+      return;
+    }
+    closeAutoForm();
+    await openAutomation(res.data.id, res.data.apiToken);
+    loadAutomations();
   });
 
   // Guard first, then load the app only when authenticated. The OAuth-return handler

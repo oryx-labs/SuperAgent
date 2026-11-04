@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- mvn clean package -PreleaseTgz  →  superagent-server/target/superagent-<version>.tar.gz -->
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 https://maven.apache.org/xsd/assembly-2.2.0.xsd">
+  <id>release</id>
+  <formats>
+    <format>tar.gz</format>
+  </formats>
+  <baseDirectory>superagent-${project.version}</baseDirectory>
+
+  <fileSets>
+    <fileSet>
+      <directory>src/main/dist/bin</directory>
+      <outputDirectory>bin</outputDirectory>
+      <fileMode>0755</fileMode>
+      <lineEnding>unix</lineEnding>
+    </fileSet>
+    <fileSet>
+      <directory>src/main/dist/config</directory>
+      <outputDirectory>config</outputDirectory>
+      <fileMode>0600</fileMode>
+      <lineEnding>unix</lineEnding>
+    </fileSet>
+    <!-- The built (filtered) application.properties, editable without repackaging. -->
+    <fileSet>
+      <directory>${project.build.outputDirectory}</directory>
+      <outputDirectory>config</outputDirectory>
+      <includes>
+        <include>application.properties</include>
+      </includes>
+      <fileMode>0644</fileMode>
+    </fileSet>
+    <!-- Empty runtime dirs. -->
+    <fileSet>
+      <directory>src/main/dist</directory>
+      <outputDirectory>logs</outputDirectory>
+      <excludes>
+        <exclude>**/*</exclude>
+      </excludes>
+    </fileSet>
+    <fileSet>
+      <directory>src/main/dist</directory>
+      <outputDirectory>data</outputDirectory>
+      <excludes>
+        <exclude>**/*</exclude>
+      </excludes>
+    </fileSet>
+  </fileSets>
+
+  <files>
+    <file>
+      <source>${project.build.directory}/${project.build.finalName}.jar</source>
+      <outputDirectory>libs</outputDirectory>
+      <destName>superagent.jar</destName>
+    </file>
+  </files>
+</assembly>

@@ -8,7 +8,10 @@ import com.superagent.api.chat.RenameSessionRequest;
 import com.superagent.api.chat.SendMessageRequest;
 import com.superagent.api.chat.SessionDetailDto;
 import com.superagent.api.chat.SessionDto;
+import com.superagent.web.attachment.ImageAttachmentStore;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.Authentication;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,9 +32,11 @@ import java.util.List;
 public class ChatController {
 
     private final ChatService chatService;
+    private final ImageAttachmentStore images;
 
-    public ChatController(ChatService chatService) {
+    public ChatController(ChatService chatService, ImageAttachmentStore images) {
         this.chatService = chatService;
+        this.images = images;
     }
 
     @PostMapping(ApiPaths.SESSIONS)
@@ -45,35 +50,50 @@ public class ChatController {
     }
 
     @GetMapping(ApiPaths.SESSIONS + "/{id}")
-    public ApiResponse<SessionDetailDto> getSession(@PathVariable String id) {
+    public ApiResponse<SessionDetailDto> getSession(@PathVariable String id, Authentication auth) {
+        chatService.requireAccess(id, auth.getName());
         return ApiResponse.ok(chatService.getSession(id));
     }
 
     @PutMapping(ApiPaths.SESSIONS + "/{id}/title")
-    public ApiResponse<SessionDto> rename(@PathVariable String id, @RequestBody RenameSessionRequest request) {
+    public ApiResponse<SessionDto> rename(@PathVariable String id, @RequestBody RenameSessionRequest request,
+                                          Authentication auth) {
+        chatService.requireAccess(id, auth.getName());
         return ApiResponse.ok(chatService.renameSession(id, request.title()));
     }
 
     @DeleteMapping(ApiPaths.SESSIONS + "/{id}")
-    public ApiResponse<Void> deleteSession(@PathVariable String id) {
+    public ApiResponse<Void> deleteSession(@PathVariable String id, Authentication auth) {
+        chatService.requireAccess(id, auth.getName());
         chatService.deleteSession(id);
         return ApiResponse.empty();
     }
 
     @PostMapping(value = ApiPaths.SESSIONS + "/{id}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter sendMessage(@PathVariable String id, @RequestBody SendMessageRequest request) {
-        return chatService.sendMessage(id, request.content());
+    public SseEmitter sendMessage(@PathVariable String id, @RequestBody SendMessageRequest request,
+                                  Authentication auth) {
+        chatService.requireAccess(id, auth.getName());
+        return chatService.sendMessage(id, request.content(), request.images(), auth == null ? null : auth.getName());
+    }
+
+    @GetMapping(ApiPaths.SESSIONS + "/{id}/messages/{messageId}/images/{index}")
+    public ResponseEntity<byte[]> image(@PathVariable String id, @PathVariable String messageId,
+                                        @PathVariable int index, Authentication auth) {
+        chatService.requireAccess(id, auth.getName());
+        return images.read(id, messageId, index).toResponse();
     }
 
     @PostMapping(ApiPaths.SESSIONS + "/{id}/stop")
-    public ApiResponse<Void> stop(@PathVariable String id) {
+    public ApiResponse<Void> stop(@PathVariable String id, Authentication auth) {
+        chatService.requireAccess(id, auth.getName());
         chatService.stopGeneration(id);
         return ApiResponse.empty();
     }
 
     @PutMapping(ApiPaths.SESSIONS + "/{id}/messages/{messageId}")
     public ApiResponse<Void> editMessage(@PathVariable String id, @PathVariable String messageId,
-                                         @RequestBody EditMessageRequest request) {
+                                         @RequestBody EditMessageRequest request, Authentication auth) {
+        chatService.requireAccess(id, auth.getName());
         chatService.editMessage(id, messageId, request.content());
         return ApiResponse.empty();
     }

@@ -1,6 +1,7 @@
 package com.superagent.storage.jdbc;
 
 import com.superagent.core.agent.Agent;
+import com.superagent.core.agent.AgentKind;
 import com.superagent.core.agent.AgentStatus;
 import com.superagent.core.agent.AgentStore;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -37,22 +38,33 @@ abstract class AbstractJdbcAgentStore implements AgentStore {
             rs.getString("id"),
             rs.getString("name"),
             emptyToNull(rs.getString("avatar")),
+            emptyToNull(rs.getString("character_key")),
             emptyToNull(rs.getString("persona")),
             emptyToNull(rs.getString("model")),
             AgentStatus.valueOf(rs.getString("status")),
+            emptyToNull(rs.getString("owner")),
+            kind(rs.getString("kind")),
+            emptyToNull(rs.getString("managed_by")),
             instant(rs, "created_at"),
             instant(rs, "updated_at"));
 
-    protected static final String COLUMNS = "(id, name, avatar, persona, model, status, created_at, updated_at)";
+    protected static final String COLUMNS = "(id, name, avatar, character_key, persona, model, status, owner, kind, "
+            + "managed_by, created_at, updated_at)";
+    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(Agent a) {
         return new Object[]{
-                a.id(), nn(a.name()), nn(a.avatar()), nn(a.persona()), nn(a.model()), a.status().name(),
-                utc(a.createdAt()), utc(a.updatedAt())};
+                a.id(), nn(a.name()), nn(a.avatar()), nn(a.character()), nn(a.persona()), nn(a.model()), a.status().name(),
+                nn(a.owner()), a.kind().name(), nn(a.managedBy()), utc(a.createdAt()), utc(a.updatedAt())};
     }
 
     protected void insert(Agent a) {
-        jdbc.update("INSERT INTO agent " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", params(a));
+        jdbc.update("INSERT INTO agent " + COLUMNS + VALUES, params(a));
+    }
+
+    /** Rows written before agents had a kind read back as standard agents. */
+    private static AgentKind kind(String value) {
+        return value == null || value.isEmpty() ? AgentKind.STANDARD : AgentKind.valueOf(value);
     }
 
     @Override

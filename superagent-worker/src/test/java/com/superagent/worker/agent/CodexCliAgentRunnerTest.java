@@ -3,6 +3,7 @@ package com.superagent.worker.agent;
 import com.superagent.core.chat.AgentEventType;
 import com.superagent.core.chat.AgentRunRequest;
 import com.superagent.core.chat.Cancellation;
+import com.superagent.core.chat.ImageAttachment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -43,6 +44,22 @@ class CodexCliAgentRunnerTest {
     }
 
     @Test
+    void passesHttpMcpServersAsConfigOverridesWithTheTokenKeptOutOfArgv() {
+        CodexCliAgentRunner runner = new CodexCliAgentRunner("codex", 600);
+        String mcp = "{\"mcpServers\":{\"superagent\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:8080/mcp\","
+                + "\"headers\":{\"Authorization\":\"Bearer s3cret\"}}}}";
+        AgentRunRequest req = new AgentRunRequest("s1", null, "/w", "hi", null, List.of(), false, mcp, null);
+
+        List<String> cmd = runner.buildCommand(req, null);
+        assertThat(cmd).containsSubsequence("-c", "mcp_servers.superagent.url=\"http://127.0.0.1:8080/mcp\"",
+                "-c", "mcp_servers.superagent.default_tools_approval_mode=\"approve\"",
+                "-c", "mcp_servers.superagent.bearer_token_env_var=\"SUPERAGENT_MCP_TOKEN_SUPERAGENT\"");
+        assertThat(String.join(" ", cmd)).doesNotContain("s3cret");
+        assertThat(CodexCliAgentRunner.mcpServers(req)).singleElement()
+                .satisfies(s -> assertThat(s.token()).isEqualTo("s3cret"));
+    }
+
+    @Test
     void buildsNewAndResumeCommandsWithModelAndSandbox() {
         CodexCliAgentRunner runner = new CodexCliAgentRunner("codex", 600);
         AgentRunRequest first = new AgentRunRequest("s1", null, "/w", "-rm everything", "gpt-6-sol",
@@ -53,6 +70,13 @@ class CodexCliAgentRunnerTest {
         AgentRunRequest resume = new AgentRunRequest("s1", "s1", "/w", "again", null, List.of(), false, null, null);
         assertThat(runner.buildCommand(resume, "01a1-t")).containsExactly(
                 "codex", "exec", "--json", "--skip-git-repo-check", "-s", "read-only", "resume", "01a1-t", "-");
+
+        // One "--image=" per image: a bare "-i" takes several values and would swallow the "-" stdin marker.
+        AgentRunRequest withImage = new AgentRunRequest("s1", "s1", "/w", "look", null, List.of(), false, null, null,
+                List.of(new ImageAttachment("/data/a/0.png", "image/png")));
+        assertThat(runner.buildCommand(withImage, "01a1-t")).containsExactly(
+                "codex", "exec", "--json", "--skip-git-repo-check", "-s", "read-only", "resume",
+                "--image=/data/a/0.png", "01a1-t", "-");
     }
 
     @Test

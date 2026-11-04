@@ -13,7 +13,7 @@
 
   <groupId>com.superagent</groupId>
   <artifactId>superagent</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.1.0-RELEASE</version>
   <packaging>pom</packaging>
 
   <name>SuperAgent</name>

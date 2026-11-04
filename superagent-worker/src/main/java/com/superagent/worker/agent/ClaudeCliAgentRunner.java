@@ -1,5 +1,8 @@
 package com.superagent.worker.agent;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.superagent.core.chat.AgentEvent;
 import com.superagent.core.chat.AgentEventSink;
 import com.superagent.core.chat.AgentEventType;
@@ -7,6 +10,7 @@ import com.superagent.core.chat.AgentRunRequest;
 import com.superagent.core.chat.AgentRunner;
 import com.superagent.core.chat.AgentType;
 import com.superagent.core.chat.Cancellation;
+import com.superagent.core.chat.ImageAttachment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,11 +21,13 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -41,6 +47,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class ClaudeCliAgentRunner implements AgentRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ClaudeCliAgentRunner.class);
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final String command;
     private final long timeoutSeconds;
@@ -75,7 +82,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
                     Instant.now()));
             AgentRunRequest fresh = new AgentRunRequest(request.sessionId(), null, request.workspaceDir(),
                     request.prompt(), request.model(), request.allowedTools(), request.skipPermissions(),
-                    request.mcpConfig(), request.systemPrompt());
+                    request.mcpConfig(), request.systemPrompt(), request.images(), request.memory());
             attempt(fresh, sink, cancellation, seq);
         }
     }
@@ -83,10 +90,19 @@ public class ClaudeCliAgentRunner implements AgentRunner {
     /** One CLI invocation. Returns true when a resume failed only because the conversation doesn't exist. */
     private boolean attempt(AgentRunRequest request, AgentEventSink sink, Cancellation cancellation, AtomicLong seq) {
         boolean conversationMissing = false;
+        String stdinMessage;
+        try {
+            stdinMessage = request.images().isEmpty() ? null : stdinMessage(request);
+        } catch (IOException e) {
+            emitError(sink, request, seq.getAndIncrement(), "Cannot read attached image: " + e.getMessage());
+            return false;
+        }
         Path mcpConfigFile = writeMcpConfig(request);
         List<String> cmd = buildCommand(request, mcpConfigFile);
-        log.info("session {} running: {} (cwd={})", request.sessionId(),
-                String.join(" ", cmd.subList(0, cmd.size() - 1)), request.workspaceDir());
+        // Never log the prompt: with images it's on stdin; otherwise it's the last argv entry.
+        log.info("session {} running: {} (cwd={}, images={})", request.sessionId(),
+                String.join(" ", stdinMessage != null ? cmd : cmd.subList(0, cmd.size() - 1)),
+                request.workspaceDir(), request.images().size());
 
         ProcessBuilder pb = new ProcessBuilder(cmd)
                 .directory(new File(request.workspaceDir()))
@@ -95,6 +111,11 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         Process process;
         try {
             process = pb.start();
+            if (stdinMessage != null) {
+                try (OutputStream stdin = process.getOutputStream()) {
+                    stdin.write(stdinMessage.getBytes(StandardCharsets.UTF_8));
+                }
+            }
         } catch (IOException e) {
             emitError(sink, request, seq.getAndIncrement(), "Failed to start agent: " + e.getMessage());
             deleteQuietly(mcpConfigFile);
@@ -173,9 +194,11 @@ public class ClaudeCliAgentRunner implements AgentRunner {
             cmd.add(request.model());
         }
 
-        if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
+        // A new conversation also gets the agent's memory; a resumed one already has its history.
+        String systemPrompt = request.isFirstTurn() ? request.systemPromptWithMemory() : request.systemPrompt();
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
             cmd.add("--append-system-prompt");
-            cmd.add(request.systemPrompt());
+            cmd.add(systemPrompt);
         }
 
         if (mcpConfigFile != null) {
@@ -201,12 +224,41 @@ public class ClaudeCliAgentRunner implements AgentRunner {
             cmd.add(String.join(" ", request.allowedTools()));
         }
 
+        if (!request.images().isEmpty()) {
+            // Images can only travel as content blocks, so the whole message goes on stdin instead.
+            cmd.add("--input-format");
+            cmd.add("stream-json");
+            // The Claude gateway rejects image requests from a CLI with Artifacts on ("request is not
+            // representable on this edge"); turn it off for this run only, not in the host's settings.
+            cmd.add("--settings");
+            cmd.add("{\"enableArtifact\":false}");
+            return cmd;
+        }
         // End-of-options separator: the CLI treats everything after "--" as a
         // positional argument, so a user prompt that begins with "-" or "--"
         // cannot be smuggled in as a CLI flag (argv flag injection).
         cmd.add("--");
         cmd.add(request.prompt());
         return cmd;
+    }
+
+    /** The prompt plus its images as one stream-json user message (one line, then stdin closes). */
+    String stdinMessage(AgentRunRequest request) throws IOException {
+        ObjectNode message = JSON.createObjectNode();
+        message.put("type", "user");
+        ObjectNode inner = message.putObject("message");
+        inner.put("role", "user");
+        ArrayNode content = inner.putArray("content");
+        for (ImageAttachment image : request.images()) {
+            ObjectNode source = content.addObject().put("type", "image").putObject("source");
+            source.put("type", "base64");
+            source.put("media_type", image.mediaType());
+            source.put("data", Base64.getEncoder().encodeToString(Files.readAllBytes(Path.of(image.path()))));
+        }
+        if (request.prompt() != null && !request.prompt().isBlank()) {
+            content.addObject().put("type", "text").put("text", request.prompt());
+        }
+        return JSON.writeValueAsString(message) + "\n";
     }
 
     private void emitError(AgentEventSink sink, AgentRunRequest request, long seq, String message) {

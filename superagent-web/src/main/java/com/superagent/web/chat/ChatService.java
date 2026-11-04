@@ -1,11 +1,15 @@
 package com.superagent.web.chat;
 
+import com.superagent.api.ApiPaths;
+import com.superagent.api.chat.ChatSegmentDto;
 import com.superagent.api.chat.CreateSessionRequest;
+import com.superagent.api.chat.ImageUploadDto;
 import com.superagent.api.chat.MessageDto;
 import com.superagent.api.chat.SessionDetailDto;
 import com.superagent.api.chat.SessionDto;
 import com.superagent.api.chat.StreamEventDto;
 import com.superagent.core.agent.Agent;
+import com.superagent.core.agent.AgentCharacters;
 import com.superagent.core.agent.AgentStore;
 import com.superagent.core.chat.AgentEvent;
 import com.superagent.core.chat.AgentEventSink;
@@ -17,9 +21,14 @@ import com.superagent.core.chat.Cancellation;
 import com.superagent.core.chat.ChatMessage;
 import com.superagent.core.chat.ChatSession;
 import com.superagent.core.chat.ChatStore;
+import com.superagent.core.chat.ImageAttachment;
 import com.superagent.core.chat.MessageRole;
 import com.superagent.core.chat.SessionStatus;
+import com.superagent.web.attachment.ImageAttachmentStore;
+import com.superagent.web.mcp.McpGrants;
+import com.superagent.web.memory.AgentMemoryService;
 import com.superagent.web.provider.ProviderService;
+import com.superagent.web.skill.SkillService;
 import com.superagent.web.settings.SettingsService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -34,9 +43,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -70,35 +81,47 @@ public class ChatService {
     private final Path workspaceRoot;
     private final SettingsService settingsService;
     private final ProviderService providerService;
+    private final ImageAttachmentStore images;
     private final String defaultModel;
     private final List<String> allowedTools;
     private final boolean skipPermissions;
     private final long sseTimeoutMs;
-    private final String mcpConfig;
+    private final McpGrants mcpGrants;   // null = chat agents get no SuperAgent MCP
+    private final SkillService skills;
+    private final AgentMemoryService memory;
 
-    /** Task tools exposed by SuperAgent's own MCP server, allowlisted so the chat agent may call them. */
+    /** Task and automation tools exposed by SuperAgent's own MCP server, allowlisted so the chat agent may call them. */
     private static final List<String> SUPERAGENT_MCP_TOOLS = List.of(
             "mcp__superagent__create_task", "mcp__superagent__list_tasks", "mcp__superagent__get_task",
-            "mcp__superagent__send_task_message", "mcp__superagent__stop_task", "mcp__superagent__delete_task");
+            "mcp__superagent__send_task_message", "mcp__superagent__stop_task", "mcp__superagent__delete_task",
+            "mcp__superagent__create_automation", "mcp__superagent__list_automations",
+            "mcp__superagent__get_automation", "mcp__superagent__update_automation",
+            "mcp__superagent__set_automation_enabled", "mcp__superagent__run_automation_now",
+            "mcp__superagent__delete_automation", "mcp__superagent__get_current_time");
 
     public ChatService(
             ChatStore store,
             AgentStore agentStore,
             SettingsService settingsService,
             ProviderService providerService,
+            ImageAttachmentStore images,
+            SkillService skills,
+            AgentMemoryService memory,
             List<AgentRunner> agentRunners,
-            com.superagent.web.mcp.McpToken mcpToken,
+            McpGrants mcpGrants,
             @Value("${superagent.agent.workspace-dir:./data/workspaces}") String workspaceDir,
             @Value("${superagent.agent.default-model:}") String defaultModel,
             @Value("${superagent.agent.allowed-tools:Read,Glob,Grep,LS}") String allowedTools,
             @Value("${superagent.agent.skip-permissions:false}") boolean skipPermissions,
             @Value("${superagent.chat.sse-timeout-ms:600000}") long sseTimeoutMs,
-            @Value("${superagent.mcp.enabled-in-chat:true}") boolean mcpInChat,
-            @Value("${superagent.mcp.self-url:http://127.0.0.1:8080/mcp}") String mcpSelfUrl) {
+            @Value("${superagent.mcp.enabled-in-chat:true}") boolean mcpInChat) {
         this.store = store;
         this.agentStore = agentStore;
         this.settingsService = settingsService;
         this.providerService = providerService;
+        this.images = images;
+        this.skills = skills;
+        this.memory = memory;
         for (AgentRunner runner : agentRunners) {
             this.runners.put(runner.type(), runner);
         }
@@ -107,17 +130,17 @@ public class ChatService {
         List<String> tools = new ArrayList<>(parseTools(allowedTools));
         this.skipPermissions = skipPermissions;
         this.sseTimeoutMs = sseTimeoutMs;
-        if (mcpInChat && mcpSelfUrl != null && !mcpSelfUrl.isBlank()) {
+        if (mcpInChat && mcpGrants.available()) {
             // Expose SuperAgent's own MCP so the chat agent can create/steer tasks as tools.
-            this.mcpConfig = "{\"mcpServers\":{\"superagent\":{\"type\":\"http\",\"url\":\""
-                    + mcpSelfUrl.trim() + "\",\"headers\":{\"X-MCP-Token\":\"" + mcpToken.value() + "\"}}}}";
+            this.mcpGrants = mcpGrants;
             tools.addAll(SUPERAGENT_MCP_TOOLS);
+            tools.addAll(McpGrants.KNOWLEDGE_TOOLS);
         } else {
-            this.mcpConfig = null;
+            this.mcpGrants = null;
         }
         this.allowedTools = List.copyOf(tools);
         log.info("ChatService ready: runners={}, workspaceRoot={}, model={}, skipPermissions={}, superagentMcp={}",
-                runners.keySet(), workspaceRoot, this.defaultModel, skipPermissions, mcpConfig != null);
+                runners.keySet(), workspaceRoot, this.defaultModel, skipPermissions, this.mcpGrants != null);
     }
 
     private static List<String> parseTools(String csv) {
@@ -162,12 +185,52 @@ public class ChatService {
                 .map(ChatService::toDto).toList();
     }
 
-    /** The id of the agent's owning session (phase 1 is 1:1), or null if it has none. */
-    public String primarySessionId(String agentId) {
+    /** The agent's current session — the one its next turn continues — or null if it has none. */
+    public String currentSessionId(String agentId) {
+        return currentSession(agentId).map(ChatSession::id).orElse(null);
+    }
+
+    private Optional<ChatSession> currentSession(String agentId) {
         return store.listSessionsByAgent(agentId).stream()
                 .filter(s -> s.status() != SessionStatus.DELETED)
-                .map(ChatSession::id)
-                .findFirst().orElse(null);
+                .max(Comparator.comparing(ChatSession::createdAt));
+    }
+
+    /**
+     * The session an agent's turn on {@code model} runs in. An agent has many sessions over time: a turn
+     * on a different model than the current session's starts a new one (same workspace, so files carry
+     * over), and the agent's long-term memory — not the old conversation — is what the new one starts from.
+     */
+    public ChatSession sessionForTurn(Agent agent, String model) {
+        ChatSession current = currentSession(agent.id()).orElse(null);
+        if (current == null || memory.modelChanged(agent.id(), model)) {
+            current = startSession(agent, current == null ? null : current.workspaceDir());
+            log.info("agent {} starts session {} on model {}", agent.id(), current.id(), model);
+        }
+        memory.recordModel(agent, model);
+        return current;
+    }
+
+    private ChatSession startSession(Agent agent, String workspaceDir) {
+        if (workspaceDir == null) {
+            return store.findSession(createSession(new CreateSessionRequest(null, agent.name(), null, agent.id())).id())
+                    .orElseThrow();
+        }
+        Instant now = Instant.now();
+        ChatSession session = new ChatSession(UUID.randomUUID().toString(), agent.name(), AgentType.CLAUDE, null,
+                workspaceDir, agent.id(), SessionStatus.ACTIVE, now, now);
+        store.createSession(session);
+        return session;
+    }
+
+    /** Every session the agent has had, oldest first, each with its messages — the agent's whole conversation. */
+    public List<ChatSegmentDto> agentHistory(String agentId) {
+        return store.listSessionsByAgent(agentId).stream()
+                .filter(s -> s.status() != SessionStatus.DELETED)
+                .sorted(Comparator.comparing(ChatSession::createdAt))
+                .map(s -> new ChatSegmentDto(s.id(), s.createdAt(),
+                        store.listMessages(s.id()).stream().map(m -> toMessageDto(s.id(), m)).toList()))
+                .toList();
     }
 
     public SessionDto renameSession(String sessionId, String title) {
@@ -189,17 +252,46 @@ public class ChatService {
     public SessionDetailDto getSession(String sessionId) {
         ChatSession session = store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
         List<MessageDto> messages = store.listMessages(sessionId).stream()
-                .map(ChatService::toMessageDto).toList();
+                .map(m -> toMessageDto(sessionId, m)).toList();
         return new SessionDetailDto(toDto(session), messages);
+    }
+
+    /**
+     * A session that belongs to another user's agent reads as "not found". Sessions with no agent
+     * (from before agents) stay open to any signed-in user, as they were.
+     */
+    public void requireAccess(String sessionId, String user) {
+        ChatSession session = store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
+        if (session.agentId() != null && !session.agentId().isBlank()) {
+            agentStore.find(session.agentId())
+                    .filter(a -> a.owner() == null || a.owner().equals(user))
+                    .orElseThrow(() -> new SessionNotFoundException(sessionId));
+        }
     }
 
     // --- sending a message (streamed) ---
 
     public SseEmitter sendMessage(String sessionId, String content) {
-        ChatSession session = store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
+        return sendMessage(sessionId, content, List.of(), null);
+    }
+
+    /** {@code user} is who is chatting: tasks the agent creates through MCP belong to them (null = default owner). */
+    public SseEmitter sendMessage(String requestedSessionId, String content, List<ImageUploadDto> uploads, String user) {
+        ChatSession session = store.findSession(requestedSessionId)
+                .orElseThrow(() -> new SessionNotFoundException(requestedSessionId));
+        String sessionId = session.id();
         Agent agent = session.agentId() == null || session.agentId().isBlank() ? null
                 : agentStore.find(session.agentId()).orElse(null);
+        if (agent != null && agent.isSuper()) {
+            // The SuperAgent doesn't answer live: messages go to its inbox and are worked through in rounds.
+            throw new IllegalArgumentException("Send messages to SuperAgent through its inbox");
+        }
         String model = resolveModel(agent);
+        if (agent != null) {
+            // The agent's current session, or a new one if the model changed; never an older one the page still shows.
+            session = sessionForTurn(agent, model);
+            sessionId = session.id();
+        }
         // The model decides the CLI (a Codex model must run under codex); unknown models keep the session's own.
         AgentType agentType = providerService.cliFor(model).map(AgentType::fromString)
                 .filter(runners::containsKey).orElse(session.agentType());
@@ -207,19 +299,28 @@ public class ChatService {
         if (runner == null) {
             throw new IllegalStateException("No runner for agent type " + agentType);
         }
-        String systemPrompt = agent != null && agent.persona() != null && !agent.persona().isBlank()
-                ? agent.persona().trim() : null;
+        // Character first, then the index of the agent's skills (their full text is read on demand).
+        String character = agent == null ? null : AgentCharacters.systemPrompt(agent);
+        String skillIndex = skills.install(session.workspaceDir(),
+                agent == null ? List.of() : skills.forAgent(agent.id()), mcpGrants != null);
+        String systemPrompt = character == null ? skillIndex
+                : skillIndex == null ? character : character + "\n\n" + skillIndex;
 
-        Instant now = Instant.now();
-        store.appendMessage(new ChatMessage(UUID.randomUUID().toString(), sessionId,
-                MessageRole.USER, content, now));
+        // Images are stored under the user message's id before it's appended, so a bad upload stores nothing.
+        String userMessageId = UUID.randomUUID().toString();
+        List<ImageAttachment> attached = images.save(sessionId, userMessageId, uploads);
+        String text = content == null ? "" : content;
+        store.appendMessage(new ChatMessage(userMessageId, sessionId, MessageRole.USER, text, Instant.now()));
+        String prompt = text.isBlank() && !attached.isEmpty() ? ImageAttachmentStore.IMAGE_ONLY_PROMPT : text;
 
         SseEmitter emitter = new SseEmitter(sseTimeoutMs);
         String assistantMessageId = UUID.randomUUID().toString();
         Cancellation cancellation = new Cancellation();
         activeRuns.put(sessionId, cancellation);
 
-        executor.execute(() -> runTurn(session, agentType, runner, model, systemPrompt, content,
+        ChatSession turn = session;
+        String agentMemory = agent == null ? null : memory.read(agent);
+        executor.execute(() -> runTurn(turn, agentType, runner, model, systemPrompt, agentMemory, prompt, attached, user,
                 assistantMessageId, emitter, cancellation));
         return emitter;
     }
@@ -233,12 +334,14 @@ public class ChatService {
         return model != null ? model : defaultModel;
     }
 
-    /** Stops the in-flight turn for a session, if any. */
+    /**
+     * Stops the in-flight turn for a session, if any — or for its agent's current session, since a model
+     * change moves the turn into a new session the page doesn't know about yet.
+     */
     public void stopGeneration(String sessionId) {
-        Cancellation cancellation = activeRuns.get(sessionId);
-        if (cancellation != null) {
-            cancellation.cancel();
-        }
+        Optional.ofNullable(activeRuns.get(sessionId)).ifPresent(Cancellation::cancel);
+        store.findSession(sessionId).map(ChatSession::agentId).filter(a -> !a.isBlank())
+                .map(this::currentSessionId).map(activeRuns::get).ifPresent(Cancellation::cancel);
     }
 
     /** Edits a stored message's content in place (record only; does not re-run the agent). */
@@ -248,7 +351,8 @@ public class ChatService {
     }
 
     private void runTurn(ChatSession session, AgentType agentType, AgentRunner runner, String model,
-                         String systemPrompt, String prompt,
+                         String systemPrompt, String agentMemory, String prompt, List<ImageAttachment> attached,
+                         String user,
                          String assistantMessageId, SseEmitter emitter, Cancellation cancellation) {
         StringBuilder textAccumulator = new StringBuilder();
         AtomicReference<String> resultText = new AtomicReference<>();
@@ -273,10 +377,11 @@ public class ChatService {
             }
         };
 
+        McpGrants.Grant grant = mcpGrants == null ? null : mcpGrants.openChat(user, session.agentId(), session.workspaceDir());
         try {
             AgentRunRequest request = new AgentRunRequest(
-                    session.id(), agentSessionId, session.workspaceDir(),
-                    prompt, model, allowedTools, skipPermissions, mcpConfig, systemPrompt);
+                    session.id(), agentSessionId, session.workspaceDir(), prompt, model, allowedTools, skipPermissions,
+                    grant == null ? null : mcpGrants.mcpConfig(grant), systemPrompt, attached, agentMemory);
             runner.run(request, sink, cancellation);
 
             boolean stopped = cancellation.isCancelled();
@@ -297,6 +402,9 @@ public class ChatService {
             emitter.complete();
         } finally {
             activeRuns.remove(session.id(), cancellation);
+            if (grant != null) {
+                mcpGrants.close(grant);
+            }
         }
     }
 
@@ -349,8 +457,10 @@ public class ChatService {
                 s.status().name().toLowerCase(), s.agentId(), s.createdAt(), s.updatedAt());
     }
 
-    private static MessageDto toMessageDto(ChatMessage m) {
-        return new MessageDto(m.id(), m.role().name().toLowerCase(), m.content(), m.createdAt());
+    private MessageDto toMessageDto(String sessionId, ChatMessage m) {
+        List<String> urls = m.role() == MessageRole.USER
+                ? images.urls(ApiPaths.SESSIONS + "/" + sessionId + "/messages", sessionId, m.id()) : List.of();
+        return new MessageDto(m.id(), m.role().name().toLowerCase(), m.content(), m.createdAt(), urls);
     }
 
     @PreDestroy

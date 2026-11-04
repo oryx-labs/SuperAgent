@@ -1,9 +1,12 @@
 package com.superagent.worker.agent;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.superagent.core.chat.AgentEvent;
 import com.superagent.core.chat.AgentEventType;
 import com.superagent.core.chat.AgentRunRequest;
 import com.superagent.core.chat.Cancellation;
+import com.superagent.core.chat.ImageAttachment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -33,6 +36,38 @@ class ClaudeCliAgentRunnerTest {
         assertThat(cmd.get(flag + 1)).isEqualTo("You are a meticulous release manager.");
         // Persona must sit before the end-of-options separator, never as a positional prompt arg.
         assertThat(flag).isLessThan(cmd.indexOf("--"));
+    }
+
+    /** With images the message goes on stdin as content blocks; nothing of the prompt stays in argv. */
+    @Test
+    void imagesMoveTheMessageToStdinAsContentBlocks(@TempDir Path dir) throws Exception {
+        Path png = dir.resolve("0.png");
+        Files.write(png, new byte[]{1, 2, 3});
+        AgentRunRequest req = new AgentRunRequest("s1", null, "/tmp/ws", "what is this?", null,
+                List.of(), false, null, null, List.of(new ImageAttachment(png.toString(), "image/png")));
+
+        List<String> cmd = runner.buildCommand(req, null);
+        assertThat(cmd).containsSubsequence("--input-format", "stream-json")
+                .doesNotContain("--", "what is this?");
+
+        JsonNode content = new ObjectMapper().readTree(runner.stdinMessage(req)).path("message").path("content");
+        assertThat(content.get(0).path("source").path("media_type").asText()).isEqualTo("image/png");
+        assertThat(content.get(0).path("source").path("data").asText()).isEqualTo("AQID"); // base64 of {1,2,3}
+        assertThat(content.get(1).path("text").asText()).isEqualTo("what is this?");
+    }
+
+    /** Memory rides along only when a conversation starts; a resumed one already has its history. */
+    @Test
+    void memoryJoinsTheSystemPromptOnlyForANewConversation() {
+        AgentRunRequest fresh = new AgentRunRequest("s1", null, "/tmp/ws", "hi", null, List.of(), false, null,
+                "You are Ada.", List.of(), "- Prefers short answers");
+        String sys = runner.buildCommand(fresh, null).get(runner.buildCommand(fresh, null).indexOf("--append-system-prompt") + 1);
+        assertThat(sys).startsWith("You are Ada.").contains("- Prefers short answers");
+
+        AgentRunRequest resumed = new AgentRunRequest("s1", "s1", "/tmp/ws", "hi", null, List.of(), false, null,
+                "You are Ada.", List.of(), "- Prefers short answers");
+        List<String> cmd = runner.buildCommand(resumed, null);
+        assertThat(cmd.get(cmd.indexOf("--append-system-prompt") + 1)).isEqualTo("You are Ada.");
     }
 
     @Test

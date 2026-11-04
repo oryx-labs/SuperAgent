@@ -27,9 +27,13 @@ CREATE TABLE IF NOT EXISTS superagent.agent (
   id         String,
   name       String,
   avatar     String,
+  character_key String,
   persona    String,
   model      String,
   status     String,
+  owner      String,
+  kind       String,
+  managed_by String,
   created_at DateTime64(3, 'UTC'),
   updated_at DateTime64(3, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)

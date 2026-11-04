@@ -1,5 +1,7 @@
 package com.superagent.worker.agent;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.superagent.core.chat.AgentEvent;
 import com.superagent.core.chat.AgentEventSink;
 import com.superagent.core.chat.AgentEventType;
@@ -7,6 +9,7 @@ import com.superagent.core.chat.AgentRunRequest;
 import com.superagent.core.chat.AgentRunner;
 import com.superagent.core.chat.AgentType;
 import com.superagent.core.chat.Cancellation;
+import com.superagent.core.chat.ImageAttachment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,6 +27,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -46,6 +50,7 @@ import java.util.regex.Pattern;
 public class CodexCliAgentRunner implements AgentRunner {
 
     private static final Logger log = LoggerFactory.getLogger(CodexCliAgentRunner.class);
+    private static final ObjectMapper JSON = new ObjectMapper();
     private static final Set<String> WRITE_TOOLS = Set.of("Edit", "Write", "MultiEdit", "NotebookEdit", "Bash");
     /**
      * Codex thread ids are UUIDs. The id file sits in a workspace the agent can write to, so its
@@ -82,7 +87,14 @@ public class CodexCliAgentRunner implements AgentRunner {
 
         Process process;
         try {
-            process = new ProcessBuilder(cmd).directory(new File(request.workspaceDir())).start();
+            ProcessBuilder pb = new ProcessBuilder(cmd).directory(new File(request.workspaceDir()));
+            // MCP bearer tokens go through the environment, never argv (visible in ps / logs).
+            for (McpServer server : mcpServers(request)) {
+                if (server.token() != null) {
+                    pb.environment().put(server.tokenEnvVar(), server.token());
+                }
+            }
+            process = pb.start();
             try (OutputStream stdin = process.getOutputStream()) {
                 stdin.write(prompt(request, threadId == null).getBytes(StandardCharsets.UTF_8));
             }
@@ -144,6 +156,19 @@ public class CodexCliAgentRunner implements AgentRunner {
             boolean canWrite = request.allowedTools() != null && request.allowedTools().stream().anyMatch(WRITE_TOOLS::contains);
             cmd.add(canWrite ? "workspace-write" : "read-only");
         }
+        for (McpServer server : mcpServers(request)) {
+            // Values are TOML; a JSON-quoted string is a valid TOML basic string.
+            cmd.add("-c");
+            cmd.add("mcp_servers." + server.name() + ".url=" + jsonString(server.url()));
+            // exec mode can't prompt, so an unapproved MCP call is simply refused. These servers come from
+            // SuperAgent's own run config and are already scoped per turn — the same trust as Claude's allowlist.
+            cmd.add("-c");
+            cmd.add("mcp_servers." + server.name() + ".default_tools_approval_mode=\"approve\"");
+            if (server.token() != null) {
+                cmd.add("-c");
+                cmd.add("mcp_servers." + server.name() + ".bearer_token_env_var=" + jsonString(server.tokenEnvVar()));
+            }
+        }
         if (threadId != null) {
             cmd.add("resume");
         }
@@ -154,6 +179,10 @@ public class CodexCliAgentRunner implements AgentRunner {
             cmd.add("-m");
             cmd.add(request.model());
         }
+        for (ImageAttachment image : request.images()) {
+            // "=" form: -i/--image takes several values, so a bare "-i path" would also swallow the "-" stdin marker.
+            cmd.add("--image=" + image.path());
+        }
         if (threadId != null) {
             cmd.add(threadId);
         }
@@ -161,10 +190,59 @@ public class CodexCliAgentRunner implements AgentRunner {
         return cmd;
     }
 
-    /** Codex has no system-prompt flag, so a persona (if any) leads the first message of a new thread. */
-    private static String prompt(AgentRunRequest request, boolean newThread) {
-        if (newThread && request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
-            return request.systemPrompt().strip() + "\n\n" + request.prompt();
+    /** An HTTP MCP server from the request's Claude-style {@code mcpConfig} JSON. */
+    record McpServer(String name, String url, String token) {
+        String tokenEnvVar() {
+            return "SUPERAGENT_MCP_TOKEN_" + name.toUpperCase(Locale.ROOT).replace('-', '_');
+        }
+    }
+
+    private static final Pattern SERVER_NAME = Pattern.compile("[A-Za-z0-9_-]{1,64}");
+
+    /**
+     * Codex has no --mcp-config: the same servers are passed as {@code -c mcp_servers.<name>.*}
+     * overrides. Only HTTP servers with a bearer token (how SuperAgent's own MCP authenticates) are
+     * translated; anything unparseable is skipped rather than failing the turn.
+     */
+    static List<McpServer> mcpServers(AgentRunRequest request) {
+        if (request.mcpConfig() == null || request.mcpConfig().isBlank()) {
+            return List.of();
+        }
+        List<McpServer> out = new ArrayList<>();
+        try {
+            JsonNode servers = JSON.readTree(request.mcpConfig()).path("mcpServers");
+            servers.fieldNames().forEachRemaining(name -> {
+                JsonNode s = servers.get(name);
+                String url = s.path("url").asText("");
+                if (!SERVER_NAME.matcher(name).matches() || url.isBlank()) {
+                    return;
+                }
+                String auth = s.path("headers").path("Authorization").asText("");
+                out.add(new McpServer(name, url, auth.startsWith("Bearer ") ? auth.substring(7).trim() : null));
+            });
+        } catch (IOException e) {
+            log.warn("session {}: ignoring unreadable MCP config: {}", request.sessionId(), e.getMessage());
+        }
+        return out;
+    }
+
+    private static String jsonString(String value) {
+        try {
+            return JSON.writeValueAsString(value);
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * Codex has no system-prompt flag, so the persona (if any) leads every message: repeating it each
+     * turn is what lets an edited character take effect in an existing thread, as it does for Claude.
+     * The agent's memory joins it only when the thread is new ({@code freshThread}).
+     */
+    static String prompt(AgentRunRequest request, boolean freshThread) {
+        String system = freshThread ? request.systemPromptWithMemory() : request.systemPrompt();
+        if (system != null && !system.isBlank()) {
+            return "<system>\n" + system.strip() + "\n</system>\n\n" + request.prompt();
         }
         return request.prompt();
     }

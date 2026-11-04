@@ -18,9 +18,15 @@ public final class ApiPaths {
 
     public static final String AGENTS = V1 + "/agents";
 
+    /** The signed-in user's SuperAgent: its inbox and its plans. */
+    public static final String SUPER_AGENT = V1 + "/superagent";
+
     public static final String CONNECTORS = V1 + "/connectors";
 
     public static final String TASKS = V1 + "/tasks";
+
+    /** Saved prompts that run as tasks by schedule or API call. */
+    public static final String AUTOMATIONS = V1 + "/automations";
 
     public static final String AUTH = V1 + "/auth";
 
@@ -34,6 +40,12 @@ public final class ApiPaths {
 
     /** OAuth authorize/callback endpoints for connectors that use a provider handshake. */
     public static final String OAUTH = V1 + "/oauth";
+
+    /** The caller's private file-system knowledge base (folders, files, previews). */
+    public static final String KNOWLEDGE = V1 + "/knowledge";
+
+    /** Shared skills (working standards) that agents and tasks follow. */
+    public static final String SKILLS = V1 + "/skills";
 
     private ApiPaths() {
     }

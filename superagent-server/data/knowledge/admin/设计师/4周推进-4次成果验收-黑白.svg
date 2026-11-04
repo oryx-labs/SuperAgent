@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="2030" viewBox="0 0 1360 2030" font-family="PingFang SC, Hiragino Sans GB, Source Han Sans SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <pattern id="grid" width="26" height="26" patternUnits="userSpaceOnUse">
+      <path d="M 26 0 L 0 0 0 26" fill="none" stroke="#000000" stroke-opacity="0.045" stroke-width="1"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1A1A1A"/>
+    </marker>
+  </defs>
+
+  <rect width="1360" height="2030" fill="#F7F7F7"/>
+  <rect width="1360" height="2030" fill="url(#grid)"/>
+
+  <!-- ================= Header ================= -->
+  <text x="680" y="105" text-anchor="middle" font-size="50" font-weight="700" fill="#0D0D0D" letter-spacing="1">4 周推进 × 4 次成果验收</text>
+  <text x="680" y="152" text-anchor="middle" font-size="24" fill="#5C5C5C">从产品判断到双场景运行，让每一步留下可检查的证据</text>
+
+  <!-- ================= Panel 1 ================= -->
+  <rect x="88" y="200" width="1184" height="800" rx="20" fill="#FFFFFF" stroke="#1A1A1A" stroke-width="2"/>
+
+  <text x="120" y="252" font-size="20" font-weight="700" fill="#0D0D0D" letter-spacing="1.5">SUPER AGENT BUILD / 系统逐周成形</text>
+  <text x="120" y="284" font-size="17" fill="#5C5C5C">每周解决一个新的系统问题，前一周的产物成为下一周的输入</text>
+  <line x1="120" y1="304" x2="1240" y2="304" stroke="#C4C4C4" stroke-width="1"/>
+
+  <!-- timeline spine -->
+  <line x1="176" y1="350" x2="176" y2="905" stroke="#1A1A1A" stroke-width="2"/>
+
+  <!-- Step 1 -->
+  <circle cx="176" cy="390" r="26" fill="#0D0D0D"/>
+  <text x="176" y="399" text-anchor="middle" font-size="24" font-weight="700" fill="#FFFFFF">1</text>
+  <rect x="232" y="336" width="1010" height="108" rx="12" fill="#FAFAFA" stroke="#1A1A1A" stroke-width="1.5"/>
+  <text x="264" y="382" font-size="27" font-weight="700" fill="#0D0D0D">定义产品与架构</text>
+  <text x="264" y="414" font-size="16.5" fill="#5C5C5C">一页产品定义 · 研发与内容任务用例 · 架构图 · 最小 Worker 契约</text>
+
+  <!-- Step 2 -->
+  <circle cx="176" cy="530" r="26" fill="#0D0D0D"/>
+  <text x="176" y="539" text-anchor="middle" font-size="24" font-weight="700" fill="#FFFFFF">2</text>
+  <rect x="232" y="476" width="1010" height="108" rx="12" fill="#FAFAFA" stroke="#1A1A1A" stroke-width="1.5"/>
+  <text x="264" y="522" font-size="27" font-weight="700" fill="#0D0D0D">运行真实 Worker</text>
+  <text x="264" y="554" font-size="16.5" fill="#5C5C5C">命令行长任务 · 事件流 · Session · 用量归因 · 一次隔离或权限边界测试</text>
+
+  <!-- Step 3 -->
+  <circle cx="176" cy="670" r="26" fill="#0D0D0D"/>
+  <text x="176" y="679" text-anchor="middle" font-size="24" font-weight="700" fill="#FFFFFF">3</text>
+  <rect x="232" y="616" width="1010" height="108" rx="12" fill="#FAFAFA" stroke="#1A1A1A" stroke-width="1.5"/>
+  <text x="264" y="662" font-size="27" font-weight="700" fill="#0D0D0D">搭起控制面</text>
+  <text x="264" y="694" font-size="16.5" fill="#5C5C5C">Chat 发起目标 · Task 后台执行 · 交付物与人工确认 · Automation 防重复</text>
+
+  <!-- Step 4 (emphasis: inverted) -->
+  <circle cx="176" cy="810" r="26" fill="#0D0D0D"/>
+  <text x="176" y="819" text-anchor="middle" font-size="24" font-weight="700" fill="#FFFFFF">4</text>
+  <rect x="232" y="756" width="1010" height="108" rx="12" fill="#0D0D0D" stroke="#0D0D0D" stroke-width="1.5"/>
+  <text x="264" y="802" font-size="27" font-weight="700" fill="#FFFFFF">验收双场景与事件入口</text>
+  <text x="264" y="834" font-size="16.5" fill="#D6D6D6">外部事件进入任务链路 · 研发与内容各跑通一次 · 费用、审计、知识来源与失败案例</text>
+
+  <!-- conclusion strip -->
+  <rect x="120" y="896" width="1122" height="60" rx="10" fill="#F1F1F1" stroke="#9E9E9E" stroke-width="1.5"/>
+  <text x="681" y="934" text-anchor="middle" font-size="18" font-weight="700" fill="#1A1A1A">系统能力不靠想象，用每周可运行、可复查的成果来证明</text>
+
+  <!-- connector -->
+  <line x1="680" y1="1000" x2="680" y2="1064" stroke="#1A1A1A" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- ================= Panel 2 ================= -->
+  <rect x="88" y="1080" width="1184" height="800" rx="20" fill="#FFFFFF" stroke="#1A1A1A" stroke-width="2"
+        stroke-dasharray="0"/>
+
+  <text x="120" y="1132" font-size="20" font-weight="700" fill="#0D0D0D" letter-spacing="1.5">EVIDENCE GATES / 成果验收</text>
+  <text x="120" y="1164" font-size="17" fill="#5C5C5C">四张证据卡对应四周产物：可以展示、复查，也能说明每个设计选择</text>
+  <line x1="120" y1="1184" x2="1240" y2="1184" stroke="#C4C4C4" stroke-width="1"/>
+
+  <!-- W1 -->
+  <rect x="120" y="1204" width="552" height="310" rx="14" fill="#FAFAFA" stroke="#1A1A1A" stroke-width="1.5"/>
+  <circle cx="172" cy="1252" r="28" fill="#1A1A1A"/>
+  <text x="172" y="1260" text-anchor="middle" font-size="17" font-weight="700" fill="#FFFFFF">W1</text>
+  <text x="216" y="1252" font-size="26" font-weight="700" fill="#0D0D0D">产品与架构证据</text>
+  <line x1="152" y1="1284" x2="640" y2="1284" stroke="#D2D2D2" stroke-width="1"/>
+  <text x="152" y="1320" font-size="16.5" fill="#4A4A4A">产品定义 · 双场景验收用例</text>
+  <text x="152" y="1352" font-size="16.5" fill="#4A4A4A">总体架构图 · Worker 契约</text>
+  <rect x="152" y="1424" width="488" height="62" rx="8" fill="#FFFFFF" stroke="#9E9E9E" stroke-width="1.5"/>
+  <text x="396" y="1462" text-anchor="middle" font-size="17" font-weight="700" fill="#0D0D0D">能说明系统为什么这样设计</text>
+
+  <!-- W2 -->
+  <rect x="688" y="1204" width="552" height="310" rx="14" fill="#FAFAFA" stroke="#1A1A1A" stroke-width="1.5"/>
+  <circle cx="740" cy="1252" r="28" fill="#1A1A1A"/>
+  <text x="740" y="1260" text-anchor="middle" font-size="17" font-weight="700" fill="#FFFFFF">W2</text>
+  <text x="784" y="1252" font-size="26" font-weight="700" fill="#0D0D0D">运行过程证据</text>
+  <line x1="720" y1="1284" x2="1208" y2="1284" stroke="#D2D2D2" stroke-width="1"/>
+  <text x="720" y="1320" font-size="16.5" fill="#4A4A4A">真实任务事件 · Session · 用量</text>
+  <text x="720" y="1352" font-size="16.5" fill="#4A4A4A">工作区隔离或权限边界测试</text>
+  <rect x="720" y="1424" width="488" height="62" rx="8" fill="#FFFFFF" stroke="#9E9E9E" stroke-width="1.5"/>
+  <text x="964" y="1462" text-anchor="middle" font-size="17" font-weight="700" fill="#0D0D0D">能还原一次 Agent 怎样执行</text>
+
+  <!-- W3 -->
+  <rect x="120" y="1538" width="552" height="310" rx="14" fill="#FAFAFA" stroke="#1A1A1A" stroke-width="1.5"/>
+  <circle cx="172" cy="1586" r="28" fill="#1A1A1A"/>
+  <text x="172" y="1594" text-anchor="middle" font-size="17" font-weight="700" fill="#FFFFFF">W3</text>
+  <text x="216" y="1586" font-size="26" font-weight="700" fill="#0D0D0D">控制面证据</text>
+  <line x1="152" y1="1618" x2="640" y2="1618" stroke="#D2D2D2" stroke-width="1"/>
+  <text x="152" y="1654" font-size="16.5" fill="#4A4A4A">Chat / Task 页面 · 后台状态</text>
+  <text x="152" y="1686" font-size="16.5" fill="#4A4A4A">交付物 · 人工确认 · 定时任务</text>
+  <rect x="152" y="1758" width="488" height="62" rx="8" fill="#FFFFFF" stroke="#9E9E9E" stroke-width="1.5"/>
+  <text x="396" y="1796" text-anchor="middle" font-size="17" font-weight="700" fill="#0D0D0D">任务离开网页也能继续完成</text>
+
+  <!-- W4 -->
+  <rect x="688" y="1538" width="552" height="310" rx="14" fill="#FAFAFA" stroke="#1A1A1A" stroke-width="1.5"/>
+  <circle cx="740" cy="1586" r="28" fill="#1A1A1A"/>
+  <text x="740" y="1594" text-anchor="middle" font-size="17" font-weight="700" fill="#FFFFFF">W4</text>
+  <text x="784" y="1586" font-size="26" font-weight="700" fill="#0D0D0D">双场景交付证据</text>
+  <line x1="720" y1="1618" x2="1208" y2="1618" stroke="#D2D2D2" stroke-width="1"/>
+  <text x="720" y="1654" font-size="16.5" fill="#4A4A4A">事件入口 · 研发任务 · 内容生产</text>
+  <text x="720" y="1686" font-size="16.5" fill="#4A4A4A">费用、审计、知识来源、失败案例</text>
+  <rect x="720" y="1758" width="488" height="62" rx="8" fill="#FFFFFF" stroke="#9E9E9E" stroke-width="1.5"/>
+  <text x="964" y="1796" text-anchor="middle" font-size="17" font-weight="700" fill="#0D0D0D">能展示平台如何复用到工作场景</text>
+
+  <!-- ================= Footer ================= -->
+  <rect x="560" y="1930" width="240" height="2" fill="#1A1A1A"/>
+  <text x="680" y="1968" text-anchor="middle" font-size="27" font-weight="700" fill="#0D0D0D">看完课程不等于完成</text>
+  <text x="680" y="2002" text-anchor="middle" font-size="17" fill="#5C5C5C">能拿出产品判断、运行证据与场景交付，才拥有一套可以继续迭代的工程作品。</text>
+</svg>

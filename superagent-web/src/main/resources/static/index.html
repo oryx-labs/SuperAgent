@@ -30,6 +30,8 @@
       <nav class="nav" aria-label="Primary">
         <a class="nav__item is-active" href="#" data-view="chat"><span class="nav__dot"></span><span data-i18n="nav.agent">Agent</span></a>
         <a class="nav__item" href="#" data-view="tasks"><span class="nav__dot"></span><span data-i18n="nav.tasks">Tasks</span></a>
+        <a class="nav__item" href="#" data-view="knowledge"><span class="nav__dot"></span><span data-i18n="nav.knowledge">Knowledge</span></a>
+        <a class="nav__item" href="#" data-view="skills"><span class="nav__dot"></span><span data-i18n="nav.skills">Skills</span></a>
         <a class="nav__item" href="#" data-view="automation"><span class="nav__dot"></span><span data-i18n="nav.automation">Automation</span></a>
         <a class="nav__item" href="#" data-view="connectors" id="connectorsNav"><span class="nav__dot"></span><span data-i18n="nav.connectors">Connectors</span></a>
       </nav>
@@ -61,11 +63,16 @@
       </div>
 
       <form class="composer" id="composer">
+        <div class="image-tray" id="chatImageTray" hidden></div>
         <textarea class="composer__input" id="composerInput" rows="1"
                   data-i18n-ph="chat.composer" aria-label="Message"></textarea>
         <div class="composer__row">
-          <select class="composer__hint composer__model" id="statusHint" aria-label="Model"></select>
-          <button class="send" type="submit" id="sendBtn" aria-label="Send">↑</button>
+          <button class="attach-btn" type="button" id="chatAttachBtn" data-i18n-title="img.attach" aria-label="Attach image"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+          <input type="file" id="chatImageInput" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+          <div class="composer__actions">
+            <select class="composer__model" id="statusHint" aria-label="Model"></select>
+            <button class="send" type="submit" id="sendBtn" aria-label="Send">↑</button>
+          </div>
         </div>
       </form>
     </main>
@@ -76,16 +83,82 @@
           <h3 class="panel__title agent-info__title"><span class="agent-avatar" id="agentInfoAvatar" aria-hidden="true"></span><span id="agentInfoName">Agent</span></h3>
           <button class="link-btn link-btn--muted" id="agentEditBtn" type="button" data-i18n="agent.edit">Edit</button>
         </div>
-        <span class="panel__subhead" data-i18n="agent.fPersona">Persona</span>
+        <span class="panel__subhead" data-i18n="agent.fCharacter">Character</span>
+        <p class="agent-info__persona" id="agentInfoCharacter"></p>
         <p class="agent-info__persona" id="agentInfoPersona"></p>
+        <span class="panel__subhead panel__subhead--spaced" data-i18n="sk.agentSkills">Skills</span>
+        <div class="skill-chips" id="agentInfoSkills"></div>
         <span class="panel__subhead panel__subhead--spaced" data-i18n="agent.fModel">Default model</span>
         <p class="agent-info__model" id="agentInfoModel"></p>
       </section>
-      <section class="panel__block">
-        <h3 class="panel__title" data-i18n="chat.progress">Progress</h3>
-        <p class="panel__status" id="progressStatus" data-i18n="chat.statusIdle">idle</p>
-      </section>
     </aside>
+
+    <section class="kb" data-pane="knowledge" aria-label="Knowledge" hidden>
+      <div class="kb__side">
+        <div class="threads__head">
+          <span class="threads__title" data-i18n="kb.title">Knowledge</span>
+        </div>
+        <button class="new-chat" type="button" id="kbNewFolderBtn" data-i18n="kb.newFolder">+ New folder</button>
+        <div class="kb-tree" id="kbTree" role="tree"></div>
+      </div>
+      <div class="kb__main">
+        <div class="kb__bar">
+          <button class="btn kb__up" type="button" id="kbUpBtn" data-i18n-title="kb.up" aria-label="Up">↑</button>
+          <nav class="kb-crumbs" id="kbCrumbs" aria-label="Path"></nav>
+          <div class="kb__actions">
+            <a class="link-btn" id="kbDownloadBtn" hidden data-i18n="kb.download">Download</a>
+            <button class="link-btn" type="button" id="kbRenameBtn" data-i18n="kb.rename">Rename</button>
+            <button class="link-btn" type="button" id="kbMoveBtn" data-i18n="kb.move">Move</button>
+            <button class="link-btn link-btn--danger" type="button" id="kbDeleteBtn" data-i18n="kb.delete">Delete</button>
+          </div>
+        </div>
+        <div class="kb__view" id="kbView"></div>
+      </div>
+    </section>
+
+    <section class="kb" data-pane="skills" aria-label="Skills" hidden>
+      <div class="kb__side">
+        <div class="threads__head">
+          <span class="threads__title" data-i18n="sk.title">Skills</span>
+          <button class="link-btn" type="button" id="skNewBtn" data-i18n="sk.new">+ Skill</button>
+        </div>
+        <div class="search sk-search"><input type="search" id="skSearch" data-i18n-ph="sk.search" aria-label="Search skills" /></div>
+        <div class="sk-list" id="skList"></div>
+      </div>
+      <div class="kb__main">
+        <div class="kb__bar">
+          <h2 class="sk-heading" id="skHeading"></h2>
+          <div class="kb__actions" id="skActions" hidden>
+            <button class="link-btn" type="button" id="skEditBtn" data-i18n="sk.edit">Edit</button>
+            <button class="link-btn link-btn--danger" type="button" id="skDeleteBtn" data-i18n="kb.delete">Delete</button>
+          </div>
+        </div>
+        <div class="kb__view" id="skView"></div>
+        <form class="kb__view sk-form" id="skForm" hidden>
+          <div class="field-row">
+            <label class="field"><span data-i18n="sk.fName">Name</span><input type="text" id="sfName" maxlength="100" required /></label>
+            <label class="field"><span data-i18n="sk.fCategory">Category</span><input type="text" id="sfCategory" maxlength="40" list="skCategories" /></label>
+            <datalist id="skCategories"></datalist>
+          </div>
+          <label class="field"><span data-i18n="sk.fDescription">When to use</span>
+            <input type="text" id="sfDescription" maxlength="500" data-i18n-ph="sk.fDescriptionPh" /></label>
+          <label class="field"><span data-i18n="sk.fContent">Content (Markdown)</span>
+            <textarea id="sfContent" rows="18" data-i18n-ph="sk.fContentPh"></textarea></label>
+          <div class="field" id="sfImagesField"><span data-i18n="sk.fImages">Images</span>
+            <div class="sk-images" id="sfImages"></div>
+            <label class="btn sk-upload"><span data-i18n="sk.addImage">Add image</span>
+              <input type="file" id="sfImageInput" accept="image/png,image/jpeg,image/gif,image/webp" hidden /></label>
+            <p class="field-hint" id="sfImagesHint" data-i18n="sk.imagesHint"></p>
+          </div>
+          <label class="check-field"><input type="checkbox" id="sfEnabled" checked /><span data-i18n="sk.fEnabled">Enabled</span></label>
+          <p class="field-hint kb-modal__error" id="sfError" hidden></p>
+          <div class="modal__actions">
+            <button type="button" class="btn" id="sfCancel" data-i18n="common.cancel">Cancel</button>
+            <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
+          </div>
+        </form>
+      </div>
+    </section>
 
     <section class="admin" data-pane="connectors" aria-label="Connectors" hidden>
       <div class="admin__head">
@@ -181,7 +254,10 @@
             <p class="artifact-empty" id="taskArtifactsEmpty" data-i18n="tasks.artifactsEmpty" hidden>No deliverables yet.</p>
           </aside>
         </div>
+        <div class="image-tray image-tray--steer" id="taskImageTray" hidden></div>
         <form class="task-steer" id="taskSteerForm">
+          <button class="attach-btn" type="button" id="taskAttachBtn" data-i18n-title="img.attach" aria-label="Attach image"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+          <input type="file" id="taskImageInput" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
           <textarea class="task-steer__input" id="taskSteerInput" rows="1" data-i18n-ph="tasks.steer"></textarea>
           <button class="send" type="submit" id="taskSteerBtn" aria-label="Send">↑</button>
         </form>
@@ -300,6 +376,81 @@
       </div>
     </section>
 
+    <section class="admin" data-pane="automation" aria-label="Automations" hidden>
+      <div class="task-list-view" id="autoListView">
+        <div class="admin__head">
+          <div>
+            <h2 class="admin__title" data-i18n="auto.title">Automations</h2>
+            <p class="admin__sub" data-i18n="auto.sub">Prompts that run as tasks on a schedule or when called by API. You can also create them by asking an Agent in chat.</p>
+          </div>
+          <button class="btn btn--primary" id="autoAddBtn" type="button" data-i18n="auto.add">+ New automation</button>
+        </div>
+        <div class="auto-toolbar">
+          <div class="auto-tabs" id="autoTabs" role="tablist">
+            <button type="button" class="auto-tab is-active" data-filter="all"><span data-i18n="auto.tabAll">All</span> <b></b></button>
+            <button type="button" class="auto-tab" data-filter="active"><span data-i18n="auto.tabActive">Active</span> <b></b></button>
+            <button type="button" class="auto-tab" data-filter="once"><span data-i18n="auto.typeOnce">One-time</span> <b></b></button>
+            <button type="button" class="auto-tab" data-filter="recurring"><span data-i18n="auto.typeRecurring">Recurring</span> <b></b></button>
+            <button type="button" class="auto-tab" data-filter="api"><span data-i18n="auto.typeApi">API</span> <b></b></button>
+          </div>
+          <div class="auto-filters">
+            <input type="search" id="autoSearch" data-i18n-ph="auto.search" aria-label="Search automations" />
+            <select id="autoOwnerFilter" aria-label="Creator">
+              <option value="mine" data-i18n="auto.ownerMine">My automations</option>
+              <option value="all" data-i18n="auto.ownerAll">Everyone's</option>
+            </select>
+          </div>
+        </div>
+        <div class="admin__body">
+          <table class="ctable">
+            <thead>
+              <tr>
+                <th data-i18n="auto.colName">Name</th><th data-i18n="auto.colSchedule">Schedule</th>
+                <th data-i18n="auto.colModel">Model</th><th data-i18n="auto.colSource">Source</th>
+                <th data-i18n="auto.colLastRun">Last run</th><th data-i18n="auto.colNextRun">Next run</th>
+                <th data-i18n="auto.colCreator">Creator</th><th data-i18n="auto.colEnabled">Enabled</th>
+                <th class="ctable__actions-col" data-i18n="auto.colActions">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="autoRows"></tbody>
+          </table>
+          <p class="admin__empty" id="autoEmpty" data-i18n="auto.empty" hidden>No automations yet.</p>
+        </div>
+      </div>
+
+      <div class="task-detail-view" id="autoDetailView" hidden>
+        <div class="task-detail__head">
+          <button class="task-back" id="autoBackBtn" type="button" aria-label="Back">←</button>
+          <div class="task-detail__title-wrap">
+            <h2 class="task-detail__title" id="autoDetailTitle">Automation</h2>
+            <div class="task-detail__meta" id="autoDetailMeta"></div>
+          </div>
+          <div class="auto-detail__actions" id="autoDetailActions"></div>
+        </div>
+        <div class="admin__body">
+          <div class="auto-token" id="autoTokenBox" hidden>
+            <p class="auto-token__title" data-i18n="auto.tokenTitle">API token — copy it now, it won't be shown again</p>
+            <code class="auto-token__value" id="autoTokenValue"></code>
+            <pre class="auto-token__curl" id="autoTokenCurl"></pre>
+          </div>
+          <dl class="task-facts auto-facts" id="autoFacts"></dl>
+          <h3 class="panel__title panel__title--spaced" data-i18n="auto.prompt">Prompt</h3>
+          <div class="auto-prompt" id="autoPrompt"></div>
+          <h3 class="panel__title panel__title--spaced" data-i18n="auto.runs">Recent runs</h3>
+          <table class="ctable">
+            <thead>
+              <tr>
+                <th data-i18n="auto.colFiredAt">Time</th><th data-i18n="auto.colTrigger">Trigger</th>
+                <th data-i18n="auto.colTask">Task</th><th data-i18n="auto.colStatus">Status</th>
+              </tr>
+            </thead>
+            <tbody id="autoRunRows"></tbody>
+          </table>
+          <p class="admin__empty" id="autoRunsEmpty" data-i18n="auto.runsEmpty" hidden>No runs yet.</p>
+        </div>
+      </div>
+    </section>
+
     <section class="admin admin--center" data-pane="placeholder" aria-label="Coming soon" hidden>
       <div class="placeholder">
         <img class="placeholder__logo" src="/superagent-logo.png" alt="" aria-hidden="true" />
@@ -382,6 +533,11 @@
         </label>
       </div>
       <p class="field-hint" id="tfModelHint" hidden></p>
+      <label class="check-field"><input type="checkbox" id="tfSaveKb" />
+        <span data-i18n="tasks.fSaveKb">Save the output to my knowledge base when done</span></label>
+      <label class="field" id="tfKbFolderField" hidden><span data-i18n="tasks.fKbFolder">Knowledge folder</span>
+        <select id="tfKbFolder"></select>
+      </label>
       <div class="modal__actions">
         <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
         <button type="submit" class="btn btn--primary" id="tfSubmit" data-i18n="tasks.create">Create &amp; run</button>
@@ -430,6 +586,25 @@
     </form>
   </div>
 
+  <div class="modal" id="kbModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="kbForm">
+      <h3 class="modal__title" id="kbModalTitle"></h3>
+      <p class="kb-modal__msg" id="kbModalMsg" hidden></p>
+      <label class="field" id="kbNameField"><span data-i18n="kb.name">Name</span>
+        <input type="text" id="kbNameInput" maxlength="255" />
+      </label>
+      <label class="field" id="kbTargetField"><span data-i18n="kb.moveTo">Move to</span>
+        <select id="kbTargetSelect"></select>
+      </label>
+      <p class="field-hint kb-modal__error" id="kbModalError" hidden></p>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="kbModalSubmit"></button>
+      </div>
+    </form>
+  </div>
+
   <div class="modal" id="agentModal" hidden>
     <div class="modal__backdrop" data-close></div>
     <form class="modal__card" id="agentForm">
@@ -440,12 +615,86 @@
       <label class="field"><span data-i18n="agent.fName">Name</span>
         <input type="text" id="afName" required data-i18n-ph="agent.fNamePh" />
       </label>
-      <label class="field"><span data-i18n="agent.fPersona">Persona</span>
-        <textarea id="afPersona" rows="6" data-i18n-ph="agent.fPersonaPh"></textarea>
+      <div class="field"><span data-i18n="agent.fCharacter">Character</span>
+        <div class="character-picker" id="afCharacters" role="radiogroup"></div>
+      </div>
+      <div class="field"><span data-i18n="sk.agentSkills">Skills</span>
+        <div class="skill-picker" id="afSkills"></div>
+      </div>
+      <label class="field"><span id="afPersonaLabel"></span>
+        <textarea id="afPersona" rows="4"></textarea>
       </label>
       <div class="modal__actions">
         <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
         <button type="submit" class="btn btn--primary" id="afSubmit" data-i18n="common.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="drawer" id="autoDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <form class="drawer__panel" id="autoForm" novalidate>
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <h3 class="drawer__title" id="autoFormTitle" data-i18n="auto.formNew">New automation</h3>
+      </div>
+      <div class="drawer__body">
+        <label class="field"><span><i class="req">*</i> <span data-i18n="auto.prompt">Prompt</span></span>
+          <textarea id="afPrompt" rows="8" data-i18n-ph="auto.promptPh"></textarea>
+        </label>
+        <label class="field"><span data-i18n="auto.colName">Name</span>
+          <input type="text" id="afAutoName" data-i18n-ph="auto.namePh" />
+        </label>
+        <label class="field"><span data-i18n="auto.type">Type</span>
+          <select id="afType">
+            <option value="recurring" data-i18n="auto.typeRecurringLong">Schedule · Recurring</option>
+            <option value="once" data-i18n="auto.typeOnceLong">Schedule · Once</option>
+            <option value="api" data-i18n="auto.typeApi">API</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="auto.colModel">Model</span>
+          <select id="afAutoModel"></select>
+        </label>
+        <div class="auto-sched" id="afRecurring">
+          <div class="field-row">
+            <label class="field"><span data-i18n="auto.preset">Preset</span>
+              <select id="afPreset">
+                <option value="hourly" data-i18n="auto.presetHourly">Every hour</option>
+                <option value="daily" data-i18n="auto.presetDaily">Every day</option>
+                <option value="weekdays" data-i18n="auto.presetWeekdays">Weekdays</option>
+                <option value="weekly" data-i18n="auto.presetWeekly">Every week</option>
+                <option value="monthly" data-i18n="auto.presetMonthly">Every month</option>
+                <option value="custom" data-i18n="auto.presetCustom">Custom (cron)</option>
+              </select>
+            </label>
+            <label class="field" id="afWeekdayField"><span data-i18n="auto.weekday">Weekday</span><select id="afWeekday"></select></label>
+            <label class="field" id="afDayField"><span data-i18n="auto.day">Day</span><select id="afDay"></select></label>
+            <label class="field" id="afHourField"><span data-i18n="auto.hour">Hour</span><select id="afHour"></select></label>
+            <label class="field" id="afMinuteField"><span data-i18n="auto.minute">Minute</span><select id="afMinute"></select></label>
+          </div>
+          <label class="field" id="afCronField"><span data-i18n="auto.cron">Cron (minute hour day month weekday)</span>
+            <input type="text" id="afCron" placeholder="0 9 * * 1-5" spellcheck="false" />
+          </label>
+        </div>
+        <label class="field" id="afRunAtField"><span data-i18n="auto.runAt">Run at</span>
+          <input type="datetime-local" id="afRunAt" />
+        </label>
+        <label class="field" id="afTimezoneField"><span data-i18n="auto.timezone">Time zone</span>
+          <select id="afTimezone"></select>
+        </label>
+        <p class="field-hint auto-preview" id="afPreview"></p>
+        <label class="field" id="afOverlapField"><span data-i18n="auto.overlap">Overlap policy</span>
+          <select id="afOverlap">
+            <option value="skip" data-i18n="auto.overlapSkip">Skip if running</option>
+            <option value="parallel" data-i18n="auto.overlapParallel">Run in parallel</option>
+          </select>
+        </label>
+        <p class="field-hint" data-i18n="auto.deliveryHint">Each run becomes a task; see results in Tasks.</p>
+        <p class="model-error" id="afAutoError" hidden></p>
+      </div>
+      <div class="drawer__foot">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="afAutoSubmit" data-i18n="common.save">Save</button>
       </div>
     </form>
   </div>
