@@ -56,6 +56,20 @@ public class MysqlChatStore extends AbstractJdbcChatStore {
 
     public MysqlChatStore(JdbcTemplate jdbc) {
         super(jdbc, SCHEMA);
+        // CREATE TABLE IF NOT EXISTS won't alter a chat_session table created before agent_id existed.
+        ensureColumn("chat_session", "agent_id", "VARCHAR(64)");
+    }
+
+    /** Adds a column to an already-created table idempotently (MySQL has no ADD COLUMN IF NOT EXISTS). */
+    private void ensureColumn(String table, String column, String type) {
+        Integer present = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                        + "WHERE table_schema = SCHEMA() AND LOWER(table_name) = LOWER(?) "
+                        + "AND LOWER(column_name) = LOWER(?)",
+                Integer.class, table, column);
+        if (present == null || present == 0) {
+            jdbc.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + type);
+        }
     }
 
     @Override
@@ -65,8 +79,10 @@ public class MysqlChatStore extends AbstractJdbcChatStore {
 
     @Override
     public void updateSession(ChatSession s) {
-        jdbc.update("UPDATE chat_session SET title = ?, agent_session_id = ?, status = ?, updated_at = ? WHERE id = ?",
+        jdbc.update("UPDATE chat_session SET title = ?, agent_type = ?, agent_session_id = ?, status = ?, updated_at = ? "
+                        + "WHERE id = ?",
                 s.title() == null ? "" : s.title(),
+                s.agentType().name(),
                 s.agentSessionId() == null ? "" : s.agentSessionId(),
                 s.status().name(),
                 java.time.LocalDateTime.ofInstant(s.updatedAt(), java.time.ZoneOffset.UTC),

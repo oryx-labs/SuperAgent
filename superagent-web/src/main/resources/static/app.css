@@ -56,7 +56,7 @@ img { max-width: 100%; }
 }
 
 .brand { display: flex; align-items: center; }
-.brand__logo { height: 48px; width: auto; display: block; }
+.brand__logo { height: 60px; width: auto; display: block; }
 
 .topbar__right { display: flex; align-items: center; gap: 16px; }
 .lang-switch { display: flex; gap: 0; }
@@ -255,6 +255,7 @@ img { max-width: 100%; }
   font-size: 13px; color: var(--muted);
   border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px;
 }
+.composer__model { background: var(--paper); cursor: pointer; max-width: 60%; font-family: inherit; }
 .send {
   width: 32px; height: 32px; border-radius: 50%;
   border: 0; background: var(--ink); color: var(--paper);
@@ -532,17 +533,21 @@ img { max-width: 100%; }
 
 .task-detail__body { flex: 1 1 auto; display: flex; min-height: 0; }
 .task-main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.task-tabs { display: flex; gap: 4px; padding: 10px 22px 0; border-bottom: 1px solid var(--line); }
-.task-tab {
-  border: 0; background: none; cursor: pointer; font: inherit; font-size: 13px; color: var(--muted);
-  padding: 8px 10px; border-bottom: 2px solid transparent; margin-bottom: -1px;
-}
-.task-tab:hover { color: var(--ink); }
-.task-tab.is-active { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
-.task-stream { flex: 1 1 auto; overflow-y: auto; padding: 18px 22px; min-width: 0; }
-.task-stream[data-filter="text"] .ev:not([data-type="text"]):not([data-type="cmd"]) { display: none; }
-.task-stream[data-filter="tool"] .ev:not([data-type="tool"]) { display: none; }
-.task-stream[data-filter="error"] .ev:not([data-type="error"]) { display: none; }
+.task-section__title { margin: 4px 0 0; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.task-prompt { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.task-prompt > summary { cursor: pointer; padding: 10px 14px; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); list-style: none; }
+.task-prompt > summary::-webkit-details-marker { display: none; }
+.task-prompt > summary::before { content: "▸ "; color: var(--muted-2); }
+.task-prompt[open] > summary::before { content: "▾ "; }
+.task-prompt__body { padding: 0 14px 12px; font-size: 13px; color: var(--ink); word-break: break-word; }
+.task-phases { margin: 0; }
+.markdown { line-height: 1.6; }
+.markdown pre { white-space: pre-wrap; background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow-x: auto; }
+.markdown code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.markdown h1, .markdown h2, .markdown h3 { font-size: 13.5px; margin: 10px 0 4px; }
+.markdown ul, .markdown ol { padding-left: 20px; margin: 6px 0; }
+.task-tab { border: 0; background: none; cursor: pointer; }
+.task-stream { min-width: 0; }
 .task-side {
   flex: 0 0 280px; border-left: 1px solid var(--line); background: var(--panel);
   padding: 18px 16px; overflow-y: auto;
@@ -623,3 +628,111 @@ img { max-width: 100%; }
   .rail { display: none; }
   .admin { grid-column: 1; }
 }
+
+/* ---------- Agent info panel (right of chat) ---------- */
+.agent-info__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.panel__subhead--spaced { margin-top: 14px; }
+.agent-info__persona { margin: 6px 0 0; font-size: 12.5px; color: var(--ink); line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.agent-info__model { margin: 6px 0 0; font-size: 12.5px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* ---------- Models (vendor CLIs) ---------- */
+.model-add { display: flex; gap: 8px; align-items: center; }
+.model-add select {
+  font: inherit; font-size: 13px; color: var(--ink); background: var(--paper);
+  border: 1px solid var(--line-strong); border-radius: 8px; padding: 7px 10px; min-width: 180px;
+}
+.model-error { display: block; margin-top: 4px; color: #b91c1c; font-size: 11px; max-width: 280px; white-space: pre-wrap; word-break: break-word; }
+.model-tabs { display: flex; gap: 4px; padding: 10px 22px 0; border-bottom: 1px solid var(--line); }
+.model-tab {
+  border: 0; background: none; cursor: pointer; font: inherit; font-size: 13px; color: var(--muted);
+  padding: 8px 10px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.model-tab.is-active { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+.model-facts { max-width: 640px; margin-top: 12px; }
+.model-facts dd { text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.model-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-width: 480px; }
+.model-list li { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.status-badge.is-model-ok, .status-badge.is-infer-ok { background: #dcfce7; color: #15803d; }
+.status-badge.is-infer-error { background: #fee2e2; color: #b91c1c; }
+.infer-tip { position: relative; display: inline-block; cursor: help; }
+.infer-tip__body {
+  display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 20;
+  width: 320px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: #fff; color: #b91c1c; font-size: 11px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word; box-shadow: 0 6px 20px rgba(0, 0, 0, .12);
+}
+.infer-tip:hover .infer-tip__body { display: block; }
+.status-badge.is-infer-unchecked { background: var(--line); color: var(--muted); }
+.status-badge.is-model-not_installed, .status-badge.is-model-unsupported { background: var(--line); color: var(--muted); }
+.status-badge.is-model-no_auth, .status-badge.is-model-needs_upgrade { background: #fef3c7; color: #b45309; }
+.status-badge.is-model-installing { background: #dbeafe; color: #1d4ed8; }
+
+/* ---------- Model list (detail tab) ---------- */
+.model-panel { margin-top: 12px; }
+.model-panel__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.model-panel__meta { font-size: 12px; color: var(--muted); }
+.model-panel .model-list { max-width: none; }
+.model-item { display: flex; flex-direction: column; gap: 6px; }
+.model-item__head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.model-item__head code { font-size: 13px; font-weight: 600; }
+.model-item__name { font-size: 12px; color: var(--muted); }
+.model-item__ctx { margin-left: auto; font-size: 11px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+.model-item__efforts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.model-item__label { font-size: 11px; color: var(--muted); margin-right: 2px; }
+.model-item__note { font-size: 11px; color: var(--muted-2); margin-left: 4px; }
+.model-tag {
+  font-size: 11px; border: 1px solid var(--line-strong); border-radius: 5px; padding: 1px 6px;
+  color: var(--ink); background: var(--paper);
+}
+.model-tag--default { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.model-tag--warn { border-color: #fcd34d; background: #fef3c7; color: #b45309; }
+
+/* ---------- Task detail tabs ---------- */
+.task-tabs { flex: 0 0 auto; }
+/* Each tab pane scrolls on its own, so the run log can be pinned to its bottom. */
+.task-pane { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 22px; display: flex; flex-direction: column; gap: 14px; }
+.task-pane[hidden] { display: none; }
+.session-facts { max-width: 720px; margin-top: 0; }
+.session-facts dd { text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
+.session-note { margin: 0; max-width: 720px; font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+.task-facts dd[title] { cursor: help; }
+
+/* ---------- Task list: session + agent/model ---------- */
+.t-session {
+  display: block; margin-top: 3px; color: var(--muted-2); font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.t-agent { white-space: nowrap; }
+.t-agent small { display: block; color: var(--muted); font-size: 11.5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.field select { width: 100%; }
+.field-hint { margin: -6px 0 0; font-size: 12px; color: var(--muted); }
+
+/* System settings */
+.settings-form { display: flex; flex-direction: column; gap: 12px; max-width: 520px; padding-top: 8px; }
+.settings-form .field-hint { margin: -4px 0 0; line-height: 1.5; }
+.settings-form__section { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.settings-form__actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.settings-form__status { font-size: 12px; color: var(--muted); }
+
+/* ---------- Agent avatars ---------- */
+.agent-avatar {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%; background: var(--rail); border: 1px solid var(--line);
+  font-size: 15px; line-height: 1;
+}
+.thread .agent-avatar { margin-right: 8px; }
+.agent-info__title { display: flex; align-items: center; gap: 8px; }
+.avatar-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 6px; }
+.avatar-option {
+  height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper);
+  font-size: 20px; line-height: 1; cursor: pointer;
+}
+.avatar-option:hover { background: var(--panel); }
+.avatar-option.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, .18); }
+
+/* ---------- Model list as a table (detail tab) ---------- */
+.model-table { margin-top: 10px; }
+.model-table .model-id { font-size: 12.5px; font-weight: 600; margin-right: 6px; }
+.model-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.model-note { color: var(--muted-2); font-size: 11.5px; }
+small.model-note { display: block; margin-top: 4px; }

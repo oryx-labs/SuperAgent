@@ -28,15 +28,16 @@
   <div class="layout">
     <aside class="rail">
       <nav class="nav" aria-label="Primary">
-        <a class="nav__item is-active" href="#" data-view="chat"><span class="nav__dot"></span><span data-i18n="nav.chat">Chat</span></a>
+        <a class="nav__item is-active" href="#" data-view="chat"><span class="nav__dot"></span><span data-i18n="nav.agent">Agent</span></a>
         <a class="nav__item" href="#" data-view="tasks"><span class="nav__dot"></span><span data-i18n="nav.tasks">Tasks</span></a>
         <a class="nav__item" href="#" data-view="automation"><span class="nav__dot"></span><span data-i18n="nav.automation">Automation</span></a>
+        <a class="nav__item" href="#" data-view="connectors" id="connectorsNav"><span class="nav__dot"></span><span data-i18n="nav.connectors">Connectors</span></a>
       </nav>
       <div class="nav__sep" id="adminSep"></div>
       <nav class="nav" aria-label="Administration" id="adminNav">
-        <a class="nav__item" href="#" data-view="connectors"><span class="nav__dot"></span><span data-i18n="nav.connectors">Connectors</span></a>
+        <a class="nav__item" href="#" data-view="models"><span class="nav__dot"></span><span data-i18n="nav.models">Models</span></a>
         <a class="nav__item" href="#" data-view="users"><span class="nav__dot"></span><span data-i18n="nav.users">Users</span></a>
-        <a class="nav__item" href="#" data-view="tokens"><span class="nav__dot"></span><span data-i18n="nav.tokens">Token Management</span></a>
+        <a class="nav__item" href="#" data-view="settings"><span class="nav__dot"></span><span data-i18n="nav.settings">System Settings</span></a>
       </nav>
     </aside>
 
@@ -63,23 +64,26 @@
         <textarea class="composer__input" id="composerInput" rows="1"
                   data-i18n-ph="chat.composer" aria-label="Message"></textarea>
         <div class="composer__row">
-          <span class="composer__hint" id="statusHint">claude</span>
+          <select class="composer__hint composer__model" id="statusHint" aria-label="Model"></select>
           <button class="send" type="submit" id="sendBtn" aria-label="Send">↑</button>
         </div>
       </form>
     </main>
 
-    <aside class="panel" data-pane="chat" aria-label="Context">
+    <aside class="panel" data-pane="chat" aria-label="Agent">
+      <section class="panel__block" id="agentInfoPanel" hidden>
+        <div class="agent-info__head">
+          <h3 class="panel__title agent-info__title"><span class="agent-avatar" id="agentInfoAvatar" aria-hidden="true"></span><span id="agentInfoName">Agent</span></h3>
+          <button class="link-btn link-btn--muted" id="agentEditBtn" type="button" data-i18n="agent.edit">Edit</button>
+        </div>
+        <span class="panel__subhead" data-i18n="agent.fPersona">Persona</span>
+        <p class="agent-info__persona" id="agentInfoPersona"></p>
+        <span class="panel__subhead panel__subhead--spaced" data-i18n="agent.fModel">Default model</span>
+        <p class="agent-info__model" id="agentInfoModel"></p>
+      </section>
       <section class="panel__block">
         <h3 class="panel__title" data-i18n="chat.progress">Progress</h3>
         <p class="panel__status" id="progressStatus" data-i18n="chat.statusIdle">idle</p>
-      </section>
-      <section class="panel__block">
-        <h3 class="panel__title" data-i18n="chat.context">Context</h3>
-        <span class="panel__subhead" data-i18n="chat.agent">Agent</span>
-        <ul class="panel__list panel__list--plain">
-          <li>claude</li>
-        </ul>
       </section>
     </aside>
 
@@ -119,7 +123,8 @@
           <table class="ttable">
             <thead>
               <tr>
-                <th data-i18n="tasks.colTask">Task</th><th data-i18n="tasks.colSource">Source</th>
+                <th data-i18n="tasks.colTask">Task</th><th data-i18n="tasks.colAgent">Agent / Model</th>
+                <th data-i18n="tasks.colSource">Source</th>
                 <th data-i18n="tasks.colCreated">Created</th><th data-i18n="tasks.colSpend">Spend</th>
                 <th class="ttable__status-col" data-i18n="tasks.colStatus">Status</th><th></th>
               </tr>
@@ -145,22 +150,31 @@
         </div>
         <div class="task-detail__body">
           <div class="task-main">
-            <div class="task-tabs" id="taskTabs">
-              <button type="button" class="task-tab is-active" data-filter="all" data-i18n="tasks.tabAll">All events</button>
-              <button type="button" class="task-tab" data-filter="text" data-i18n="tasks.tabMessages">Messages</button>
-              <button type="button" class="task-tab" data-filter="tool" data-i18n="tasks.tabTools">Tools</button>
-              <button type="button" class="task-tab" data-filter="error" data-i18n="tasks.tabErrors">Errors</button>
+            <div class="model-tabs task-tabs" id="taskTabs">
+              <button type="button" class="model-tab" data-tab="prompt" data-i18n="tasks.tabPrompt">Prompt</button>
+              <button type="button" class="model-tab is-active" data-tab="run" data-i18n="tasks.tabRun">Conversation</button>
+              <button type="button" class="model-tab" data-tab="session" data-i18n="tasks.tabSession">Session</button>
             </div>
-            <div class="task-stream" id="taskStream"></div>
+            <div class="task-pane" data-pane-tab="prompt" hidden>
+              <div class="task-prompt__body markdown" id="taskPromptBody"></div>
+            </div>
+            <div class="task-pane" data-pane-tab="run" id="taskRunPane">
+              <section class="task-phases" id="taskPhasesPanel" hidden>
+                <h3 class="task-section__title" data-i18n="tasks.phases">Flow</h3>
+                <ol class="phases" id="taskPhases"></ol>
+              </section>
+              <h3 class="task-section__title" data-i18n="tasks.runlog">Run log</h3>
+              <div class="task-stream" id="taskStream"></div>
+            </div>
+            <div class="task-pane" data-pane-tab="session" hidden>
+              <dl class="task-facts session-facts" id="taskSessionInfo"></dl>
+              <p class="session-note" data-i18n="tasks.sessionNote">Steering messages resume this same session.</p>
+            </div>
           </div>
           <aside class="task-side">
             <h3 class="panel__title" data-i18n="tasks.progress">Progress</h3>
             <div class="progress"><div class="progress__bar" id="taskProgressBar"></div></div>
             <p class="progress__pct" id="taskProgressPct">0%</p>
-            <section id="taskPhasesPanel" hidden>
-              <h3 class="panel__title panel__title--spaced" data-i18n="tasks.phases">Flow</h3>
-              <ol class="phases" id="taskPhases"></ol>
-            </section>
             <dl class="task-facts" id="taskFacts"></dl>
             <h3 class="panel__title panel__title--spaced" data-i18n="tasks.artifacts">Artifacts</h3>
             <ul class="artifact-list" id="taskArtifacts"></ul>
@@ -194,6 +208,95 @@
           <tbody id="userRows"></tbody>
         </table>
         <p class="admin__empty" id="usersEmpty" data-i18n="users.empty" hidden>No provisioned users yet.</p>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="models" aria-label="Models" hidden>
+      <div class="task-list-view" id="modelListView">
+        <div class="admin__head">
+          <div>
+            <h2 class="admin__title" data-i18n="models.title">Models</h2>
+            <p class="admin__sub" data-i18n="models.sub">The model-vendor CLIs the runtime calls on this machine.</p>
+          </div>
+          <div class="model-add">
+            <select id="modelCatalog" aria-label="Add model CLI"></select>
+            <button class="btn btn--primary" id="modelAddBtn" type="button" data-i18n="models.add">+ Add</button>
+          </div>
+        </div>
+        <div class="admin__body">
+          <table class="ctable">
+            <thead>
+              <tr>
+                <th data-i18n="models.colName">CLI</th><th data-i18n="models.colInstalled">Installed</th>
+                <th data-i18n="models.colInfer">Can infer</th><th data-i18n="models.colVersion">Version</th>
+                <th data-i18n="models.colLatest">Latest</th><th data-i18n="models.colStatus">Status</th>
+                <th class="ctable__actions-col" data-i18n="models.colActions">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="modelRows"></tbody>
+          </table>
+          <p class="admin__empty" id="modelsEmpty" data-i18n="models.empty" hidden>No model CLIs yet — add one from the top right.</p>
+        </div>
+      </div>
+
+      <div class="task-detail-view" id="modelDetailView" hidden>
+        <div class="task-detail__head">
+          <button class="task-back" id="modelBackBtn" type="button" aria-label="Back">←</button>
+          <div class="task-detail__title-wrap">
+            <h2 class="task-detail__title" id="modelDetailTitle">Model</h2>
+            <div class="task-detail__meta" id="modelDetailMeta"></div>
+          </div>
+          <span class="status-badge" id="modelDetailStatus">—</span>
+        </div>
+        <div class="model-tabs" id="modelTabs">
+          <button type="button" class="model-tab is-active" data-tab="info" data-i18n="models.tabInfo">Basic info</button>
+          <button type="button" class="model-tab" data-tab="models" data-i18n="models.tabModels">Models</button>
+        </div>
+        <div class="admin__body">
+          <dl class="task-facts model-facts" id="modelInfo" data-panel="info"></dl>
+          <div class="model-panel" id="modelModelsPanel" data-panel="models" hidden>
+            <div class="model-panel__head">
+              <span class="model-panel__meta" id="modelModelsMeta"></span>
+              <button class="btn" id="modelRefreshBtn" type="button" data-i18n="models.refresh">Refresh</button>
+            </div>
+            <p class="model-error" id="modelModelsError" hidden></p>
+            <table class="ctable model-table">
+              <thead>
+                <tr>
+                  <th data-i18n="models.colModel">Model</th><th data-i18n="models.effort">Effort</th>
+                  <th data-i18n="models.defaultEffort">Default</th><th data-i18n="models.colContext">Context</th>
+                  <th data-i18n="models.colInference">Inference</th>
+                </tr>
+              </thead>
+              <tbody id="modelModels"></tbody>
+            </table>
+            <p class="admin__empty" id="modelModelsEmpty" data-i18n="models.noModels" hidden>No models.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="settings" aria-label="System Settings" hidden>
+      <div class="admin__head">
+        <div>
+          <h2 class="admin__title" data-i18n="settings.title">System Settings</h2>
+          <p class="admin__sub" data-i18n="settings.sub">Defaults that apply to everyone on this platform.</p>
+        </div>
+      </div>
+      <div class="admin__body">
+        <form class="settings-form" id="settingsForm">
+          <h3 class="settings-form__section" data-i18n="settings.sectionAgent">Agent</h3>
+          <label class="field"><span data-i18n="settings.agentModel">Default chat model</span>
+            <select id="sfAgentModel"></select>
+          </label>
+          <p class="field-hint" id="sfAgentModelHint" data-i18n="settings.agentModelHint"></p>
+          <p class="field-hint" id="sfAgentModelMissing" data-i18n="settings.modelsMissing" hidden></p>
+          <p class="field-hint" id="sfAgentModelFiltered" hidden></p>
+          <div class="settings-form__actions">
+            <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
+            <span class="settings-form__status" id="sfStatus" role="status"></span>
+          </div>
+        </form>
       </div>
     </section>
 
@@ -270,6 +373,15 @@
           <option value="general" data-i18n="tasks.kind.general">General</option>
         </select>
       </label>
+      <div class="field-row">
+        <label class="field"><span data-i18n="tasks.fAgent">Agent</span>
+          <select id="tfAgent"></select>
+        </label>
+        <label class="field"><span data-i18n="tasks.fModel">Model</span>
+          <select id="tfModel"></select>
+        </label>
+      </div>
+      <p class="field-hint" id="tfModelHint" hidden></p>
       <div class="modal__actions">
         <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
         <button type="submit" class="btn btn--primary" id="tfSubmit" data-i18n="tasks.create">Create &amp; run</button>
@@ -322,14 +434,14 @@
     <div class="modal__backdrop" data-close></div>
     <form class="modal__card" id="agentForm">
       <h3 class="modal__title" id="agentModalTitle" data-i18n="agent.modalAdd">New Agent</h3>
+      <div class="field"><span data-i18n="agent.fAvatar">Avatar</span>
+        <div class="avatar-picker" id="afAvatars" role="radiogroup"></div>
+      </div>
       <label class="field"><span data-i18n="agent.fName">Name</span>
         <input type="text" id="afName" required data-i18n-ph="agent.fNamePh" />
       </label>
       <label class="field"><span data-i18n="agent.fPersona">Persona</span>
         <textarea id="afPersona" rows="6" data-i18n-ph="agent.fPersonaPh"></textarea>
-      </label>
-      <label class="field"><span data-i18n="agent.fModel">Default model</span>
-        <input type="text" id="afModel" data-i18n-ph="common.optional" />
       </label>
       <div class="modal__actions">
         <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>

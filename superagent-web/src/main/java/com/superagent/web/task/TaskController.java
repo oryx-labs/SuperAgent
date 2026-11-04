@@ -5,9 +5,13 @@ import com.superagent.api.ApiResponse;
 import com.superagent.api.chat.SendMessageRequest;
 import com.superagent.api.task.ArtifactDto;
 import com.superagent.api.task.CreateTaskRequest;
+import com.superagent.api.task.TaskAgentOptionDto;
 import com.superagent.api.task.TaskDetailDto;
 import com.superagent.api.task.TaskDto;
 import com.superagent.api.task.TaskEventDto;
+import com.superagent.core.chat.AgentType;
+import com.superagent.core.provider.ProviderCatalog;
+import com.superagent.web.provider.ProviderService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -30,14 +35,27 @@ import java.util.List;
 public class TaskController {
 
     private final TaskService taskService;
+    private final ProviderService providerService;
 
-    public TaskController(TaskService taskService) {
+    public TaskController(TaskService taskService, ProviderService providerService) {
         this.taskService = taskService;
+        this.providerService = providerService;
     }
 
     @PostMapping(ApiPaths.TASKS)
     public ApiResponse<TaskDto> create(@RequestBody CreateTaskRequest request) {
         return ApiResponse.ok(taskService.create(request));
+    }
+
+    /** Agent CLIs a task can be created with (those with a runner here), and each one's models. */
+    @GetMapping(ApiPaths.TASKS + "/agents")
+    public ApiResponse<List<TaskAgentOptionDto>> agents() {
+        return ApiResponse.ok(taskService.runnableAgents().stream()
+                .sorted(Comparator.comparingInt(AgentType::ordinal))
+                .map(a -> new TaskAgentOptionDto(a.cliName(),
+                        ProviderCatalog.find(a.cliName()).map(ProviderCatalog.Entry::name).orElse(a.cliName()),
+                        providerService.storedModels(a.cliName())))
+                .toList());
     }
 
     @GetMapping(ApiPaths.TASKS)

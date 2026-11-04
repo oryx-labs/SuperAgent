@@ -62,4 +62,16 @@ class ClaudeStreamParserTest {
                 + "\"type\":\"content_block_start\"}}")).isNull();
         assertThat(type("not json")).isNull();
     }
+
+    @Test
+    void errorResultsCarryTheirReasonAndDenialsAreReported() {
+        ClaudeStreamParser.ParsedEvent missing = parser.parse("{\"type\":\"result\",\"subtype\":\"error_during_execution\","
+                + "\"is_error\":true,\"errors\":[\"No conversation found with session ID: s1\"]}").orElseThrow();
+        assertThat(missing.type()).isEqualTo(AgentEventType.ERROR);
+        assertThat(missing.payload()).isEqualTo("No conversation found with session ID: s1");
+
+        ClaudeStreamParser.ParsedEvent denied = parser.parse("{\"type\":\"result\",\"is_error\":false,\"result\":\"ok\","
+                + "\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf build\"}}]}").orElseThrow();
+        assertThat(denied.permissionDenials()).containsExactly("Bash: rm -rf build");
+    }
 }

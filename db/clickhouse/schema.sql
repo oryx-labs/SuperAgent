@@ -26,6 +26,7 @@ ORDER BY id;
 CREATE TABLE IF NOT EXISTS superagent.agent (
   id         String,
   name       String,
+  avatar     String,
   persona    String,
   model      String,
   status     String,

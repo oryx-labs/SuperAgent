@@ -99,12 +99,17 @@ public class TaskWatchdog {
         try {
             Set<String> active = recovery.activeTaskIds();
             Instant cutoff = Instant.now().minus(stall);
-            for (Task t : runningTasks()) {
-                boolean notHere = !active.contains(t.id());
-                boolean notAdvancing = t.updatedAt() == null || t.updatedAt().isBefore(cutoff);
-                if (notHere && notAdvancing) {
-                    log.warn("watchdog: task {} is RUNNING but not executing here and stalled since {} — recovering",
-                            t.id(), t.updatedAt());
+            for (Task t : tasks.listTasks()) {
+                if (t.status() == TaskStatus.RUNNING) {
+                    boolean notHere = !active.contains(t.id());
+                    boolean stalled = t.updatedAt() == null || t.updatedAt().isBefore(cutoff);
+                    if (notHere && stalled) {
+                        log.warn("watchdog: task {} is RUNNING but not executing here and stalled since {} — recovering",
+                                t.id(), t.updatedAt());
+                        recoverSafely(t.id());
+                    }
+                } else if (t.status() == TaskStatus.ERROR) {
+                    // A failed run settles to ERROR; retry it (bounded by the retry budget in recover()).
                     recoverSafely(t.id());
                 }
             }

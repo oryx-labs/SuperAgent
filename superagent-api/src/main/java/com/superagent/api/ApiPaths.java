@@ -26,6 +26,12 @@ public final class ApiPaths {
 
     public static final String USERS = V1 + "/users";
 
+    /** Model-vendor CLIs (claude, codex, ...) the runtime can call. */
+    public static final String PROVIDERS = V1 + "/providers";
+
+    /** Platform-wide default configuration (e.g. the Agent chat model). */
+    public static final String SETTINGS = V1 + "/settings";
+
     /** OAuth authorize/callback endpoints for connectors that use a provider handshake. */
     public static final String OAUTH = V1 + "/oauth";
 

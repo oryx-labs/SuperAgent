@@ -6,6 +6,8 @@ import com.superagent.core.chat.AgentEventType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -30,9 +32,18 @@ public class ClaudeStreamParser {
     private final ObjectMapper mapper = new ObjectMapper();
 
     /** A parsed, normalised event with its text/JSON payload, and the turn cost on a result line. */
-    public record ParsedEvent(AgentEventType type, String payload, Double costUsd) {
+    /**
+     * A parsed event. On a result line, {@code costUsd} is the turn cost and
+     * {@code permissionDenials} names tool calls the CLI refused without asking — in
+     * {@code -p} mode there is no one to approve them, so they'd otherwise be invisible.
+     */
+    public record ParsedEvent(AgentEventType type, String payload, Double costUsd, List<String> permissionDenials) {
         public ParsedEvent(AgentEventType type, String payload) {
-            this(type, payload, null);
+            this(type, payload, null, List.of());
+        }
+
+        public ParsedEvent(AgentEventType type, String payload, Double costUsd) {
+            this(type, payload, costUsd, List.of());
         }
     }
 
@@ -131,8 +142,28 @@ public class ClaudeStreamParser {
     private Optional<ParsedEvent> parseResult(JsonNode root) {
         boolean isError = root.path("is_error").asBoolean(false);
         String text = root.path("result").asText("");
+        if (isError && text.isBlank()) {
+            // Error results carry the reason in "errors" (e.g. "No conversation found with session ID: …"),
+            // not in "result"; without this the failure surfaces as an empty error.
+            List<String> errors = new ArrayList<>();
+            root.path("errors").forEach(e -> errors.add(e.isTextual() ? e.asText() : e.toString()));
+            text = errors.isEmpty() ? root.path("subtype").asText("error") : String.join("; ", errors);
+        }
         Double cost = root.has("total_cost_usd") ? root.path("total_cost_usd").asDouble() : null;
+        List<String> denials = new ArrayList<>();
+        root.path("permission_denials").forEach(d -> denials.add(describeDenial(d)));
         return Optional.of(new ParsedEvent(
-                isError ? AgentEventType.ERROR : AgentEventType.RESULT, text, cost));
+                isError ? AgentEventType.ERROR : AgentEventType.RESULT, text, cost, denials));
+    }
+
+    private static String describeDenial(JsonNode d) {
+        String tool = d.path("tool_name").asText("tool");
+        String command = d.path("tool_input").path("command").asText("");
+        String file = d.path("tool_input").path("file_path").asText("");
+        String detail = !command.isBlank() ? command : file;
+        if (detail.length() > 120) {
+            detail = detail.substring(0, 117) + "...";
+        }
+        return detail.isBlank() ? tool : tool + ": " + detail;
     }
 }

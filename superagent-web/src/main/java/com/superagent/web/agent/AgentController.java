@@ -35,6 +35,11 @@ public class AgentController {
         return ApiResponse.ok(agentService.create(request));
     }
 
+    @GetMapping(ApiPaths.AGENTS + "/avatars")
+    public ApiResponse<List<String>> avatars() {
+        return ApiResponse.ok(AgentService.AVATARS);
+    }
+
     @GetMapping(ApiPaths.AGENTS + "/{id}")
     public ApiResponse<AgentDto> get(@PathVariable String id) {
         return ApiResponse.ok(agentService.get(id));

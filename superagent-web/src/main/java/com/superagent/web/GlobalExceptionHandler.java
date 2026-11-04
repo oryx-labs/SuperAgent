@@ -4,6 +4,8 @@ import com.superagent.api.ApiResponse;
 import com.superagent.web.agent.AgentNotFoundException;
 import com.superagent.web.chat.SessionNotFoundException;
 import com.superagent.web.connector.ConnectorNotFoundException;
+import com.superagent.web.provider.ProviderAlreadyAddedException;
+import com.superagent.web.provider.ProviderNotFoundException;
 import com.superagent.web.task.ArtifactNotFoundException;
 import com.superagent.web.task.TaskBusyException;
 import com.superagent.web.task.TaskNotFoundException;
@@ -83,6 +85,16 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(UsernameTakenException.class)
     public ResponseEntity<ApiResponse<Void>> handleUsernameTaken(UsernameTakenException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error("conflict", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ProviderNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleProviderNotFound(ProviderNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error("not_found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ProviderAlreadyAddedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleProviderAlreadyAdded(ProviderAlreadyAddedException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error("conflict", ex.getMessage()));
     }
 

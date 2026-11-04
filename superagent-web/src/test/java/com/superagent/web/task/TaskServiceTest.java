@@ -14,6 +14,8 @@ import com.superagent.core.chat.ChatSession;
 import com.superagent.core.chat.ChatStore;
 import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskPhaseStore;
+import com.superagent.core.task.TaskRunState;
+import com.superagent.core.task.TaskRunStateStore;
 import com.superagent.core.task.TaskStore;
 import org.junit.jupiter.api.Test;
 
@@ -101,8 +103,15 @@ class TaskServiceTest {
     }
 
     private TaskService service(AgentRunner runner, InMemoryTaskStore tasks, InMemoryTaskPhaseStore phases, int maxParallel) {
-        return new TaskService(tasks, phases, new InMemoryRunStore(), List.of(runner),
+        return new TaskService(tasks, phases, new InMemoryTaskRunStateStore(), new InMemoryRunStore(), List.of(runner),
                 System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID(), "", "", false, maxParallel, "tester");
+    }
+
+    private static final class InMemoryTaskRunStateStore implements TaskRunStateStore {
+        private final Map<String, TaskRunState> rows = new LinkedHashMap<>();
+        @Override public Optional<TaskRunState> find(String id) { return Optional.ofNullable(rows.get(id)); }
+        @Override public synchronized TaskRunState save(TaskRunState s) { rows.put(s.taskId(), s); return s; }
+        @Override public void delete(String id) { rows.remove(id); }
     }
 
     /** A non-coding task, so the generic single-pass flow runs regardless of title wording. */
@@ -263,5 +272,262 @@ class TaskServiceTest {
         TaskDetailDto detail = service.detail(id);
         assertThat(detail.messages()).anyMatch(m -> m.content().contains("第1步未产出 PRD"));
         assertThat(detail.phases().get(0).status()).isEqualTo("running"); // stays on the PRD step for resume
+    }
+
+    @Test
+    void recoverResumesAnOrphanedRunningTask() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        TaskService service = service(new FakeRunner(() -> "交付完成。"), tasks);
+
+        String id = service.create(brief("orphan")).id();
+        await().atMost(Duration.ofSeconds(5)).until(() ->
+                tasks.findTask(id).map(t -> t.status().name()).orElse("").equals("DONE"));
+
+        // Simulate a crash: the store still says RUNNING but nothing is executing it.
+        tasks.save(tasks.findTask(id).orElseThrow().withStatus(com.superagent.core.task.TaskStatus.RUNNING));
+        assertThat(service.activeTaskIds()).doesNotContain(id);
+
+        service.recover(id); // the watchdog's action
+        await().atMost(Duration.ofSeconds(5)).until(() ->
+                tasks.findTask(id).map(t -> t.status().name()).orElse("").equals("DONE"));
+    }
+
+    /** Records each agent run's session wiring; blocks the run whose 1-based index is {@code blockAt} until released. */
+    private static final class RecordingRunner implements AgentRunner {
+        record Call(String sessionId, String resumeId, String workspaceDir) { }
+        final List<Call> calls = Collections.synchronizedList(new ArrayList<>());
+        final CountDownLatch gate = new CountDownLatch(1);
+        final int blockAt;
+        RecordingRunner(int blockAt) { this.blockAt = blockAt; }
+        @Override public AgentType type() { return AgentType.CLAUDE; }
+        @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+            calls.add(new Call(req.sessionId(), req.agentSessionId(), req.workspaceDir()));
+            if (calls.size() == blockAt) {
+                try { gate.await(5, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }
+            sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.RESULT, "done", Instant.now()));
+        }
+    }
+
+    private static void awaitStatus(InMemoryTaskStore tasks, String id, String status) {
+        await().atMost(Duration.ofSeconds(5)).until(() ->
+                tasks.findTask(id).map(t -> t.status().name()).orElse("").equals(status));
+    }
+
+    @Test
+    void steeringResumesTheTasksOwnSessionEvenAfterARestart() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        InMemoryTaskPhaseStore phases = new InMemoryTaskPhaseStore();
+        InMemoryTaskRunStateStore runStates = new InMemoryTaskRunStateStore();
+        InMemoryRunStore runStore = new InMemoryRunStore();
+        RecordingRunner runner = new RecordingRunner(0);
+        String root = System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID();
+        TaskService service = new TaskService(tasks, phases, runStates, runStore, List.of(runner),
+                root, "", "", false, 5, "tester");
+
+        String id = service.create(brief("A")).id();
+        awaitStatus(tasks, id, "DONE");
+        RecordingRunner.Call first = runner.calls.get(0);
+        assertThat(first.resumeId()).isNull(); // first turn mints the session
+
+        service.sendMessage(id, "fix the edge case");
+        awaitStatus(tasks, id, "DONE");
+        RecordingRunner.Call steer = runner.calls.get(1);
+        assertThat(steer.sessionId()).isEqualTo(first.sessionId());
+        assertThat(steer.resumeId()).isEqualTo(first.sessionId()); // --resume, not a new session
+        assertThat(steer.workspaceDir()).isEqualTo(first.workspaceDir());
+        assertThat(service.detail(id).task().sessionId()).isEqualTo(first.sessionId());
+
+        // A new process starts with an empty pool: steering must still resume the same session.
+        TaskService restarted = new TaskService(tasks, phases, runStates, runStore, List.of(runner),
+                root, "", "", false, 5, "tester");
+        restarted.sendMessage(id, "one more fix");
+        awaitStatus(tasks, id, "DONE");
+        RecordingRunner.Call afterRestart = runner.calls.get(2);
+        assertThat(afterRestart.resumeId()).isEqualTo(first.sessionId());
+        assertThat(afterRestart.workspaceDir()).isEqualTo(first.workspaceDir());
+    }
+
+    @Test
+    void steeringWaitsWhileAnotherTaskHoldsTheSession() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        RecordingRunner runner = new RecordingRunner(2); // block task B's run
+        TaskService service = service(runner, tasks, 5);
+
+        String a = service.create(brief("A")).id();
+        awaitStatus(tasks, a, "DONE");
+        String b = service.create(brief("B")).id(); // reuses A's now-idle session
+        await().atMost(Duration.ofSeconds(5)).until(() -> runner.calls.size() == 2);
+        assertThat(runner.calls.get(1).sessionId()).isEqualTo(runner.calls.get(0).sessionId());
+
+        service.sendMessage(a, "rework");
+        assertThat(tasks.findTask(a).orElseThrow().status().name()).isEqualTo("PENDING");
+        assertThatThrownBy(() -> service.sendMessage(a, "again")).isInstanceOf(TaskBusyException.class);
+
+        runner.gate.countDown(); // B finishes and frees the session; A's steering run takes it
+        awaitStatus(tasks, b, "DONE");
+        awaitStatus(tasks, a, "DONE");
+        assertThat(runner.calls).hasSize(3);
+        assertThat(runner.calls.get(2).resumeId()).isEqualTo(runner.calls.get(0).sessionId());
+    }
+
+    /** Records which session each run used; one per CLI type. */
+    private static final class TypedRunner implements AgentRunner {
+        final AgentType type;
+        final List<RecordingRunner.Call> calls;
+        TypedRunner(AgentType type, List<RecordingRunner.Call> calls) { this.type = type; this.calls = calls; }
+        @Override public AgentType type() { return type; }
+        @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+            calls.add(new RecordingRunner.Call(req.sessionId(), req.agentSessionId(), req.workspaceDir()));
+            sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.RESULT, "done", Instant.now()));
+        }
+    }
+
+    private static CreateTaskRequest briefFor(String title, String agent, String model) {
+        return new CreateTaskRequest(title, "Do it.", null, null, null, null, model, agent, "general");
+    }
+
+    @Test
+    void sessionsAreReusedOnlyWithinTheSameCli() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        List<RecordingRunner.Call> claude = Collections.synchronizedList(new ArrayList<>());
+        List<RecordingRunner.Call> codex = Collections.synchronizedList(new ArrayList<>());
+        TaskService service = new TaskService(tasks, new InMemoryTaskPhaseStore(), new InMemoryTaskRunStateStore(),
+                new InMemoryRunStore(), List.of(new TypedRunner(AgentType.CLAUDE, claude), new TypedRunner(AgentType.CODEX, codex)),
+                System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID(), "", "", false, 5, "tester");
+
+        String a = service.create(briefFor("A", "claude", null)).id();
+        awaitStatus(tasks, a, "DONE");
+        String b = service.create(briefFor("B", "codex", "gpt-6-sol")).id();
+        awaitStatus(tasks, b, "DONE");
+        String c = service.create(briefFor("C", "claude", "claude-opus-5-5")).id();
+        awaitStatus(tasks, c, "DONE");
+
+        assertThat(codex.get(0).sessionId()).isNotEqualTo(claude.get(0).sessionId()); // codex never takes a claude session
+        assertThat(claude.get(1).sessionId()).isEqualTo(claude.get(0).sessionId());   // the next claude task reuses it
+        assertThat(service.detail(b).task().agentType()).isEqualTo("codex");
+        assertThat(service.detail(b).task().model()).isEqualTo("gpt-6-sol");
+    }
+
+    @Test
+    void afterARestartNewTasksReuseSessionsFinishedTasksLeft() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        InMemoryTaskPhaseStore phases = new InMemoryTaskPhaseStore();
+        InMemoryTaskRunStateStore runStates = new InMemoryTaskRunStateStore();
+        InMemoryRunStore runStore = new InMemoryRunStore();
+        RecordingRunner runner = new RecordingRunner(0);
+        String root = System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID();
+        TaskService first = new TaskService(tasks, phases, runStates, runStore, List.of(runner), root, "", "", false, 5, "tester");
+        String a = first.create(brief("A")).id();
+        awaitStatus(tasks, a, "DONE");
+
+        TaskService restarted = new TaskService(tasks, phases, runStates, runStore, List.of(runner), root, "", "", false, 5, "tester");
+        String b = restarted.create(brief("B")).id();
+        awaitStatus(tasks, b, "DONE");
+        assertThat(runner.calls.get(1).sessionId()).isEqualTo(runner.calls.get(0).sessionId());
+        assertThat(runner.calls.get(1).resumeId()).isEqualTo(runner.calls.get(0).sessionId()); // resumed, not re-minted
+    }
+
+    @Test
+    void creatingATaskForACliWithoutARunnerIsRejected() {
+        TaskService service = service(new FakeRunner(() -> "x"), new InMemoryTaskStore());
+        assertThatThrownBy(() -> service.create(briefFor("K", "kimi", null))).isInstanceOf(IllegalArgumentException.class);
+        assertThat(service.list()).isEmpty();
+    }
+
+    @Test
+    void anAgentFailureFailsTheTaskInsteadOfPausingAtAGate() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        AgentRunner failing = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.ERROR, "boom: cli crashed", Instant.now()));
+            }
+        };
+        TaskService service = service(failing, tasks);
+        String id = service.create(coding("写点代码")).id();
+        awaitStatus(tasks, id, "ERROR");
+        assertThat(tasks.findTask(id).orElseThrow().error()).contains("boom: cli crashed");
+    }
+
+    /** The user's case: A's session was later taken by B, which now waits for a confirmation. */
+    @Test
+    void steeringRunsInASessionReservedByAnotherWaitingTaskAndHandsTheReservationBack() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        List<RecordingRunner.Call> calls = Collections.synchronizedList(new ArrayList<>());
+        AtomicInteger n = new AtomicInteger();
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                calls.add(new RecordingRunner.Call(req.sessionId(), req.agentSessionId(), req.workspaceDir()));
+                String out = n.incrementAndGet() == 2 ? "NEEDS_CONFIRMATION: which db?" : "done";
+                sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.RESULT, out, Instant.now()));
+            }
+        };
+        TaskService service = service(runner, tasks, 5);
+
+        String a = service.create(brief("A")).id();
+        awaitStatus(tasks, a, "DONE");
+        String b = service.create(brief("B")).id();                 // reuses A's idle session, then pauses
+        awaitStatus(tasks, b, "NEEDS_CONFIRMATION");
+        String shared = calls.get(0).sessionId();
+        assertThat(calls.get(1).sessionId()).isEqualTo(shared);
+
+        service.sendMessage(a, "rework");                           // must not wait on B's reply
+        awaitStatus(tasks, a, "DONE");
+        assertThat(calls.get(2).sessionId()).isEqualTo(shared);
+
+        String c = service.create(brief("C")).id();                 // the session is still reserved for B
+        awaitStatus(tasks, c, "DONE");
+        assertThat(calls.get(3).sessionId()).isNotEqualTo(shared);
+
+        service.sendMessage(b, "mysql");                            // B's reply continues in the shared session
+        awaitStatus(tasks, b, "DONE");
+        assertThat(calls.get(4).sessionId()).isEqualTo(shared);
+    }
+
+    @Test
+    void aSteeringMessageWaitingWhenTheProcessStoppedRunsAfterARestart() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        InMemoryTaskPhaseStore phases = new InMemoryTaskPhaseStore();
+        InMemoryTaskRunStateStore runStates = new InMemoryTaskRunStateStore();
+        InMemoryRunStore runStore = new InMemoryRunStore();
+        RecordingRunner runner = new RecordingRunner(0);
+        String root = System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID();
+        TaskService first = new TaskService(tasks, phases, runStates, runStore, List.of(runner), root, "", "", false, 5, "tester");
+        String a = first.create(brief("A")).id();
+        awaitStatus(tasks, a, "DONE");
+        // Simulate the crash window: message stored and task PENDING, but the in-memory queue is gone.
+        runStore.appendMessage(new ChatMessage(UUID.randomUUID().toString(), a,
+                com.superagent.core.chat.MessageRole.USER, "please continue", Instant.now()));
+        tasks.save(tasks.findTask(a).orElseThrow().withStatus(com.superagent.core.task.TaskStatus.PENDING));
+
+        new TaskService(tasks, phases, runStates, runStore, List.of(runner), root, "", "", false, 5, "tester");
+        awaitStatus(tasks, a, "DONE");
+        assertThat(runner.calls).hasSize(2);
+        assertThat(runner.calls.get(1).resumeId()).isEqualTo(runner.calls.get(0).sessionId());
+    }
+
+    @Test
+    void reworkOnAFinishedCodingTaskActuallyRunsTheAgent() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        List<String> prompts = Collections.synchronizedList(new ArrayList<>());
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                prompts.add(req.prompt());
+                sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.RESULT, "## 结果\n已完成，测试通过。", Instant.now()));
+            }
+        };
+        TaskService service = service(runner, tasks);
+        String id = service.create(coding("改点代码")).id();
+        awaitStatus(tasks, id, "DONE");
+        int phaseTurns = prompts.size();
+
+        service.sendMessage(id, "咋没效果，需要重新编译吗");
+        await().atMost(Duration.ofSeconds(5)).until(() -> prompts.size() == phaseTurns + 1);
+        awaitStatus(tasks, id, "DONE");
+        assertThat(prompts.get(phaseTurns)).isEqualTo("咋没效果，需要重新编译吗");
+        assertThat(service.detail(id).messages()).anyMatch(m -> m.role().equals("assistant") && m.content().contains("已完成"));
     }
 }

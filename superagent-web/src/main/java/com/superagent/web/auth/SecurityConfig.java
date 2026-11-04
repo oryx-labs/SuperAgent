@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -55,7 +56,11 @@ public class SecurityConfig {
                         .requestMatchers("/oauth2/**", "/login/oauth2/**", "/api/v1/auth/wechat/**").permitAll()
                         .requestMatchers("/mcp").permitAll() // gated by X-MCP-Token in McpController
                         .requestMatchers("/api/v1/users/**").hasRole("ADMIN")
+                        .requestMatchers("/api/v1/providers/**").hasRole("ADMIN") // runs install commands on the host
                         .requestMatchers("/api/v1/connectors/**", "/api/v1/oauth/**").hasRole("ADMIN")
+                        // Everyone reads the defaults (e.g. to show an agent's effective model); only admins change them.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/settings").authenticated()
+                        .requestMatchers("/api/v1/settings/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginProcessingUrl("/api/v1/auth/login")

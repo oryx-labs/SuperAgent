@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * {@link AgentRunner} for Claude Code. Spawns the {@code claude} CLI in
@@ -44,6 +45,8 @@ public class ClaudeCliAgentRunner implements AgentRunner {
     private final String command;
     private final long timeoutSeconds;
     private final ClaudeStreamParser parser = new ClaudeStreamParser();
+    /** Claude's error when {@code --resume} names a session it has no conversation for. */
+    private static final String NO_CONVERSATION = "No conversation found with session ID";
 
     public ClaudeCliAgentRunner(
             @Value("${superagent.agent.claude.command:claude}") String command,
@@ -59,6 +62,27 @@ public class ClaudeCliAgentRunner implements AgentRunner {
 
     @Override
     public void run(AgentRunRequest request, AgentEventSink sink, Cancellation cancellation) {
+        AtomicLong seq = new AtomicLong();
+        if (attempt(request, sink, cancellation, seq) && !cancellation.isCancelled()) {
+            // The session's conversation is gone from this Claude config (cleaned up, or written under
+            // another config dir). Start a new conversation under the SAME session id so the task keeps
+            // its session and workspace; only the earlier conversation context is lost.
+            log.warn("session {}: no conversation to resume; starting a new one under the same session id",
+                    request.sessionId());
+            sink.emit(new AgentEvent(request.sessionId(), null, seq.getAndIncrement(), AgentEventType.THINKING,
+                    "Previous conversation for this session was not found; continuing in a new conversation "
+                            + "(same session id, same workspace — earlier context is not available).",
+                    Instant.now()));
+            AgentRunRequest fresh = new AgentRunRequest(request.sessionId(), null, request.workspaceDir(),
+                    request.prompt(), request.model(), request.allowedTools(), request.skipPermissions(),
+                    request.mcpConfig(), request.systemPrompt());
+            attempt(fresh, sink, cancellation, seq);
+        }
+    }
+
+    /** One CLI invocation. Returns true when a resume failed only because the conversation doesn't exist. */
+    private boolean attempt(AgentRunRequest request, AgentEventSink sink, Cancellation cancellation, AtomicLong seq) {
+        boolean conversationMissing = false;
         Path mcpConfigFile = writeMcpConfig(request);
         List<String> cmd = buildCommand(request, mcpConfigFile);
         log.info("session {} running: {} (cwd={})", request.sessionId(),
@@ -72,9 +96,9 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         try {
             process = pb.start();
         } catch (IOException e) {
-            emitError(sink, request, 0, "Failed to start agent: " + e.getMessage());
+            emitError(sink, request, seq.getAndIncrement(), "Failed to start agent: " + e.getMessage());
             deleteQuietly(mcpConfigFile);
-            return;
+            return false;
         }
 
         // Let the orchestrator stop this turn by killing the subprocess.
@@ -85,7 +109,6 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         stderr.setDaemon(true);
         stderr.start();
 
-        long seq = 0;
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
@@ -94,19 +117,29 @@ public class ClaudeCliAgentRunner implements AgentRunner {
                     continue;
                 }
                 Optional<ClaudeStreamParser.ParsedEvent> parsed = parser.parse(line);
-                if (parsed.isPresent()) {
-                    ClaudeStreamParser.ParsedEvent e = parsed.get();
-                    sink.emit(new AgentEvent(request.sessionId(), null, seq++, e.type(), e.payload(), Instant.now()));
-                    if (e.costUsd() != null) {
-                        sink.emit(new AgentEvent(request.sessionId(), null, seq++,
-                                AgentEventType.USAGE, String.valueOf(e.costUsd()), Instant.now()));
-                    }
+                if (parsed.isEmpty()) {
+                    continue;
+                }
+                ClaudeStreamParser.ParsedEvent e = parsed.get();
+                if (e.type() == AgentEventType.ERROR && !request.isFirstTurn()
+                        && e.payload().contains(NO_CONVERSATION)) {
+                    conversationMissing = true; // handled by run(): retried as a new conversation
+                    continue;
+                }
+                for (String denial : e.permissionDenials()) {
+                    sink.emit(new AgentEvent(request.sessionId(), null, seq.getAndIncrement(),
+                            AgentEventType.TOOL_RESULT, "Permission denied: " + denial, Instant.now()));
+                }
+                sink.emit(new AgentEvent(request.sessionId(), null, seq.getAndIncrement(), e.type(), e.payload(), Instant.now()));
+                if (e.costUsd() != null) {
+                    sink.emit(new AgentEvent(request.sessionId(), null, seq.getAndIncrement(),
+                            AgentEventType.USAGE, String.valueOf(e.costUsd()), Instant.now()));
                 }
             }
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
-                emitError(sink, request, seq, "Agent timed out after " + timeoutSeconds + "s");
-                return;
+                emitError(sink, request, seq.getAndIncrement(), "Agent timed out after " + timeoutSeconds + "s");
+                return false;
             }
             int code = process.exitValue();
             if (code != 0) {
@@ -114,17 +147,19 @@ public class ClaudeCliAgentRunner implements AgentRunner {
             }
         } catch (IOException e) {
             process.destroyForcibly();
-            emitError(sink, request, seq, "Agent run failed: " + e.getMessage());
+            emitError(sink, request, seq.getAndIncrement(), "Agent run failed: " + e.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             process.destroyForcibly();
-            emitError(sink, request, seq, "Agent run interrupted");
+            emitError(sink, request, seq.getAndIncrement(), "Agent run interrupted");
         } finally {
             deleteQuietly(mcpConfigFile);
         }
+        return conversationMissing;
     }
 
-    private List<String> buildCommand(AgentRunRequest request, Path mcpConfigFile) {
+    // Package-private for unit testing of the argv assembly (persona injection, flag ordering).
+    List<String> buildCommand(AgentRunRequest request, Path mcpConfigFile) {
         List<String> cmd = new ArrayList<>();
         cmd.add(command);
         cmd.add("-p");

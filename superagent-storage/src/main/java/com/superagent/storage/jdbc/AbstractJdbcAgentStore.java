@@ -36,22 +36,23 @@ abstract class AbstractJdbcAgentStore implements AgentStore {
     private final RowMapper<Agent> mapper = (rs, n) -> new Agent(
             rs.getString("id"),
             rs.getString("name"),
+            emptyToNull(rs.getString("avatar")),
             emptyToNull(rs.getString("persona")),
             emptyToNull(rs.getString("model")),
             AgentStatus.valueOf(rs.getString("status")),
             instant(rs, "created_at"),
             instant(rs, "updated_at"));
 
-    protected static final String COLUMNS = "(id, name, persona, model, status, created_at, updated_at)";
+    protected static final String COLUMNS = "(id, name, avatar, persona, model, status, created_at, updated_at)";
 
     protected Object[] params(Agent a) {
         return new Object[]{
-                a.id(), nn(a.name()), nn(a.persona()), nn(a.model()), a.status().name(),
+                a.id(), nn(a.name()), nn(a.avatar()), nn(a.persona()), nn(a.model()), a.status().name(),
                 utc(a.createdAt()), utc(a.updatedAt())};
     }
 
     protected void insert(Agent a) {
-        jdbc.update("INSERT INTO agent " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?)", params(a));
+        jdbc.update("INSERT INTO agent " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", params(a));
     }
 
     @Override

@@ -13,7 +13,8 @@ import java.util.List;
 public class ClickHouseAgentStore extends AbstractJdbcAgentStore {
 
     public ClickHouseAgentStore(JdbcTemplate jdbc) {
-        super(jdbc, List.of());
+        // Older tables predate the avatar column.
+        super(jdbc, List.of("ALTER TABLE agent ADD COLUMN IF NOT EXISTS avatar String"));
     }
 
     @Override

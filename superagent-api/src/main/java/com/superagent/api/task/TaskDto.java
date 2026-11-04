@@ -23,5 +23,15 @@ public record TaskDto(
         Instant createdAt,
         Instant startedAt,
         Instant finishedAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        String agentType,
+        /** The agent session the task runs in (resumed for every steering message), or null before it starts. */
+        String sessionId,
+        String workspaceDir,
+        /**
+         * This process's hold on that session: busy | reserved (paused for confirmation) | idle |
+         * in_use (held by another task) | released (not loaded, e.g. after a restart — resumed on demand).
+         * Null before the task starts.
+         */
+        String sessionState) {
 }

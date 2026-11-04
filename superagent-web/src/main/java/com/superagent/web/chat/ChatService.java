@@ -19,6 +19,8 @@ import com.superagent.core.chat.ChatSession;
 import com.superagent.core.chat.ChatStore;
 import com.superagent.core.chat.MessageRole;
 import com.superagent.core.chat.SessionStatus;
+import com.superagent.web.provider.ProviderService;
+import com.superagent.web.settings.SettingsService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,6 +68,8 @@ public class ChatService {
     });
 
     private final Path workspaceRoot;
+    private final SettingsService settingsService;
+    private final ProviderService providerService;
     private final String defaultModel;
     private final List<String> allowedTools;
     private final boolean skipPermissions;
@@ -80,6 +84,8 @@ public class ChatService {
     public ChatService(
             ChatStore store,
             AgentStore agentStore,
+            SettingsService settingsService,
+            ProviderService providerService,
             List<AgentRunner> agentRunners,
             com.superagent.web.mcp.McpToken mcpToken,
             @Value("${superagent.agent.workspace-dir:./data/workspaces}") String workspaceDir,
@@ -91,6 +97,8 @@ public class ChatService {
             @Value("${superagent.mcp.self-url:http://127.0.0.1:8080/mcp}") String mcpSelfUrl) {
         this.store = store;
         this.agentStore = agentStore;
+        this.settingsService = settingsService;
+        this.providerService = providerService;
         for (AgentRunner runner : agentRunners) {
             this.runners.put(runner.type(), runner);
         }
@@ -189,10 +197,18 @@ public class ChatService {
 
     public SseEmitter sendMessage(String sessionId, String content) {
         ChatSession session = store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
-        AgentRunner runner = runners.get(session.agentType());
+        Agent agent = session.agentId() == null || session.agentId().isBlank() ? null
+                : agentStore.find(session.agentId()).orElse(null);
+        String model = resolveModel(agent);
+        // The model decides the CLI (a Codex model must run under codex); unknown models keep the session's own.
+        AgentType agentType = providerService.cliFor(model).map(AgentType::fromString)
+                .filter(runners::containsKey).orElse(session.agentType());
+        AgentRunner runner = runners.get(agentType);
         if (runner == null) {
-            throw new IllegalStateException("No runner for agent type " + session.agentType());
+            throw new IllegalStateException("No runner for agent type " + agentType);
         }
+        String systemPrompt = agent != null && agent.persona() != null && !agent.persona().isBlank()
+                ? agent.persona().trim() : null;
 
         Instant now = Instant.now();
         store.appendMessage(new ChatMessage(UUID.randomUUID().toString(), sessionId,
@@ -203,8 +219,18 @@ public class ChatService {
         Cancellation cancellation = new Cancellation();
         activeRuns.put(sessionId, cancellation);
 
-        executor.execute(() -> runTurn(session, runner, content, assistantMessageId, emitter, cancellation));
+        executor.execute(() -> runTurn(session, agentType, runner, model, systemPrompt, content,
+                assistantMessageId, emitter, cancellation));
         return emitter;
+    }
+
+    /** Model precedence: the agent's own override > admin's system default > deployment config. */
+    private String resolveModel(Agent agent) {
+        if (agent != null && agent.model() != null && !agent.model().isBlank()) {
+            return agent.model().trim();
+        }
+        String model = settingsService.agentDefaultModel();
+        return model != null ? model : defaultModel;
     }
 
     /** Stops the in-flight turn for a session, if any. */
@@ -221,11 +247,13 @@ public class ChatService {
         store.updateMessage(sessionId, messageId, content);
     }
 
-    private void runTurn(ChatSession session, AgentRunner runner, String prompt,
+    private void runTurn(ChatSession session, AgentType agentType, AgentRunner runner, String model,
+                         String systemPrompt, String prompt,
                          String assistantMessageId, SseEmitter emitter, Cancellation cancellation) {
         StringBuilder textAccumulator = new StringBuilder();
         AtomicReference<String> resultText = new AtomicReference<>();
-        AtomicReference<String> capturedAgentSessionId = new AtomicReference<>(session.agentSessionId());
+        String agentSessionId = agentSessionIdFor(session, agentType);
+        AtomicReference<String> capturedAgentSessionId = new AtomicReference<>(agentSessionId);
 
         AgentEventSink sink = event -> {
             AgentEvent stamped = new AgentEvent(session.id(), assistantMessageId, event.seq(),
@@ -246,21 +274,8 @@ public class ChatService {
         };
 
         try {
-            String systemPrompt = null;
-            String model = defaultModel;
-            if (session.agentId() != null && !session.agentId().isBlank()) {
-                Agent agent = agentStore.find(session.agentId()).orElse(null);
-                if (agent != null) {
-                    if (agent.persona() != null && !agent.persona().isBlank()) {
-                        systemPrompt = agent.persona().trim();
-                    }
-                    if (agent.model() != null && !agent.model().isBlank()) {
-                        model = agent.model().trim();
-                    }
-                }
-            }
             AgentRunRequest request = new AgentRunRequest(
-                    session.id(), session.agentSessionId(), session.workspaceDir(),
+                    session.id(), agentSessionId, session.workspaceDir(),
                     prompt, model, allowedTools, skipPermissions, mcpConfig, systemPrompt);
             runner.run(request, sink, cancellation);
 
@@ -268,7 +283,7 @@ public class ChatService {
             String finalText = resultText.get() != null ? resultText.get() : textAccumulator.toString();
             store.appendMessage(new ChatMessage(assistantMessageId, session.id(),
                     MessageRole.ASSISTANT, finalText, Instant.now()));
-            persistSessionUpdate(session, capturedAgentSessionId.get(), prompt);
+            persistSessionUpdate(session, agentType, capturedAgentSessionId.get(), prompt);
 
             if (stopped) {
                 send(emitter, new StreamEventDto("stopped", -1, finalText));
@@ -285,9 +300,26 @@ public class ChatService {
         }
     }
 
-    private void persistSessionUpdate(ChatSession session, String agentSessionId, String firstPrompt) {
+    /**
+     * The stored agent session id belongs to whichever CLI ran last ({@code session.agentType()}). After a
+     * model switch to the other CLI, hand it an id it understands instead: Claude's conversation id is the
+     * SuperAgent session id (its first turn passes {@code --session-id}; a missing one falls back to a fresh
+     * conversation), and Codex finds its own thread from the session id on disk.
+     */
+    private static String agentSessionIdFor(ChatSession session, AgentType agentType) {
+        if (agentType == session.agentType() || session.agentSessionId() == null) {
+            return session.agentSessionId();
+        }
+        return session.id();
+    }
+
+    private void persistSessionUpdate(ChatSession session, AgentType agentType, String agentSessionId,
+                                      String firstPrompt) {
         ChatSession updated = session;
-        if (agentSessionId != null && !agentSessionId.equals(session.agentSessionId())) {
+        if (agentType != session.agentType()) {
+            updated = new ChatSession(session.id(), session.title(), agentType, agentSessionId,
+                    session.workspaceDir(), session.agentId(), session.status(), session.createdAt(), Instant.now());
+        } else if (agentSessionId != null && !agentSessionId.equals(session.agentSessionId())) {
             updated = updated.withAgentSessionId(agentSessionId);
         }
         if ("New chat".equals(session.title())) {

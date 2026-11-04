@@ -26,6 +26,8 @@ import com.superagent.core.task.TaskKindClassifier;
 import com.superagent.core.task.TaskPhase;
 import com.superagent.core.task.TaskPhaseStatus;
 import com.superagent.core.task.TaskPhaseStore;
+import com.superagent.core.task.TaskRunState;
+import com.superagent.core.task.TaskRunStateStore;
 import com.superagent.core.task.TaskSource;
 import com.superagent.core.task.TaskStatus;
 import com.superagent.core.task.TaskStore;
@@ -49,6 +51,7 @@ import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -69,7 +72,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * agent as its session id, so a resume turn continues the same conversation.
  */
 @Service
-public class TaskService {
+public class TaskService implements TaskRecovery {
 
     private static final Logger log = LoggerFactory.getLogger(TaskService.class);
 
@@ -91,6 +94,7 @@ public class TaskService {
 
     private final TaskStore tasks;
     private final TaskPhaseStore phaseStore;
+    private final TaskRunStateStore runStates;
     private final ChatStore runStore;
     private final Map<AgentType, AgentRunner> runners = new EnumMap<>(AgentType.class);
     private final Map<String, Cancellation> activeRuns = new ConcurrentHashMap<>();
@@ -112,13 +116,17 @@ public class TaskService {
     private final Object schedulerLock = new Object();
     private final Map<String, Deque<QueuedRun>> queues = new HashMap<>();
 
-    /** A task run waiting for a free session: its prompt and whether the brief wrapper applies. */
-    private record QueuedRun(String taskId, String prompt, boolean wrapBrief) {
+    /**
+     * A task run waiting for a free session. {@code sessionId} pins a steering run to the
+     * task's own session (null = any session, for a task's first run).
+     */
+    private record QueuedRun(String taskId, String prompt, boolean wrapBrief, String sessionId) {
     }
 
     public TaskService(
             TaskStore tasks,
             TaskPhaseStore phaseStore,
+            TaskRunStateStore runStates,
             ChatStore runStore,
             List<AgentRunner> agentRunners,
             @Value("${superagent.task.workspace-dir:./data/tasks}") String workspaceDir,
@@ -129,6 +137,7 @@ public class TaskService {
             @Value("${superagent.task.default-owner:local}") String defaultOwner) {
         this.tasks = tasks;
         this.phaseStore = phaseStore;
+        this.runStates = runStates;
         this.runStore = runStore;
         for (AgentRunner runner : agentRunners) {
             this.runners.put(runner.type(), runner);
@@ -146,6 +155,84 @@ public class TaskService {
         }
         log.info("TaskService ready: runners={}, workspaceRoot={}, allowedTools={}, skipPermissions={}, maxParallel/owner={}",
                 runners.keySet(), workspaceRoot, this.allowedTools, skipPermissions, maxParallel);
+        restoreSessions();
+    }
+
+    /**
+     * The pool lives in memory, so without this every restart would start empty and the
+     * next task would mint a new session even though finished tasks left reusable ones on
+     * disk. Sessions of tasks waiting on a confirmation stay reserved for them; sessions of
+     * RUNNING tasks are left to the watchdog, which resumes those tasks on them.
+     */
+    private void restoreSessions() {
+        List<Task> all = tasks.listTasks().stream().filter(t -> t.workspaceDir() != null).toList();
+        Set<String> running = new java.util.HashSet<>();
+        all.stream().filter(t -> t.status() == TaskStatus.RUNNING).forEach(t -> running.add(boundSessionId(t)));
+        int restored = 0;
+        synchronized (schedulerLock) {
+            for (Task t : all) {
+                String sessionId = boundSessionId(t);
+                if (t.status() != TaskStatus.RUNNING && t.status() != TaskStatus.NEEDS_CONFIRMATION
+                        && !running.contains(sessionId)) {
+                    pool.restore(t.createdBy(), t.agentType(), sessionId, t.workspaceDir(), null);
+                    restored++;
+                }
+            }
+            for (Task t : all) {
+                if (t.status() == TaskStatus.NEEDS_CONFIRMATION) {
+                    pool.restore(t.createdBy(), t.agentType(), boundSessionId(t), t.workspaceDir(), t.id());
+                }
+            }
+        }
+        if (restored > 0) {
+            log.info("restored idle task sessions from {} finished task(s)", restored);
+        }
+        requeueWaitingSteering(all);
+    }
+
+    /**
+     * A steering message that was waiting for its session when the process stopped: the queue
+     * lived in memory, so without this the task would sit at PENDING forever. The message is
+     * already stored, so it is re-queued from there and dispatched.
+     */
+    private void requeueWaitingSteering(List<Task> started) {
+        Set<String> owners = new java.util.HashSet<>();
+        synchronized (schedulerLock) {
+            for (Task t : started) {
+                if (t.status() != TaskStatus.PENDING) {
+                    continue;
+                }
+                String content = lastUserMessage(t.id());
+                if (content == null) {
+                    tasks.save(t.withStatus(TaskStatus.STOPPED)); // nothing to resume with
+                    continue;
+                }
+                queues.computeIfAbsent(t.createdBy(), k -> new ArrayDeque<>())
+                        .addLast(new QueuedRun(t.id(), content, false, boundSessionId(t)));
+                owners.add(t.createdBy());
+                log.info("re-queued waiting steering message for task {}", t.id());
+            }
+        }
+        owners.forEach(this::tryDispatch);
+        // New tasks still waiting for their first session were queued in memory too.
+        tasks.listTasks().stream()
+                .filter(t -> t.status() == TaskStatus.PENDING && t.workspaceDir() == null)
+                .forEach(this::schedule);
+    }
+
+    private String lastUserMessage(String taskId) {
+        List<ChatMessage> messages = runStore.listMessages(taskId);
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i).role() == MessageRole.USER) {
+                return messages.get(i).content();
+            }
+        }
+        return null;
+    }
+
+    /** Agent CLIs that can actually run a task here (have a runner). */
+    public Set<AgentType> runnableAgents() {
+        return Set.copyOf(runners.keySet());
     }
 
     private static List<String> parseTools(String csv) {
@@ -166,7 +253,7 @@ public class TaskService {
     public List<TaskDto> list() {
         return tasks.listTasks().stream()
                 .filter(t -> t.status() != TaskStatus.DELETED)
-                .map(TaskService::toDto).toList();
+                .map(this::toListDto).toList();
     }
 
     public TaskDetailDto detail(String id) {
@@ -246,6 +333,11 @@ public class TaskService {
     public TaskDto create(CreateTaskRequest request) {
         String id = UUID.randomUUID().toString();
         AgentType agentType = AgentType.fromString(request.agentType());
+        if (!runners.containsKey(agentType)) {
+            // Fail at creation rather than letting the task start and error with "no runner".
+            throw new IllegalArgumentException("Agent " + agentType.cliName() + " can't run tasks here yet; available: "
+                    + runners.keySet().stream().map(AgentType::cliName).sorted().toList());
+        }
         TaskSource source = parseSource(request.source());
         TaskKind kind = resolveKind(request);
         Instant now = Instant.now();
@@ -279,12 +371,12 @@ public class TaskService {
      */
     private void schedule(Task task) {
         synchronized (schedulerLock) {
-            TaskSessionPool.Lease lease = pool.acquire(task.createdBy(), task.id());
+            TaskSessionPool.Lease lease = pool.acquire(task.createdBy(), task.agentType(), task.id());
             if (lease != null) {
                 assignAndRun(task, lease, task.brief(), true);
             } else {
                 queues.computeIfAbsent(task.createdBy(), k -> new ArrayDeque<>())
-                        .addLast(new QueuedRun(task.id(), task.brief(), true));
+                        .addLast(new QueuedRun(task.id(), task.brief(), true, null));
                 log.info("task {} queued (owner {} at parallel cap)", task.id(), task.createdBy());
             }
         }
@@ -298,58 +390,104 @@ public class TaskService {
         executor.execute(() -> run(running, prompt, session.id, lease.firstTurn(), wrapBrief));
     }
 
-    /** When a session frees up, run as many queued tasks for that owner as there are slots. */
+    /** When a session frees up, run every queued task for that owner that can now get its session. */
     private void tryDispatch(String owner) {
-        while (true) {
-            synchronized (schedulerLock) {
-                Deque<QueuedRun> q = queues.get(owner);
-                if (q == null || q.isEmpty()) {
-                    return;
-                }
-                QueuedRun run = q.peekFirst();
-                TaskSessionPool.Lease lease = pool.acquire(owner, run.taskId());
-                if (lease == null) {
-                    return; // no slot right now
-                }
-                q.pollFirst();
+        synchronized (schedulerLock) {
+            Deque<QueuedRun> q = queues.get(owner);
+            if (q == null) {
+                return;
+            }
+            for (java.util.Iterator<QueuedRun> it = q.iterator(); it.hasNext(); ) {
+                QueuedRun run = it.next();
                 Task task = tasks.findTask(run.taskId())
                         .filter(t -> t.status() != TaskStatus.DELETED).orElse(null);
                 if (task == null) {
-                    pool.release(lease.session());   // task gone; don't leak the session
+                    it.remove();
                     continue;
                 }
-                assignAndRun(task, lease, run.prompt(), run.wrapBrief());
+                if (run.sessionId() != null) {
+                    // Pinned steering run: only its own session will do; skip it while that session is busy.
+                    TaskSessionPool.Lease lease =
+                            pool.acquireSession(owner, task.agentType(), task.id(), run.sessionId(), task.workspaceDir());
+                    if (lease != null) {
+                        it.remove();
+                        resumeRun(task, lease, run.prompt());
+                    }
+                } else {
+                    TaskSessionPool.Lease lease = pool.acquire(owner, task.agentType(), run.taskId());
+                    if (lease == null) {
+                        continue; // no idle session of this CLI and at the cap; another CLI's run may still fit
+                    }
+                    it.remove();
+                    assignAndRun(task, lease, run.prompt(), run.wrapBrief());
+                }
             }
         }
     }
 
-    /** Steers a non-running task: answers a confirmation or follows up on a finished run; resumes the agent session. */
+    /**
+     * Steers a task that isn't running: answers a confirmation or follows up on a finished
+     * or failed run. Always continues in the task's OWN agent session (same conversation
+     * via {@code --resume}, same workspace) — never a fresh or borrowed one; if another task
+     * currently holds that session, the steering run queues until it frees.
+     */
     public void sendMessage(String id, String content) {
         Task task = require(id);
-        if (task.status() == TaskStatus.RUNNING) {
-            throw new TaskBusyException(id);
+        if (task.status() == TaskStatus.RUNNING || task.workspaceDir() == null) {
+            throw new TaskBusyException(id); // running, or queued and never started
         }
-        runStore.appendMessage(new ChatMessage(UUID.randomUUID().toString(), id,
-                MessageRole.USER, content, Instant.now()));
+        String sessionId = boundSessionId(task);
         synchronized (schedulerLock) {
-            TaskSessionPool.Session bound = pool.sessionForTask(id);
-            if (bound != null) {
-                // Same session the task paused on: resume its conversation in place.
-                pool.resumeBusy(bound);
-                Task running = task.withStatus(TaskStatus.RUNNING);
-                tasks.save(running);
-                executor.execute(() -> run(running, content, bound.id, false, false));
+            Deque<QueuedRun> q = queues.get(task.createdBy());
+            if (q != null && q.stream().anyMatch(r -> r.taskId().equals(id))) {
+                throw new TaskBusyException(id); // a steering run is already waiting for this session
+            }
+            runStore.appendMessage(new ChatMessage(UUID.randomUUID().toString(), id,
+                    MessageRole.USER, content, Instant.now()));
+            TaskSessionPool.Lease lease = pool.acquireSession(task.createdBy(), task.agentType(), id, sessionId, task.workspaceDir());
+            if (lease != null) {
+                resumeRun(task, lease, content);
             } else {
-                // Session already released (e.g. a finished task): grab a fresh one, or queue.
-                TaskSessionPool.Lease lease = pool.acquire(task.createdBy(), id);
-                if (lease != null) {
-                    assignAndRun(task, lease, content, false);
-                } else {
-                    queues.computeIfAbsent(task.createdBy(), k -> new ArrayDeque<>())
-                            .addLast(new QueuedRun(id, content, false));
-                }
+                // PENDING while waiting; if a restart drops the in-memory queue, the check above
+                // no longer finds it and the user can simply send again.
+                tasks.save(task.withStatus(TaskStatus.PENDING));
+                queues.computeIfAbsent(task.createdBy(), k -> new ArrayDeque<>())
+                        .addLast(new QueuedRun(id, content, false, sessionId));
+                log.info("task {} steering queued: its session {} is held by another task", id, sessionId);
             }
         }
+    }
+
+    /** Continues a task in the leased session, keeping its workspace and start time. Call under schedulerLock. */
+    private void resumeRun(Task task, TaskSessionPool.Lease lease, String prompt) {
+        Task running = task.withStatus(TaskStatus.RUNNING);
+        tasks.save(running);
+        String sessionId = lease.session().id;
+        boolean firstTurn = lease.firstTurn();
+        executor.execute(() -> run(running, prompt, sessionId, firstTurn, false));
+    }
+
+    /**
+     * The task's chosen model, else the configured default — which is a Claude model name
+     * (shared with chat), so it only applies to Claude; other CLIs fall back to their own default.
+     */
+    private String effectiveModel(Task task) {
+        if (task.model() != null) {
+            return task.model();
+        }
+        return task.agentType() == AgentType.CLAUDE ? defaultModel : null;
+    }
+
+    /**
+     * The agent session a task runs in. A watchdog rotation records the new id in run-state;
+     * otherwise it is the session the task was first scheduled on, whose workspace directory
+     * is named after it (see TaskSessionPool).
+     */
+    private String boundSessionId(Task task) {
+        return runStates.find(task.id())
+                .map(TaskRunState::agentSessionId)
+                .filter(s -> s != null && !s.isBlank())
+                .orElseGet(() -> deriveSessionId(task));
     }
 
     public void stop(String id) {
@@ -376,9 +514,92 @@ public class TaskService {
             if (session != null && task.status() != TaskStatus.RUNNING) {
                 pool.release(session);   // paused/idle binding: free it now
             }
+            pool.dropReservation(id);    // a reservation it held while another task ran in the session
         }
         tasks.save(task.withStatus(TaskStatus.DELETED));
         tryDispatch(task.createdBy());
+    }
+
+    // --- resilience (TaskRecovery, driven by the watchdog) ---
+
+    /** Rotate to a fresh session after this many consecutive failures on one session. */
+    private static final int ROTATE_AFTER = 3;
+    /** Overall retry budget before a task is given up for good. */
+    private static final int MAX_ATTEMPTS = 10;
+
+    @Override
+    public Set<String> activeTaskIds() {
+        return Set.copyOf(activeRuns.keySet());
+    }
+
+    @Override
+    public void recover(String id) {
+        Task task = tasks.findTask(id).orElse(null);
+        if (task == null || (task.status() != TaskStatus.RUNNING && task.status() != TaskStatus.ERROR)) {
+            return;
+        }
+        if (activeRuns.containsKey(id)) {
+            return; // actually executing here; healthy
+        }
+
+        TaskRunState state = runStates.find(id).orElseGet(() -> TaskRunState.initial(id, deriveSessionId(task)));
+        if (state.attemptCount() >= MAX_ATTEMPTS) {
+            if (task.status() != TaskStatus.ERROR) {
+                tasks.save(task.finished(TaskStatus.ERROR, task.progress(),
+                        "retry budget exhausted after " + MAX_ATTEMPTS + " attempts"));
+            }
+            log.warn("task {} given up after {} attempts", id, state.attemptCount());
+            return;
+        }
+
+        boolean failure = task.status() == TaskStatus.ERROR;
+        boolean rotate = failure && state.failureCount() + 1 >= ROTATE_AFTER;
+
+        String sessionId;
+        boolean firstTurn;
+        synchronized (schedulerLock) {
+            TaskSessionPool.Session bound = pool.sessionForTask(id);
+            if (bound != null && !rotate) {
+                pool.resumeBusy(bound);           // same-process stall: reuse the still-bound session
+                sessionId = bound.id;
+                firstTurn = false;
+            } else if (rotate) {
+                sessionId = UUID.randomUUID().toString();   // fresh conversation, same workspace (keep prior work)
+                firstTurn = true;
+                pool.adopt(task.createdBy(), task.agentType(), id, sessionId, task.workspaceDir(), false);
+            } else {
+                sessionId = deriveSessionId(task);  // restart: pool is empty, resume the persisted agent session
+                firstTurn = false;
+                pool.adopt(task.createdBy(), task.agentType(), id, sessionId, task.workspaceDir(), true);
+            }
+        }
+
+        TaskRunState next = rotate ? state.rotatedTo(sessionId)
+                : failure ? state.failedOnSameSession() : state.resumed();
+        runStates.save(next);
+
+        Task running = task.withStatus(TaskStatus.RUNNING);
+        tasks.save(running);
+        String prompt = recoverPrompt(rotate);
+        String sid = sessionId;
+        boolean ft = firstTurn;
+        log.info("recovering task {} (attempt {}, failures {}, rotate={}, session {})",
+                id, next.attemptCount(), next.failureCount(), rotate, sid);
+        executor.execute(() -> run(running, prompt, sid, ft, false));
+    }
+
+    /** The pool session id equals the workspace dir's name (see TaskSessionPool), so it is recoverable without extra state. */
+    private String deriveSessionId(Task task) {
+        if (task.workspaceDir() == null || task.workspaceDir().isBlank()) {
+            return UUID.randomUUID().toString();
+        }
+        return Path.of(task.workspaceDir()).getFileName().toString();
+    }
+
+    private static String recoverPrompt(boolean rotate) {
+        return rotate
+                ? "上一个会话连续失败。工作区里可能已有部分成果，请基于现有文件重新评估并完成本任务，然后给出交付总结。"
+                : "服务刚恢复，或上一次执行被中断。请检查工作区已有成果，从中断处继续完成本任务；若其实已完成，请做收尾并给出交付总结。";
     }
 
     /** Dispatches a scheduled turn: coding tasks run the fixed PRD→develop→verify flow, others run single-pass. */
@@ -386,7 +607,12 @@ public class TaskService {
         Cancellation cancellation = new Cancellation();
         activeRuns.put(task.id(), cancellation);
         try {
-            if (TaskKind.fromStorage(task.flow()) == TaskKind.CODING) {
+            boolean coding = TaskKind.fromStorage(task.flow()) == TaskKind.CODING;
+            if (coding && !wrapBriefPrompt && currentPhaseIndex(loadPhases(task.id())) >= loadPhases(task.id()).size()) {
+                // Rework on a finished coding task: every phase is done, so there's no phase to resume —
+                // without this the message would settle DONE without the agent ever seeing it.
+                runFollowUp(task, prompt, agentSessionId, sessionFirstTurn, cancellation);
+            } else if (coding) {
                 // wrapBrief=true marks the initial execution (run phases from the start); false is a
                 // post-confirmation resume carrying the user's reply for the current phase.
                 runCoding(task, wrapBriefPrompt ? null : prompt, agentSessionId, sessionFirstTurn, cancellation);
@@ -400,7 +626,10 @@ public class TaskService {
 
     private record TurnResult(String finalText, BigDecimal cost, boolean cancelled) {
         boolean needsConfirmation() {
-            return finalText != null && finalText.contains(CONFIRM_MARKER);
+            // Only a real blocking question counts: a line that STARTS with the marker (per the wrapped
+            // brief's instruction). A passing mention in a summary must not falsely pause a finished task.
+            return finalText != null
+                    && finalText.lines().anyMatch(line -> line.stripLeading().startsWith(CONFIRM_MARKER));
         }
     }
 
@@ -415,6 +644,7 @@ public class TaskService {
         StringBuilder text = new StringBuilder();
         AtomicReference<String> result = new AtomicReference<>();
         AtomicReference<BigDecimal> turnCost = new AtomicReference<>(BigDecimal.ZERO);
+        AtomicReference<String> error = new AtomicReference<>();
 
         AgentEventSink sink = event -> {
             if (event.type() == AgentEventType.USAGE) {
@@ -427,7 +657,8 @@ public class TaskService {
                 case TEXT -> text.append(event.payload());
                 case RESULT -> result.set(event.payload());
                 case TOOL_USE -> { if (onToolUse != null) onToolUse.run(); }
-                default -> { /* thinking / system / tool_result / error already persisted */ }
+                case ERROR -> error.set(event.payload());
+                default -> { /* thinking / system / tool_result already persisted */ }
             }
         };
 
@@ -436,17 +667,42 @@ public class TaskService {
         AgentRunRequest request = new AgentRunRequest(
                 agentSessionId, sessionFirstTurn ? null : agentSessionId, task.workspaceDir(),
                 wrapBriefPrompt ? wrapBrief(prompt) : prompt,
-                task.model() != null ? task.model() : defaultModel,
+                effectiveModel(task),
                 allowedTools, skipPermissions, null, null);
         runner.run(request, sink, cancellation);
 
         String finalText = result.get() != null ? result.get() : text.toString();
+        if (!cancellation.isCancelled() && error.get() != null && finalText.isBlank()) {
+            // The agent itself failed (couldn't start, couldn't resume, crashed) and produced nothing.
+            // Fail the task with the real reason instead of letting a gate read the empty output as
+            // "needs confirmation" — a reply can't fix an agent failure; ERROR lets the watchdog retry.
+            throw new IllegalStateException("Agent run failed: " + (error.get().isBlank() ? "no output" : error.get()));
+        }
         runStore.appendMessage(new ChatMessage(messageId, task.id(),
                 MessageRole.ASSISTANT, finalText, Instant.now()));
         return new TurnResult(finalText, turnCost.get(), cancellation.isCancelled());
     }
 
     /** Single-pass execution for non-coding tasks: run the turn, then settle to a terminal/confirmation status. */
+    /** One steering turn on a finished task; the agent's reply lands in the run log, the delivery doc is kept. */
+    private void runFollowUp(Task task, String prompt, String agentSessionId, boolean sessionFirstTurn,
+                             Cancellation cancellation) {
+        TurnResult turn;
+        try {
+            turn = executeTurn(task, prompt, agentSessionId, sessionFirstTurn, false, null, cancellation);
+        } catch (Exception e) {
+            failTurn(task, task.progress(), e);
+            return;
+        }
+        if (turn.cancelled()) {
+            settle(task, TaskStatus.STOPPED, task.progress(), null, turn.cost());
+        } else if (turn.needsConfirmation()) {
+            settle(task, TaskStatus.NEEDS_CONFIRMATION, task.progress(), null, turn.cost());
+        } else {
+            settle(task, TaskStatus.DONE, 100, null, turn.cost());
+        }
+    }
+
     private void runTurn(Task task, String prompt, String agentSessionId, boolean sessionFirstTurn,
                          boolean wrapBriefPrompt, Cancellation cancellation) {
         AtomicInteger progress = new AtomicInteger(Math.max(task.progress(), 10));
@@ -743,11 +999,37 @@ public class TaskService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    private static TaskDto toDto(Task t) {
+    private TaskDto toDto(Task t) {
+        return toDto(t, t.workspaceDir() == null ? null : boundSessionId(t));
+    }
+
+    /** List view: session id from the workspace name only, so listing N tasks doesn't cost N run-state reads. */
+    private TaskDto toListDto(Task t) {
+        return toDto(t, t.workspaceDir() == null ? null : deriveSessionId(t));
+    }
+
+    private TaskDto toDto(Task t, String sessionId) {
         return new TaskDto(t.id(), t.title(), t.source().name().toLowerCase(),
                 t.repo(), t.branch(), t.flow(), t.status().name().toLowerCase(),
                 t.progress(), t.spend(), t.model(), t.createdBy(), t.error(),
-                t.createdAt(), t.startedAt(), t.finishedAt(), t.updatedAt());
+                t.createdAt(), t.startedAt(), t.finishedAt(), t.updatedAt(),
+                t.agentType().name().toLowerCase(), sessionId, t.workspaceDir(), sessionState(t.id(), sessionId));
+    }
+
+    private String sessionState(String taskId, String sessionId) {
+        if (sessionId == null) {
+            return null;
+        }
+        synchronized (schedulerLock) {
+            TaskSessionPool.Session s = pool.findSession(sessionId);
+            if (s == null) {
+                return "released";
+            }
+            if (!taskId.equals(s.taskId)) {
+                return s.state == TaskSessionPool.State.IDLE ? "idle" : "in_use";
+            }
+            return s.state == TaskSessionPool.State.RESERVED ? "reserved" : "busy";
+        }
     }
 
     private static MessageDto toMessageDto(ChatMessage m) {

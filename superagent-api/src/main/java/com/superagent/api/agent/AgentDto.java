@@ -9,6 +9,8 @@ import java.time.Instant;
 public record AgentDto(
         String id,
         String name,
+        /** Emoji avatar (one of AgentService's built-ins), or null for agents created before avatars. */
+        String avatar,
         String persona,
         String model,
         String status,
