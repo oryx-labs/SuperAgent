@@ -618,7 +618,7 @@
       "nav.chat": "对话",
       "nav.agent": "Agent",
       "nav.tasks": "任务",
-      "nav.agents": "Agents",
+      "nav.agents": "Agent",
       "nav.knowledge": "知识库",
       "co.myAgents": "我的 Agent",
       "co.sharedAgents": "协作 Agent",
