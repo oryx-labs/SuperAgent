@@ -248,33 +248,81 @@ skel.del.addEventListener("click", () => {
   });
 });
 
-// Agent form: pick skills (all enabled ones; a disabled one already attached stays visible).
+// Agent form: a multi-select dropdown of skills (enabled ones; a disabled one already attached stays listed).
 let chosenSkills = new Set();
+const skillSelect = {
+  root: document.getElementById("afSkills"),
+  trigger: document.getElementById("afSkillsTrigger"),
+  menu: document.getElementById("afSkillsMenu"),
+};
+
 async function renderSkillPicker(current) {
   await loadSkillList();
   chosenSkills = new Set(current || []);
-  const box = document.getElementById("afSkills");
-  box.innerHTML = "";
+  skillSelect.menu.innerHTML = "";
   const offered = skills.filter(s => s.enabled || chosenSkills.has(s.id));
   if (!offered.length) {
-    box.innerHTML = '<span class="skill-chips__empty">' + L("sk.noneYet") + "</span>";
-    return;
+    skillSelect.menu.innerHTML = '<p class="multi-select__empty">' + L("sk.noneYet") + "</p>";
   }
   offered.forEach(s => {
     const label = document.createElement("label");
-    label.className = chosenSkills.has(s.id) ? "is-on" : "";
-    label.title = s.description || "";
+    label.className = "multi-select__option";
+    label.setAttribute("role", "option");
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = chosenSkills.has(s.id);
     cb.addEventListener("change", () => {
       if (cb.checked) chosenSkills.add(s.id); else chosenSkills.delete(s.id);
-      label.className = cb.checked ? "is-on" : "";
+      label.setAttribute("aria-selected", String(cb.checked));
+      renderSkillTrigger();
     });
-    label.append(cb, document.createTextNode(s.name));
-    box.appendChild(label);
+    label.setAttribute("aria-selected", String(cb.checked));
+    const text = document.createElement("span");
+    text.className = "multi-select__text";
+    const name = document.createElement("span");
+    name.className = "multi-select__name";
+    name.textContent = s.name + (s.enabled ? "" : " (" + L("sk.disabled") + ")");
+    const desc = document.createElement("span");
+    desc.className = "multi-select__desc";
+    desc.textContent = s.description || "";
+    text.append(name, desc);
+    label.append(cb, text);
+    skillSelect.menu.appendChild(label);
+  });
+  closeSkillMenu();
+  renderSkillTrigger();
+}
+
+// The closed dropdown shows the chosen skills as chips, or a placeholder.
+function renderSkillTrigger() {
+  skillSelect.trigger.innerHTML = "";
+  const chosen = skills.filter(s => chosenSkills.has(s.id));
+  if (!chosen.length) {
+    const ph = document.createElement("span");
+    ph.className = "multi-select__placeholder";
+    ph.textContent = L("sk.pickPh");
+    skillSelect.trigger.appendChild(ph);
+    return;
+  }
+  chosen.forEach(s => {
+    const chip = document.createElement("span");
+    chip.className = "multi-select__chip";
+    chip.textContent = s.name;
+    skillSelect.trigger.appendChild(chip);
   });
 }
+
+function closeSkillMenu() {
+  skillSelect.menu.hidden = true;
+  skillSelect.trigger.setAttribute("aria-expanded", "false");
+}
+skillSelect.trigger.addEventListener("click", () => {
+  const open = skillSelect.menu.hidden;
+  skillSelect.menu.hidden = !open;
+  skillSelect.trigger.setAttribute("aria-expanded", String(open));
+});
+document.addEventListener("click", e => { if (!skillSelect.root.contains(e.target)) closeSkillMenu(); });
+skillSelect.root.addEventListener("keydown", e => { if (e.key === "Escape" && !skillSelect.menu.hidden) { e.stopPropagation(); closeSkillMenu(); skillSelect.trigger.focus(); } });
 
 // Agent side panel: its skills as chips that open the skill.
 async function renderAgentSkills(agent) {

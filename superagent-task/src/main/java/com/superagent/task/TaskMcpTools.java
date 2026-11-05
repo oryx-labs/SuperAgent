@@ -44,7 +44,7 @@ public class TaskMcpTools implements McpToolProvider {
                                 opt("repo", "string", "可选代码库"), opt("branch", "string", "可选分支"),
                                 opt("kind", "string", "可选任务类型：coding/writing/research/stats/general；不填则自动分类")),
                         "title", "brief"),
-                tool("list_tasks", "列出所有任务及其状态。", props(), (String[]) null),
+                tool("list_tasks", "列出当前用户的任务及其状态。", props(), (String[]) null),
                 tool("get_task", "查看某个任务的状态与进度。", props(req("id", "string", "任务 id")), "id"),
                 tool("send_task_message", "给任务发送消息：回答确认、或变更/指挥其执行（任务非运行中时）。",
                         props(req("id", "string", "任务 id"), req("content", "string", "要发送的内容")), "id", "content"),
@@ -63,7 +63,7 @@ public class TaskMcpTools implements McpToolProvider {
                 yield "已创建任务 " + t.id() + "（" + t.title() + "），状态 " + t.status() + "。可用 get_task 查询进度。";
             }
             case "list_tasks" -> {
-                List<TaskDto> list = tasks.list();
+                List<TaskDto> list = tasks.list(grant.owner());
                 if (list.isEmpty()) {
                     yield "当前没有任务。";
                 }
@@ -75,20 +75,20 @@ public class TaskMcpTools implements McpToolProvider {
                 yield sb.toString();
             }
             case "get_task" -> {
-                TaskDto t = tasks.status(require(args, "id"));
+                TaskDto t = tasks.status(require(args, "id"), grant.owner());
                 yield t.title() + " — 状态 " + t.status() + "，进度 " + t.progress() + "%"
                         + (t.error() != null ? "，错误：" + t.error() : "");
             }
             case "send_task_message" -> {
-                tasks.sendMessage(require(args, "id"), str(args, "content"));
+                tasks.sendMessage(require(args, "id"), grant.owner(), str(args, "content"));
                 yield "已发送，任务将继续执行。";
             }
             case "stop_task" -> {
-                tasks.stop(require(args, "id"));
+                tasks.stop(require(args, "id"), grant.owner());
                 yield "已请求停止。";
             }
             case "delete_task" -> {
-                tasks.delete(require(args, "id"));
+                tasks.delete(require(args, "id"), grant.owner());
                 yield "已删除。";
             }
             default -> throw new McpToolException("Unknown tool: " + name);

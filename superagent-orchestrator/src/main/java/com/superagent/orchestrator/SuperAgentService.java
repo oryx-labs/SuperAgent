@@ -579,7 +579,7 @@ public class SuperAgentService {
         if (works.find(taskId).filter(w -> w.owner().equals(owner)).isEmpty()) {
             throw new IllegalArgumentException("Not a task you assigned: " + taskId);
         }
-        taskService.sendMessage(taskId, content);
+        taskService.sendMessage(taskId, owner, content);
         works.find(taskId).ifPresent(w -> works.save(w.withStatus(SuperAgentWork.RUNNING, null, null)));
         event(taskId, owner, "replied", content.length() <= SUMMARY_CHARS ? content : content.substring(0, SUMMARY_CHARS) + "…");
     }

@@ -9,6 +9,7 @@ import com.superagent.api.task.TaskDetailDto;
 import com.superagent.api.task.TaskDto;
 import com.superagent.api.task.TaskEventDto;
 import com.superagent.api.task.TaskPageDto;
+import com.superagent.api.task.TaskStatsDto;
 import com.superagent.api.task.TaskPhaseDto;
 import com.superagent.core.chat.AgentEvent;
 import com.superagent.core.chat.AgentEventSink;
@@ -263,19 +264,28 @@ public class TaskService implements TaskRecovery {
 
     // --- queries ---
 
-    public List<TaskDto> list() {
-        return tasks.listTasks().stream()
-                .filter(t -> t.status() != TaskStatus.DELETED)
-                .map(this::toListDto).toList();
+    // Every entry point takes the user it acts for: a task is visible only to the user it belongs to
+    // (whoever created it — directly, or through their agents, SuperAgent or automations). Someone else's
+    // task reads as "not found", so ids can't be probed.
+
+    /** The user's live tasks, newest first. */
+    public List<TaskDto> list(String owner) {
+        return owned(owner).map(this::toListDto).toList();
     }
 
-    /** One page of the list, newest first; a page past the end is clamped to the last one. */
-    public TaskPageDto page(int page, int size) {
+    private java.util.stream.Stream<Task> owned(String owner) {
+        return tasks.listTasks().stream()
+                .filter(t -> t.status() != TaskStatus.DELETED && t.createdBy() != null && t.createdBy().equals(owner))
+                .sorted(Comparator.comparing(Task::createdAt).reversed());
+    }
+
+    /**
+     * One page of the user's list, newest first; a page past the end is clamped to the last one.
+     * {@code status}: null/all, "active" (pending or running), or one task status (e.g. needs_confirmation).
+     */
+    public TaskPageDto page(String owner, String status, int page, int size) {
         int pageSize = Math.max(1, Math.min(size, 100));
-        List<Task> live = tasks.listTasks().stream()
-                .filter(t -> t.status() != TaskStatus.DELETED)
-                .sorted(Comparator.comparing(Task::createdAt).reversed())
-                .toList();
+        List<Task> live = owned(owner).filter(t -> matches(t, status)).toList();
         int pages = Math.max(1, (live.size() + pageSize - 1) / pageSize);
         int current = Math.min(Math.max(1, page), pages);
         List<TaskDto> items = live.stream().skip((long) (current - 1) * pageSize).limit(pageSize)
@@ -283,8 +293,41 @@ public class TaskService implements TaskRecovery {
         return new TaskPageDto(items, live.size(), current, pageSize);
     }
 
-    public TaskDetailDto detail(String id) {
-        Task task = require(id);
+    private static boolean matches(Task t, String status) {
+        if (status == null || status.isBlank() || "all".equals(status)) {
+            return true;
+        }
+        if ("active".equals(status)) {
+            return t.status() == TaskStatus.PENDING || t.status() == TaskStatus.RUNNING;
+        }
+        return t.status().name().equalsIgnoreCase(status);
+    }
+
+    /** The user's overview: counts by state, today's completions (server time zone) and this month's spend. */
+    public TaskStatsDto stats(String owner) {
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+        Instant today = java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant();
+        Instant month = java.time.LocalDate.now(zone).withDayOfMonth(1).atStartOfDay(zone).toInstant();
+        List<Task> all = owned(owner).toList();
+        int active = 0, waiting = 0, doneToday = 0, failed = 0;
+        BigDecimal spend = BigDecimal.ZERO;
+        for (Task t : all) {
+            switch (t.status()) {
+                case PENDING, RUNNING -> active++;
+                case NEEDS_CONFIRMATION -> waiting++;
+                case DONE -> doneToday += t.finishedAt() != null && !t.finishedAt().isBefore(today) ? 1 : 0;
+                case ERROR -> failed++;
+                default -> { }
+            }
+            if (t.spend() != null && !t.createdAt().isBefore(month)) {
+                spend = spend.add(t.spend());
+            }
+        }
+        return new TaskStatsDto(all.size(), active, waiting, doneToday, failed, spend);
+    }
+
+    public TaskDetailDto detail(String id, String owner) {
+        Task task = require(id, owner);
         List<MessageDto> messages = runStore.listMessages(id).stream().map(m -> toMessageDto(id, m)).toList();
         List<TaskEventDto> events = runStore.listEvents(id).stream().map(TaskService::toEventDto).toList();
         List<TaskPhaseDto> phases = TaskKind.fromStorage(task.flow()) == TaskKind.CODING
@@ -294,8 +337,8 @@ public class TaskService implements TaskRecovery {
     }
 
     /** Events from {@code offset} onward (chronological), for incremental polling of a running task. */
-    public List<TaskEventDto> eventsFrom(String id, int offset) {
-        require(id);
+    public List<TaskEventDto> eventsFrom(String id, String owner, int offset) {
+        require(id, owner);
         List<AgentEvent> all = runStore.listEvents(id);
         int from = Math.max(0, offset);
         if (from >= all.size()) {
@@ -305,13 +348,13 @@ public class TaskService implements TaskRecovery {
     }
 
     /** Lightweight status/progress snapshot for polling, without the event stream. */
-    public TaskDto status(String id) {
-        return toDto(require(id));
+    public TaskDto status(String id, String owner) {
+        return toDto(require(id, owner));
     }
 
     /** Top-level files in the task workspace, offered as downloadable artifacts. */
-    public List<ArtifactDto> artifacts(String id) {
-        Task task = require(id);
+    public List<ArtifactDto> artifacts(String id, String owner) {
+        Task task = require(id, owner);
         if (task.workspaceDir() == null) {
             return List.of();
         }
@@ -330,8 +373,8 @@ public class TaskService implements TaskRecovery {
     }
 
     /** Reads one artifact by name, guarding against path traversal out of the workspace. */
-    public byte[] readArtifact(String id, String name) {
-        Path file = artifactFile(id, name);
+    public byte[] readArtifact(String id, String owner, String name) {
+        Path file = artifactFile(id, owner, name);
         try {
             return Files.readAllBytes(file);
         } catch (IOException e) {
@@ -340,8 +383,8 @@ public class TaskService implements TaskRecovery {
     }
 
     /** An artifact's path, confined to the task workspace (no traversal, no symlink out of it). */
-    public Path artifactFile(String id, String name) {
-        Task task = require(id);
+    public Path artifactFile(String id, String owner, String name) {
+        Task task = require(id, owner);
         if (task.workspaceDir() == null || name == null) {
             throw new ArtifactNotFoundException(name);
         }
@@ -498,12 +541,12 @@ public class TaskService implements TaskRecovery {
      * via {@code --resume}, same workspace) — never a fresh or borrowed one; if another task
      * currently holds that session, the steering run queues until it frees.
      */
-    public void sendMessage(String id, String content) {
-        sendMessage(id, content, List.of());
+    public void sendMessage(String id, String owner, String content) {
+        sendMessage(id, owner, content, List.of());
     }
 
-    public void sendMessage(String id, String text, List<ImageUploadDto> uploads) {
-        Task task = require(id);
+    public void sendMessage(String id, String owner, String text, List<ImageUploadDto> uploads) {
+        Task task = require(id, owner);
         if (task.status() == TaskStatus.RUNNING || task.workspaceDir() == null) {
             throw new TaskBusyException(id); // running, or queued and never started
         }
@@ -573,8 +616,8 @@ public class TaskService implements TaskRecovery {
                 .orElseGet(() -> deriveSessionId(task));
     }
 
-    public void stop(String id) {
-        require(id);
+    public void stop(String id, String owner) {
+        require(id, owner);
         Cancellation cancellation = activeRuns.get(id);
         if (cancellation != null) {
             cancellation.cancel();
@@ -582,8 +625,8 @@ public class TaskService implements TaskRecovery {
     }
 
     /** Soft delete: marks the task DELETED so it drops out of the list; the row is kept. */
-    public void delete(String id) {
-        Task task = require(id);
+    public void delete(String id, String owner) {
+        Task task = require(id, owner);
         Cancellation cancellation = activeRuns.get(id);
         if (cancellation != null) {
             cancellation.cancel();   // a running turn will settle to STOPPED and release its session
@@ -998,9 +1041,10 @@ public class TaskService implements TaskRecovery {
                 """ + (brief == null ? "" : brief);
     }
 
-    private Task require(String id) {
+    /** The live task if it belongs to {@code owner}; anything else — missing or someone else's — is "not found". */
+    private Task require(String id, String owner) {
         return tasks.findTask(id)
-                .filter(t -> t.status() != TaskStatus.DELETED)
+                .filter(t -> t.status() != TaskStatus.DELETED && t.createdBy() != null && t.createdBy().equals(owner))
                 .orElseThrow(() -> new TaskNotFoundException(id));
     }
 

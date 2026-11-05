@@ -58,6 +58,7 @@ public class SecurityConfig {
                         // External callers: gated by the automation's own X-Automation-Token in AutomationService.
                         .requestMatchers(HttpMethod.POST, "/api/v1/automations/*/trigger").permitAll()
                         .requestMatchers("/api/v1/users/**").hasRole("ADMIN")
+                        .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/providers/**").hasRole("ADMIN") // runs install commands on the host
                         // Everyone may see which connectors exist and whether they're connected. Credentials are
                         // shared by the whole platform, so adding, editing and (dis)connecting stay with admins.

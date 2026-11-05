@@ -11,7 +11,8 @@ const ael = {
   name: document.getElementById("afName"),
   persona: document.getElementById("afPersona"),
   avatars: document.getElementById("afAvatars"),
-  characters: document.getElementById("afCharacters"),
+  character: document.getElementById("afCharacter"),
+  characterHint: document.getElementById("afCharacterHint"),
   personaLabel: document.getElementById("afPersonaLabel"),
 };
 let avatarChoices = [];   // built-in emoji avatars, loaded once from the server
@@ -54,44 +55,34 @@ async function loadCharacters() {
   try { const res = await api.agentCharacters(); characterChoices = (res && res.data) || []; } catch (e) { characterChoices = []; }
 }
 
+// Single choice: the presets, then "custom" (value ""). The selected one's summary shows under the select.
 async function renderCharacterPicker(current) {
   await loadCharacters();
-  chosenCharacter = current;
-  ael.characters.innerHTML = "";
-  const card = (key, emoji, name, summary) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "character-option";
-    b.dataset.key = key || "";
-    b.setAttribute("role", "radio");
-    const head = document.createElement("span");
-    head.className = "character-option__name";
-    head.textContent = emoji + " " + name;
-    const sub = document.createElement("span");
-    sub.className = "character-option__summary";
-    sub.textContent = summary;
-    b.append(head, sub);
-    b.addEventListener("click", () => selectCharacter(key));
-    ael.characters.appendChild(b);
+  ael.character.innerHTML = "";
+  const add = (value, label) => {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    ael.character.appendChild(o);
   };
-  characterChoices.forEach(c => card(c.key, c.emoji, characterName(c), zh() ? c.summaryZh : c.summaryEn));
-  card(null, "✏️", L("agent.characterCustom"), L("agent.characterCustomHint"));
+  characterChoices.forEach(c => add(c.key, c.emoji + " " + characterName(c)));
+  add("", "✏️ " + L("agent.characterCustom"));
   selectCharacter(current);
 }
 
 // Custom: the persona box IS the character (required). Preset: it's optional extra instructions.
 function selectCharacter(key) {
-  chosenCharacter = key;
-  ael.characters.querySelectorAll(".character-option").forEach(x => {
-    const on = x.dataset.key === (key || "");
-    x.classList.toggle("is-selected", on);
-    x.setAttribute("aria-checked", String(on));
-  });
-  const custom = !key;
+  chosenCharacter = key || null;
+  ael.character.value = key || "";
+  const preset = characterByKey(chosenCharacter);
+  ael.characterHint.textContent = preset ? (zh() ? preset.summaryZh : preset.summaryEn) : L("agent.characterCustomHint");
+  const custom = !chosenCharacter;
   ael.personaLabel.textContent = L(custom ? "agent.fPersonaCustom" : "agent.fPersonaExtra");
   ael.persona.placeholder = L(custom ? "agent.fPersonaPh" : "agent.fPersonaExtraPh");
   ael.persona.required = custom;
 }
+
+ael.character.addEventListener("change", () => selectCharacter(ael.character.value));
 
 function openAgentModal(agent) {
   if (streaming) return;

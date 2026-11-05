@@ -4,7 +4,9 @@
 
 // ---------- tasks ----------
 Object.assign(api, {
-  listTasks: page => fetch("/api/v1/tasks?page=" + page + "&size=" + TASK_PAGE_SIZE).then(r => r.json()),
+  listTasks: (page, status) => fetch("/api/v1/tasks?page=" + page + "&size=" + TASK_PAGE_SIZE
+    + (status ? "&status=" + encodeURIComponent(status) : "")).then(r => r.json()),
+  taskStats: () => fetch("/api/v1/tasks/stats").then(r => r.json()),
   taskDetail: id => fetch("/api/v1/tasks/" + id).then(r => r.json()),
   taskAgents: () => fetch("/api/v1/tasks/agents").then(r => r.json()),
   taskStatus: id => fetch("/api/v1/tasks/" + id + "/status").then(r => r.json()),
@@ -72,6 +74,7 @@ function showTaskList() {
 
 const TASK_PAGE_SIZE = 20;
 let taskPage = 1;
+let taskFilter = ""; // "" = all; otherwise the stat card the user clicked
 let agentOptions = [];  // [{key, name, models:[ProviderModelDto]}] from /tasks/agents
 
 // Tasks are only ever created by agents and automations, so the list just pages through them.
@@ -84,11 +87,49 @@ function renderTaskPager(page) {
   tel.pagerNext.disabled = page.page >= pages;
 }
 
+// The overview above the list. Each card is also a filter: click to see just those tasks, click again for all.
+const TASK_STAT_CARDS = [
+  { key: "", label: "tasks.statTotal", value: s => s.total },
+  { key: "active", label: "tasks.statActive", value: s => s.active },
+  { key: "needs_confirmation", label: "tasks.statWaiting", value: s => s.needsConfirmation, tone: "warn" },
+  { key: "done", label: "tasks.statDoneToday", value: s => s.doneToday, tone: "ok" },
+  { key: "error", label: "tasks.statFailed", value: s => s.failed, tone: "bad" },
+  { key: null, label: "tasks.statSpend", value: s => "$" + Number(s.spendThisMonth || 0).toFixed(2) },
+];
+
+async function loadTaskStats() {
+  const res = await api.taskStats().catch(() => null);
+  const stats = res && res.data;
+  const box = document.getElementById("taskStats");
+  if (!stats) { box.replaceChildren(); return; }
+  box.replaceChildren(...TASK_STAT_CARDS.map(c => {
+    const card = document.createElement(c.key === null ? "div" : "button");
+    card.className = "stat-card" + (c.tone ? " is-" + c.tone : "") + (c.key === taskFilter ? " is-active" : "");
+    if (c.key !== null) {
+      card.type = "button";
+      card.addEventListener("click", () => {
+        taskFilter = taskFilter === c.key ? "" : c.key;
+        taskPage = 1;
+        loadTasks();
+      });
+    }
+    const v = document.createElement("span");
+    v.className = "stat-card__value";
+    v.textContent = c.value(stats);
+    const l = document.createElement("span");
+    l.className = "stat-card__label";
+    l.textContent = L(c.label);
+    card.append(v, l);
+    return card;
+  }));
+}
+
 async function loadTasks() {
   if (!agentOptions.length) await loadAgentOptions();
   let list = [];
   let page = null;
-  try { const res = await api.listTasks(taskPage); page = res && res.data; } catch (e) { /* ignore */ }
+  loadTaskStats();
+  try { const res = await api.listTasks(taskPage, taskFilter); page = res && res.data; } catch (e) { /* ignore */ }
   list = (page && page.items) || [];
   if (page) taskPage = page.page; // the server clamps a page past the end (e.g. after deletes)
   renderTaskPager(page);

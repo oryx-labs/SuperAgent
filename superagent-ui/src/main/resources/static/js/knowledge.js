@@ -394,8 +394,11 @@ let modelDetailId = null;
 // View state lives in the URL hash (#tasks, #connectors, …) so a refresh or
 // back/forward restores the same view. Admin-only views fall back to the default
 // for non-admins. See initialView().
-const KNOWN_VIEWS = new Set(["chat", "tasks", "inbox", "knowledge", "skills", "automation", "connectors", "models", "users", "settings"]);
-const ADMIN_VIEWS = new Set(["models", "users", "settings"]);
+const KNOWN_VIEWS = new Set(["chat", "tasks", "inbox", "knowledge", "skills", "automation", "connectors", "models",
+  "users", "settings", "analytics"]);
+// The "Workspace" dropdown's pages, and the admin pages (shown with the admin sidebar).
+const WORKSPACE_VIEWS = new Set(["inbox", "automation", "knowledge", "skills", "connectors"]);
+const ADMIN_VIEWS = new Set(["settings", "analytics", "models", "users"]);
 const DEFAULT_VIEW = "chat";
 let isAdmin = false;
 
@@ -411,6 +414,16 @@ function setView(view) {
     history.replaceState(history.state, document.title, window.location.pathname + window.location.search + "#" + view);
   }
   navItems.forEach(a => a.classList.toggle("is-active", a.dataset.view === view));
+  // Top menu: the dropdown and "Admin" light up for any of their pages; the dropdown also says which one.
+  const inWorkspace = WORKSPACE_VIEWS.has(view);
+  const inAdmin = ADMIN_VIEWS.has(view);
+  document.getElementById("workspaceMenu").classList.toggle("is-active", inWorkspace);
+  const wsItem = inWorkspace ? navItems.find(a => a.dataset.view === view) : null;
+  document.getElementById("workspaceCurrent").textContent = wsItem ? " · " + wsItem.textContent.trim() : "";
+  document.getElementById("adminTopNav").classList.toggle("is-active", inAdmin);
+  document.getElementById("adminSide").hidden = !inAdmin;
+  document.querySelector(".layout").classList.toggle("layout--admin", inAdmin);
+  closeWorkspaceMenu();
   const isChat = view === "chat";
   const isConnectors = view === "connectors";
   const isTasks = view === "tasks";
@@ -421,7 +434,9 @@ function setView(view) {
   const isAutomation = view === "automation";
   const isSkills = view === "skills";
   const isInbox = view === "inbox";
+  const isAnalytics = view === "analytics";
   chatPanes.forEach(p => { p.hidden = !isChat; });
+  analyticsPane.hidden = !isAnalytics;
   automationPane.hidden = !isAutomation;
   connectorsPane.hidden = !isConnectors;
   tasksPane.hidden = !isTasks;
@@ -432,7 +447,7 @@ function setView(view) {
   skPane.hidden = !isSkills;
   ibPane.hidden = !isInbox;
   placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isSettings || isKnowledge
-    || isAutomation || isSkills || isInbox;
+    || isAutomation || isSkills || isInbox || isAnalytics;
   if (!placeholderPane.hidden) placeholderText.textContent = L(placeholderLabels[view] || "placeholder.default");
   if (isConnectors) loadConnectors();
   if (isUsers) loadUsers();
@@ -440,6 +455,7 @@ function setView(view) {
   if (isKnowledge) loadKnowledge();
   if (isSkills) loadSkills();
   if (isInbox) loadInbox();
+  if (isAnalytics) loadAnalytics();
   if (isAutomation) { showAutoList(); loadAutomations(); }
   if (isTasks) { showTaskList(); loadTasks(); } else { stopTaskPolling(); }
   if (isModels) { showModelList(); startModelPolling(); } else { stopModelPolling(); }
@@ -466,7 +482,28 @@ userMenuBtn.addEventListener("click", e => {
   userMenu.classList.toggle("is-open", open);
   userMenuBtn.setAttribute("aria-expanded", String(open));
 });
-document.addEventListener("click", e => { if (!userMenu.contains(e.target)) closeUserMenu(); });
+document.addEventListener("click", e => {
+  if (!userMenu.contains(e.target)) closeUserMenu();
+  if (!workspaceMenu.contains(e.target)) closeWorkspaceMenu();
+});
+
+// The "Workspace" dropdown in the top menu: same behaviour as the account menu (hover, or click on touch).
+const workspaceMenu = document.getElementById("workspaceMenu");
+const workspaceBtn = document.getElementById("workspaceBtn");
+function closeWorkspaceMenu() {
+  workspaceMenu.classList.remove("is-open");
+  workspaceBtn.setAttribute("aria-expanded", "false");
+  if (workspaceMenu.contains(document.activeElement)) document.activeElement.blur();
+}
+workspaceBtn.addEventListener("click", e => {
+  e.stopPropagation();
+  const open = !workspaceMenu.classList.contains("is-open");
+  workspaceMenu.classList.toggle("is-open", open);
+  workspaceBtn.setAttribute("aria-expanded", String(open));
+});
+
+// "Admin" opens the first admin page; the admin sidebar takes it from there.
+document.getElementById("adminTopNav").addEventListener("click", e => { e.preventDefault(); setView("settings"); });
 
 // The logo goes home: the Agent page with the user's SuperAgent open.
 document.getElementById("brandHome").addEventListener("click", e => {
@@ -475,7 +512,7 @@ document.getElementById("brandHome").addEventListener("click", e => {
   const home = agents.find(a => a.kind === "super") || agents[0];
   if (home && home.id !== activeAgentId) selectAgent(home);
 });
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeUserMenu(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closeUserMenu(); closeWorkspaceMenu(); } });
 
 // Back/forward (and manual hash edits) re-drive the view from the URL.
 window.addEventListener("hashchange", () => setView(initialView()));

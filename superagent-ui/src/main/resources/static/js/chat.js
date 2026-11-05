@@ -135,18 +135,31 @@ function renderThreads(list) {
   const mine = list.filter(a => a.kind !== "super" && !isShared(a));
   const shared = list.filter(a => a.kind !== "super" && isShared(a));
   supers.forEach(a => el.threadList.append(superThread(a), threadSeparator()));
-  if (shared.length) el.threadList.appendChild(threadGroup(L("co.myAgents")));
-  mine.forEach(renderThread);
-  if (shared.length) {
-    el.threadList.appendChild(threadGroup(L("co.sharedAgents")));
-    shared.forEach(renderThread);
-  }
+  // Both groups always show, so it's clear where shared agents will appear even before there are any.
+  el.threadList.appendChild(threadGroup(L("co.myAgents"), mine.length));
+  if (mine.length) mine.forEach(renderThread);
+  else el.threadList.appendChild(threadEmpty(L("co.myEmpty")));
+  el.threadList.appendChild(threadGroup(L("co.sharedAgents"), shared.length));
+  if (shared.length) shared.forEach(renderThread);
+  else el.threadList.appendChild(threadEmpty(L("co.sharedEmpty")));
 }
 
-function threadGroup(label) {
+function threadGroup(label, count) {
   const li = document.createElement("li");
   li.className = "thread-group";
-  li.textContent = label;
+  const name = document.createElement("span");
+  name.textContent = label;
+  const n = document.createElement("span");
+  n.className = "thread-group__count";
+  n.textContent = count;
+  li.append(name, n);
+  return li;
+}
+
+function threadEmpty(text) {
+  const li = document.createElement("li");
+  li.className = "thread-empty";
+  li.textContent = text;
   return li;
 }
 

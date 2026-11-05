@@ -148,7 +148,7 @@ class TaskServiceTest {
         assertThat(done.progress()).isEqualTo(100);
         assertThat(done.finishedAt()).isNotNull();
 
-        TaskDetailDto detail = service.detail(id);
+        TaskDetailDto detail = service.detail(id, "tester");
         assertThat(detail.events()).isNotEmpty();
         assertThat(detail.messages()).anyMatch(m -> m.role().equals("assistant"));
     }
@@ -166,7 +166,7 @@ class TaskServiceTest {
         await().atMost(Duration.ofSeconds(5)).until(() ->
                 tasks.findTask(id).map(t -> t.status().name()).orElse("").equals("NEEDS_CONFIRMATION"));
 
-        service.sendMessage(id, "用 MySQL");
+        service.sendMessage(id, "tester", "用 MySQL");
         await().atMost(Duration.ofSeconds(5)).until(() ->
                 tasks.findTask(id).map(t -> t.status().name()).orElse("").equals("DONE"));
 
@@ -189,7 +189,7 @@ class TaskServiceTest {
 
         await().atMost(Duration.ofSeconds(2)).until(() ->
                 tasks.findTask(id).map(t -> t.status().name()).orElse("").equals("RUNNING"));
-        assertThatThrownBy(() -> service.sendMessage(id, "hi")).isInstanceOf(TaskBusyException.class);
+        assertThatThrownBy(() -> service.sendMessage(id, "tester", "hi")).isInstanceOf(TaskBusyException.class);
     }
 
     @Test
@@ -200,17 +200,31 @@ class TaskServiceTest {
             Thread.sleep(5); // distinct creation times, so "newest first" is well defined
         }
 
-        TaskPageDto first = service.page(1, 2);
+        TaskPageDto first = service.page("tester", null, 1, 2);
         assertThat(first.total()).isEqualTo(3);
         assertThat(first.items()).extracting(TaskDto::title).containsExactly("C", "B");
-        assertThat(service.page(2, 2).items()).extracting(TaskDto::title).containsExactly("A");
-        assertThat(service.page(9, 2).page()).isEqualTo(2);
+        assertThat(service.page("tester", null, 2, 2).items()).extracting(TaskDto::title).containsExactly("A");
+        assertThat(service.page("tester", null, 9, 2).page()).isEqualTo(2);
+    }
+
+    @Test
+    void someoneElsesTaskDoesNotExistForYou() {
+        TaskService service = service(new FakeRunner(() -> "done."), new InMemoryTaskStore());
+        String id = service.create(brief("Mine"), "alice").id();
+
+        assertThat(service.list("bob")).isEmpty();
+        assertThat(service.page("bob", null, 1, 20).total()).isZero();
+        assertThat(service.stats("bob").total()).isZero();
+        assertThatThrownBy(() -> service.detail(id, "bob")).isInstanceOf(TaskNotFoundException.class);
+        assertThatThrownBy(() -> service.sendMessage(id, "bob", "hi")).isInstanceOf(TaskNotFoundException.class);
+        assertThatThrownBy(() -> service.delete(id, "bob")).isInstanceOf(TaskNotFoundException.class);
+        assertThat(service.list("alice")).extracting(TaskDto::title).containsExactly("Mine");
     }
 
     @Test
     void missingTaskYields404() {
         TaskService service = service(new FakeRunner(() -> "x"), new InMemoryTaskStore());
-        assertThatThrownBy(() -> service.detail("nope")).isInstanceOf(TaskNotFoundException.class);
+        assertThatThrownBy(() -> service.detail("nope", "tester")).isInstanceOf(TaskNotFoundException.class);
     }
 
     @Test
@@ -279,7 +293,7 @@ class TaskServiceTest {
 
         assertThat(tasks.findTask(id).orElseThrow().progress()).isEqualTo(100);
 
-        TaskDetailDto detail = service.detail(id);
+        TaskDetailDto detail = service.detail(id, "tester");
         assertThat(detail.phases()).hasSize(3);
         assertThat(detail.phases()).allMatch(p -> p.status().equals("done"));
         assertThat(detail.phases().get(0).content()).contains("## 背景");   // PRD stored in DB
@@ -295,7 +309,7 @@ class TaskServiceTest {
         await().atMost(Duration.ofSeconds(5)).until(() ->
                 tasks.findTask(id).map(t -> t.status().name()).orElse("").equals("NEEDS_CONFIRMATION"));
 
-        TaskDetailDto detail = service.detail(id);
+        TaskDetailDto detail = service.detail(id, "tester");
         assertThat(detail.messages()).anyMatch(m -> m.content().contains("第1步未产出 PRD"));
         assertThat(detail.phases().get(0).status()).isEqualTo("running"); // stays on the PRD step for resume
     }
@@ -350,14 +364,14 @@ class TaskServiceTest {
         String id = service.create(brief("A")).id();
         awaitStatus(tasks, id, "DONE");
 
-        service.sendMessage(id, "", List.of(new ImageUploadDto("image/png", PNG))); // image-only is allowed
+        service.sendMessage(id, "tester", "", List.of(new ImageUploadDto("image/png", PNG))); // image-only is allowed
         awaitStatus(tasks, id, "DONE");
         assertThat(runner.calls.get(1).images()).isEqualTo(1);
-        assertThat(service.detail(id).messages()).filteredOn(m -> m.role().equals("user")).singleElement()
+        assertThat(service.detail(id, "tester").messages()).filteredOn(m -> m.role().equals("user")).singleElement()
                 .satisfies(m -> assertThat(m.images()).singleElement().asString()
                         .startsWith("/api/v1/tasks/" + id + "/messages/"));
 
-        service.sendMessage(id, "and now without one");
+        service.sendMessage(id, "tester", "and now without one");
         awaitStatus(tasks, id, "DONE");
         assertThat(runner.calls.get(2).images()).isZero();
     }
@@ -378,18 +392,18 @@ class TaskServiceTest {
         RecordingRunner.Call first = runner.calls.get(0);
         assertThat(first.resumeId()).isNull(); // first turn mints the session
 
-        service.sendMessage(id, "fix the edge case");
+        service.sendMessage(id, "tester", "fix the edge case");
         awaitStatus(tasks, id, "DONE");
         RecordingRunner.Call steer = runner.calls.get(1);
         assertThat(steer.sessionId()).isEqualTo(first.sessionId());
         assertThat(steer.resumeId()).isEqualTo(first.sessionId()); // --resume, not a new session
         assertThat(steer.workspaceDir()).isEqualTo(first.workspaceDir());
-        assertThat(service.detail(id).task().sessionId()).isEqualTo(first.sessionId());
+        assertThat(service.detail(id, "tester").task().sessionId()).isEqualTo(first.sessionId());
 
         // A new process starts with an empty pool: steering must still resume the same session.
         TaskService restarted = new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES,
                 root, "", "", false, 5, "tester", null, null);
-        restarted.sendMessage(id, "one more fix");
+        restarted.sendMessage(id, "tester", "one more fix");
         awaitStatus(tasks, id, "DONE");
         RecordingRunner.Call afterRestart = runner.calls.get(2);
         assertThat(afterRestart.resumeId()).isEqualTo(first.sessionId());
@@ -408,9 +422,9 @@ class TaskServiceTest {
         await().atMost(Duration.ofSeconds(5)).until(() -> runner.calls.size() == 2);
         assertThat(runner.calls.get(1).sessionId()).isEqualTo(runner.calls.get(0).sessionId());
 
-        service.sendMessage(a, "rework");
+        service.sendMessage(a, "tester", "rework");
         assertThat(tasks.findTask(a).orElseThrow().status().name()).isEqualTo("PENDING");
-        assertThatThrownBy(() -> service.sendMessage(a, "again")).isInstanceOf(TaskBusyException.class);
+        assertThatThrownBy(() -> service.sendMessage(a, "tester", "again")).isInstanceOf(TaskBusyException.class);
 
         runner.gate.countDown(); // B finishes and frees the session; A's steering run takes it
         awaitStatus(tasks, b, "DONE");
@@ -453,8 +467,8 @@ class TaskServiceTest {
 
         assertThat(codex.get(0).sessionId()).isNotEqualTo(claude.get(0).sessionId()); // codex never takes a claude session
         assertThat(claude.get(1).sessionId()).isEqualTo(claude.get(0).sessionId());   // the next claude task reuses it
-        assertThat(service.detail(b).task().agentType()).isEqualTo("codex");
-        assertThat(service.detail(b).task().model()).isEqualTo("gpt-6-sol");
+        assertThat(service.detail(b, "tester").task().agentType()).isEqualTo("codex");
+        assertThat(service.detail(b, "tester").task().model()).isEqualTo("gpt-6-sol");
     }
 
     @Test
@@ -480,7 +494,7 @@ class TaskServiceTest {
     void creatingATaskForACliWithoutARunnerIsRejected() {
         TaskService service = service(new FakeRunner(() -> "x"), new InMemoryTaskStore());
         assertThatThrownBy(() -> service.create(briefFor("K", "kimi", null))).isInstanceOf(IllegalArgumentException.class);
-        assertThat(service.list()).isEmpty();
+        assertThat(service.list("tester")).isEmpty();
     }
 
     @Test
@@ -521,7 +535,7 @@ class TaskServiceTest {
         String shared = calls.get(0).sessionId();
         assertThat(calls.get(1).sessionId()).isEqualTo(shared);
 
-        service.sendMessage(a, "rework");                           // must not wait on B's reply
+        service.sendMessage(a, "tester", "rework");                           // must not wait on B's reply
         awaitStatus(tasks, a, "DONE");
         assertThat(calls.get(2).sessionId()).isEqualTo(shared);
 
@@ -529,7 +543,7 @@ class TaskServiceTest {
         awaitStatus(tasks, c, "DONE");
         assertThat(calls.get(3).sessionId()).isNotEqualTo(shared);
 
-        service.sendMessage(b, "mysql");                            // B's reply continues in the shared session
+        service.sendMessage(b, "tester", "mysql");                            // B's reply continues in the shared session
         awaitStatus(tasks, b, "DONE");
         assertThat(calls.get(4).sessionId()).isEqualTo(shared);
     }
@@ -572,10 +586,10 @@ class TaskServiceTest {
         awaitStatus(tasks, id, "DONE");
         int phaseTurns = prompts.size();
 
-        service.sendMessage(id, "咋没效果，需要重新编译吗");
+        service.sendMessage(id, "tester", "咋没效果，需要重新编译吗");
         await().atMost(Duration.ofSeconds(5)).until(() -> prompts.size() == phaseTurns + 1);
         awaitStatus(tasks, id, "DONE");
         assertThat(prompts.get(phaseTurns)).isEqualTo("咋没效果，需要重新编译吗");
-        assertThat(service.detail(id).messages()).anyMatch(m -> m.role().equals("assistant") && m.content().contains("已完成"));
+        assertThat(service.detail(id, "tester").messages()).anyMatch(m -> m.role().equals("assistant") && m.content().contains("已完成"));
     }
 }

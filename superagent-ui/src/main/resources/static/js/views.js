@@ -12,6 +12,7 @@ const modelsPane = document.querySelector('[data-pane="models"]');
 const settingsPane = document.querySelector('[data-pane="settings"]');
 const placeholderPane = document.querySelector('[data-pane="placeholder"]');
 const automationPane = document.querySelector('[data-pane="automation"]');
+const analyticsPane = document.querySelector('[data-pane="analytics"]');
 const placeholderText = document.getElementById("placeholderText");
 const placeholderLabels = {
   automation: "placeholder.automation",

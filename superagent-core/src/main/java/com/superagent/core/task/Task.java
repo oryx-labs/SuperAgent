@@ -36,6 +36,11 @@ public record Task(
         Instant finishedAt,
         Instant updatedAt) {
 
+    public Task withCreatedBy(String owner) {
+        return new Task(id, title, brief, source, repo, branch, flow, status, progress, spend,
+                model, agentType, workspaceDir, owner, error, createdAt, startedAt, finishedAt, Instant.now());
+    }
+
     public Task withStatus(TaskStatus newStatus) {
         return new Task(id, title, brief, source, repo, branch, flow, newStatus, progress, spend,
                 model, agentType, workspaceDir, createdBy, error, createdAt, startedAt, finishedAt, Instant.now());

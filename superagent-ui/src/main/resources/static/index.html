@@ -13,17 +13,29 @@
         <img class="brand__logo" src="/superagent-logo.png" alt="SuperAgent" />
       </a>
     </div>
-    <!-- The two everyday areas, always one click away; everything else is in the account menu. -->
+    <!-- Main menu: the everyday areas, the workspace tools in a dropdown, and administration for admins. -->
     <nav class="topnav" aria-label="Main">
       <a class="nav__item is-active" href="#chat" data-view="chat"><span data-i18n="nav.agents">Agents</span></a>
       <a class="nav__item" href="#tasks" data-view="tasks"><span data-i18n="nav.tasks">Tasks</span></a>
+      <div class="topmenu" id="workspaceMenu">
+        <button class="topmenu__btn" type="button" id="workspaceBtn" aria-haspopup="menu" aria-expanded="false">
+          <span data-i18n="nav.workspace">Workspace</span><span class="topmenu__current" id="workspaceCurrent"></span>
+          <span class="user__caret" aria-hidden="true"></span>
+        </button>
+        <div class="topmenu__panel" role="menu">
+          <nav class="nav" aria-label="Workspace">
+            <a class="nav__item" href="#inbox" data-view="inbox"><span class="nav__dot"></span><span data-i18n="nav.inbox">Inbox</span></a>
+            <a class="nav__item" href="#automation" data-view="automation"><span class="nav__dot"></span><span data-i18n="nav.automation">Automation</span></a>
+            <a class="nav__item" href="#knowledge" data-view="knowledge"><span class="nav__dot"></span><span data-i18n="nav.knowledge">Knowledge</span></a>
+            <a class="nav__item" href="#skills" data-view="skills"><span class="nav__dot"></span><span data-i18n="nav.skills">Skills</span></a>
+            <a class="nav__item" href="#connectors" data-view="connectors"><span class="nav__dot"></span><span data-i18n="nav.connectors">Connectors</span></a>
+          </nav>
+        </div>
+      </div>
+      <a class="topnav__admin" href="#settings" id="adminTopNav" hidden><span data-i18n="nav.admin">Admin</span></a>
     </nav>
     <div class="topbar__right">
-      <div class="lang-switch" id="langSwitch">
-        <button type="button" data-lang="en">EN</button>
-        <button type="button" data-lang="zh">中文</button>
-      </div>
-      <!-- Navigation lives in the account menu: work areas for everyone, administration for admins. -->
+      <!-- The account menu: who you are, the interface language, signing out. -->
       <div class="user-menu" id="userMenu">
         <button class="user" type="button" id="userMenuBtn" aria-haspopup="menu" aria-expanded="false">
           <span class="user__avatar" id="userAvatar" aria-hidden="true"></span>
@@ -31,23 +43,11 @@
           <span class="user__caret" aria-hidden="true"></span>
         </button>
         <div class="user-menu__panel" role="menu">
-          <div class="user-menu__label" data-i18n="nav.groupWork">Workspace</div>
-          <nav class="nav" aria-label="Primary">
-        <a class="nav__item" href="#" data-view="inbox"><span class="nav__dot"></span><span data-i18n="nav.inbox">Inbox</span></a>
-        <a class="nav__item" href="#" data-view="knowledge"><span class="nav__dot"></span><span data-i18n="nav.knowledge">Knowledge</span></a>
-        <a class="nav__item" href="#" data-view="skills"><span class="nav__dot"></span><span data-i18n="nav.skills">Skills</span></a>
-        <a class="nav__item" href="#" data-view="automation"><span class="nav__dot"></span><span data-i18n="nav.automation">Automation</span></a>
-        <a class="nav__item" href="#" data-view="connectors" id="connectorsNav"><span class="nav__dot"></span><span data-i18n="nav.connectors">Connectors</span></a>
-          </nav>
-          <div id="adminSep">
-            <div class="nav__sep"></div>
-            <div class="user-menu__label" data-i18n="nav.groupAdmin">Administration</div>
+          <div class="user-menu__label" data-i18n="nav.language">Language</div>
+          <div class="lang-switch" id="langSwitch">
+            <button type="button" data-lang="en">English</button>
+            <button type="button" data-lang="zh">中文</button>
           </div>
-          <nav class="nav" aria-label="Administration" id="adminNav">
-        <a class="nav__item" href="#" data-view="models"><span class="nav__dot"></span><span data-i18n="nav.models">Models</span></a>
-        <a class="nav__item" href="#" data-view="users"><span class="nav__dot"></span><span data-i18n="nav.users">Users</span></a>
-        <a class="nav__item" href="#" data-view="settings"><span class="nav__dot"></span><span data-i18n="nav.settings">System Settings</span></a>
-          </nav>
           <div class="nav__sep"></div>
           <button class="user-menu__logout" id="logoutBtn" type="button" data-i18n="topbar.logout">Sign out</button>
         </div>
@@ -279,6 +279,7 @@
           </div>
         </div>
         <div class="admin__body">
+          <div class="stat-cards stat-cards--filter" id="taskStats"></div>
           <table class="ttable">
             <thead>
               <tr>
@@ -352,6 +353,41 @@
           <textarea class="task-steer__input" id="taskSteerInput" rows="1" data-i18n-ph="tasks.steer"></textarea>
           <button class="send" type="submit" id="taskSteerBtn" aria-label="Send">↑</button>
         </form>
+      </div>
+    </section>
+
+    <!-- Administration: one sidebar for every admin page, current and future. -->
+    <aside class="admin-side" id="adminSide" hidden>
+      <div class="admin-side__title" data-i18n="nav.admin">Admin</div>
+      <nav class="nav" aria-label="Administration">
+        <a class="nav__item" href="#settings" data-view="settings"><span class="nav__dot"></span><span data-i18n="nav.settings">System Settings</span></a>
+        <a class="nav__item" href="#analytics" data-view="analytics"><span class="nav__dot"></span><span data-i18n="nav.analytics">Analytics</span></a>
+        <a class="nav__item" href="#models" data-view="models"><span class="nav__dot"></span><span data-i18n="nav.models">Models</span></a>
+        <a class="nav__item" href="#users" data-view="users"><span class="nav__dot"></span><span data-i18n="nav.users">Users</span></a>
+      </nav>
+    </aside>
+
+    <section class="admin" data-pane="analytics" aria-label="Analytics" hidden>
+      <div class="admin__head">
+        <div>
+          <h2 class="admin__title" data-i18n="an.title">Analytics</h2>
+          <p class="admin__sub" data-i18n="an.sub">How the platform is being used.</p>
+        </div>
+      </div>
+      <div class="admin__body">
+        <div class="stat-cards" id="anCards"></div>
+        <h3 class="panel__title panel__title--spaced" data-i18n="an.daily">Tasks per day</h3>
+        <div class="an-chart" id="anChart"></div>
+        <div class="an-legend">
+          <span><i class="is-created"></i><span data-i18n="an.created">Created</span></span>
+          <span><i class="is-done"></i><span data-i18n="an.done">Done</span></span>
+          <span><i class="is-failed"></i><span data-i18n="an.failed">Failed</span></span>
+        </div>
+        <h3 class="panel__title panel__title--spaced" data-i18n="an.models">By model</h3>
+        <table class="ctable">
+          <thead><tr><th data-i18n="an.model">Model</th><th data-i18n="an.tasks">Tasks</th><th data-i18n="an.spend">Spend</th></tr></thead>
+          <tbody id="anModels"></tbody>
+        </table>
       </div>
     </section>
 
@@ -675,11 +711,15 @@
       <label class="field"><span data-i18n="agent.fName">Name</span>
         <input type="text" id="afName" required data-i18n-ph="agent.fNamePh" />
       </label>
-      <div class="field"><span data-i18n="agent.fCharacter">Character</span>
-        <div class="character-picker" id="afCharacters" role="radiogroup"></div>
-      </div>
+      <label class="field"><span data-i18n="agent.fCharacter">Character</span>
+        <select id="afCharacter"></select>
+      </label>
+      <p class="field-hint character-hint" id="afCharacterHint"></p>
       <div class="field"><span data-i18n="sk.agentSkills">Skills</span>
-        <div class="skill-picker" id="afSkills"></div>
+        <div class="multi-select" id="afSkills">
+          <button type="button" class="multi-select__trigger" id="afSkillsTrigger" aria-haspopup="listbox" aria-expanded="false"></button>
+          <div class="multi-select__menu" id="afSkillsMenu" role="listbox" aria-multiselectable="true" hidden></div>
+        </div>
       </div>
       <label class="field"><span id="afPersonaLabel"></span>
         <textarea id="afPersona" rows="4"></textarea>
@@ -830,6 +870,7 @@
   <script src="/js/auth.js"></script>
   <script src="/js/models.js"></script>
   <script src="/js/settings.js"></script>
+  <script src="/js/analytics.js"></script>
   <script src="/js/automations.js"></script>
 </body>
 </html>

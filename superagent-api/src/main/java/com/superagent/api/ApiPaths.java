@@ -32,6 +32,9 @@ public final class ApiPaths {
 
     public static final String USERS = V1 + "/users";
 
+    /** Platform-wide figures for administrators. */
+    public static final String ANALYTICS = V1 + "/admin/analytics";
+
     /** Model-vendor CLIs (claude, codex, ...) the runtime can call. */
     public static final String PROVIDERS = V1 + "/providers";
 

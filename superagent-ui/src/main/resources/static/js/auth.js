@@ -16,8 +16,6 @@ Object.assign(api, {
   deleteUser: id => fetch("/api/v1/users/" + id, { method: "DELETE" }),
 });
 
-const adminNav = document.getElementById("adminNav");
-const adminSep = document.getElementById("adminSep");
 
 let currentUsername = null;
 
@@ -33,8 +31,7 @@ async function initAuth() {
   // Admin-only sections: hide for non-admins.
   const showAdmin = !!me.admin;
   isAdmin = showAdmin;
-  adminNav.hidden = !showAdmin;
-  adminSep.hidden = !showAdmin;
+  document.getElementById("adminTopNav").hidden = !showAdmin;
   document.getElementById("addConnectorBtn").hidden = !showAdmin; // the list is for all; managing it is not
   return true;
 }
