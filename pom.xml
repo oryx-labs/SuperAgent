@@ -23,10 +23,16 @@
     <module>superagent-core</module>
     <module>superagent-api</module>
     <module>superagent-storage</module>
-    <module>superagent-web</module>
-    <module>superagent-server</module>
-    <module>superagent-worker</module>
+    <module>superagent-runtime</module>
+    <module>superagent-platform</module>
+    <module>superagent-knowledge</module>
+    <module>superagent-agent</module>
+    <module>superagent-task</module>
+    <module>superagent-orchestrator</module>
     <module>superagent-event</module>
+    <module>superagent-web</module>
+    <module>superagent-ui</module>
+    <module>superagent-server</module>
   </modules>
 
   <properties>
@@ -60,7 +66,37 @@
       </dependency>
       <dependency>
         <groupId>com.superagent</groupId>
-        <artifactId>superagent-worker</artifactId>
+        <artifactId>superagent-runtime</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-platform</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-knowledge</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-agent</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-task</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-orchestrator</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-ui</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

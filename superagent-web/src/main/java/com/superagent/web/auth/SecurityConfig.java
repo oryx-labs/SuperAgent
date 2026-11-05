@@ -49,7 +49,7 @@ public class SecurityConfig {
         http
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/login", "/login.html", "/login.css", "/login.js", "/app.css", "/app.js",
+                        .requestMatchers("/login", "/login.html", "/login.css", "/login.js", "/app.css", "/js/**",
                                 "/i18n.js", "/superagent-logo.png", "/favicon.ico").permitAll()
                         .requestMatchers("/api/v1/meta", "/actuator/health").permitAll()
                         .requestMatchers("/api/v1/auth/login", "/api/v1/auth/phone/**").permitAll()

@@ -4,6 +4,7 @@ import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.knowledge.KnowledgeEntryDto;
 import com.superagent.api.knowledge.KnowledgeRequests;
+import com.superagent.knowledge.KnowledgeService;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;

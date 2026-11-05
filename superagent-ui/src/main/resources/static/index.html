@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title data-i18n="title.app">SuperAgent</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <a class="brand__home" href="#chat" id="brandHome" data-i18n-title="brand.home" aria-label="Home">
+        <img class="brand__logo" src="/superagent-logo.png" alt="SuperAgent" />
+      </a>
+    </div>
+    <!-- The two everyday areas, always one click away; everything else is in the account menu. -->
+    <nav class="topnav" aria-label="Main">
+      <a class="nav__item is-active" href="#chat" data-view="chat"><span data-i18n="nav.agents">Agents</span></a>
+      <a class="nav__item" href="#tasks" data-view="tasks"><span data-i18n="nav.tasks">Tasks</span></a>
+    </nav>
+    <div class="topbar__right">
+      <div class="lang-switch" id="langSwitch">
+        <button type="button" data-lang="en">EN</button>
+        <button type="button" data-lang="zh">中文</button>
+      </div>
+      <!-- Navigation lives in the account menu: work areas for everyone, administration for admins. -->
+      <div class="user-menu" id="userMenu">
+        <button class="user" type="button" id="userMenuBtn" aria-haspopup="menu" aria-expanded="false">
+          <span class="user__avatar" id="userAvatar" aria-hidden="true"></span>
+          <span class="user__name" id="currentUser">—</span>
+          <span class="user__caret" aria-hidden="true"></span>
+        </button>
+        <div class="user-menu__panel" role="menu">
+          <div class="user-menu__label" data-i18n="nav.groupWork">Workspace</div>
+          <nav class="nav" aria-label="Primary">
+        <a class="nav__item" href="#" data-view="inbox"><span class="nav__dot"></span><span data-i18n="nav.inbox">Inbox</span></a>
+        <a class="nav__item" href="#" data-view="knowledge"><span class="nav__dot"></span><span data-i18n="nav.knowledge">Knowledge</span></a>
+        <a class="nav__item" href="#" data-view="skills"><span class="nav__dot"></span><span data-i18n="nav.skills">Skills</span></a>
+        <a class="nav__item" href="#" data-view="automation"><span class="nav__dot"></span><span data-i18n="nav.automation">Automation</span></a>
+        <a class="nav__item" href="#" data-view="connectors" id="connectorsNav"><span class="nav__dot"></span><span data-i18n="nav.connectors">Connectors</span></a>
+          </nav>
+          <div id="adminSep">
+            <div class="nav__sep"></div>
+            <div class="user-menu__label" data-i18n="nav.groupAdmin">Administration</div>
+          </div>
+          <nav class="nav" aria-label="Administration" id="adminNav">
+        <a class="nav__item" href="#" data-view="models"><span class="nav__dot"></span><span data-i18n="nav.models">Models</span></a>
+        <a class="nav__item" href="#" data-view="users"><span class="nav__dot"></span><span data-i18n="nav.users">Users</span></a>
+        <a class="nav__item" href="#" data-view="settings"><span class="nav__dot"></span><span data-i18n="nav.settings">System Settings</span></a>
+          </nav>
+          <div class="nav__sep"></div>
+          <button class="user-menu__logout" id="logoutBtn" type="button" data-i18n="topbar.logout">Sign out</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+
+    <section class="threads" data-pane="chat" aria-label="Agents">
+      <ul class="thread-list" id="threadList"></ul>
+      <button class="new-chat" type="button" id="newChatBtn" data-i18n="agent.new">+ New Agent</button>
+    </section>
+
+    <main class="chat" data-pane="chat" aria-label="Conversation">
+      <div class="messages" id="messages">
+        <div class="empty-state" id="emptyState">
+          <img class="empty-state__logo" src="/superagent-logo.png" alt="" aria-hidden="true" />
+          <p data-i18n="chat.empty">Start a new conversation and work with SuperAgent.</p>
+        </div>
+      </div>
+
+      <form class="composer" id="composer">
+        <div class="image-tray" id="chatImageTray" hidden></div>
+        <textarea class="composer__input" id="composerInput" rows="1"
+                  data-i18n-ph="chat.composer" aria-label="Message"></textarea>
+        <div class="composer__row">
+          <button class="attach-btn" type="button" id="chatAttachBtn" data-i18n-title="img.attach" aria-label="Attach image"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+          <input type="file" id="chatImageInput" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+          <div class="composer__actions">
+            <select class="composer__model" id="statusHint" aria-label="Model"></select>
+            <button class="send" type="submit" id="sendBtn" aria-label="Send">↑</button>
+          </div>
+        </div>
+      </form>
+    </main>
+
+    <aside class="panel" data-pane="chat" aria-label="Agent">
+      <section class="panel__block" id="agentInfoPanel" hidden>
+        <div class="agent-info__head">
+          <h3 class="panel__title agent-info__title"><span class="agent-avatar" id="agentInfoAvatar" aria-hidden="true"></span><span id="agentInfoName">Agent</span></h3>
+          <span class="agent-info__actions">
+            <button class="link-btn link-btn--muted" id="agentLogBtn" type="button" data-i18n="log.open">Run log</button>
+            <button class="link-btn link-btn--muted" id="agentEditBtn" type="button" data-i18n="agent.edit">Edit</button>
+          </span>
+        </div>
+        <div id="agentInfoDetails">
+          <div class="agent-members" id="agentMembersBlock" hidden>
+            <div class="agent-members__head">
+              <span class="panel__subhead" data-i18n="co.members">Members</span>
+              <button class="link-btn" type="button" id="agentInviteBtn" data-i18n="co.invite">+ Invite</button>
+            </div>
+            <ul class="agent-members__list" id="agentMembers"></ul>
+            <button class="link-btn link-btn--muted" type="button" id="agentLeaveBtn" data-i18n="co.leave" hidden>Leave</button>
+          </div>
+          <span class="panel__subhead" data-i18n="agent.fCharacter">Character</span>
+          <p class="agent-info__persona" id="agentInfoCharacter"></p>
+          <p class="agent-info__persona" id="agentInfoPersona"></p>
+          <span class="panel__subhead panel__subhead--spaced" data-i18n="sk.agentSkills">Skills</span>
+          <div class="skill-chips" id="agentInfoSkills"></div>
+          <span class="panel__subhead panel__subhead--spaced" data-i18n="agent.fModel">Default model</span>
+          <p class="agent-info__model" id="agentInfoModel"></p>
+        </div>
+        <!-- The SuperAgent has no character, skills or model to show: just what it is and how it works. -->
+        <div class="super-intro" id="superIntro" hidden>
+          <p class="super-intro__lead" data-i18n="super.introLead">Your super-self — it can help you get anything done.</p>
+          <ol class="super-intro__steps">
+            <li><b data-i18n="super.introStep1Title">Drop it in</b><span data-i18n="super.introStep1">Send your thoughts any time, as many as you like — no need to wait for a reply.</span></li>
+            <li><b data-i18n="super.introStep2Title">Plan, then go</b><span data-i18n="super.introStep2">It works out what you want and proposes a plan; nothing starts until you approve.</span></li>
+            <li><b data-i18n="super.introStep3Title">Team delivers</b><span data-i18n="super.introStep3">It puts together a small team, hands out the work and reports back here.</span></li>
+          </ol>
+        </div>
+      </section>
+      <section class="panel__block super-work" id="superWorkPanel" hidden>
+        <div class="super-work__head">
+          <span class="panel__subhead" data-i18n="work.recent">Recently finished</span>
+          <button class="super-work__all" type="button" id="superWorkAllBtn" data-i18n="work.viewAll">View all</button>
+        </div>
+        <ul class="super-work__list" id="superWorkList"></ul>
+        <p class="super-work__empty" id="superWorkEmpty" data-i18n="work.empty" hidden>Nothing finished yet.</p>
+      </section>
+    </aside>
+
+    <section class="kb" data-pane="knowledge" aria-label="Knowledge" hidden>
+      <div class="kb__side">
+        <div class="threads__head">
+          <span class="threads__title" data-i18n="kb.title">Knowledge</span>
+        </div>
+        <button class="new-chat" type="button" id="kbNewFolderBtn" data-i18n="kb.newFolder">+ New folder</button>
+        <div class="kb-tree" id="kbTree" role="tree"></div>
+      </div>
+      <div class="kb__main">
+        <div class="kb__bar">
+          <button class="btn kb__up" type="button" id="kbUpBtn" data-i18n-title="kb.up" aria-label="Up">↑</button>
+          <nav class="kb-crumbs" id="kbCrumbs" aria-label="Path"></nav>
+          <div class="kb__actions">
+            <a class="link-btn" id="kbDownloadBtn" hidden data-i18n="kb.download">Download</a>
+            <button class="link-btn" type="button" id="kbRenameBtn" data-i18n="kb.rename">Rename</button>
+            <button class="link-btn" type="button" id="kbMoveBtn" data-i18n="kb.move">Move</button>
+            <button class="link-btn link-btn--danger" type="button" id="kbDeleteBtn" data-i18n="kb.delete">Delete</button>
+          </div>
+        </div>
+        <div class="kb__view" id="kbView"></div>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="inbox" aria-label="Inbox" hidden>
+      <div class="admin__head">
+        <div>
+          <h2 class="admin__title" data-i18n="ib.title">Inbox</h2>
+          <p class="admin__sub" data-i18n="ib.sub">Messages your bot receives for you, triaged like a person would: urgent now, important hourly, the rest in a daily digest.</p>
+        </div>
+        <span class="status-badge" id="ibStatus" hidden></span>
+      </div>
+      <div class="model-tabs" id="ibTabs">
+        <button type="button" class="model-tab is-active" data-tab="todos" data-i18n="ib.tabTodos">To-dos</button>
+        <button type="button" class="model-tab" data-tab="events" data-i18n="ib.tabEvents">Messages</button>
+        <button type="button" class="model-tab" data-tab="settings" data-i18n="ib.tabSettings">Feishu bot</button>
+      </div>
+      <div class="admin__body">
+        <div data-ib="todos">
+          <label class="check-field ib-filter"><input type="checkbox" id="ibShowClosed" /><span data-i18n="ib.showClosed">Show done and dismissed</span></label>
+          <table class="ctable"><tbody id="ibTodos"></tbody></table>
+          <p class="kb-empty" id="ibTodosEmpty" data-i18n="ib.todosEmpty" hidden></p>
+        </div>
+        <div data-ib="events" hidden>
+          <table class="ctable ib-events">
+            <thead><tr><th data-i18n="ib.colPriority">Priority</th><th data-i18n="ib.colFrom">From</th><th data-i18n="ib.colText">Message</th><th data-i18n="ib.colTime">Received</th></tr></thead>
+            <tbody id="ibEvents"></tbody>
+          </table>
+          <p class="kb-empty" id="ibEventsEmpty" data-i18n="ib.eventsEmpty" hidden></p>
+        </div>
+        <form class="ib-settings" data-ib="settings" id="ibForm" hidden>
+          <p class="field-hint" data-i18n="ib.setupHint"></p>
+          <div class="field-row">
+            <label class="field"><span>App ID</span><input type="text" id="ibAppId" autocomplete="off" required /></label>
+            <label class="field"><span>App Secret</span><input type="password" id="ibAppSecret" autocomplete="new-password" /></label>
+          </div>
+          <p class="field-hint" id="ibSecretHint" data-i18n="ib.secretKept" hidden></p>
+          <div class="ib-bind" id="ibBind" hidden></div>
+          <label class="field"><span data-i18n="ib.fVip">Important people (one per line, Feishu display name)</span>
+            <textarea id="ibVip" rows="3" data-i18n-ph="ib.fVipPh"></textarea></label>
+          <label class="field"><span data-i18n="ib.fKeywords">Urgent keywords (one per line)</span>
+            <textarea id="ibKeywords" rows="3"></textarea></label>
+          <div class="field-row">
+            <label class="field"><span data-i18n="ib.fDigest">Daily digest at</span><input type="time" id="ibDigest" value="09:00" /></label>
+            <label class="field"><span data-i18n="ib.fTimezone">Time zone</span><input type="text" id="ibTimezone" value="Asia/Shanghai" /></label>
+          </div>
+          <label class="check-field"><input type="checkbox" id="ibEnabled" checked /><span data-i18n="ib.fEnabled">Receive messages</span></label>
+          <p class="field-hint kb-modal__error" id="ibError" hidden></p>
+          <div class="modal__actions"><button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button></div>
+        </form>
+      </div>
+    </section>
+
+    <section class="kb" data-pane="skills" aria-label="Skills" hidden>
+      <div class="kb__side">
+        <div class="threads__head">
+          <span class="threads__title" data-i18n="sk.title">Skills</span>
+          <button class="link-btn" type="button" id="skNewBtn" data-i18n="sk.new">+ Skill</button>
+        </div>
+        <div class="search sk-search"><input type="search" id="skSearch" data-i18n-ph="sk.search" aria-label="Search skills" /></div>
+        <div class="sk-list" id="skList"></div>
+      </div>
+      <div class="kb__main">
+        <div class="kb__bar">
+          <h2 class="sk-heading" id="skHeading"></h2>
+          <div class="kb__actions" id="skActions" hidden>
+            <button class="link-btn" type="button" id="skEditBtn" data-i18n="sk.edit">Edit</button>
+            <button class="link-btn link-btn--danger" type="button" id="skDeleteBtn" data-i18n="kb.delete">Delete</button>
+          </div>
+        </div>
+        <div class="kb__view" id="skView"></div>
+        <form class="kb__view sk-form" id="skForm" hidden>
+          <div class="field-row">
+            <label class="field"><span data-i18n="sk.fName">Name</span><input type="text" id="sfName" maxlength="100" required /></label>
+            <label class="field"><span data-i18n="sk.fCategory">Category</span><input type="text" id="sfCategory" maxlength="40" list="skCategories" /></label>
+            <datalist id="skCategories"></datalist>
+          </div>
+          <label class="field"><span data-i18n="sk.fDescription">When to use</span>
+            <input type="text" id="sfDescription" maxlength="500" data-i18n-ph="sk.fDescriptionPh" /></label>
+          <label class="field"><span data-i18n="sk.fContent">Content (Markdown)</span>
+            <textarea id="sfContent" rows="18" data-i18n-ph="sk.fContentPh"></textarea></label>
+          <div class="field" id="sfImagesField"><span data-i18n="sk.fImages">Images</span>
+            <div class="sk-images" id="sfImages"></div>
+            <label class="btn sk-upload"><span data-i18n="sk.addImage">Add image</span>
+              <input type="file" id="sfImageInput" accept="image/png,image/jpeg,image/gif,image/webp" hidden /></label>
+            <p class="field-hint" id="sfImagesHint" data-i18n="sk.imagesHint"></p>
+          </div>
+          <label class="check-field"><input type="checkbox" id="sfEnabled" checked /><span data-i18n="sk.fEnabled">Enabled</span></label>
+          <p class="field-hint kb-modal__error" id="sfError" hidden></p>
+          <div class="modal__actions">
+            <button type="button" class="btn" id="sfCancel" data-i18n="common.cancel">Cancel</button>
+            <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="connectors" aria-label="Connectors" hidden>
+      <div class="admin__head">
+        <div>
+          <h2 class="admin__title" data-i18n="conn.title">Connectors</h2>
+          <p class="admin__sub" data-i18n="conn.sub">Manage the MCP services your models can connect to.</p>
+        </div>
+        <button class="btn btn--primary" id="addConnectorBtn" type="button" data-i18n="conn.add">+ Add Connector</button>
+      </div>
+      <div class="admin__body">
+        <table class="ctable">
+          <thead>
+            <tr>
+              <th data-i18n="conn.colConnector">Connector</th><th data-i18n="conn.colType">Type</th>
+              <th data-i18n="conn.colStatus">Status</th><th data-i18n="conn.colMethod">Method</th>
+              <th class="ctable__actions-col" data-i18n="conn.colActions">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="connectorRows"></tbody>
+        </table>
+        <p class="admin__empty" id="connectorsEmpty" data-i18n="conn.empty" hidden>No connectors yet.</p>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="tasks" aria-label="Tasks" hidden>
+      <div class="task-list-view" id="taskListView">
+        <div class="admin__head">
+          <div>
+            <h2 class="admin__title" data-i18n="tasks.title">Tasks</h2>
+            <p class="admin__sub" data-i18n="tasks.sub">Document-driven long-running tasks.</p>
+          </div>
+        </div>
+        <div class="admin__body">
+          <table class="ttable">
+            <thead>
+              <tr>
+                <th data-i18n="tasks.colTask">Task</th><th data-i18n="tasks.colAgent">Agent / Model</th>
+                <th data-i18n="tasks.colSource">Source</th>
+                <th data-i18n="tasks.colCreated">Created</th><th data-i18n="tasks.colSpend">Spend</th>
+                <th class="ttable__status-col" data-i18n="tasks.colStatus">Status</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="taskRows"></tbody>
+          </table>
+          <p class="admin__empty" id="tasksEmpty" data-i18n="tasks.empty" hidden>No tasks yet.</p>
+          <div class="pager" id="taskPager" hidden>
+            <span class="pager__info" id="taskPagerInfo"></span>
+            <button class="btn pager__btn" type="button" id="taskPagerPrev" data-i18n-title="tasks.pagePrev" aria-label="Previous page">‹</button>
+            <button class="btn pager__btn" type="button" id="taskPagerNext" data-i18n-title="tasks.pageNext" aria-label="Next page">›</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="task-detail-view" id="taskDetailView" hidden>
+        <div class="task-detail__head">
+          <button class="task-back" id="taskBackBtn" type="button" aria-label="Back">←</button>
+          <div class="task-detail__title-wrap">
+            <h2 class="task-detail__title" id="taskDetailTitle">Task</h2>
+            <div class="task-detail__meta" id="taskDetailMeta"></div>
+          </div>
+          <span class="status-badge" id="taskDetailStatus">pending</span>
+          <div class="task-detail__actions">
+            <button class="btn" id="taskStopBtn" type="button" data-i18n="tasks.stop">Stop</button>
+            <button class="btn" id="taskDeleteBtn" type="button" data-i18n="tasks.delete">Delete</button>
+          </div>
+        </div>
+        <div class="task-detail__body">
+          <div class="task-main">
+            <div class="model-tabs task-tabs" id="taskTabs">
+              <button type="button" class="model-tab" data-tab="prompt" data-i18n="tasks.tabPrompt">Prompt</button>
+              <button type="button" class="model-tab is-active" data-tab="run" data-i18n="tasks.tabRun">Conversation</button>
+              <button type="button" class="model-tab" data-tab="session" data-i18n="tasks.tabSession">Session</button>
+            </div>
+            <div class="task-pane" data-pane-tab="prompt" hidden>
+              <div class="task-prompt__body markdown" id="taskPromptBody"></div>
+            </div>
+            <div class="task-pane" data-pane-tab="run" id="taskRunPane">
+              <section class="task-phases" id="taskPhasesPanel" hidden>
+                <h3 class="task-section__title" data-i18n="tasks.phases">Flow</h3>
+                <ol class="phases" id="taskPhases"></ol>
+              </section>
+              <h3 class="task-section__title" data-i18n="tasks.runlog">Run log</h3>
+              <div class="task-stream" id="taskStream"></div>
+            </div>
+            <div class="task-pane" data-pane-tab="session" hidden>
+              <dl class="task-facts session-facts" id="taskSessionInfo"></dl>
+              <p class="session-note" data-i18n="tasks.sessionNote">Steering messages resume this same session.</p>
+            </div>
+          </div>
+          <aside class="task-side">
+            <h3 class="panel__title" data-i18n="tasks.progress">Progress</h3>
+            <div class="progress"><div class="progress__bar" id="taskProgressBar"></div></div>
+            <p class="progress__pct" id="taskProgressPct">0%</p>
+            <dl class="task-facts" id="taskFacts"></dl>
+            <h3 class="panel__title panel__title--spaced" data-i18n="tasks.artifacts">Artifacts</h3>
+            <ul class="artifact-list" id="taskArtifacts"></ul>
+            <p class="artifact-empty" id="taskArtifactsEmpty" data-i18n="tasks.artifactsEmpty" hidden>No deliverables yet.</p>
+          </aside>
+        </div>
+        <div class="image-tray image-tray--steer" id="taskImageTray" hidden></div>
+        <form class="task-steer" id="taskSteerForm">
+          <button class="attach-btn" type="button" id="taskAttachBtn" data-i18n-title="img.attach" aria-label="Attach image"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+          <input type="file" id="taskImageInput" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+          <textarea class="task-steer__input" id="taskSteerInput" rows="1" data-i18n-ph="tasks.steer"></textarea>
+          <button class="send" type="submit" id="taskSteerBtn" aria-label="Send">↑</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="users" aria-label="Users" hidden>
+      <div class="admin__head">
+        <div>
+          <h2 class="admin__title" data-i18n="users.title">Users</h2>
+          <p class="admin__sub" data-i18n="users.sub">Provision who may sign in.</p>
+        </div>
+        <button class="btn btn--primary" id="addUserBtn" type="button" data-i18n="users.add">+ Add User</button>
+      </div>
+      <div class="admin__body">
+        <table class="ctable">
+          <thead>
+            <tr>
+              <th data-i18n="users.colUser">User</th><th data-i18n="users.colRoles">Roles</th>
+              <th data-i18n="users.colSource">Source</th><th data-i18n="users.colStatus">Status</th>
+              <th class="ctable__actions-col" data-i18n="users.colActions">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="userRows"></tbody>
+        </table>
+        <p class="admin__empty" id="usersEmpty" data-i18n="users.empty" hidden>No provisioned users yet.</p>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="models" aria-label="Models" hidden>
+      <div class="task-list-view" id="modelListView">
+        <div class="admin__head">
+          <div>
+            <h2 class="admin__title" data-i18n="models.title">Models</h2>
+            <p class="admin__sub" data-i18n="models.sub">The model-vendor CLIs the runtime calls on this machine.</p>
+          </div>
+          <div class="model-add">
+            <select id="modelCatalog" aria-label="Add model CLI"></select>
+            <button class="btn btn--primary" id="modelAddBtn" type="button" data-i18n="models.add">+ Add</button>
+          </div>
+        </div>
+        <div class="admin__body">
+          <table class="ctable">
+            <thead>
+              <tr>
+                <th data-i18n="models.colName">CLI</th><th data-i18n="models.colInstalled">Installed</th>
+                <th data-i18n="models.colInfer">Can infer</th><th data-i18n="models.colVersion">Version</th>
+                <th data-i18n="models.colLatest">Latest</th><th data-i18n="models.colStatus">Status</th>
+                <th class="ctable__actions-col" data-i18n="models.colActions">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="modelRows"></tbody>
+          </table>
+          <p class="admin__empty" id="modelsEmpty" data-i18n="models.empty" hidden>No model CLIs yet — add one from the top right.</p>
+        </div>
+      </div>
+
+      <div class="task-detail-view" id="modelDetailView" hidden>
+        <div class="task-detail__head">
+          <button class="task-back" id="modelBackBtn" type="button" aria-label="Back">←</button>
+          <div class="task-detail__title-wrap">
+            <h2 class="task-detail__title" id="modelDetailTitle">Model</h2>
+            <div class="task-detail__meta" id="modelDetailMeta"></div>
+          </div>
+          <span class="status-badge" id="modelDetailStatus">—</span>
+        </div>
+        <div class="model-tabs" id="modelTabs">
+          <button type="button" class="model-tab is-active" data-tab="info" data-i18n="models.tabInfo">Basic info</button>
+          <button type="button" class="model-tab" data-tab="models" data-i18n="models.tabModels">Models</button>
+        </div>
+        <div class="admin__body">
+          <dl class="task-facts model-facts" id="modelInfo" data-panel="info"></dl>
+          <div class="model-panel" id="modelModelsPanel" data-panel="models" hidden>
+            <div class="model-panel__head">
+              <span class="model-panel__meta" id="modelModelsMeta"></span>
+              <button class="btn" id="modelRefreshBtn" type="button" data-i18n="models.refresh">Refresh</button>
+            </div>
+            <p class="model-error" id="modelModelsError" hidden></p>
+            <table class="ctable model-table">
+              <thead>
+                <tr>
+                  <th data-i18n="models.colModel">Model</th><th data-i18n="models.effort">Effort</th>
+                  <th data-i18n="models.defaultEffort">Default</th><th data-i18n="models.colContext">Context</th>
+                  <th data-i18n="models.colInference">Inference</th>
+                </tr>
+              </thead>
+              <tbody id="modelModels"></tbody>
+            </table>
+            <p class="admin__empty" id="modelModelsEmpty" data-i18n="models.noModels" hidden>No models.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="settings" aria-label="System Settings" hidden>
+      <div class="admin__head">
+        <div>
+          <h2 class="admin__title" data-i18n="settings.title">System Settings</h2>
+          <p class="admin__sub" data-i18n="settings.sub">Defaults that apply to everyone on this platform.</p>
+        </div>
+      </div>
+      <div class="admin__body">
+        <form class="settings-form" id="settingsForm">
+          <h3 class="settings-form__section" data-i18n="settings.sectionAgent">Agent</h3>
+          <label class="field"><span data-i18n="settings.agentModel">Default chat model</span>
+            <select id="sfAgentModel"></select>
+          </label>
+          <p class="field-hint" id="sfAgentModelHint" data-i18n="settings.agentModelHint"></p>
+          <p class="field-hint" id="sfAgentModelMissing" data-i18n="settings.modelsMissing" hidden></p>
+          <p class="field-hint" id="sfAgentModelFiltered" hidden></p>
+          <div class="settings-form__actions">
+            <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
+            <span class="settings-form__status" id="sfStatus" role="status"></span>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="automation" aria-label="Automations" hidden>
+      <div class="task-list-view" id="autoListView">
+        <div class="admin__head">
+          <div>
+            <h2 class="admin__title" data-i18n="auto.title">Automations</h2>
+            <p class="admin__sub" data-i18n="auto.sub">Prompts that run as tasks on a schedule or when called by API. You can also create them by asking an Agent in chat.</p>
+          </div>
+          <button class="btn btn--primary" id="autoAddBtn" type="button" data-i18n="auto.add">+ New automation</button>
+        </div>
+        <div class="auto-toolbar">
+          <div class="auto-tabs" id="autoTabs" role="tablist">
+            <button type="button" class="auto-tab is-active" data-filter="all"><span data-i18n="auto.tabAll">All</span> <b></b></button>
+            <button type="button" class="auto-tab" data-filter="active"><span data-i18n="auto.tabActive">Active</span> <b></b></button>
+            <button type="button" class="auto-tab" data-filter="once"><span data-i18n="auto.typeOnce">One-time</span> <b></b></button>
+            <button type="button" class="auto-tab" data-filter="recurring"><span data-i18n="auto.typeRecurring">Recurring</span> <b></b></button>
+            <button type="button" class="auto-tab" data-filter="api"><span data-i18n="auto.typeApi">API</span> <b></b></button>
+          </div>
+          <div class="auto-filters">
+            <input type="search" id="autoSearch" data-i18n-ph="auto.search" aria-label="Search automations" />
+            <select id="autoOwnerFilter" aria-label="Creator">
+              <option value="mine" data-i18n="auto.ownerMine">My automations</option>
+              <option value="all" data-i18n="auto.ownerAll">Everyone's</option>
+            </select>
+          </div>
+        </div>
+        <div class="admin__body">
+          <table class="ctable">
+            <thead>
+              <tr>
+                <th data-i18n="auto.colName">Name</th><th data-i18n="auto.colSchedule">Schedule</th>
+                <th data-i18n="auto.colModel">Model</th><th data-i18n="auto.colSource">Source</th>
+                <th data-i18n="auto.colLastRun">Last run</th><th data-i18n="auto.colNextRun">Next run</th>
+                <th data-i18n="auto.colCreator">Creator</th><th data-i18n="auto.colEnabled">Enabled</th>
+                <th class="ctable__actions-col" data-i18n="auto.colActions">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="autoRows"></tbody>
+          </table>
+          <p class="admin__empty" id="autoEmpty" data-i18n="auto.empty" hidden>No automations yet.</p>
+        </div>
+      </div>
+
+      <div class="task-detail-view" id="autoDetailView" hidden>
+        <div class="task-detail__head">
+          <button class="task-back" id="autoBackBtn" type="button" aria-label="Back">←</button>
+          <div class="task-detail__title-wrap">
+            <h2 class="task-detail__title" id="autoDetailTitle">Automation</h2>
+            <div class="task-detail__meta" id="autoDetailMeta"></div>
+          </div>
+          <div class="auto-detail__actions" id="autoDetailActions"></div>
+        </div>
+        <div class="admin__body">
+          <div class="auto-token" id="autoTokenBox" hidden>
+            <p class="auto-token__title" data-i18n="auto.tokenTitle">API token — copy it now, it won't be shown again</p>
+            <code class="auto-token__value" id="autoTokenValue"></code>
+            <pre class="auto-token__curl" id="autoTokenCurl"></pre>
+          </div>
+          <dl class="task-facts auto-facts" id="autoFacts"></dl>
+          <h3 class="panel__title panel__title--spaced" data-i18n="auto.prompt">Prompt</h3>
+          <div class="auto-prompt" id="autoPrompt"></div>
+          <h3 class="panel__title panel__title--spaced" data-i18n="auto.runs">Recent runs</h3>
+          <table class="ctable">
+            <thead>
+              <tr>
+                <th data-i18n="auto.colFiredAt">Time</th><th data-i18n="auto.colTrigger">Trigger</th>
+                <th data-i18n="auto.colTask">Task</th><th data-i18n="auto.colStatus">Status</th>
+              </tr>
+            </thead>
+            <tbody id="autoRunRows"></tbody>
+          </table>
+          <p class="admin__empty" id="autoRunsEmpty" data-i18n="auto.runsEmpty" hidden>No runs yet.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="admin admin--center" data-pane="placeholder" aria-label="Coming soon" hidden>
+      <div class="placeholder">
+        <img class="placeholder__logo" src="/superagent-logo.png" alt="" aria-hidden="true" />
+        <p id="placeholderText" data-i18n="placeholder.default">Coming soon.</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal" id="connectorModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="connectorForm">
+      <h3 class="modal__title" id="connectorModalTitle" data-i18n="conn.modalAdd">Add Connector</h3>
+      <label class="field"><span data-i18n="conn.fName">Name</span>
+        <input type="text" id="cfName" required placeholder="e.g. GitHub" />
+      </label>
+      <label class="field"><span data-i18n="conn.fEndpoint">Endpoint</span>
+        <input type="text" id="cfEndpoint" data-i18n-ph="conn.fEndpointPh" />
+      </label>
+      <label class="field"><span data-i18n="conn.fDescription">Description</span>
+        <input type="text" id="cfDescription" data-i18n-ph="common.optional" />
+      </label>
+      <div class="field-row">
+        <label class="field"><span data-i18n="conn.fTransport">Transport</span>
+          <select id="cfTransport">
+            <option value="stdio">stdio</option>
+            <option value="http">http</option>
+            <option value="sse">sse</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="conn.fType">Type</span>
+          <select id="cfType">
+            <option value="optional" data-i18n="conn.typeOptional">Optional</option>
+            <option value="required" data-i18n="conn.typeRequired">Required</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="conn.fMethod">Method</span>
+          <select id="cfAuthMethod">
+            <option value="system_oauth" data-i18n="conn.methodSystem">System OAuth</option>
+            <option value="personal_token" data-i18n="conn.methodToken">Personal Token</option>
+          </select>
+        </label>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="cfSubmit" data-i18n="common.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal" id="userModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="userForm">
+      <h3 class="modal__title" id="userModalTitle" data-i18n="users.modalAdd">Add User</h3>
+      <label class="field"><span data-i18n="users.fUsername">Username (login name)</span>
+        <input type="text" id="ufUsername" required data-i18n-ph="users.fUsernamePh" />
+      </label>
+      <label class="field"><span data-i18n="users.fDisplay">Display name</span>
+        <input type="text" id="ufDisplayName" data-i18n-ph="common.optional" />
+      </label>
+      <div class="field-row">
+        <label class="field"><span data-i18n="users.fSource">Source</span>
+          <select id="ufSource">
+            <option value="local" data-i18n="src.local">Username / Password</option>
+            <option value="phone" data-i18n="src.phone">Phone code</option>
+            <option value="sso" data-i18n="src.sso">SSO</option>
+            <option value="wechat" data-i18n="src.wechat">WeChat</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="users.fRole">Role</span>
+          <select id="ufRole">
+            <option value="USER">USER</option>
+            <option value="ADMIN">ADMIN</option>
+          </select>
+        </label>
+      </div>
+      <label class="field" id="ufPasswordField"><span data-i18n="users.fPassword">Password</span>
+        <input type="password" id="ufPassword" data-i18n-ph="users.fPasswordPh" />
+      </label>
+      <div class="field-row">
+        <label class="field"><span data-i18n="users.fPhone">Phone</span><input type="text" id="ufPhone" data-i18n-ph="users.fPhonePh" /></label>
+        <label class="field"><span data-i18n="users.fExternal">External ID</span><input type="text" id="ufExternalId" data-i18n-ph="users.fExternalPh" /></label>
+      </div>
+      <label class="checkbox-row"><input type="checkbox" id="ufEnabled" checked /> <span data-i18n="users.fEnabled">Enabled (allow sign-in)</span></label>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="ufSubmit" data-i18n="common.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal" id="inviteModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="inviteForm">
+      <h3 class="modal__title" id="inviteTitle"></h3>
+      <p class="field-hint" data-i18n="co.inviteHint">They will see this agent's whole conversation, including earlier messages and files in its workspace, and can direct it with you.</p>
+      <input type="search" class="invite-search" id="inviteSearch" data-i18n-ph="co.searchPh" />
+      <div class="invite-list" id="inviteList"></div>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="inviteSubmit" data-i18n="co.inviteSubmit">Invite</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal" id="kbModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="kbForm">
+      <h3 class="modal__title" id="kbModalTitle"></h3>
+      <p class="kb-modal__msg" id="kbModalMsg" hidden></p>
+      <label class="field" id="kbNameField"><span data-i18n="kb.name">Name</span>
+        <input type="text" id="kbNameInput" maxlength="255" />
+      </label>
+      <label class="field" id="kbTargetField"><span data-i18n="kb.moveTo">Move to</span>
+        <select id="kbTargetSelect"></select>
+      </label>
+      <p class="field-hint kb-modal__error" id="kbModalError" hidden></p>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="kbModalSubmit"></button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal" id="agentModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="agentForm">
+      <h3 class="modal__title" id="agentModalTitle" data-i18n="agent.modalAdd">New Agent</h3>
+      <div class="field"><span data-i18n="agent.fAvatar">Avatar</span>
+        <div class="avatar-picker" id="afAvatars" role="radiogroup"></div>
+      </div>
+      <label class="field"><span data-i18n="agent.fName">Name</span>
+        <input type="text" id="afName" required data-i18n-ph="agent.fNamePh" />
+      </label>
+      <div class="field"><span data-i18n="agent.fCharacter">Character</span>
+        <div class="character-picker" id="afCharacters" role="radiogroup"></div>
+      </div>
+      <div class="field"><span data-i18n="sk.agentSkills">Skills</span>
+        <div class="skill-picker" id="afSkills"></div>
+      </div>
+      <label class="field"><span id="afPersonaLabel"></span>
+        <textarea id="afPersona" rows="4"></textarea>
+      </label>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="afSubmit" data-i18n="common.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="drawer" id="agentLogDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <div class="drawer__panel drawer__panel--wide">
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <h3 class="drawer__title" id="agentLogTitle">Run log</h3>
+      </div>
+      <div class="drawer__body">
+        <div class="log-toolbar">
+          <div class="auto-tabs" id="agentLogTabs">
+            <button type="button" class="auto-tab is-active" data-cat="" data-i18n="log.catAll">All</button>
+            <button type="button" class="auto-tab" data-cat="turn" data-i18n="log.catTurn">Turns</button>
+            <button type="button" class="auto-tab" data-cat="session" data-i18n="log.catSession">Sessions</button>
+            <button type="button" class="auto-tab" data-cat="memory" data-i18n="log.catMemory">Memory</button>
+            <button type="button" class="auto-tab" data-cat="superagent" id="agentLogSuperTab" data-i18n="log.catSuper">SuperAgent</button>
+          </div>
+          <button type="button" class="super-work__all log-refresh" id="agentLogRefresh" data-i18n="log.refresh">Refresh</button>
+        </div>
+        <ol class="log-list" id="agentLogList"></ol>
+        <p class="admin__empty" id="agentLogEmpty" data-i18n="log.empty" hidden>Nothing logged yet.</p>
+        <p class="log-note" data-i18n="log.retention">Kept for 30 days, up to 5000 lines per agent.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="drawer" id="superWorkDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <div class="drawer__panel drawer__panel--wide">
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <h3 class="drawer__title" data-i18n="work.title">SuperAgent work history</h3>
+      </div>
+      <div class="drawer__body">
+        <div class="auto-filters work-filters">
+          <select id="workStatusFilter" aria-label="Status">
+            <option value="all" data-i18n="work.fAll">All</option>
+            <option value="open" data-i18n="work.fOpen">In progress</option>
+            <option value="finished" data-i18n="work.fFinished">Finished</option>
+            <option value="done" data-i18n="status.done">Done</option>
+            <option value="error" data-i18n="status.error">Error</option>
+            <option value="stopped" data-i18n="status.stopped">Stopped</option>
+          </select>
+          <select id="workMemberFilter" aria-label="Member"></select>
+          <span class="work-count" id="workCount"></span>
+        </div>
+        <ul class="work-list" id="workList"></ul>
+        <p class="admin__empty" id="workEmpty" data-i18n="work.emptyAll" hidden>No work yet.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="drawer" id="autoDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <form class="drawer__panel" id="autoForm" novalidate>
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <h3 class="drawer__title" id="autoFormTitle" data-i18n="auto.formNew">New automation</h3>
+      </div>
+      <div class="drawer__body">
+        <label class="field"><span><i class="req">*</i> <span data-i18n="auto.prompt">Prompt</span></span>
+          <textarea id="afPrompt" rows="8" data-i18n-ph="auto.promptPh"></textarea>
+        </label>
+        <label class="field"><span data-i18n="auto.colName">Name</span>
+          <input type="text" id="afAutoName" data-i18n-ph="auto.namePh" />
+        </label>
+        <label class="field"><span data-i18n="auto.type">Type</span>
+          <select id="afType">
+            <option value="recurring" data-i18n="auto.typeRecurringLong">Schedule · Recurring</option>
+            <option value="once" data-i18n="auto.typeOnceLong">Schedule · Once</option>
+            <option value="api" data-i18n="auto.typeApi">API</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="auto.colModel">Model</span>
+          <select id="afAutoModel"></select>
+        </label>
+        <div class="auto-sched" id="afRecurring">
+          <div class="field-row">
+            <label class="field"><span data-i18n="auto.preset">Preset</span>
+              <select id="afPreset">
+                <option value="hourly" data-i18n="auto.presetHourly">Every hour</option>
+                <option value="daily" data-i18n="auto.presetDaily">Every day</option>
+                <option value="weekdays" data-i18n="auto.presetWeekdays">Weekdays</option>
+                <option value="weekly" data-i18n="auto.presetWeekly">Every week</option>
+                <option value="monthly" data-i18n="auto.presetMonthly">Every month</option>
+                <option value="custom" data-i18n="auto.presetCustom">Custom (cron)</option>
+              </select>
+            </label>
+            <label class="field" id="afWeekdayField"><span data-i18n="auto.weekday">Weekday</span><select id="afWeekday"></select></label>
+            <label class="field" id="afDayField"><span data-i18n="auto.day">Day</span><select id="afDay"></select></label>
+            <label class="field" id="afHourField"><span data-i18n="auto.hour">Hour</span><select id="afHour"></select></label>
+            <label class="field" id="afMinuteField"><span data-i18n="auto.minute">Minute</span><select id="afMinute"></select></label>
+          </div>
+          <label class="field" id="afCronField"><span data-i18n="auto.cron">Cron (minute hour day month weekday)</span>
+            <input type="text" id="afCron" placeholder="0 9 * * 1-5" spellcheck="false" />
+          </label>
+        </div>
+        <label class="field" id="afRunAtField"><span data-i18n="auto.runAt">Run at</span>
+          <input type="datetime-local" id="afRunAt" />
+        </label>
+        <label class="field" id="afTimezoneField"><span data-i18n="auto.timezone">Time zone</span>
+          <select id="afTimezone"></select>
+        </label>
+        <p class="field-hint auto-preview" id="afPreview"></p>
+        <label class="field" id="afOverlapField"><span data-i18n="auto.overlap">Overlap policy</span>
+          <select id="afOverlap">
+            <option value="skip" data-i18n="auto.overlapSkip">Skip if running</option>
+            <option value="parallel" data-i18n="auto.overlapParallel">Run in parallel</option>
+          </select>
+        </label>
+        <p class="field-hint" data-i18n="auto.deliveryHint">Each run becomes a task; see results in Tasks.</p>
+        <p class="model-error" id="afAutoError" hidden></p>
+      </div>
+      <div class="drawer__foot">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="afAutoSubmit" data-i18n="common.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <script src="/i18n.js"></script>
+  <script src="/vendor/marked.min.js"></script>
+  <script src="/vendor/purify.min.js"></script>
+  <script src="/js/core.js"></script>
+  <script src="/js/images.js"></script>
+  <script src="/js/chat.js"></script>
+  <script src="/js/collab.js"></script>
+  <script src="/js/chat-stream.js"></script>
+  <script src="/js/agent-form.js"></script>
+  <script src="/js/superagent.js"></script>
+  <script src="/js/agent-log.js"></script>
+  <script src="/js/views.js"></script>
+  <script src="/js/inbox.js"></script>
+  <script src="/js/skills.js"></script>
+  <script src="/js/knowledge.js"></script>
+  <script src="/js/connectors.js"></script>
+  <script src="/js/tasks.js"></script>
+  <script src="/js/auth.js"></script>
+  <script src="/js/models.js"></script>
+  <script src="/js/settings.js"></script>
+  <script src="/js/automations.js"></script>
+</body>
+</html>

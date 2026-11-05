@@ -19,7 +19,12 @@
   <dependencies>
     <dependency>
       <groupId>com.superagent</groupId>
-      <artifactId>superagent-api</artifactId>
+      <artifactId>superagent-orchestrator</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.superagent</groupId>
+      <artifactId>superagent-event</artifactId>
     </dependency>
 
     <dependency>

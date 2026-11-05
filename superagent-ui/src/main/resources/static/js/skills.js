@@ -1,0 +1,301 @@
+// SuperAgent UI — Skills: shared working standards — list, view, edit, images.
+// Classic script sharing one global scope with the others; index.html loads them in order.
+"use strict";
+
+// ---------- skills ----------
+// Shared working standards. Agents get the skills attached to them; their tasks inherit those.
+Object.assign(api, {
+  listSkills: () => fetch("/api/v1/skills").then(kbJson),
+  createSkill: body => kbPost("/api/v1/skills", body),
+  updateSkill: (id, body) => fetch("/api/v1/skills/" + id, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }).then(kbJson),
+  deleteSkill: id => fetch("/api/v1/skills/" + id, { method: "DELETE" }).then(kbJson),
+  addSkillImage: (id, name, data) => kbPost("/api/v1/skills/" + id + "/images", { name, data }),
+  deleteSkillImage: (id, name) => fetch("/api/v1/skills/" + id + "/images/" + encodeURIComponent(name),
+    { method: "DELETE" }).then(kbJson),
+});
+const skillImageUrl = (id, name) => "/api/v1/skills/" + id + "/images/" + encodeURIComponent(name);
+
+const skPane = document.querySelector('[data-pane="skills"]');
+const skel = {
+  list: document.getElementById("skList"),
+  search: document.getElementById("skSearch"),
+  newBtn: document.getElementById("skNewBtn"),
+  heading: document.getElementById("skHeading"),
+  actions: document.getElementById("skActions"),
+  edit: document.getElementById("skEditBtn"),
+  del: document.getElementById("skDeleteBtn"),
+  view: document.getElementById("skView"),
+  form: document.getElementById("skForm"),
+  name: document.getElementById("sfName"),
+  category: document.getElementById("sfCategory"),
+  categories: document.getElementById("skCategories"),
+  description: document.getElementById("sfDescription"),
+  content: document.getElementById("sfContent"),
+  enabled: document.getElementById("sfEnabled"),
+  imagesField: document.getElementById("sfImagesField"),
+  images: document.getElementById("sfImages"),
+  imageInput: document.getElementById("sfImageInput"),
+  error: document.getElementById("sfError"),
+  cancel: document.getElementById("sfCancel"),
+};
+let skills = [];             // SkillDto[] from the server
+let skSelectedId = null;
+let skEditing = null;        // null = viewing; "new" or a skill id = editing
+
+async function loadSkillList() {
+  try { skills = (await api.listSkills()) || []; } catch (e) { skills = []; showToast(e.message, true); }
+  return skills;
+}
+
+async function loadSkills() {
+  await loadSkillList();
+  if (skSelectedId && !skills.some(s => s.id === skSelectedId)) skSelectedId = null;
+  if (!skSelectedId && skills.length) skSelectedId = skills[0].id;
+  skEditing = null;
+  renderSkillList();
+  renderSkill();
+}
+
+function renderSkillList() {
+  const q = skel.search.value.trim().toLowerCase();
+  const shown = skills.filter(s => !q || [s.name, s.description, s.category].some(v => (v || "").toLowerCase().includes(q)));
+  skel.list.innerHTML = "";
+  if (!shown.length) {
+    skel.list.innerHTML = '<p class="kb-empty">' + L(skills.length ? "sk.noMatch" : "sk.empty") + "</p>";
+    return;
+  }
+  let group = undefined;
+  shown.forEach(s => {
+    const cat = s.category || L("sk.uncategorized");
+    if (cat !== group) {
+      group = cat;
+      const h = document.createElement("div");
+      h.className = "sk-group";
+      h.textContent = cat;
+      skel.list.appendChild(h);
+    }
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "sk-item" + (s.id === skSelectedId ? " is-selected" : "") + (s.enabled ? "" : " is-off");
+    const name = document.createElement("span");
+    name.className = "sk-item__name";
+    name.textContent = s.name;
+    const desc = document.createElement("span");
+    desc.className = "sk-item__desc";
+    desc.textContent = s.description || "";
+    b.append(name, desc);
+    b.addEventListener("click", () => { skSelectedId = s.id; skEditing = null; renderSkillList(); renderSkill(); });
+    skel.list.appendChild(b);
+  });
+}
+skel.search.addEventListener("input", renderSkillList);
+
+// Markdown references images as images/<name>; point those at the skill's image endpoint.
+function renderSkillMarkdown(skill) {
+  const div = document.createElement("div");
+  div.className = "markdown";
+  div.innerHTML = renderMarkdown(skill.content || "");
+  div.querySelectorAll("img").forEach(img => {
+    const m = /^(?:\.\/)?images\/(.+)$/.exec(img.getAttribute("src") || "");
+    if (m) img.src = skillImageUrl(skill.id, decodeURIComponent(m[1]));
+  });
+  return div;
+}
+
+function renderSkill() {
+  const skill = skills.find(s => s.id === skSelectedId);
+  skel.form.hidden = !skEditing;
+  skel.view.hidden = !!skEditing;
+  skel.actions.hidden = !!skEditing || !skill;
+  if (skEditing) return;
+  skel.view.innerHTML = "";
+  if (!skill) {
+    skel.heading.textContent = L("sk.title");
+    skel.view.innerHTML = '<p class="kb-empty">' + L("sk.pick") + "</p>";
+    return;
+  }
+  skel.heading.textContent = skill.name;
+  const meta = document.createElement("p");
+  meta.className = "sk-meta";
+  meta.textContent = [skill.category || L("sk.uncategorized"), skill.enabled ? null : L("sk.disabled"),
+    L("sk.updatedBy", { user: skill.updatedBy || skill.createdBy || "—", time: formatDateTime(skill.updatedAt) })]
+    .filter(Boolean).join(" · ");
+  skel.view.appendChild(meta);
+  if (skill.description) {
+    const d = document.createElement("p");
+    d.className = "sk-desc";
+    d.textContent = L("sk.whenToUse") + skill.description;
+    skel.view.appendChild(d);
+  }
+  skel.view.appendChild(renderSkillMarkdown(skill));
+}
+
+function openSkillForm(skill) {
+  skEditing = skill ? skill.id : "new";
+  skel.heading.textContent = skill ? L("sk.editTitle", { name: skill.name }) : L("sk.newTitle");
+  skel.name.value = skill ? skill.name : "";
+  skel.category.value = skill ? skill.category || "" : "";
+  skel.description.value = skill ? skill.description || "" : "";
+  skel.content.value = skill ? skill.content || "" : "";
+  skel.enabled.checked = skill ? skill.enabled : true;
+  skel.error.hidden = true;
+  skel.categories.innerHTML = "";
+  Array.from(new Set(skills.map(s => s.category).filter(Boolean))).forEach(c => {
+    const o = document.createElement("option");
+    o.value = c;
+    skel.categories.appendChild(o);
+  });
+  skel.imagesField.hidden = !skill; // images attach to a saved skill
+  if (skill) renderSkillImages(skill);
+  renderSkill();
+  skel.name.focus();
+}
+
+function renderSkillImages(skill) {
+  skel.images.innerHTML = "";
+  (skill.images || []).forEach(name => {
+    const box = document.createElement("div");
+    box.className = "sk-image";
+    const img = document.createElement("img");
+    img.src = skillImageUrl(skill.id, name);
+    img.alt = name;
+    const row = document.createElement("div");
+    row.className = "sk-image__row";
+    const label = document.createElement("span");
+    label.textContent = name;
+    label.title = name;
+    const actions = document.createElement("span");
+    const insert = document.createElement("button");
+    insert.type = "button";
+    insert.className = "link-btn";
+    insert.textContent = L("sk.insert");
+    insert.addEventListener("click", () => insertAtCursor(skel.content, "![" + name + "](images/" + name + ")"));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "link-btn link-btn--danger";
+    remove.textContent = "×";
+    remove.title = L("kb.delete");
+    remove.addEventListener("click", async () => {
+      try { replaceSkill(await api.deleteSkillImage(skill.id, name)); renderSkillImages(skills.find(s => s.id === skill.id)); }
+      catch (e) { showToast(e.message, true); }
+    });
+    actions.append(insert, remove);
+    row.append(label, actions);
+    box.append(img, row);
+    skel.images.appendChild(box);
+  });
+}
+
+function insertAtCursor(textarea, text) {
+  const start = textarea.selectionStart ?? textarea.value.length;
+  textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(textarea.selectionEnd ?? start);
+  textarea.focus();
+  textarea.selectionStart = textarea.selectionEnd = start + text.length;
+}
+
+function replaceSkill(updated) {
+  skills = skills.map(s => s.id === updated.id ? updated : s);
+}
+
+skel.imageInput.addEventListener("change", async () => {
+  const file = skel.imageInput.files && skel.imageInput.files[0];
+  skel.imageInput.value = "";
+  if (!file || !skEditing || skEditing === "new") return;
+  try {
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    const updated = await api.addSkillImage(skEditing, file.name, data);
+    replaceSkill(updated);
+    renderSkillImages(updated);
+  } catch (e) { showToast(e.message, true); }
+});
+
+skel.newBtn.addEventListener("click", () => openSkillForm(null));
+skel.edit.addEventListener("click", () => {
+  const skill = skills.find(s => s.id === skSelectedId);
+  if (skill) openSkillForm(skill);
+});
+skel.cancel.addEventListener("click", () => { skEditing = null; renderSkill(); });
+skel.form.addEventListener("submit", async e => {
+  e.preventDefault();
+  const body = {
+    name: skel.name.value.trim(), category: skel.category.value.trim(),
+    description: skel.description.value.trim(), content: skel.content.value, enabled: skel.enabled.checked,
+  };
+  skel.error.hidden = true;
+  try {
+    const saved = skEditing === "new" ? await api.createSkill(body) : await api.updateSkill(skEditing, body);
+    skSelectedId = saved.id;
+    await loadSkills();
+  } catch (err) {
+    skel.error.textContent = err.message;
+    skel.error.hidden = false;
+  }
+});
+skel.del.addEventListener("click", () => {
+  const skill = skills.find(s => s.id === skSelectedId);
+  if (!skill) return;
+  kbOpenModal({
+    title: L("sk.deleteTitle"), submit: L("kb.delete"), danger: true,
+    message: L("sk.deleteConfirm", { name: skill.name }),
+    action: async () => { await api.deleteSkill(skill.id); skSelectedId = null; await loadSkills(); },
+  });
+});
+
+// Agent form: pick skills (all enabled ones; a disabled one already attached stays visible).
+let chosenSkills = new Set();
+async function renderSkillPicker(current) {
+  await loadSkillList();
+  chosenSkills = new Set(current || []);
+  const box = document.getElementById("afSkills");
+  box.innerHTML = "";
+  const offered = skills.filter(s => s.enabled || chosenSkills.has(s.id));
+  if (!offered.length) {
+    box.innerHTML = '<span class="skill-chips__empty">' + L("sk.noneYet") + "</span>";
+    return;
+  }
+  offered.forEach(s => {
+    const label = document.createElement("label");
+    label.className = chosenSkills.has(s.id) ? "is-on" : "";
+    label.title = s.description || "";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = chosenSkills.has(s.id);
+    cb.addEventListener("change", () => {
+      if (cb.checked) chosenSkills.add(s.id); else chosenSkills.delete(s.id);
+      label.className = cb.checked ? "is-on" : "";
+    });
+    label.append(cb, document.createTextNode(s.name));
+    box.appendChild(label);
+  });
+}
+
+// Agent side panel: its skills as chips that open the skill.
+async function renderAgentSkills(agent) {
+  const box = document.getElementById("agentInfoSkills");
+  if (!box) return;
+  const ids = agent.skillIds || [];
+  if (ids.length && !ids.every(id => skills.some(s => s.id === id))) await loadSkillList();
+  if (activeAgent !== agent) return;
+  box.innerHTML = "";
+  const attached = ids.map(id => skills.find(s => s.id === id)).filter(Boolean);
+  if (!attached.length) {
+    box.innerHTML = '<span class="skill-chips__empty">' + L("sk.agentNone") + "</span>";
+    return;
+  }
+  attached.forEach(s => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "skill-chip";
+    chip.textContent = s.name + (s.enabled ? "" : " (" + L("sk.disabled") + ")");
+    chip.title = s.description || "";
+    chip.addEventListener("click", () => { skSelectedId = s.id; setView("skills"); });
+    box.appendChild(chip);
+  });
+}

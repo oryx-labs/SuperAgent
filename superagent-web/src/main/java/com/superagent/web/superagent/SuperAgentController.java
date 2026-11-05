@@ -6,6 +6,7 @@ import com.superagent.api.chat.SendMessageRequest;
 import com.superagent.api.superagent.SuperAgentStateDto;
 import com.superagent.api.superagent.SuperAgentWorkDto;
 import com.superagent.api.superagent.SuperAgentWorkEventDto;
+import com.superagent.orchestrator.SuperAgentService;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;

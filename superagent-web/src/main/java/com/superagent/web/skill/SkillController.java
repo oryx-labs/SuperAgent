@@ -5,6 +5,7 @@ import com.superagent.api.ApiResponse;
 import com.superagent.api.skill.SkillDto;
 import com.superagent.api.skill.SkillImageUpload;
 import com.superagent.api.skill.SkillRequest;
+import com.superagent.knowledge.skill.SkillService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;

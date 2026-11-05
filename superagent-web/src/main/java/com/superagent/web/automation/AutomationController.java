@@ -7,6 +7,7 @@ import com.superagent.api.automation.AutomationDto;
 import com.superagent.api.automation.AutomationRunDto;
 import com.superagent.api.automation.SaveAutomationRequest;
 import com.superagent.api.automation.TriggerAutomationRequest;
+import com.superagent.task.automation.AutomationService;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;

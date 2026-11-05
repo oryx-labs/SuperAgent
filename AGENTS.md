@@ -13,22 +13,25 @@ Maven multi-module, **Java 21**, Spring Boot 3.5.3. No Maven wrapper — use a l
 ```bash
 mvn clean install                             # build + test all modules
 mvn clean install -DskipTests                 # build, skip tests
-mvn -pl superagent-web -am test               # one module (+ its deps)
+mvn -pl superagent-task -am test              # one module (+ its deps)
 mvn -pl superagent-core test -Dtest=FooTest   # single test class
-mvn -pl superagent-web -am spring-boot:run    # run REST app on :8080
-mvn -pl superagent-worker -am spring-boot:run # run background worker (no HTTP)
+mvn -pl superagent-server spring-boot:run     # run everything on :8080 (after mvn install)
 ```
 
 ## Module architecture
 
-Strict dependency direction: **core ← api ← {web, worker}**. web and worker never depend on each other.
+Layered; depend only downward (full table and conventions in [CLAUDE.md](CLAUDE.md)):
 
-- **superagent-core** — domain model, shared abstractions, utilities (`spring-context` only).
-- **superagent-api** — API contracts/DTOs (e.g. `ApiError`) shared by web and worker + Jackson.
-- **superagent-web** — HTTP entry point: REST controllers, validation, actuator; bootable, port 8080.
-- **superagent-worker** — background jobs/agent runs/scheduled tasks; bootable non-web context.
+- **L0** superagent-core (domain records, store interfaces, error bases), superagent-api (DTOs)
+- **L1** superagent-storage (JDBC), superagent-runtime (agent CLIs, MCP grants, attachments)
+- **L2** superagent-platform (users, settings, providers, connectors), superagent-knowledge (knowledge base, skills)
+- **L3** superagent-agent (chat, memory, collaboration), superagent-task (tasks, automations) — siblings, never depend on each other
+- **L4** superagent-orchestrator (SuperAgent), superagent-event (inbox)
+- **L5** superagent-web (controllers, MCP endpoint, auth), superagent-ui (static UI)
+- **L6** superagent-server (boots it all)
 
-Both bootable apps `@ComponentScan("com.superagent")`, so shared beans in core/api are discovered automatically — keep packages under `com.superagent.*`. Don't add a dependency from a lower module to a higher one.
+Packages follow modules (`com.superagent.<module>…`); business logic stays out of web; each module contributes
+its own MCP tools via `McpToolProvider`. The server `@ComponentScan("com.superagent")`s everything.
 
 ## Deployment
 

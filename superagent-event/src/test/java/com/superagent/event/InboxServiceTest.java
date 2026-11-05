@@ -5,7 +5,6 @@ import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.inbox.InboxEvent;
 import com.superagent.core.inbox.InboxEventStore;
-import com.superagent.core.inbox.InboxProcessor;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;

@@ -1,5 +1,6 @@
 package com.superagent.web.chat;
 
+import com.superagent.agent.chat.ChatService;
 import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.chat.CreateSessionRequest;
@@ -9,7 +10,7 @@ import com.superagent.api.chat.RenameSessionRequest;
 import com.superagent.api.chat.SendMessageRequest;
 import com.superagent.api.chat.SessionDetailDto;
 import com.superagent.api.chat.SessionDto;
-import com.superagent.web.attachment.ImageAttachmentStore;
+import com.superagent.runtime.attachment.ImageAttachmentStore;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.http.ResponseEntity;

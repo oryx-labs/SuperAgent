@@ -1,5 +1,6 @@
 package com.superagent.web.agent;
 
+import com.superagent.agent.AgentService;
 import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.agent.AgentDto;

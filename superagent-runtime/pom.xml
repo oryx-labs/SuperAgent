@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.superagent</groupId>
+    <artifactId>superagent</artifactId>
+    <version>0.1.0-RELEASE</version>
+  </parent>
+
+  <artifactId>superagent-runtime</artifactId>
+  <packaging>jar</packaging>
+
+  <name>superagent-runtime</name>
+  <description>Agent runtime: drives the coding-agent CLIs (Claude Code, Codex), issues per-turn MCP tool grants, stores image attachments</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.superagent</groupId>
+      <artifactId>superagent-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-json</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

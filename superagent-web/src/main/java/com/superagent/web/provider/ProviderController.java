@@ -5,6 +5,7 @@ import com.superagent.api.ApiResponse;
 import com.superagent.api.provider.AddProviderRequest;
 import com.superagent.api.provider.CatalogEntryDto;
 import com.superagent.api.provider.ProviderDto;
+import com.superagent.platform.provider.ProviderService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;

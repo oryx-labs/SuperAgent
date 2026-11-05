@@ -19,7 +19,12 @@
   <dependencies>
     <dependency>
       <groupId>com.superagent</groupId>
-      <artifactId>superagent-api</artifactId>
+      <artifactId>superagent-agent</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.superagent</groupId>
+      <artifactId>superagent-task</artifactId>
     </dependency>
 
     <dependency>

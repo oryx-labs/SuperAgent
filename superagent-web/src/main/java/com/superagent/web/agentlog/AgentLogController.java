@@ -1,9 +1,10 @@
 package com.superagent.web.agentlog;
 
+import com.superagent.agent.AgentService;
+import com.superagent.agent.log.AgentLogService;
 import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.agent.AgentLogDto;
-import com.superagent.web.agent.AgentService;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;

@@ -1,6 +1,9 @@
 package com.superagent.web.connector;
 
 import com.superagent.api.ApiPaths;
+import com.superagent.platform.connector.ConnectorNotFoundException;
+import com.superagent.platform.connector.ConnectorOAuthService;
+import com.superagent.platform.connector.OAuthException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

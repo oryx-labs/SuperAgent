@@ -25,13 +25,19 @@
 
     <dependency>
       <groupId>com.superagent</groupId>
-      <artifactId>superagent-worker</artifactId>
+      <artifactId>superagent-runtime</artifactId>
       <version>${project.version}</version>
     </dependency>
 
     <dependency>
       <groupId>com.superagent</groupId>
       <artifactId>superagent-event</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.superagent</groupId>
+      <artifactId>superagent-ui</artifactId>
       <version>${project.version}</version>
     </dependency>
 
