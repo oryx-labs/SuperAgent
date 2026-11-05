@@ -26,7 +26,7 @@ This produces `superagent-server/target/superagent-<version>.tar.gz`, which unpa
 ```text
 superagent-<version>/
 ├── bin/      superagent-start.sh, superagent-stop.sh
-├── config/   application.properties, superagent.env
+├── config/   application.yml, superagent.env
 ├── libs/     superagent.jar
 ├── logs/     superagent.log, console.out, superagent.pid
 └── data/     agent and task workspaces
@@ -43,7 +43,7 @@ SUPERAGENT_STORAGE_MYSQL_USERNAME=superagent
 SUPERAGENT_STORAGE_MYSQL_PASSWORD=<password>
 ```
 
-`config/application.properties` overrides the defaults built into the jar; changes take effect on restart, with no repackaging.
+`config/application.yml` overrides the defaults built into the jar; changes take effect on restart, with no repackaging.
 
 ## Start and stop
 

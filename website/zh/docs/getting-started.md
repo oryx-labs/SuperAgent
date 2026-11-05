@@ -26,7 +26,7 @@ mvn clean package -PreleaseTgz          # 加 -DskipTests 可跳过测试
 ```text
 superagent-<version>/
 ├── bin/      superagent-start.sh、superagent-stop.sh
-├── config/   application.properties、superagent.env
+├── config/   application.yml、superagent.env
 ├── libs/     superagent.jar
 ├── logs/     superagent.log、console.out、superagent.pid
 └── data/     agent 与 task 的工作区
@@ -43,7 +43,7 @@ SUPERAGENT_STORAGE_MYSQL_USERNAME=superagent
 SUPERAGENT_STORAGE_MYSQL_PASSWORD=<密码>
 ```
 
-`config/application.properties` 用于覆盖打进 jar 的默认配置;改动重启即生效,无需重新打包。
+`config/application.yml` 用于覆盖打进 jar 的默认配置;改动重启即生效,无需重新打包。
 
 ## 启动与停止
 

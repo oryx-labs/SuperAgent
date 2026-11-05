@@ -126,31 +126,35 @@ document.getElementById("agentLeaveBtn").addEventListener("click", async () => {
   } catch (e) { showToast(e.message, true); }
 });
 
-// Members who didn't start the running turn poll for it: whose it is and the text so far. When it ends,
-// the conversation reloads with the new messages. Only while a shared agent is open in the chat view.
+// A turn keeps running on the server even if the page is closed or refreshed, so whoever opens the session
+// polls for it: whose it is and the text so far. This covers two cases — a collaborator watching another
+// member's turn, and anyone returning to a turn they started before the stream was cut. When it ends, the
+// conversation reloads with the stored messages. Only while a chat (not SuperAgent) is open.
 let liveBubble = null;
 let liveRunning = false;
 async function pollLive() {
   const agent = activeAgent;
-  if (!agent || !isShared(agent) || streaming || !activeSessionId || superMode
+  if (!agent || streaming || !activeSessionId || superMode
       || document.querySelector('[data-pane="chat"]').hidden) return;
   let live;
   try { live = await fetch("/api/v1/sessions/" + activeSessionId + "/live").then(kbJson); } catch (e) { return; }
   if (activeAgent !== agent || streaming) return;
-  if (live.running && live.by !== currentUsername) {
+  if (live.running) {
+    const mine = live.by === currentUsername;
     if (!liveRunning) {
       liveRunning = true;
-      await selectSession(activeSessionId); // shows the member's message that started the turn
+      await selectSession(activeSessionId); // shows the message that started the turn
       liveBubble = addAssistantBubble();
       const head = document.createElement("div");
       head.className = "live-head";
       liveBubble.text.closest(".bubble").prepend(head);
       liveBubble.head = head;
     }
-    liveBubble.head.textContent = L("co.liveBy", { name: live.byName }) + (live.activity ? " · ⚙ " + live.activity : "");
+    const label = mine ? L("chat.resuming") : L("co.liveBy", { name: live.byName });
+    liveBubble.head.textContent = label + (live.activity ? " · ⚙ " + live.activity : "");
     renderStreamText(liveBubble.text, live.text || "");
     el.input.disabled = true;
-    el.input.placeholder = L("co.waitFor", { name: live.byName });
+    el.input.placeholder = mine ? L("chat.resumingPh") : L("co.waitFor", { name: live.byName });
     scrollToBottom();
   } else if (liveRunning) {
     liveRunning = false;

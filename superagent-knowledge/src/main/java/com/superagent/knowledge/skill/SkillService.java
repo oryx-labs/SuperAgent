@@ -6,6 +6,7 @@ import com.superagent.api.skill.SkillRequest;
 import com.superagent.core.org.TeamPaths;
 import com.superagent.core.org.TeamRenamed;
 import com.superagent.core.settings.SystemSettingStore;
+import com.superagent.core.org.TeamAdminStore;
 import com.superagent.core.skill.Skill;
 import com.superagent.core.skill.SkillStore;
 import com.superagent.knowledge.KnowledgeSpace;
@@ -60,10 +61,12 @@ public class SkillService {
     private final SkillStore store;
     private final SystemSettingStore settings;
     private final KnowledgeSpaces spaces;
+    private final TeamAdminStore teamAdmins;
     private final Path root;
 
-    public SkillService(SkillStore store, SystemSettingStore settings, KnowledgeSpaces spaces,
+    public SkillService(SkillStore store, SystemSettingStore settings, KnowledgeSpaces spaces, TeamAdminStore teamAdmins,
                         @Value("${superagent.skill.dir:./data/skills}") String dir) {
+        this.teamAdmins = teamAdmins;
         this.store = store;
         this.settings = settings;
         this.spaces = spaces;
@@ -75,9 +78,9 @@ public class SkillService {
 
     /** What the user can see: their own skills, their teams' (and the teams above), the company's. */
     public List<SkillDto> list(String user) {
-        Predicate<KnowledgeSpace> readable = spaces.readableBy(user);
-        Predicate<KnowledgeSpace> writable = spaces.writableBy(user);
-        return live().filter(s -> readable.test(spaceOf(s)))
+        Predicate<Skill> visible = visibleTo(user);
+        Predicate<Skill> writable = editableBy(user);
+        return live().filter(visible)
                 .sorted(Comparator.comparingInt((Skill s) -> spaceOf(s).kind().ordinal())
                         .thenComparing(s -> spaceOf(s).key())
                         .thenComparing(s -> s.category() == null ? "￿" : s.category())
@@ -86,13 +89,13 @@ public class SkillService {
     }
 
     public SkillDto get(String id, String user) {
-        return toDto(readable(id, user), spaces.writableBy(user));
+        return toDto(readable(id, user), editableBy(user));
     }
 
     public SkillDto create(SkillRequest req, String user) {
         Skill s = insert(req, target(req.space(), user), user);
         log.info("skill {} ({}) created by {} in {}", s.id(), s.name(), user, s.space());
-        return toDto(s, spaces.writableBy(user));
+        return toDto(s, editableBy(user));
     }
 
     /** Only those who may write the skill's layer may change it — or move it to another layer they may write. */
@@ -107,7 +110,7 @@ public class SkillService {
                 req.enabled() == null ? cur.enabled() : req.enabled(),
                 false, cur.createdBy(), user, cur.createdAt(), Instant.now());
         store.save(s);
-        return toDto(s, spaces.writableBy(user));
+        return toDto(s, editableBy(user));
     }
 
     public void delete(String id, String user) {
@@ -304,18 +307,48 @@ public class SkillService {
     /** A skill the user can't see reads as not found. */
     private Skill readable(String id, String user) {
         Skill s = require(id);
-        if (!spaces.readableBy(user).test(spaceOf(s))) {
+        if (!visibleTo(user).test(s)) {
             throw new SkillNotFoundException(id);
         }
         return s;
     }
 
+    /** The knowledge layers' read rule, plus: whoever manages a team's skills (system or team admin) sees them. */
+    private Predicate<Skill> visibleTo(String user) {
+        Predicate<KnowledgeSpace> readable = spaces.readableBy(user);
+        boolean admin = spaces.isAdmin(user);
+        return s -> {
+            KnowledgeSpace space = spaceOf(s);
+            return readable.test(space) || space.kind() == KnowledgeSpace.Kind.TEAM
+                    && (admin || teamAdmins.manages(user, space.key()));
+        };
+    }
+
     private Skill writable(String id, String user) {
         Skill s = readable(id, user);
-        if (!spaces.writableBy(user).test(spaceOf(s))) {
+        if (!editableBy(user).test(s)) {
             throw new SkillForbiddenException("This skill is read-only for you");
         }
         return s;
+    }
+
+    /**
+     * Who may edit or delete a skill: personal — its owner; company — system administrators; team — whoever
+     * created it (while still in the team), an admin of that team or a team above it, or a system administrator.
+     * Adding a skill to a team stays open to its members (see {@link #target}).
+     */
+    private Predicate<Skill> editableBy(String user) {
+        boolean admin = spaces.isAdmin(user);
+        Predicate<KnowledgeSpace> member = spaces.writableBy(user);
+        return s -> {
+            KnowledgeSpace space = spaceOf(s);
+            return switch (space.kind()) {
+                case PERSONAL -> space.key().equals(user);
+                case COMPANY -> admin;
+                case TEAM -> admin || teamAdmins.manages(user, space.key())
+                        || (user != null && user.equals(s.createdBy()) && member.test(space));
+            };
+        };
     }
 
     /** The layer a new or moved skill goes to; blank = the user's own. */
@@ -438,10 +471,10 @@ public class SkillService {
         }
     }
 
-    private SkillDto toDto(Skill s, Predicate<KnowledgeSpace> writable) {
+    private SkillDto toDto(Skill s, Predicate<Skill> writable) {
         KnowledgeSpace space = spaceOf(s);
         return new SkillDto(s.id(), s.name(), s.description(), s.category(), s.content(), s.enabled(), space.id(),
-                writable.test(space), images(s.id()), s.createdBy(), s.updatedBy(), s.createdAt(), s.updatedAt());
+                writable.test(s), images(s.id()), s.createdBy(), s.updatedBy(), s.createdAt(), s.updatedAt());
     }
 
     /** Examples on first start only; deleting them later doesn't bring them back. */

@@ -42,13 +42,14 @@ public class ChatController {
     }
 
     @PostMapping(ApiPaths.SESSIONS)
-    public ApiResponse<SessionDto> createSession(@RequestBody(required = false) CreateSessionRequest request) {
-        return ApiResponse.ok(chatService.createSession(request));
+    public ApiResponse<SessionDto> createSession(@RequestBody(required = false) CreateSessionRequest request,
+                                                 Authentication auth) {
+        return ApiResponse.ok(chatService.createSessionFor(request, auth.getName()));
     }
 
     @GetMapping(ApiPaths.SESSIONS)
-    public ApiResponse<List<SessionDto>> listSessions() {
-        return ApiResponse.ok(chatService.listSessions());
+    public ApiResponse<List<SessionDto>> listSessions(Authentication auth) {
+        return ApiResponse.ok(chatService.listSessions(auth.getName()));
     }
 
     @GetMapping(ApiPaths.SESSIONS + "/{id}")

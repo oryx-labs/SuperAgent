@@ -107,21 +107,30 @@
           </span>
         </div>
         <div id="agentInfoDetails">
-          <div class="agent-members" id="agentMembersBlock" hidden>
-            <div class="agent-members__head">
-              <span class="panel__subhead" data-i18n="co.members">Members</span>
+          <div class="agent-field agent-members" id="agentMembersBlock" hidden>
+            <div class="agent-field__head">
+              <span class="agent-field__label" data-i18n="co.members">Members</span>
               <button class="link-btn" type="button" id="agentInviteBtn" data-i18n="co.invite">+ Invite</button>
             </div>
             <ul class="agent-members__list" id="agentMembers"></ul>
             <button class="link-btn link-btn--muted" type="button" id="agentLeaveBtn" data-i18n="co.leave" hidden>Leave</button>
           </div>
-          <span class="panel__subhead" data-i18n="agent.fCharacter">Character</span>
-          <p class="agent-info__persona" id="agentInfoCharacter"></p>
-          <p class="agent-info__persona" id="agentInfoPersona"></p>
-          <span class="panel__subhead panel__subhead--spaced" data-i18n="sk.agentSkills">Skills</span>
-          <div class="skill-chips" id="agentInfoSkills"></div>
-          <span class="panel__subhead panel__subhead--spaced" data-i18n="agent.fModel">Default model</span>
-          <p class="agent-info__model" id="agentInfoModel"></p>
+          <div class="agent-field">
+            <span class="agent-field__label" data-i18n="agent.fCharacter">Character</span>
+            <p class="agent-info__character" id="agentInfoCharacter"></p>
+            <div class="agent-persona" id="agentPersonaWrap" hidden>
+              <p class="agent-info__persona" id="agentInfoPersona"></p>
+              <button class="agent-persona__more" type="button" id="agentPersonaMore" hidden></button>
+            </div>
+          </div>
+          <div class="agent-field">
+            <span class="agent-field__label" data-i18n="sk.agentSkills">Skills</span>
+            <div class="skill-chips" id="agentInfoSkills"></div>
+          </div>
+          <div class="agent-field">
+            <span class="agent-field__label" data-i18n="agent.fModel">Default model</span>
+            <p class="agent-info__model" id="agentInfoModel"></p>
+          </div>
         </div>
         <!-- The SuperAgent has no character, skills or model to show: just what it is and how it works. -->
         <div class="super-intro" id="superIntro" hidden>
@@ -249,46 +258,24 @@
       </div>
     </section>
 
-    <section class="kb" data-pane="skills" aria-label="Skills" hidden>
-      <!-- Same rhythm as the Agent column: search on top, the list scrolls, "new" pinned at the bottom. -->
-      <div class="kb__side sk-side">
-        <div class="sk-search"><input type="search" id="skSearch" data-i18n-ph="sk.search" aria-label="Search skills" /></div>
-        <div class="sk-list" id="skList"></div>
-        <button class="new-chat" type="button" id="skNewBtn" data-i18n="sk.new">+ New skill</button>
-      </div>
-      <div class="kb__main">
-        <div class="kb__bar">
-          <h2 class="sk-heading" id="skHeading"></h2>
-          <div class="kb__actions" id="skActions" hidden>
-            <button class="link-btn" type="button" id="skEditBtn" data-i18n="sk.edit">Edit</button>
-            <button class="link-btn link-btn--danger" type="button" id="skDeleteBtn" data-i18n="kb.delete">Delete</button>
-          </div>
+    <section class="admin" data-pane="skills" aria-label="Skills" hidden>
+      <div class="model-tabs page-tabs sk-tabs" id="skTabs" role="tablist">
+        <button type="button" class="model-tab is-active" data-layer="personal"><span data-i18n="sk.layerPersonal">Personal</span> <b></b></button>
+        <button type="button" class="model-tab" data-layer="team"><span data-i18n="sk.layerTeam">Team</span> <b></b></button>
+        <button type="button" class="model-tab" data-layer="company"><span data-i18n="sk.layerCompany">Company</span> <b></b></button>
+        <div class="sk-toolbar">
+          <input type="search" id="skSearch" data-i18n-ph="sk.search" aria-label="Search skills" />
+          <button class="btn btn--primary btn--sm" type="button" id="skNewBtn" data-i18n="sk.new">+ New skill</button>
         </div>
-        <div class="kb__view" id="skView"></div>
-        <form class="kb__view sk-form" id="skForm" hidden>
-          <div class="field-row">
-            <label class="field"><span data-i18n="sk.fName">Name</span><input type="text" id="sfName" maxlength="100" required /></label>
-            <label class="field"><span data-i18n="sk.fCategory">Category</span><input type="text" id="sfCategory" maxlength="40" list="skCategories" /></label>
-            <datalist id="skCategories"></datalist>
-            <label class="field"><span data-i18n="sk.fSpace">Layer</span><select id="sfSpace"></select></label>
-          </div>
-          <label class="field"><span data-i18n="sk.fDescription">When to use</span>
-            <input type="text" id="sfDescription" maxlength="500" data-i18n-ph="sk.fDescriptionPh" /></label>
-          <label class="field"><span data-i18n="sk.fContent">Content (Markdown)</span>
-            <textarea id="sfContent" rows="18" data-i18n-ph="sk.fContentPh"></textarea></label>
-          <div class="field" id="sfImagesField"><span data-i18n="sk.fImages">Images</span>
-            <div class="sk-images" id="sfImages"></div>
-            <label class="btn sk-upload"><span data-i18n="sk.addImage">Add image</span>
-              <input type="file" id="sfImageInput" accept="image/png,image/jpeg,image/gif,image/webp" hidden /></label>
-            <p class="field-hint" id="sfImagesHint" data-i18n="sk.imagesHint"></p>
-          </div>
-          <label class="check-field"><input type="checkbox" id="sfEnabled" checked /><span data-i18n="sk.fEnabled">Enabled</span></label>
-          <p class="field-hint kb-modal__error" id="sfError" hidden></p>
-          <div class="modal__actions">
-            <button type="button" class="btn" id="sfCancel" data-i18n="common.cancel">Cancel</button>
-            <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
-          </div>
-        </form>
+      </div>
+      <div class="admin__body">
+        <p class="sk-hint" id="skHint"></p>
+        <table class="ctable sk-table"><thead><tr>
+          <th data-i18n="sk.fName">Name</th><th data-i18n="sk.fCategory">Category</th>
+          <th data-i18n="sk.fDescription">When to use</th><th class="sk-col-owner" data-i18n="sk.colOwner">Belongs to</th>
+          <th class="sk-col-time" data-i18n="sk.colUpdated">Updated</th><th class="sk-col-state" data-i18n="sk.colState">Status</th>
+        </tr></thead><tbody id="skRows"></tbody></table>
+        <p class="kb-empty" id="skEmpty" hidden></p>
       </div>
     </section>
 
@@ -639,6 +626,47 @@
         <p id="placeholderText" data-i18n="placeholder.default">Coming soon.</p>
       </div>
     </section>
+  </div>
+
+  <div class="drawer" id="skDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <div class="drawer__panel drawer__panel--wide">
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <h3 class="drawer__title sk-heading" id="skHeading"></h3>
+        <div class="kb__actions" id="skActions" hidden>
+          <button class="btn btn--sm" type="button" id="skEditBtn" data-i18n="sk.edit">Edit</button>
+          <button class="link-btn link-btn--danger" type="button" id="skDeleteBtn" data-i18n="kb.delete">Delete</button>
+        </div>
+      </div>
+      <div class="drawer__body">
+        <div id="skView"></div>
+        <form class="sk-form" id="skForm" hidden>
+          <div class="field-row">
+            <label class="field"><span data-i18n="sk.fName">Name</span><input type="text" id="sfName" maxlength="100" required /></label>
+            <label class="field"><span data-i18n="sk.fCategory">Category</span><input type="text" id="sfCategory" maxlength="40" list="skCategories" /></label>
+            <datalist id="skCategories"></datalist>
+            <label class="field"><span data-i18n="sk.fSpace">Layer</span><select id="sfSpace"></select></label>
+          </div>
+          <label class="field"><span data-i18n="sk.fDescription">When to use</span>
+            <input type="text" id="sfDescription" maxlength="500" data-i18n-ph="sk.fDescriptionPh" /></label>
+          <label class="field"><span data-i18n="sk.fContent">Content (Markdown)</span>
+            <textarea id="sfContent" rows="18" data-i18n-ph="sk.fContentPh"></textarea></label>
+          <div class="field" id="sfImagesField"><span data-i18n="sk.fImages">Images</span>
+            <div class="sk-images" id="sfImages"></div>
+            <label class="btn sk-upload"><span data-i18n="sk.addImage">Add image</span>
+              <input type="file" id="sfImageInput" accept="image/png,image/jpeg,image/gif,image/webp" hidden /></label>
+            <p class="field-hint" id="sfImagesHint" data-i18n="sk.imagesHint"></p>
+          </div>
+          <label class="check-field"><input type="checkbox" id="sfEnabled" checked /><span data-i18n="sk.fEnabled">Enabled</span></label>
+          <p class="field-hint kb-modal__error" id="sfError" hidden></p>
+          <div class="modal__actions">
+            <button type="button" class="btn" id="sfCancel" data-i18n="common.cancel">Cancel</button>
+            <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 
   <div class="modal" id="connectorModal" hidden>

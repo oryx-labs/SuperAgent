@@ -108,7 +108,7 @@ public class KnowledgeSpaces {
         return out;
     }
 
-    private boolean isAdmin(String user) {
+    public boolean isAdmin(String user) {
         return users.findByUsername(user).map(u -> u.roles().contains("ADMIN")).orElse(false);
     }
 

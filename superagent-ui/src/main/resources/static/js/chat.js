@@ -352,6 +352,7 @@ async function selectAgent(agent) {
     return;
   }
   await selectSession(agent.sessionId);
+  pollLive(); // reconnect at once if a turn this session started is still running on the server
 }
 
 function renderAgentPanel(agent) {
@@ -378,12 +379,32 @@ function renderAgentPanel(agent) {
   if (agent.kind === "super") loadSuperSources();
   const persona = document.getElementById("agentInfoPersona");
   persona.textContent = agent.persona || "";
-  persona.hidden = !agent.persona;
+  document.getElementById("agentPersonaWrap").hidden = !agent.persona;
+  setupPersonaClamp();
   if (!characterChoices.length) loadCharacters().then(() => { if (activeAgent === agent && agent.character) renderAgentPanel(agent); });
   const model = agent.model || systemSettings.agentDefaultModel || "default";
   document.getElementById("agentInfoModel").textContent = model;
   renderComposerModel(agent);
   renderAgentSkills(agent);
+}
+
+// A long persona is clamped to a few lines with a show-more toggle; a short one shows in full.
+function setupPersonaClamp() {
+  const wrap = document.getElementById("agentPersonaWrap");
+  const more = document.getElementById("agentPersonaMore");
+  if (wrap.hidden) return;
+  wrap.classList.add("is-clamped");
+  const persona = document.getElementById("agentInfoPersona");
+  requestAnimationFrame(() => {
+    const overflows = persona.scrollHeight - persona.clientHeight > 2;
+    more.hidden = !overflows;
+    more.textContent = L("agent.personaMore");
+    if (!overflows) wrap.classList.remove("is-clamped");
+  });
+  more.onclick = () => {
+    const clamped = wrap.classList.toggle("is-clamped");
+    more.textContent = L(clamped ? "agent.personaMore" : "agent.personaLess");
+  };
 }
 
 // Composer model picker: the agent's model override, limited to Claude models the background probe saw answer.

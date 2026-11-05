@@ -13,6 +13,10 @@ public final class OrgRequests {
     public record RenameTeam(String from, String to) {
     }
 
+    /** A team's admins (usernames); they manage the team's skills and those of the teams under it. */
+    public record SaveTeamAdmins(String team, List<String> usernames) {
+    }
+
     private OrgRequests() {
     }
 }

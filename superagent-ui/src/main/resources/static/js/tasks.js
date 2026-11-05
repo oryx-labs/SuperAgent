@@ -61,7 +61,7 @@ const tel = {
   steerBtn: document.getElementById("taskSteerBtn"),
 };
 
-const task = { id: null, renderedEvents: 0, mergeEl: null, mergeType: null, pollTimer: null };
+const task = { id: null, renderedEvents: 0, mergeEl: null, mergeType: null, toolGroup: null, pollTimer: null };
 
 function isActiveStatus(s) { return s === "running" || s === "pending"; }
 
@@ -278,6 +278,7 @@ async function openTask(id) {
   task.renderedEvents = 0;
   task.mergeEl = null;
   task.mergeType = null;
+  task.toolGroup = null;
   tel.listView.hidden = true;
   tel.detailView.hidden = false;
   tel.stream.innerHTML = "";
@@ -305,6 +306,7 @@ function renderDetail(d) {
   tel.stream.innerHTML = "";
   task.mergeEl = null;
   task.mergeType = null;
+  task.toolGroup = null;
   timeline.forEach(appendStreamItem);
   task.renderedEvents = (d.events || []).length;
   if (timeline.length === 0) {
@@ -416,6 +418,12 @@ function setEvBody(bodyEl, kind, fullRaw) {
 function appendStreamItem(item) {
   const type = item.kind;
   if (type === "system") return; // bootstrap noise
+
+  // A run of tool calls folds into one compact, collapsible block (one row per call).
+  if (type === "tool_use" || type === "tool_result") { appendToolEvent(item); return; }
+  // Any non-tool event ends the current tool group, so the next call starts a fresh one.
+  task.toolGroup = null;
+
   const mergeable = type === "text" || type === "thinking";
   if (mergeable && task.mergeType === type && task.mergeEl) {
     const bodyEl = task.mergeEl.querySelector(".ev__body");
@@ -456,6 +464,100 @@ const EV_LABEL = {
   thinking: L("ev.think"), tool_use: L("ev.tool"), tool_result: L("ev.toolResult"),
   result: L("ev.result"), error: L("ev.error"), cmd: "",
 };
+
+// Consecutive tool calls collapse into one block: a "N tool calls" header over one row per call
+// (✓ Used tool: name, or a spinner + Using tool while it runs). Clicking a row reveals its result.
+function ensureToolGroup() {
+  if (task.toolGroup) return task.toolGroup;
+  const placeholder = tel.stream.querySelector(".task-stream__empty");
+  if (placeholder) placeholder.remove();
+  const el = document.createElement("div");
+  el.className = "ev ev--tools";
+  el.dataset.type = "tool";
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "evtools__head";
+  head.setAttribute("aria-expanded", "true");
+  const chev = document.createElement("span");
+  chev.className = "evtools__chev";
+  const count = document.createElement("span");
+  count.className = "evtools__count";
+  head.append(chev, count);
+  const list = document.createElement("div");
+  list.className = "evtools__list";
+  head.addEventListener("click", () => {
+    const open = head.getAttribute("aria-expanded") === "true";
+    head.setAttribute("aria-expanded", String(!open));
+    list.hidden = open;
+  });
+  el.append(head, list);
+  tel.stream.appendChild(el);
+  task.mergeEl = null;
+  task.mergeType = null;
+  task.toolGroup = { list, count, n: 0, pendingRow: null };
+  return task.toolGroup;
+}
+
+function appendToolEvent(item) {
+  const g = ensureToolGroup();
+  if (item.kind === "tool_use") {
+    g.pendingRow = addToolRow(g, "using", item.payload || "", "");
+  } else { // tool_result: fill in the call it belongs to, or stand alone if orphaned
+    if (g.pendingRow) finishToolRow(g.pendingRow, item.payload || "");
+    else addToolRow(g, "done", "", item.payload || "");
+    g.pendingRow = null;
+  }
+  scrollStream();
+}
+
+function addToolRow(g, state, name, result) {
+  const row = document.createElement("div");
+  row.className = "evtool is-" + state;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "evtool__row";
+  const icon = document.createElement("span");
+  icon.className = "evtool__icon";
+  const text = document.createElement("span");
+  text.className = "evtool__text";
+  const lead = document.createElement("span");
+  lead.className = "evtool__lead";
+  lead.textContent = L(state === "using" ? "ev.usingTool" : "ev.usedTool");
+  const nameEl = document.createElement("b");
+  nameEl.textContent = name;
+  text.append(lead, nameEl);
+  const chev = document.createElement("span");
+  chev.className = "evtool__chev";
+  btn.append(icon, text, chev);
+  const detail = document.createElement("div");
+  detail.className = "evtool__detail";
+  detail.hidden = true;
+  const body = document.createElement("div");
+  body.className = "ev__body";
+  detail.appendChild(body);
+  btn.addEventListener("click", () => {
+    if (row.dataset.hasDetail !== "1") return;
+    const open = row.dataset.open === "1";
+    row.dataset.open = open ? "0" : "1";
+    detail.hidden = open;
+  });
+  row.append(btn, detail);
+  g.list.appendChild(row);
+  g.n += 1;
+  g.count.textContent = L(g.n === 1 ? "ev.toolCall" : "ev.toolCalls", { n: g.n });
+  const handle = { row, lead, body };
+  if (result) finishToolRow(handle, result);
+  return handle;
+}
+
+function finishToolRow(handle, result) {
+  handle.row.className = "evtool is-done";
+  handle.lead.textContent = L("ev.usedTool");
+  if ((result || "").trim()) {
+    handle.body.textContent = result;
+    handle.row.dataset.hasDetail = "1";
+  }
+}
 
 // The run pane is the scrolling container (the stream itself never overflows).
 function scrollStream() { tel.runPane.scrollTop = tel.runPane.scrollHeight; }

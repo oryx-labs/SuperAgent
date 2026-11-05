@@ -30,7 +30,7 @@ import java.util.Map;
  * <p>Login is form-based but answers with JSON so the SPA can drive it; an
  * unauthenticated API call gets 401 while a page load is redirected to /login.
  * CSRF is disabled (token-less JSON API); the session cookie is {@code SameSite=Lax}
- * (set in application.properties) as the baseline mitigation.
+ * (set in application.yml) as the baseline mitigation.
  */
 @Configuration
 @EnableWebSecurity

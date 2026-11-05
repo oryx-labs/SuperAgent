@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: superagent-server
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  servlet:
+    session:
+      cookie:
+        same-site: lax
+        http-only: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    root: INFO
+    com.superagent: DEBUG
+
+superagent:
+  version: @project.version@
+  storage:
+    type: mysql
+    mysql:
+      url: ${SUPERAGENT_STORAGE_MYSQL_URL:jdbc:mysql://127.0.0.1:3306/superagent?createDatabaseIfNotExist=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true}
+      username: ${SUPERAGENT_STORAGE_MYSQL_USERNAME:root}
+      password: ${SUPERAGENT_STORAGE_MYSQL_PASSWORD:}
+  agent:
+    workspace-dir: ./data/workspaces
+  knowledge:
+    dir: ./data/knowledge
+  attachments:
+    dir: ./data/attachments
+  auth:
+    admin:
+      username: ${SUPERAGENT_ADMIN_USERNAME:admin}
+      password: ${SUPERAGENT_ADMIN_PASSWORD:admin}
+  task:
+    allowed-tools: ${SUPERAGENT_TASK_ALLOWED_TOOLS:Read,Glob,Grep,LS,Edit,Write,Bash}
+    skip-permissions: ${SUPERAGENT_TASK_SKIP_PERMISSIONS:false}
+    max-parallel: ${SUPERAGENT_TASK_MAX_PARALLEL:50}
+  oauth:
+    github:
+      client-id: ${GITHUB_OAUTH_CLIENT_ID:}
+      client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:}
+      redirect-uri: ${GITHUB_OAUTH_REDIRECT_URI:http://localhost:8080/api/v1/oauth/github/callback}
+  app:
+    base-url: ${SUPERAGENT_BASE_URL:}

@@ -22,12 +22,12 @@
       <fileMode>0600</fileMode>
       <lineEnding>unix</lineEnding>
     </fileSet>
-    <!-- The built (filtered) application.properties, editable without repackaging. -->
+    <!-- The built (filtered) application.yml, editable without repackaging. -->
     <fileSet>
       <directory>${project.build.outputDirectory}</directory>
       <outputDirectory>config</outputDirectory>
       <includes>
-        <include>application.properties</include>
+        <include>application.yml</include>
       </includes>
       <fileMode>0644</fileMode>
     </fileSet>

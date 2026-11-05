@@ -14,6 +14,7 @@ import com.superagent.api.chat.StreamEventDto;
 import com.superagent.core.agent.Agent;
 import com.superagent.core.agent.AgentCharacters;
 import com.superagent.core.agent.AgentMemberStore;
+import com.superagent.core.agent.AgentStatus;
 import com.superagent.core.agent.AgentStore;
 import com.superagent.core.chat.AgentEvent;
 import com.superagent.core.chat.AgentEventSink;
@@ -196,10 +197,25 @@ public class ChatService {
         return toDto(session);
     }
 
-    public List<SessionDto> listSessions() {
+    /** The sessions of agents the user owns or collaborates on; never anyone else's. */
+    public List<SessionDto> listSessions(String user) {
         return store.listSessions().stream()
-                .filter(s -> s.status() != SessionStatus.DELETED)
+                .filter(s -> s.status() != SessionStatus.DELETED && canAccess(s, user))
                 .map(ChatService::toDto).toList();
+    }
+
+    /**
+     * Creating a session through the API: only on an agent the caller owns. Attaching one to someone else's
+     * agent would make it that agent's current session, so their next turn would land in it.
+     */
+    public SessionDto createSessionFor(CreateSessionRequest request, String user) {
+        String agentId = request == null ? null : request.agentId();
+        boolean owns = agentId != null && agentStore.find(agentId)
+                .filter(a -> a.status() != AgentStatus.DELETED && user != null && user.equals(a.owner())).isPresent();
+        if (!owns) {
+            throw new SessionNotFoundException(agentId == null ? "(no agent)" : agentId);
+        }
+        return createSession(request);
     }
 
     /** The agent's current session — the one its next turn continues — or null if it has none. */
@@ -338,12 +354,23 @@ public class ChatService {
      */
     public void requireAccess(String sessionId, String user) {
         ChatSession session = store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
-        if (session.agentId() != null && !session.agentId().isBlank()) {
-            agentStore.find(session.agentId())
-                    .filter(a -> a.owner() == null || a.owner().equals(user)
-                            || members.members(a.id()).stream().anyMatch(m -> m.username().equals(user)))
-                    .orElseThrow(() -> new SessionNotFoundException(sessionId));
+        if (!canAccess(session, user)) {
+            throw new SessionNotFoundException(sessionId);
         }
+    }
+
+    /**
+     * Owner or collaborator of the session's agent. A session with no agent (from before agents existed)
+     * belongs to no one, so no one may open it — it used to be open to every signed-in user.
+     */
+    private boolean canAccess(ChatSession session, String user) {
+        if (user == null || session.agentId() == null || session.agentId().isBlank()) {
+            return false;
+        }
+        return agentStore.find(session.agentId())
+                .filter(a -> user.equals(a.owner())
+                        || members.members(a.id()).stream().anyMatch(m -> m.username().equals(user)))
+                .isPresent();
     }
 
     // --- sending a message (streamed) ---

@@ -521,6 +521,7 @@ function setView(view) {
   settingsPane.hidden = !isSettings;
   kbPane.hidden = !isKnowledge;
   skPane.hidden = !isSkills;
+  if (!isSkills && !skel.drawer.hidden) closeSkillDrawer();
   ibPane.hidden = !isInbox;
   placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isSettings || isKnowledge
     || isAutomation || isSkills || isInbox || isAnalytics || isTodo;

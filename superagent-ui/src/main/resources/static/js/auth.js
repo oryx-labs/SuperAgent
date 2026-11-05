@@ -98,6 +98,7 @@ let editingUserId = null;
 // The organisation, maintained one user at a time: each user's manager and teams (team = "a/b" path).
 let allUsers = [];
 let org = { members: [], teams: [] };
+let teamAdmins = {};         // team path → usernames who manage its skills (and its sub-teams')
 let editingTeams = [];
 const orgMember = username => org.members.find(m => m.username === username) || { manager: null, teams: [] };
 
@@ -106,22 +107,29 @@ Object.assign(api, {
   saveUserOrg: (id, body) => fetch("/api/v1/users/" + encodeURIComponent(id) + "/org", {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   }).then(r => r.json()),
+  teamAdmins: () => fetch("/api/v1/admin/org/team-admins").then(r => r.json()),
+  saveTeamAdmins: (team, usernames) => fetch("/api/v1/admin/org/team-admins", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ team, usernames }),
+  }).then(r => r.json()),
   renameTeam: (from, to) => fetch("/api/v1/admin/org/teams/rename", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from, to }),
   }).then(r => r.json()),
 });
 
 async function loadUsers() {
-  const [usersRes, orgRes] = await Promise.all([api.listUsers().catch(() => null), api.orgOverview().catch(() => null)]);
+  const [usersRes, orgRes, adminsRes] = await Promise.all([api.listUsers().catch(() => null),
+    api.orgOverview().catch(() => null), api.teamAdmins().catch(() => null)]);
   allUsers = (usersRes && usersRes.data) || [];
   org = (orgRes && orgRes.data) || { members: [], teams: [] };
+  teamAdmins = (adminsRes && adminsRes.data) || {};
   uel.rows.innerHTML = "";
   uel.empty.hidden = allUsers.length > 0;
   allUsers.forEach(u => uel.rows.appendChild(userRow(u)));
   renderOrgTeams();
 }
 
-// Every team, indented by depth; a team (with everything under it) can be renamed — its knowledge base moves along.
+// Every team, indented by depth; a team (with everything under it) can be renamed — its knowledge base moves along —
+// and given admins, who manage its skills and those of the teams under it.
 function renderOrgTeams() {
   uel.orgTeams.replaceChildren(...org.teams.map(team => {
     const li = document.createElement("li");
@@ -133,7 +141,18 @@ function renderOrgTeams() {
     const count = document.createElement("span");
     count.className = "org-teams__count";
     count.textContent = L("org.memberCount", { n: org.members.filter(m => m.teams.includes(team)).length });
-    li.append(name, count, linkBtn(L("org.rename"), async () => {
+    const admins = teamAdmins[team] || [];
+    const adminsEl = document.createElement("span");
+    adminsEl.className = "org-teams__admins";
+    adminsEl.textContent = admins.length ? L("org.admins", { users: admins.join(", ") }) : "";
+    li.append(name, count, adminsEl, linkBtn(L("org.setAdmins"), async () => {
+      const input = window.prompt(L("org.adminsPrompt", { team }), admins.join(", "));
+      if (input === null) return;
+      const usernames = input.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
+      const res = await api.saveTeamAdmins(team, usernames).catch(() => null);
+      if (!res || res.code !== "ok") { showToast((res && res.message) || L("org.adminsFailed"), true); return; }
+      await loadUsers();
+    }, "link-btn--muted"), linkBtn(L("org.rename"), async () => {
       const to = window.prompt(L("org.renamePrompt", { team }), team);
       if (!to || to.trim() === team) return;
       const res = await api.renameTeam(team, to.trim()).catch(() => null);

@@ -4,6 +4,7 @@ import com.superagent.api.skill.SkillDto;
 import com.superagent.api.skill.SkillRequest;
 import com.superagent.core.org.TeamRenamed;
 import com.superagent.core.settings.SystemSettingStore;
+import com.superagent.core.org.TeamAdminStore;
 import com.superagent.core.skill.Skill;
 import com.superagent.core.skill.SkillStore;
 import com.superagent.knowledge.KnowledgeService;
@@ -44,11 +45,17 @@ class SkillServiceTest {
     @TempDir
     Path tmp;
 
+    /** dan administers 技术中心 (bob's 后端组 sits under it). */
+    private final TeamAdminStore teamAdmins = new TeamAdminStore() {
+        @Override public Map<String, List<String>> all() { return Map.of("技术中心", List.of("dan")); }
+        @Override public void set(String team, List<String> usernames) { }
+    };
+
     private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0};
 
     private SkillService service(InMemorySkills store, InMemorySettings settings, Path dir) {
         return new SkillService(store, settings, TestOrg.spaces(new KnowledgeService(tmp.resolve("kb").toString())),
-                dir.toString());
+                teamAdmins, dir.toString());
     }
 
     private static SkillRequest req(String name, String space) {
@@ -79,10 +86,14 @@ class SkillServiceTest {
         String backend = svc.create(req("接口", "team:技术中心/后端组"), "bob").id();
         String center = svc.create(req("评审", "team:技术中心"), "dan").id();
 
-        // bob: own + own team + the team above (read only); dan: only his team — not the sub-team, not bob's own.
+        // bob: own + own team (he made it) + the team above (read only). dan administers 技术中心, so he also sees
+        // and manages the sub-team's skills — never bob's personal ones. root (system admin) manages any team's.
         assertThat(svc.list("bob")).extracting(SkillDto::id).containsExactly(mine, center, backend);
         assertThat(svc.list("bob")).extracting(SkillDto::canWrite).containsExactly(true, false, true);
-        assertThat(svc.list("dan")).extracting(SkillDto::id).containsExactly(center);
+        assertThat(svc.list("dan")).extracting(SkillDto::id).containsExactly(center, backend);
+        assertThat(svc.list("dan")).extracting(SkillDto::canWrite).containsExactly(true, true);
+        svc.update(backend, req("接口规范", null), "dan");
+        svc.update(backend, req("接口规范", null), "root");
         assertThatThrownBy(() -> svc.get(mine, "dan")).isInstanceOf(SkillNotFoundException.class);
         assertThatThrownBy(() -> svc.update(center, req("评审", null), "bob")).isInstanceOf(SkillForbiddenException.class);
         assertThatThrownBy(() -> svc.create(req("x", "team:技术中心"), "bob")).isInstanceOf(SkillForbiddenException.class);
@@ -91,7 +102,7 @@ class SkillServiceTest {
         assertThatThrownBy(() -> svc.setAgentSkills("agent-d", List.of(mine), "dan")).isInstanceOf(SkillNotFoundException.class);
         svc.setAgentSkills("agent-b", List.of(backend, center), "bob");
         assertThat(svc.forAgent("agent-b", "bob")).extracting(Skill::id).containsExactly(backend, center);
-        assertThat(svc.forTask("page-task", "dan")).extracting(Skill::id).containsExactly(center);
+        assertThat(svc.forTask("page-task", "dan")).extracting(Skill::id).containsExactly(center); // using ≠ managing
 
         svc.onTeamRenamed(new TeamRenamed("技术中心", "研发中心"));
         assertThat(store.rows.get(backend).space()).isEqualTo("team:研发中心/后端组"); // sub-teams move along

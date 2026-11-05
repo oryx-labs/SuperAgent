@@ -21,9 +21,13 @@ const skillImageUrl = (id, name) => "/api/v1/skills/" + id + "/images/" + encode
 
 const skPane = document.querySelector('[data-pane="skills"]');
 const skel = {
-  list: document.getElementById("skList"),
+  tabs: document.getElementById("skTabs"),
+  rows: document.getElementById("skRows"),
+  empty: document.getElementById("skEmpty"),
+  hint: document.getElementById("skHint"),
   search: document.getElementById("skSearch"),
   newBtn: document.getElementById("skNewBtn"),
+  drawer: document.getElementById("skDrawer"),
   heading: document.getElementById("skHeading"),
   actions: document.getElementById("skActions"),
   edit: document.getElementById("skEditBtn"),
@@ -44,8 +48,11 @@ const skel = {
   cancel: document.getElementById("sfCancel"),
 };
 let skills = [];             // SkillDto[] from the server
-let skSelectedId = null;
+let skLayer = "personal";    // the tab: personal | team | company
+let skSelectedId = null;     // the skill open in the drawer (set before setView("skills") to open one)
 let skEditing = null;        // null = viewing; "new" or a skill id = editing
+
+const skLayerOf = s => s.space === "personal" || s.space === "company" ? s.space : "team";
 
 async function loadSkillList() {
   try { skills = (await api.listSkills()) || []; } catch (e) { skills = []; showToast(e.message, true); }
@@ -54,64 +61,65 @@ async function loadSkillList() {
 
 async function loadSkills() {
   await loadSkillList();
-  if (skSelectedId && !skills.some(s => s.id === skSelectedId)) skSelectedId = null;
-  if (!skSelectedId && skills.length) skSelectedId = skills[0].id;
-  skEditing = null;
-  renderSkillList();
-  renderSkill();
+  const open = skills.find(s => s.id === skSelectedId);
+  if (open) { skLayer = skLayerOf(open); openSkillDrawer(open.id); } else closeSkillDrawer();
+  renderSkillTable();
 }
 
-function renderSkillList() {
+function renderSkillTable() {
   const q = skel.search.value.trim().toLowerCase();
-  const shown = skills.filter(s => !q || [s.name, s.description, s.category].some(v => (v || "").toLowerCase().includes(q)));
-  skel.list.innerHTML = "";
-  if (!shown.length) {
-    skel.list.innerHTML = '<p class="kb-empty">' + L(skills.length ? "sk.noMatch" : "sk.empty") + "</p>";
-    return;
-  }
-  let layer = undefined, group = undefined;
-  shown.forEach(s => {
-    if (s.space !== layer) {
-      layer = s.space;
-      group = undefined;
-      const h = document.createElement("div");
-      h.className = "sk-layer";
-      const name = document.createElement("span");
-      name.className = "sk-layer__name";
-      name.textContent = skLayerLabel(s.space);
-      name.title = name.textContent;
-      h.appendChild(name);
-      if (!s.canWrite) {
-        const ro = document.createElement("span");
-        ro.className = "kb-readonly";
-        ro.textContent = L("sk.readOnly");
-        h.appendChild(ro);
-      }
-      skel.list.appendChild(h);
-    }
-    const cat = s.category || L("sk.uncategorized");
-    if (cat !== group) {
-      group = cat;
-      const h = document.createElement("div");
-      h.className = "sk-group";
-      h.textContent = cat;
-      skel.list.appendChild(h);
-    }
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "sk-item" + (s.id === skSelectedId ? " is-selected" : "") + (s.enabled ? "" : " is-off");
-    const name = document.createElement("span");
-    name.className = "sk-item__name";
-    name.textContent = s.name;
-    const desc = document.createElement("span");
-    desc.className = "sk-item__desc";
-    desc.textContent = s.description || "";
-    b.append(name, desc);
-    b.addEventListener("click", () => { skSelectedId = s.id; skEditing = null; renderSkillList(); renderSkill(); });
-    skel.list.appendChild(b);
+  const matches = s => !q || [s.name, s.description, s.category].some(v => (v || "").toLowerCase().includes(q));
+  skel.tabs.querySelectorAll(".model-tab").forEach(t => {
+    t.classList.toggle("is-active", t.dataset.layer === skLayer);
+    t.querySelector("b").textContent = skills.filter(s => skLayerOf(s) === t.dataset.layer && matches(s)).length || "";
   });
+  skel.hint.textContent = L("sk.hint." + skLayer);
+  // Team skills grouped by team; within a layer by category, then name.
+  const shown = skills.filter(s => skLayerOf(s) === skLayer && matches(s)).sort((a, b) =>
+    (a.space || "").localeCompare(b.space || "") || (a.category || "").localeCompare(b.category || "")
+      || a.name.localeCompare(b.name));
+  skel.rows.replaceChildren(...shown.map(skillRow));
+  skel.empty.hidden = shown.length > 0;
+  skel.empty.textContent = L(q ? "sk.noMatch" : "sk.empty." + skLayer);
 }
-skel.search.addEventListener("input", renderSkillList);
+
+function skillRow(s) {
+  const tr = document.createElement("tr");
+  tr.className = "sk-row" + (s.enabled ? "" : " is-off");
+  tr.tabIndex = 0;
+  const cell = (text, cls) => {
+    const td = document.createElement("td");
+    if (cls) td.className = cls;
+    td.textContent = text;
+    td.title = text;
+    return td;
+  };
+  const name = cell(s.name, "sk-row__name");
+  const owner = skLayerOf(s) === "team" ? skLayerLabel(s.space) : s.createdBy || "—";
+  const state = document.createElement("td");
+  state.className = "sk-row__state";
+  const badge = document.createElement("span");
+  badge.className = "status-badge " + (s.enabled ? "is-done" : "is-stopped");
+  badge.textContent = L(s.enabled ? "sk.enabled" : "sk.disabled");
+  state.appendChild(badge);
+  if (!s.canWrite) {
+    const ro = document.createElement("span");
+    ro.className = "kb-readonly";
+    ro.textContent = L("sk.readOnly");
+    state.appendChild(ro);
+  }
+  tr.append(name, cell(s.category || "—", "sk-row__meta"), cell(s.description || "", "sk-row__desc"),
+    cell(owner, "sk-row__meta"), cell(formatDateTime(s.updatedAt), "sk-row__meta"), state);
+  tr.addEventListener("click", () => openSkillDrawer(s.id));
+  tr.addEventListener("keydown", e => { if (e.key === "Enter") openSkillDrawer(s.id); });
+  return tr;
+}
+
+skel.search.addEventListener("input", renderSkillTable);
+skel.tabs.addEventListener("click", e => {
+  const t = e.target.closest(".model-tab");
+  if (t) { skLayer = t.dataset.layer; renderSkillTable(); }
+});
 
 function skLayerLabel(space) {
   if (space === "personal") return L("sk.layerPersonal");
@@ -131,6 +139,23 @@ function renderSkillMarkdown(skill) {
   return div;
 }
 
+function openSkillDrawer(id) {
+  skSelectedId = id;
+  skEditing = null;
+  skel.drawer.hidden = false;
+  renderSkill();
+}
+
+function closeSkillDrawer() {
+  skel.drawer.hidden = true;
+  skSelectedId = null;
+  skEditing = null;
+}
+skel.drawer.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", closeSkillDrawer));
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !skel.drawer.hidden && document.getElementById("kbModal").hidden) closeSkillDrawer();
+});
+
 function renderSkill() {
   const skill = skills.find(s => s.id === skSelectedId);
   skel.form.hidden = !skEditing;
@@ -138,11 +163,7 @@ function renderSkill() {
   skel.actions.hidden = !!skEditing || !skill || !skill.canWrite;
   if (skEditing) return;
   skel.view.innerHTML = "";
-  if (!skill) {
-    skel.heading.textContent = L("sk.title");
-    skel.view.innerHTML = '<p class="kb-empty">' + L("sk.pick") + "</p>";
-    return;
-  }
+  if (!skill) { closeSkillDrawer(); return; }
   skel.heading.textContent = skill.name;
   const meta = document.createElement("p");
   meta.className = "sk-meta";
@@ -162,6 +183,8 @@ function renderSkill() {
 
 function openSkillForm(skill) {
   skEditing = skill ? skill.id : "new";
+  if (!skill) skSelectedId = null;
+  skel.drawer.hidden = false;
   skel.heading.textContent = skill ? L("sk.editTitle", { name: skill.name }) : L("sk.newTitle");
   skel.name.value = skill ? skill.name : "";
   skel.category.value = skill ? skill.category || "" : "";
@@ -177,13 +200,14 @@ function openSkillForm(skill) {
   });
   skel.imagesField.hidden = !skill; // images attach to a saved skill
   if (skill) renderSkillImages(skill);
-  renderSkillSpaces(skill ? skill.space : "personal");
+  renderSkillSpaces(skill ? skill.space : "personal", skill ? null : skLayer);
   renderSkill();
   skel.name.focus();
 }
 
-// The layers the user may put a skill in: their own, their teams, the company's (admins).
-async function renderSkillSpaces(current) {
+// The layers the user may put a skill in: their own, their teams, the company's (admins). A new skill starts in
+// the open tab's layer when the user may write there.
+async function renderSkillSpaces(current, preferLayer) {
   skel.space.innerHTML = "";
   const add = (id, label) => {
     const o = document.createElement("option");
@@ -198,7 +222,8 @@ async function renderSkillSpaces(current) {
   spaces.filter(sp => sp.canWrite || sp.id === current).forEach(sp => add(sp.id,
     sp.kind === "personal" ? L("sk.spacePersonal")
       : sp.kind === "company" ? L("sk.spaceCompany") : L("sk.spaceTeam", { team: sp.team })));
-  skel.space.value = current;
+  const preferred = preferLayer && spaces.find(sp => sp.canWrite && sp.kind === preferLayer);
+  skel.space.value = preferred ? preferred.id : current;
 }
 
 function renderSkillImages(skill) {
@@ -269,7 +294,9 @@ skel.edit.addEventListener("click", () => {
   const skill = skills.find(s => s.id === skSelectedId);
   if (skill) openSkillForm(skill);
 });
-skel.cancel.addEventListener("click", () => { skEditing = null; renderSkill(); });
+skel.cancel.addEventListener("click", () => {
+  if (skEditing === "new") closeSkillDrawer(); else { skEditing = null; renderSkill(); }
+});
 skel.form.addEventListener("submit", async e => {
   e.preventDefault();
   const body = {
@@ -293,7 +320,7 @@ skel.del.addEventListener("click", () => {
   kbOpenModal({
     title: L("sk.deleteTitle"), submit: L("kb.delete"), danger: true,
     message: L("sk.deleteConfirm", { name: skill.name }),
-    action: async () => { await api.deleteSkill(skill.id); skSelectedId = null; await loadSkills(); },
+    action: async () => { await api.deleteSkill(skill.id); closeSkillDrawer(); await loadSkills(); },
   });
 });
 

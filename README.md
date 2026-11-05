@@ -66,7 +66,7 @@ This produces `superagent-server/target/superagent-<version>.tar.gz`, which unpa
 ```text
 superagent-<version>/
 ├── bin/      superagent-start.sh, superagent-stop.sh
-├── config/   application.properties, superagent.env
+├── config/   application.yml, superagent.env
 ├── libs/     superagent.jar
 ├── logs/     superagent.log, console.out, superagent.pid
 └── data/     agent and task workspaces
@@ -75,7 +75,7 @@ superagent-<version>/
 ### Configure
 
 - `config/superagent.env`: secrets and deployment values, sourced by the start script. It includes the admin password, MySQL connection, GitHub OAuth, `SERVER_PORT` and `JAVA_OPTS`. Every entry ships commented out. Keep the file at mode `600`.
-- `config/application.properties`: overrides the defaults built into the jar. Changes take effect on restart, with no repackaging.
+- `config/application.yml`: overrides the defaults built into the jar. Changes take effect on restart, with no repackaging.
 
 At minimum, set these before the first start:
 

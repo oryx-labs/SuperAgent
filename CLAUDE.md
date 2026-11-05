@@ -36,7 +36,7 @@ Thirteen Maven modules, layered; a module may only depend on modules below it (M
 module only sees what its pom declares):
 
 ```text
-L6  superagent-server        boots everything (the only executable jar); application.properties lives here
+L6  superagent-server        boots everything (the only executable jar); application.yml lives here
 L5  superagent-web           HTTP only: REST controllers, the MCP endpoint, auth/security, GlobalExceptionHandler
 L5  superagent-ui            the browser UI: static HTML/CSS/JS served from classpath:/static
 L4  superagent-orchestrator  the user's SuperAgent: plans work, hires team members, assigns tasks
