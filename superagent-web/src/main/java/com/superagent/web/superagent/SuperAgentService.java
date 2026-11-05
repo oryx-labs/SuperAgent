@@ -33,6 +33,7 @@ import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskStatus;
 import com.superagent.core.task.TaskStore;
 import com.superagent.web.agent.AgentService;
+import com.superagent.web.agentlog.AgentLogService;
 import com.superagent.web.attachment.ImageAttachmentStore;
 import com.superagent.web.chat.ChatService;
 import com.superagent.web.memory.AgentMemoryService;
@@ -70,6 +71,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Each user's SuperAgent: a leader that takes requests through an inbox instead of answering live.
@@ -118,6 +120,7 @@ public class SuperAgentService {
     private final ChatService chatService;
     private final AgentMemoryService memory;
     private final SuperAgentWorkStore works;
+    private final AgentLogService runLog;
     private final SkillService skills;
     private final Map<AgentType, AgentRunner> runners = new EnumMap<>(AgentType.class);
     private final Duration quiet;
@@ -141,6 +144,7 @@ public class SuperAgentService {
                              TaskStore tasks, ProviderService providers, SettingsService settings,
                              ImageAttachmentStore images, McpGrants grants, SkillService skills,
                              ChatService chatService, AgentMemoryService memory, SuperAgentWorkStore works,
+                             AgentLogService runLog,
                              List<AgentRunner> agentRunners,
                              @Value("${superagent.superagent.quiet-seconds:10}") long quietSeconds,
                              @Value("${superagent.superagent.max-wait-seconds:60}") long maxWaitSeconds,
@@ -158,6 +162,7 @@ public class SuperAgentService {
         this.chatService = chatService;
         this.memory = memory;
         this.works = works;
+        this.runLog = runLog;
         this.skills = skills;
         for (AgentRunner r : agentRunners) {
             runners.put(r.type(), r);
@@ -201,6 +206,7 @@ public class SuperAgentService {
             }
             states.save(s.withPlan(s.planId(), SuperAgentState.PLAN_APPROVED, s.planJson()));
             note(sessionId(agents.require(s.agentId(), owner)), "用户已确认计划，请开始执行。");
+            logSuper(owner, "info", "你确认了计划 #" + planId + "，开始执行", null);
             immediate.add(owner);
         }
         return state(owner);
@@ -263,15 +269,65 @@ public class SuperAgentService {
         });
     }
 
+    /** How one attempt at a round went; {@code error} set + blank {@code text} = it failed. */
+    private record RoundAttempt(ChatSession session, AgentType type, String text, String error, String agentSessionId) {
+        boolean failed() {
+            return text.isBlank() && error != null;
+        }
+    }
+
+    /**
+     * Works one batch. Like any agent's turn: if it fails and that tips the session over its failure limit
+     * (network trouble never counts), the SuperAgent moves to a fresh session and tries the batch once more.
+     * The reply — or why the round failed — goes into the conversation either way, and the cursor moves on,
+     * so a broken batch can't be retried forever.
+     */
     private void runRound(String owner, Agent sa, List<ChatMessage> batch, Instant cutoff) {
+        long startedAt = System.currentTimeMillis();
         String model = sa.model() != null ? sa.model() : settings.agentDefaultModel();
         // Like any agent: a new model means a new session, which starts from the SuperAgent's memory.
         ChatSession session = chatService.sessionForTurn(sa, model);
-        String sessionId = session.id();
+        String replyId = UUID.randomUUID().toString();
+        // The batch is this round's input already; the "recent conversation" is what came before it.
+        Set<String> batchIds = batch.stream().map(ChatMessage::id).collect(Collectors.toSet());
+        String context = session.agentSessionId() == null ? memory.context(sa, batchIds) : memory.read(sa);
+        RoundAttempt attempt = attemptRound(owner, sa, session, model, batch, context, replyId);
+        if (!attempt.failed()) {
+            memory.recordSuccess(sa);
+        } else if (memory.recordFailure(sa, attempt.error())) {
+            attempt = attemptRound(owner, sa, chatService.rotateSession(sa), model, batch,
+                    memory.context(sa, batchIds), replyId);
+            if (attempt.failed()) {
+                memory.recordFailure(sa, attempt.error());
+            } else {
+                memory.recordSuccess(sa);
+            }
+        }
+        String reply = attempt.failed() ? "（本轮处理失败：" + attempt.error() + "）" : attempt.text();
+        String round = "处理 " + batch.size() + " 条输入 · 模型 " + (model == null ? "默认模型" : model) + " · 用时 "
+                + String.format("%.1fs", (System.currentTimeMillis() - startedAt) / 1000.0);
+        if (attempt.failed()) {
+            runLog.error(sa, AgentLogService.SUPERAGENT, "一轮处理失败 · " + round, attempt.error());
+        } else {
+            runLog.info(sa, AgentLogService.SUPERAGENT, "完成一轮 · " + round, null);
+        }
+        ChatSession used = attempt.session();
+        chats.appendMessage(new ChatMessage(replyId, used.id(), MessageRole.ASSISTANT, reply, Instant.now()));
+        chats.updateSession(attempt.type() != used.agentType()
+                ? new ChatSession(used.id(), used.title(), attempt.type(), attempt.agentSessionId(), used.workspaceDir(),
+                used.agentId(), used.status(), used.createdAt(), Instant.now())
+                : used.withAgentSessionId(attempt.agentSessionId()));
+        synchronized (stateLock) {
+            states.find(owner).ifPresent(s -> states.save(s.processedTo(cutoff)));
+        }
+        log.info("superagent round for {} handled {} message(s)", owner, batch.size());
+    }
+
+    private RoundAttempt attemptRound(String owner, Agent sa, ChatSession session, String model, List<ChatMessage> batch,
+                                      String context, String replyId) {
         AgentType type = providers.cliFor(model).map(AgentType::fromString).filter(runners::containsKey)
                 .orElse(session.agentType());
         AgentRunner runner = runners.get(type);
-        String replyId = UUID.randomUUID().toString();
         StringBuilder text = new StringBuilder();
         AtomicReference<String> result = new AtomicReference<>();
         AtomicReference<String> error = new AtomicReference<>();
@@ -280,7 +336,7 @@ public class SuperAgentService {
                 ? session.agentSessionId() : session.id();
         AtomicReference<String> captured = new AtomicReference<>(agentSessionId);
         AgentEventSink sink = event -> {
-            chats.appendEvent(new AgentEvent(sessionId, replyId, event.seq(), event.type(), event.payload(),
+            chats.appendEvent(new AgentEvent(session.id(), replyId, event.seq(), event.type(), event.payload(),
                     event.createdAt()));
             switch (event.type()) {
                 case TEXT -> text.append(event.payload());
@@ -294,39 +350,25 @@ public class SuperAgentService {
                 default -> { /* thinking / tool use are kept as events only */ }
             }
         };
-
         List<ImageAttachment> attached = new ArrayList<>();
         batch.stream().filter(m -> m.role() == MessageRole.USER)
                 .forEach(m -> attached.addAll(images.list(m.sessionId(), m.id())));
         McpGrants.Grant grant = grants.available() ? grants.openSuper(owner, sa.id(), session.workspaceDir()) : null;
-        String reply;
         try {
             if (runner == null) {
                 throw new IllegalStateException("No runner for " + type);
             }
             runner.run(new AgentRunRequest(session.id(), agentSessionId, session.workspaceDir(), roundPrompt(owner, batch),
                     model, ROUND_TOOLS, false, grant == null ? null : grants.mcpConfig(grant),
-                    SuperAgentPrompts.system(teamLimit), attached, memory.read(sa)), sink, new Cancellation());
-            String out = result.get() != null ? result.get() : text.toString();
-            reply = out.isBlank() && error.get() != null ? "（本轮处理失败：" + error.get() + "）" : out;
+                    SuperAgentPrompts.system(teamLimit), attached, context), sink, new Cancellation());
         } catch (RuntimeException e) {
-            // The round's outcome is shown to the user in the conversation; the cursor still moves on, so a
-            // broken batch can't be retried forever.
-            log.warn("superagent round failed for {}", owner, e);
-            reply = "（本轮处理失败：" + e.getMessage() + "）";
+            log.warn("superagent round attempt failed for {}: {}", owner, e.getMessage());
+            error.set(e.getMessage() != null ? e.getMessage() : "round failed");
         } finally {
             grants.close(grant);
         }
-        chats.appendMessage(new ChatMessage(replyId, sessionId, MessageRole.ASSISTANT, reply, Instant.now()));
-        ChatSession updated = type != session.agentType()
-                ? new ChatSession(session.id(), session.title(), type, captured.get(), session.workspaceDir(),
-                session.agentId(), session.status(), session.createdAt(), Instant.now())
-                : session.withAgentSessionId(captured.get());
-        chats.updateSession(updated);
-        synchronized (stateLock) {
-            states.find(owner).ifPresent(s -> states.save(s.processedTo(cutoff)));
-        }
-        log.info("superagent round for {} handled {} message(s)", owner, batch.size());
+        String out = result.get() != null ? result.get() : text.toString();
+        return new RoundAttempt(session, type, out == null ? "" : out, error.get(), captured.get());
     }
 
     private String roundPrompt(String owner, List<ChatMessage> batch) {
@@ -377,6 +419,8 @@ public class SuperAgentService {
                 }
                 if (watch != SuperAgentInbox.Watch.DROP) {
                     note(sessionId, report(w, status, task.orElse(null)));
+                    logSuper(owner, status == TaskStatus.ERROR ? "warn" : "info", "收到任务结果：「" + w.title() + "」"
+                            + status(status) + "（成员 " + w.memberName() + "）", w.taskId());
                 }
                 boolean finished = watch != SuperAgentInbox.Watch.REPORT_AND_KEEP;
                 String summary = outcome(w.taskId(), status, task.orElse(null));
@@ -471,6 +515,8 @@ public class SuperAgentService {
         synchronized (stateLock) {
             SuperAgentState s = ensureState(owner);
             states.save(s.withPlan(plan.id(), SuperAgentState.PLAN_PROPOSED, toJson(plan)));
+            logSuper(owner, "info", "提交计划 #" + plan.id() + "（" + members.size() + " 名成员，" + assignments.size()
+                    + " 个任务），等待确认", plan.summary());
         }
         return plan;
     }
@@ -485,7 +531,9 @@ public class SuperAgentService {
         if (team(owner, sa).stream().anyMatch(m -> m.name().equalsIgnoreCase(name == null ? "" : name.strip()))) {
             throw new IllegalArgumentException("A member named " + name + " already exists; re-brief them instead");
         }
-        return agents.createTeamMember(owner, sa.id(), name, avatar, persona, model, skillIds);
+        Agent hired = agents.createTeamMember(owner, sa.id(), name, avatar, persona, model, skillIds);
+        logSuper(owner, "info", "招入成员「" + hired.name() + "」", persona);
+        return hired;
     }
 
     /** Re-briefs a member: only fields given change. */
@@ -496,6 +544,7 @@ public class SuperAgentService {
         agents.update(a.id(), new UpdateAgentRequest(
                 name != null ? name : a.name(), persona != null ? persona : a.persona(),
                 model != null ? model : a.model(), null, persona != null ? null : a.character(), skillIds), owner);
+        logSuper(owner, "info", "调整成员「" + a.name() + "」", persona);
         return member(owner, memberId);
     }
 
@@ -519,6 +568,7 @@ public class SuperAgentService {
             works.save(new SuperAgentWork(taskId, owner, ensureState(owner).planId(), title.strip(), m.id(), m.name(),
                     SuperAgentWork.RUNNING, null, now, null, now));
             event(taskId, owner, "assigned", "派给 " + m.name());
+            logSuper(owner, "info", "派出任务「" + title.strip() + "」给「" + m.name() + "」", "任务 " + taskId);
         }
         log.info("superagent of {} assigned task {} to {}", owner, taskId, m.name());
         return taskId;
@@ -631,6 +681,17 @@ public class SuperAgentService {
     }
 
     // --- helpers ---
+
+    /** Writes a line to the owner's SuperAgent run log (the tool methods only know the owner). */
+    private void logSuper(String owner, String level, String summary, String detail) {
+        agents.findSuperAgent(owner).ifPresent(sa -> {
+            switch (level) {
+                case "warn" -> runLog.warn(sa, AgentLogService.SUPERAGENT, summary, detail);
+                case "error" -> runLog.error(sa, AgentLogService.SUPERAGENT, summary, detail);
+                default -> runLog.info(sa, AgentLogService.SUPERAGENT, summary, detail);
+            }
+        });
+    }
 
     /** Where new inbox messages go: the SuperAgent's current session. */
     private String sessionId(Agent sa) {

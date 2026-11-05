@@ -11,5 +11,11 @@ public record ChatMessage(
         String sessionId,
         MessageRole role,
         String content,
-        Instant createdAt) {
+        Instant createdAt,
+        /** Who wrote a USER message (username); null for the agent's replies and messages from before authors. */
+        String author) {
+
+    public ChatMessage(String id, String sessionId, MessageRole role, String content, Instant createdAt) {
+        this(id, sessionId, role, content, createdAt, null);
+    }
 }

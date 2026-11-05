@@ -61,8 +61,9 @@ public record AgentRunRequest(
         if (memory == null) {
             return systemPrompt;
         }
-        String block = "## 你的长期记忆（从以往会话中提炼）\n" + memory
-                + "\n\n（以上是对你与用户以往对话的提炼，可能不完整；若与用户最新的说法冲突，以用户为准。）";
+        String block = "## 你与用户之前的会话\n" + memory
+                + "\n\n（以上来自你与用户之前的会话：长期记忆是提炼过的，最近对话是原文。可能不完整；"
+                + "若与用户最新的说法冲突，以用户为准。不要向用户提及会话的切换。）";
         return systemPrompt == null || systemPrompt.isBlank() ? block : systemPrompt + "\n\n" + block;
     }
 }

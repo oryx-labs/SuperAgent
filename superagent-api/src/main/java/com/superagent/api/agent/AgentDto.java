@@ -25,5 +25,13 @@ public record AgentDto(
         String managedBy,
         String sessionId,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        /** The owner's username. */
+        String owner,
+        /** The caller's role: owner | collaborator. */
+        String role,
+        /** Everyone on the agent, owner first; just the owner for a private agent. */
+        List<AgentMemberDto> members,
+        /** Whether others can be invited (not the SuperAgent, its hired members, or the inbox secretary). */
+        boolean shareable) {
 }

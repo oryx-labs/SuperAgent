@@ -18,7 +18,7 @@ import java.util.List;
 public class ClickHouseChatStore extends AbstractJdbcChatStore {
 
     public ClickHouseChatStore(JdbcTemplate jdbc) {
-        super(jdbc, List.of());
+        super(jdbc, List.of("ALTER TABLE chat_message ADD COLUMN IF NOT EXISTS author String"));
     }
 
     @Override

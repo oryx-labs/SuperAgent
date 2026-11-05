@@ -4,6 +4,7 @@ import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.agent.AgentDto;
 import com.superagent.api.agent.CreateAgentRequest;
+import com.superagent.api.agent.InviteMembersRequest;
 import com.superagent.api.agent.UpdateAgentRequest;
 import com.superagent.api.chat.ChatSegmentDto;
 import com.superagent.core.agent.AgentCharacters;
@@ -64,6 +65,20 @@ public class AgentController {
     public ApiResponse<AgentDto> update(@PathVariable String id, @RequestBody UpdateAgentRequest request,
                                        Authentication auth) {
         return ApiResponse.ok(agentService.update(id, request, auth.getName()));
+    }
+
+    /** Owner only: share the agent with colleagues. */
+    @PostMapping(ApiPaths.AGENTS + "/{id}/members")
+    public ApiResponse<AgentDto> invite(@PathVariable String id, @RequestBody InviteMembersRequest request,
+                                        Authentication auth) {
+        return ApiResponse.ok(agentService.invite(id, auth.getName(), request.usernames()));
+    }
+
+    /** The owner removes a collaborator, or a collaborator leaves (their own username). */
+    @DeleteMapping(ApiPaths.AGENTS + "/{id}/members/{username}")
+    public ApiResponse<Void> removeMember(@PathVariable String id, @PathVariable String username, Authentication auth) {
+        agentService.removeMember(id, auth.getName(), username);
+        return ApiResponse.empty();
     }
 
     @DeleteMapping(ApiPaths.AGENTS + "/{id}")

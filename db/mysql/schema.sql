@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS chat_message (
   role       VARCHAR(16) NOT NULL,
   content    MEDIUMTEXT,
   created_at DATETIME(3) NOT NULL,
+  author     VARCHAR(128),
   PRIMARY KEY (id),
   KEY idx_message_session (session_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

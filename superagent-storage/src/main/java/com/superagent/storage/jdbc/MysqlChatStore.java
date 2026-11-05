@@ -58,6 +58,7 @@ public class MysqlChatStore extends AbstractJdbcChatStore {
         super(jdbc, SCHEMA);
         // CREATE TABLE IF NOT EXISTS won't alter a chat_session table created before agent_id existed.
         ensureColumn("chat_session", "agent_id", "VARCHAR(64)");
+        ensureColumn("chat_message", "author", "VARCHAR(128)");
     }
 
     /** Adds a column to an already-created table idempotently (MySQL has no ADD COLUMN IF NOT EXISTS). */

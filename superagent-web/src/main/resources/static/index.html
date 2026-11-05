@@ -87,9 +87,20 @@
       <section class="panel__block" id="agentInfoPanel" hidden>
         <div class="agent-info__head">
           <h3 class="panel__title agent-info__title"><span class="agent-avatar" id="agentInfoAvatar" aria-hidden="true"></span><span id="agentInfoName">Agent</span></h3>
-          <button class="link-btn link-btn--muted" id="agentEditBtn" type="button" data-i18n="agent.edit">Edit</button>
+          <span class="agent-info__actions">
+            <button class="link-btn link-btn--muted" id="agentLogBtn" type="button" data-i18n="log.open">Run log</button>
+            <button class="link-btn link-btn--muted" id="agentEditBtn" type="button" data-i18n="agent.edit">Edit</button>
+          </span>
         </div>
         <div id="agentInfoDetails">
+          <div class="agent-members" id="agentMembersBlock" hidden>
+            <div class="agent-members__head">
+              <span class="panel__subhead" data-i18n="co.members">Members</span>
+              <button class="link-btn" type="button" id="agentInviteBtn" data-i18n="co.invite">+ Invite</button>
+            </div>
+            <ul class="agent-members__list" id="agentMembers"></ul>
+            <button class="link-btn link-btn--muted" type="button" id="agentLeaveBtn" data-i18n="co.leave" hidden>Leave</button>
+          </div>
           <span class="panel__subhead" data-i18n="agent.fCharacter">Character</span>
           <p class="agent-info__persona" id="agentInfoCharacter"></p>
           <p class="agent-info__persona" id="agentInfoPersona"></p>
@@ -619,6 +630,20 @@
     </form>
   </div>
 
+  <div class="modal" id="inviteModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="inviteForm">
+      <h3 class="modal__title" id="inviteTitle"></h3>
+      <p class="field-hint" data-i18n="co.inviteHint">They will see this agent's whole conversation, including earlier messages and files in its workspace, and can direct it with you.</p>
+      <input type="search" class="invite-search" id="inviteSearch" data-i18n-ph="co.searchPh" />
+      <div class="invite-list" id="inviteList"></div>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="inviteSubmit" data-i18n="co.inviteSubmit">Invite</button>
+      </div>
+    </form>
+  </div>
+
   <div class="modal" id="kbModal" hidden>
     <div class="modal__backdrop" data-close></div>
     <form class="modal__card" id="kbForm">
@@ -662,6 +687,31 @@
         <button type="submit" class="btn btn--primary" id="afSubmit" data-i18n="common.save">Save</button>
       </div>
     </form>
+  </div>
+
+  <div class="drawer" id="agentLogDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <div class="drawer__panel drawer__panel--wide">
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <h3 class="drawer__title" id="agentLogTitle">Run log</h3>
+      </div>
+      <div class="drawer__body">
+        <div class="log-toolbar">
+          <div class="auto-tabs" id="agentLogTabs">
+            <button type="button" class="auto-tab is-active" data-cat="" data-i18n="log.catAll">All</button>
+            <button type="button" class="auto-tab" data-cat="turn" data-i18n="log.catTurn">Turns</button>
+            <button type="button" class="auto-tab" data-cat="session" data-i18n="log.catSession">Sessions</button>
+            <button type="button" class="auto-tab" data-cat="memory" data-i18n="log.catMemory">Memory</button>
+            <button type="button" class="auto-tab" data-cat="superagent" id="agentLogSuperTab" data-i18n="log.catSuper">SuperAgent</button>
+          </div>
+          <button type="button" class="super-work__all log-refresh" id="agentLogRefresh" data-i18n="log.refresh">Refresh</button>
+        </div>
+        <ol class="log-list" id="agentLogList"></ol>
+        <p class="admin__empty" id="agentLogEmpty" data-i18n="log.empty" hidden>Nothing logged yet.</p>
+        <p class="log-note" data-i18n="log.retention">Kept for 30 days, up to 5000 lines per agent.</p>
+      </div>
+    </div>
   </div>
 
   <div class="drawer" id="superWorkDrawer" hidden>

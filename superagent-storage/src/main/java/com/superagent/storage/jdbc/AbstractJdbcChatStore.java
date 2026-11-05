@@ -62,7 +62,8 @@ abstract class AbstractJdbcChatStore implements ChatStore {
             rs.getString("session_id"),
             MessageRole.valueOf(rs.getString("role")),
             rs.getString("content"),
-            instant(rs, "created_at"));
+            instant(rs, "created_at"),
+            emptyToNull(rs.getString("author")));
 
     private final RowMapper<AgentEvent> eventMapper = (rs, n) -> {
         String messageId = rs.getString("message_id");
@@ -82,6 +83,10 @@ abstract class AbstractJdbcChatStore implements ChatStore {
 
     private static LocalDateTime utc(Instant instant) {
         return LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
+    }
+
+    private static String emptyToNull(String value) {
+        return value == null || value.isEmpty() ? null : value;
     }
 
     private static String nn(String value) {
@@ -128,8 +133,8 @@ abstract class AbstractJdbcChatStore implements ChatStore {
 
     @Override
     public ChatMessage appendMessage(ChatMessage m) {
-        jdbc.update("INSERT INTO chat_message (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
-                m.id(), m.sessionId(), m.role().name(), nn(m.content()), utc(m.createdAt()));
+        jdbc.update("INSERT INTO chat_message (id, session_id, role, content, created_at, author) VALUES (?, ?, ?, ?, ?, ?)",
+                m.id(), m.sessionId(), m.role().name(), nn(m.content()), utc(m.createdAt()), nn(m.author()));
         return m;
     }
 

@@ -4,6 +4,7 @@ import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.chat.CreateSessionRequest;
 import com.superagent.api.chat.EditMessageRequest;
+import com.superagent.api.chat.LiveTurnDto;
 import com.superagent.api.chat.RenameSessionRequest;
 import com.superagent.api.chat.SendMessageRequest;
 import com.superagent.api.chat.SessionDetailDto;
@@ -81,6 +82,13 @@ public class ChatController {
                                         @PathVariable int index, Authentication auth) {
         chatService.requireAccess(id, auth.getName());
         return images.read(id, messageId, index).toResponse();
+    }
+
+    /** Polled by members who didn't start the running turn: whether the agent is answering, for whom, and its text so far. */
+    @GetMapping(ApiPaths.SESSIONS + "/{id}/live")
+    public ApiResponse<LiveTurnDto> live(@PathVariable String id, Authentication auth) {
+        chatService.requireAccess(id, auth.getName());
+        return ApiResponse.ok(chatService.live(id));
     }
 
     @PostMapping(ApiPaths.SESSIONS + "/{id}/stop")

@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS superagent.chat_message (
   session_id String,
   role       String,
   content    String,
-  created_at DateTime64(3, 'UTC')
+  created_at DateTime64(3, 'UTC'),
+  author     String
 ) ENGINE = MergeTree
 ORDER BY (session_id, created_at);
 

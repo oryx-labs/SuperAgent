@@ -1,10 +1,12 @@
 package com.superagent.web;
 
 import com.superagent.api.ApiResponse;
+import com.superagent.web.agent.AgentForbiddenException;
 import com.superagent.web.agent.AgentNotFoundException;
 import com.superagent.web.attachment.AttachmentNotFoundException;
 import com.superagent.web.automation.AutomationForbiddenException;
 import com.superagent.web.automation.AutomationNotFoundException;
+import com.superagent.web.chat.ChatBusyException;
 import com.superagent.web.chat.SessionNotFoundException;
 import com.superagent.web.connector.ConnectorNotFoundException;
 import com.superagent.web.knowledge.KnowledgeConflictException;
@@ -118,6 +120,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ProviderAlreadyAddedException.class)
     public ResponseEntity<ApiResponse<Void>> handleProviderAlreadyAdded(ProviderAlreadyAddedException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error("conflict", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ChatBusyException.class)
+    public ResponseEntity<ApiResponse<Void>> handleChatBusy(ChatBusyException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error("busy", ex.getMessage()));
+    }
+
+    @ExceptionHandler(AgentForbiddenException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAgentForbidden(AgentForbiddenException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error("forbidden", ex.getMessage()));
     }
 
     @ExceptionHandler(SkillNotFoundException.class)
