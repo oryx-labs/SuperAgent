@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-SuperAgent is a self-hosted AI work platform for enterprises. This repository is at an early stage — it currently describes the intended system and its module skeleton rather than production capabilities (see [README.md](README.md)). Expect to be scaffolding new functionality more often than modifying existing behavior.
+SuperAgent is the AI work system for companies, not a personal assistant: everyone in the company works in one system, and the work becomes company assets (see [README.md](README.md) for the positioning, in priority order). Design features from the company's and its employees' side, not one person's. The core is running and iterating fast; you will often be scaffolding new functionality as well as modifying existing behavior.
 
 ## Build & test
 
@@ -76,6 +76,7 @@ keep packages under `com.superagent.*`.
 
 - Prefer records for immutable data/DTOs (see `ApiError`).
 - Keep the module layering intact (see above); don't introduce a dependency from a lower module to a higher one.
+- Put code in the module it belongs to, by that module's responsibility and layer (`com.superagent.<module>[.<area>]`) — not wherever is nearest or currently open. If no existing module is a good fit, create a new module at the right layer (add it to the parent `pom.xml`, declare only downward dependencies, keep packages under `com.superagent.*`) rather than bending an ill-fitting one. The goal is a sensible distribution of code across modules; prefer a new module over piling unrelated concerns into an existing one.
 - Keep tests convergent — cover the behaviour with a few meaningful cases, not one per permutation.
 - Keep comments sparse — prefer self-documenting code; don't document every field/parameter. Comment the non-obvious (why, invariants, gotchas), not the obvious.
 - Let exceptions propagate. Don't catch-and-log at the throw site; a single central handler (`GlobalExceptionHandler`) catches, logs, and returns a specific error to the client. (For streamed/async work that can't reach that handler, the stream's terminal error event is the equivalent central point.)

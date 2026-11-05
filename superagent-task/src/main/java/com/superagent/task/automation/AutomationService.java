@@ -29,6 +29,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -80,6 +81,13 @@ public class AutomationService {
         Automation a = requireVisible(id, user, admin);
         List<AutomationRunDto> runs = store.listRuns(id, RECENT_RUNS).stream().map(this::toRunDto).toList();
         return new AutomationDetailDto(toDto(a, null), runs, upcoming(a));
+    }
+
+    /** The scheduled task that started {@code taskId}, if it was one and the user may see it. */
+    public Optional<AutomationDto> forTask(String taskId, String user, boolean admin) {
+        return store.findRunByTask(taskId).flatMap(r -> store.find(r.automationId()))
+                .filter(a -> admin || Objects.equals(a.owner(), user))
+                .map(a -> toDto(a, null));
     }
 
     /** {@code source}: "manual" (the form) or "chat" (an agent's tool call). */

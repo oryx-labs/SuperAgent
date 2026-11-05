@@ -204,7 +204,7 @@ public class FeishuConnector implements SmartLifecycle {
                     direct ? "私聊" : chatName(conn, m.getChatId()), m.getChatType(),
                     m.getThreadId() != null ? m.getThreadId() : m.getRootId(),
                     senderOpenId, userName(conn, senderOpenId), text, direct || mentionsMe, Jsons.DEFAULT.toJson(event),
-                    EventPriority.P2, null, false, millis(m.getCreateTime()), Instant.now(), Instant.now());
+                    EventPriority.P2, null, false, null, millis(m.getCreateTime()), Instant.now(), Instant.now());
             boolean fromOwner = senderOpenId != null && senderOpenId.equals(source.ownerExternalId());
             inbox.ingest(source, e, fromOwner, fromBot);
         } catch (RuntimeException e) {

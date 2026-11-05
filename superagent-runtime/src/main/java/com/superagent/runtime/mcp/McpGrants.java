@@ -37,12 +37,12 @@ public class McpGrants {
     public record Grant(String token, Kind kind, String owner, String taskId, String agentId, Path workspace) {
     }
 
-    /** Knowledge-base and skill tool names as the Claude CLI sees them (server "superagent"), for chat and task allowlists. */
-    /** The chatting user's inbox tools (chat only), for the chat allowlist. */
+    /** SuperAgent's inbox tools as the Claude CLI sees them (server "superagent"), for its round allowlist. */
     public static final List<String> INBOX_TOOLS = List.of(
-            "mcp__superagent__inbox_recent", "mcp__superagent__todo_list", "mcp__superagent__todo_update",
-            "mcp__superagent__todo_to_task");
+            "mcp__superagent__inbox_search", "mcp__superagent__inbox_add_todo", "mcp__superagent__inbox_notify",
+            "mcp__superagent__inbox_mark", "mcp__superagent__todo_list", "mcp__superagent__todo_update");
 
+    /** Knowledge-base and skill tool names as the Claude CLI sees them, for chat and task allowlists. */
     public static final List<String> KNOWLEDGE_TOOLS = List.of(
             "mcp__superagent__knowledge_list_folders", "mcp__superagent__knowledge_create_folder",
             "mcp__superagent__knowledge_write", "mcp__superagent__knowledge_save",

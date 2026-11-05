@@ -33,6 +33,7 @@ import com.superagent.core.chat.ChatStore;
 import com.superagent.core.chat.ImageAttachment;
 import com.superagent.core.chat.MessageRole;
 import com.superagent.core.chat.SessionStatus;
+import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskStatus;
 import com.superagent.core.task.TaskStore;
@@ -47,6 +48,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
@@ -72,6 +74,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Each user's SuperAgent: a leader that takes requests through an inbox instead of answering live.
@@ -88,6 +91,10 @@ import java.util.stream.Collectors;
  *
  * <p><b>Closing the loop.</b> Tasks it assigns are tracked; when one finishes, fails, or needs a
  * decision, a system message lands in the inbox and the next round reports it to the user.
+ *
+ * <p><b>The outside world.</b> Messages the user's data sources receive (Feishu, ...) are delivered here too
+ * ({@link #deliverExternal}), marked as third-party data. They're worked in rounds of their own, with only
+ * the inbox and read-only tools: text from strangers never runs in a round that may hire, assign or reply.
  */
 @Service
 public class SuperAgentService {
@@ -97,7 +104,14 @@ public class SuperAgentService {
     private static final int REPORT_CHARS = 1500;
 
     /** Tool names as the CLI sees them; a round may call these and nothing else. */
-    static final List<String> ROUND_TOOLS = SuperAgentTools.NAMES.stream().map(n -> "mcp__superagent__" + n).toList();
+    static final List<String> ROUND_TOOLS = Stream.concat(
+            SuperAgentTools.NAMES.stream().map(n -> "mcp__superagent__" + n), McpGrants.INBOX_TOOLS.stream()).toList();
+
+    /** Marks a delivery of received messages; such rounds can't touch the team or its tasks. */
+    static final String EXTERNAL = "【外部消息】";
+    private static final Set<String> ACTING_TOOLS = Set.of("hire_member", "update_member", "assign_task", "reply_task");
+    static final List<String> EXTERNAL_ROUND_TOOLS = ROUND_TOOLS.stream()
+            .filter(t -> !ACTING_TOOLS.contains(t.substring("mcp__superagent__".length()))).toList();
 
     /** A task the SuperAgent assigned; {@code reported} is the last status it told the user about. */
     /** Recognizes a task the SuperAgent assigned (its brief opens with this), to back-fill the work record. */
@@ -121,6 +135,7 @@ public class SuperAgentService {
     private final AgentMemoryService memory;
     private final SuperAgentWorkStore works;
     private final AgentLogService runLog;
+    private final ApplicationEventPublisher events;
     private final SkillService skills;
     private final Map<AgentType, AgentRunner> runners = new EnumMap<>(AgentType.class);
     private final Duration quiet;
@@ -132,6 +147,8 @@ public class SuperAgentService {
     private final Object stateLock = new Object();
     /** owner → cutoff of the round running for them. */
     private final Map<String, Instant> running = new ConcurrentHashMap<>();
+    /** Owners whose current round works received messages: it may not touch the team or its tasks. */
+    private final Set<String> externalRound = ConcurrentHashMap.newKeySet();
     /** Owners whose next round should start without waiting for quiet (they just approved a plan). */
     private final Set<String> immediate = ConcurrentHashMap.newKeySet();
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
@@ -144,13 +161,14 @@ public class SuperAgentService {
                              TaskStore tasks, ProviderService providers, SettingsService settings,
                              ImageAttachmentStore images, McpGrants grants, SkillService skills,
                              ChatService chatService, AgentMemoryService memory, SuperAgentWorkStore works,
-                             AgentLogService runLog,
+                             AgentLogService runLog, ApplicationEventPublisher events,
                              List<AgentRunner> agentRunners,
                              @Value("${superagent.superagent.quiet-seconds:10}") long quietSeconds,
                              @Value("${superagent.superagent.max-wait-seconds:60}") long maxWaitSeconds,
                              @Value("${superagent.superagent.team-limit:6}") int teamLimit,
                              @Value("${superagent.superagent.timezone:Asia/Shanghai}") String timezone) {
         this.agents = agents;
+        this.events = events;
         this.states = states;
         this.chats = chats;
         this.taskService = taskService;
@@ -197,6 +215,22 @@ public class SuperAgentService {
         return state(owner);
     }
 
+    /**
+     * Received messages for the owner's SuperAgent; an urgent delivery starts a round right away. The text says
+     * what kind of batch it is and lists the messages as quoted data.
+     */
+    public void deliverExternal(String owner, String text, boolean urgent) {
+        SuperAgentState s = ensureState(owner);
+        note(sessionId(agents.require(s.agentId(), owner)), EXTERNAL + text);
+        if (urgent) {
+            immediate.add(owner);
+        }
+    }
+
+    static boolean external(ChatMessage m) {
+        return m.role() == MessageRole.SYSTEM && m.content().startsWith(EXTERNAL);
+    }
+
     /** The user approves the latest plan: the next round may hire and assign, and starts right away. */
     public SuperAgentStateDto approvePlan(String owner, String planId) {
         synchronized (stateLock) {
@@ -205,6 +239,7 @@ public class SuperAgentService {
                 throw new IllegalArgumentException("This plan is no longer waiting for approval");
             }
             states.save(s.withPlan(s.planId(), SuperAgentState.PLAN_APPROVED, s.planJson()));
+            events.publishEvent(new NoticeEvents.PlanChanged(owner, planId, null, false));
             note(sessionId(agents.require(s.agentId(), owner)), "用户已确认计划，请开始执行。");
             logSuper(owner, "info", "你确认了计划 #" + planId + "，开始执行", null);
             immediate.add(owner);
@@ -251,19 +286,29 @@ public class SuperAgentService {
         if (sessionId == null) {
             return;
         }
-        List<ChatMessage> pending = SuperAgentInbox.pending(agentMessages(sa.id()), s.processedUntil());
-        if (!SuperAgentInbox.due(pending, now, quiet, maxWait, immediate.contains(owner))) {
+        List<ChatMessage> all = SuperAgentInbox.pending(agentMessages(sa.id()), s.processedUntil());
+        if (!SuperAgentInbox.due(all, now, quiet, maxWait, immediate.contains(owner))) {
             return;
         }
         immediate.remove(owner);
+        // Received messages and the user's own input never share a round (see the class comment).
+        boolean external = external(all.get(0));
+        List<ChatMessage> pending = all.stream().takeWhile(m -> external(m) == external).toList();
+        if (pending.size() < all.size()) {
+            immediate.add(owner); // the rest is due already: take it next tick
+        }
         Instant last = pending.get(pending.size() - 1).createdAt();
         if (running.putIfAbsent(owner, last) != null) {
             return;
         }
         executor.execute(() -> {
+            if (external) {
+                externalRound.add(owner);
+            }
             try {
                 runRound(owner, sa, pending, last);
             } finally {
+                externalRound.remove(owner);
                 running.remove(owner);
             }
         });
@@ -359,7 +404,7 @@ public class SuperAgentService {
                 throw new IllegalStateException("No runner for " + type);
             }
             runner.run(new AgentRunRequest(session.id(), agentSessionId, session.workspaceDir(), roundPrompt(owner, batch),
-                    model, ROUND_TOOLS, false, grant == null ? null : grants.mcpConfig(grant),
+                    model, external(batch.get(0)) ? EXTERNAL_ROUND_TOOLS : ROUND_TOOLS, false, grant == null ? null : grants.mcpConfig(grant),
                     SuperAgentPrompts.system(teamLimit), attached, context), sink, new Cancellation());
         } catch (RuntimeException e) {
             log.warn("superagent round attempt failed for {}: {}", owner, e.getMessage());
@@ -515,6 +560,7 @@ public class SuperAgentService {
         synchronized (stateLock) {
             SuperAgentState s = ensureState(owner);
             states.save(s.withPlan(plan.id(), SuperAgentState.PLAN_PROPOSED, toJson(plan)));
+            events.publishEvent(new NoticeEvents.PlanChanged(owner, plan.id(), plan.summary(), true));
             logSuper(owner, "info", "提交计划 #" + plan.id() + "（" + members.size() + " 名成员，" + assignments.size()
                     + " 个任务），等待确认", plan.summary());
         }
@@ -576,6 +622,7 @@ public class SuperAgentService {
 
     /** Answers a task it assigned that is waiting for a decision. */
     void replyToTask(String owner, String taskId, String content) {
+        requireOwnInput(owner);
         if (works.find(taskId).filter(w -> w.owner().equals(owner)).isEmpty()) {
             throw new IllegalArgumentException("Not a task you assigned: " + taskId);
         }
@@ -657,7 +704,14 @@ public class SuperAgentService {
         return tasks.findTask(taskId).filter(t -> Objects.equals(t.createdBy(), owner));
     }
 
+    private void requireOwnInput(String owner) {
+        if (externalRound.contains(owner)) {
+            throw new IllegalArgumentException("处理外部消息时不能招人、调整成员、派任务或回复任务；需要团队去做的事请用 propose_plan 提计划。");
+        }
+    }
+
     private void requireApproved(String owner) {
+        requireOwnInput(owner);
         SuperAgentState s = ensureState(owner);
         if (!SuperAgentState.PLAN_APPROVED.equals(s.planStatus())) {
             throw new IllegalArgumentException("计划尚未确认：请先用 propose_plan 提交计划，并请用户在界面上点击「确认执行」。"

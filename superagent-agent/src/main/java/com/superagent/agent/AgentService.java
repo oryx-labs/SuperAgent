@@ -18,6 +18,7 @@ import com.superagent.core.agent.AgentStatus;
 import com.superagent.core.agent.AgentStore;
 import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
+import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
 import com.superagent.knowledge.skill.SkillService;
@@ -26,6 +27,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
@@ -67,6 +69,7 @@ public class AgentService {
     private final SkillService skills;
     private final AgentMemoryService memory;
     private final AgentMemberStore members;
+    private final ApplicationEventPublisher events;
     private final UserStore users;
     private final EventSourceStore sources;
     private final String adminUsername;
@@ -74,7 +77,9 @@ public class AgentService {
 
     public AgentService(AgentStore store, ChatService chatService, SkillService skills, AgentMemoryService memory,
                         AgentMemberStore members, UserStore users, EventSourceStore sources,
+                        ApplicationEventPublisher events,
                         @Value("${superagent.auth.admin.username:admin}") String adminUsername) {
+        this.events = events;
         this.members = members;
         this.users = users;
         this.sources = sources;
@@ -107,7 +112,7 @@ public class AgentService {
                 request == null ? null : request.character(), request == null ? null : request.persona(),
                 request == null ? null : request.model(), AgentKind.STANDARD, null);
         if (request != null && request.skillIds() != null) {
-            skills.setAgentSkills(agent.id(), request.skillIds());
+            skills.setAgentSkills(agent.id(), request.skillIds(), owner);
         }
         return toDto(agent, chatService.currentSessionId(agent.id()), owner);
     }
@@ -120,7 +125,7 @@ public class AgentService {
         }
         Agent agent = newAgent(owner, name.trim(), avatar, null, persona, model, AgentKind.STANDARD, superAgentId);
         if (skillIds != null) {
-            skills.setAgentSkills(agent.id(), skillIds);
+            skills.setAgentSkills(agent.id(), skillIds, owner);
         }
         return agent;
     }
@@ -199,7 +204,7 @@ public class AgentService {
         }
         store.update(updated);
         if (request.skillIds() != null) {
-            skills.setAgentSkills(id, request.skillIds());
+            skills.setAgentSkills(id, request.skillIds(), agent.owner());
         }
         return toDto(updated, chatService.currentSessionId(id), owner);
     }
@@ -298,6 +303,7 @@ public class AgentService {
             User user = users.findByUsername(username).filter(User::enabled)
                     .orElseThrow(() -> new IllegalArgumentException("No such user: " + username));
             members.save(new AgentMember(id, user.username(), owner, true, now, now));
+            events.publishEvent(new NoticeEvents.AgentShared(id, agent.name(), user.username(), displayName(owner)));
             log.info("agent {} shared by {} with {}", id, owner, username);
         }
         return toDto(agent, chatService.currentSessionId(id), owner);

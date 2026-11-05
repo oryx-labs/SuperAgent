@@ -5,13 +5,20 @@
 // ---------- knowledge ----------
 // The signed-in user's private file-system knowledge base. Paths are "/"-separated, "" is the root.
 // Declared before setView: the initial view (from the URL hash) may be #knowledge.
+// The knowledge bases this user can open, in three layers: their own (personal), their teams' (team:<path>,
+// including the teams above theirs, read-only), and the company's (written by admins). Each is its own
+// tree; paths are "/"-separated within a space, "" is its root.
+// Declared before setView: the initial view (from the URL hash) may be #knowledge.
+const kbQ = space => "space=" + encodeURIComponent(space || "personal");
 Object.assign(api, {
-  kbList: path => fetch("/api/v1/knowledge/entries?path=" + encodeURIComponent(path)).then(kbJson),
-  kbFolders: () => fetch("/api/v1/knowledge/folders").then(kbJson),
-  kbCreateFolder: path => kbPost("/api/v1/knowledge/folders", { path }),
-  kbRename: (path, newName) => kbPost("/api/v1/knowledge/rename", { path, newName }),
-  kbMove: (path, targetDir) => kbPost("/api/v1/knowledge/move", { path, targetDir }),
-  kbDelete: path => fetch("/api/v1/knowledge/entries?path=" + encodeURIComponent(path), { method: "DELETE" }).then(kbJson),
+  kbSpaces: () => fetch("/api/v1/knowledge/spaces").then(kbJson),
+  kbList: (space, path) => fetch("/api/v1/knowledge/entries?" + kbQ(space) + "&path=" + encodeURIComponent(path)).then(kbJson),
+  kbFolders: space => fetch("/api/v1/knowledge/folders?" + kbQ(space)).then(kbJson),
+  kbCreateFolder: (space, path) => kbPost("/api/v1/knowledge/folders?" + kbQ(space), { path }),
+  kbRename: (space, path, newName) => kbPost("/api/v1/knowledge/rename?" + kbQ(space), { path, newName }),
+  kbMove: (space, path, targetDir) => kbPost("/api/v1/knowledge/move?" + kbQ(space), { path, targetDir }),
+  kbDelete: (space, path) => fetch("/api/v1/knowledge/entries?" + kbQ(space) + "&path=" + encodeURIComponent(path),
+    { method: "DELETE" }).then(kbJson),
 });
 // Server errors come back as {code, message}; surface the message.
 async function kbJson(r) {
@@ -22,8 +29,8 @@ async function kbJson(r) {
 function kbPost(url, body) {
   return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(kbJson);
 }
-const kbFileUrl = (path, download) =>
-  "/api/v1/knowledge/file?path=" + encodeURIComponent(path) + (download ? "&download=true" : "");
+const kbFileUrl = (path, download, space) => "/api/v1/knowledge/file?" + kbQ(space || kbSelected.space)
+  + "&path=" + encodeURIComponent(path) + (download ? "&download=true" : "");
 
 const kbPane = document.querySelector('[data-pane="knowledge"]');
 const kel = {
@@ -47,96 +54,154 @@ const kel = {
   modalError: document.getElementById("kbModalError"),
   modalSubmit: document.getElementById("kbModalSubmit"),
 };
-const kbChildren = new Map();      // folder path -> entries, filled lazily as folders are opened
-const kbExpanded = new Set([""]);  // folders open in the tree
-let kbSelected = { path: "", dir: true, name: "" };
+let kbSpaces = [];                    // [{id, kind, team, canWrite}] from /knowledge/spaces
+const kbChildren = new Map();         // "space|path" -> entries, filled lazily as folders are opened
+const kbExpanded = new Set(["personal|"]); // folders open in the tree ("space|path"; "space|" = the space itself)
+let kbSelected = { space: "personal", path: "", dir: true, name: "" };
 let kbModalAction = null;
 
+const kbKey = (space, path) => space + "|" + path;
 const kbParent = path => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
 const kbBaseName = path => path.slice(path.lastIndexOf("/") + 1);
 const kbCurrentFolder = () => kbSelected.dir ? kbSelected.path : kbParent(kbSelected.path);
+const kbSpaceOf = id => kbSpaces.find(s => s.id === id);
+const kbCanWrite = () => { const s = kbSpaceOf(kbSelected.space); return !!(s && s.canWrite); };
+const kbSpaceLabel = s => s.kind === "personal" ? L("kb.mine") : s.kind === "company" ? L("kb.companyBase")
+  : s.team.slice(s.team.lastIndexOf("/") + 1);
 const KB_IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 const KB_MARKDOWN = /\.(md|markdown)$/i;
 const KB_TEXT = /\.(txt|log|csv|json|ya?ml|xml|html)$/i;
 const kbIcon = e => e.dir ? "📁" : KB_IMAGE.test(e.name) ? "🖼️" : KB_MARKDOWN.test(e.name) ? "📝" : "📄";
 
-async function kbLoad(path) {
-  const entries = await api.kbList(path);
-  kbChildren.set(path, entries || []);
-  return kbChildren.get(path);
+async function kbLoad(space, path) {
+  const entries = await api.kbList(space, path);
+  kbChildren.set(kbKey(space, path), entries || []);
+  return kbChildren.get(kbKey(space, path));
 }
 
 async function loadKnowledge() {
+  try { kbSpaces = (await api.kbSpaces()) || []; } catch (e) { kbSpaces = [{ id: "personal", kind: "personal", canWrite: true }]; }
+  if (!kbSpaceOf(kbSelected.space)) kbSelected = { space: "personal", path: "", dir: true, name: "" };
+  kbExpanded.add(kbKey(kbSelected.space, ""));
   kbChildren.clear();
-  // Re-read every open folder; ones deleted since (e.g. on disk) just close.
-  for (const path of Array.from(kbExpanded)) {
-    try { await kbLoad(path); } catch (e) { kbExpanded.delete(path); }
+  // Re-read every open folder of a space that still exists; ones gone since just close.
+  for (const key of Array.from(kbExpanded)) {
+    const [space, path] = [key.slice(0, key.indexOf("|")), key.slice(key.indexOf("|") + 1)];
+    if (!kbSpaceOf(space)) { kbExpanded.delete(key); continue; }
+    try { await kbLoad(space, path); } catch (e) { kbExpanded.delete(key); }
   }
-  if (!kbExpanded.has("")) { kbExpanded.add(""); await kbLoad(""); }
   renderKbTree();
-  await kbSelect(kbSelected.path, kbSelected.dir, true);
+  await kbSelect(kbSelected.space, kbSelected.path, kbSelected.dir, true);
 }
 
+// Three groups — Personal, Team, Company — each space a collapsible header with its own folder tree.
 function renderKbTree() {
   kel.tree.innerHTML = "";
-  const walk = (folder, depth) => {
-    (kbChildren.get(folder) || []).forEach(e => {
-      const row = document.createElement("div");
-      row.className = "kb-node" + (e.path === kbSelected.path ? " is-selected" : "");
-      row.style.paddingLeft = (6 + depth * 14) + "px";
-      row.setAttribute("role", "treeitem");
-      const open = e.dir && kbExpanded.has(e.path);
-      if (e.dir) row.setAttribute("aria-expanded", String(open));
-      const twisty = document.createElement("span");
-      twisty.className = "kb-node__twisty";
-      twisty.textContent = e.dir ? (open ? "▾" : "▸") : "";
-      const name = document.createElement("span");
-      name.className = "kb-node__name";
-      name.textContent = kbIcon(e) + " " + e.name;
-      row.append(twisty, name);
-      twisty.addEventListener("click", ev => { ev.stopPropagation(); if (e.dir) kbToggle(e.path); });
-      row.addEventListener("click", () => kbSelect(e.path, e.dir));
-      kel.tree.appendChild(row);
-      if (open) walk(e.path, depth + 1);
+  const groups = [["personal", L("kb.groupPersonal")], ["team", L("kb.groupTeam")], ["company", L("kb.groupCompany")]];
+  groups.forEach(([kind, title]) => {
+    const spaces = kbSpaces.filter(s => s.kind === kind);
+    if (!spaces.length) return;
+    const head = document.createElement("div");
+    head.className = "kb-group";
+    head.textContent = title;
+    kel.tree.appendChild(head);
+    spaces.forEach(space => renderKbSpace(space));
+  });
+}
+
+function renderKbSpace(space) {
+  const rootKey = kbKey(space.id, "");
+  const open = kbExpanded.has(rootKey);
+  const row = document.createElement("div");
+  const selected = kbSelected.space === space.id && !kbSelected.path;
+  row.className = "kb-node kb-space" + (selected ? " is-selected" : "");
+  // A team space is indented by its depth, so the hierarchy reads at a glance.
+  const depth = space.kind === "team" ? space.team.split("/").length - 1 : 0;
+  row.style.paddingLeft = (6 + depth * 14) + "px";
+  row.title = space.kind === "team" ? space.team : "";
+  const twisty = document.createElement("span");
+  twisty.className = "kb-node__twisty";
+  twisty.textContent = open ? "▾" : "▸";
+  const name = document.createElement("span");
+  name.className = "kb-node__name";
+  name.textContent = (space.kind === "personal" ? "👤 " : space.kind === "team" ? "👥 " : "🏢 ") + kbSpaceLabel(space);
+  row.append(twisty, name);
+  if (!space.canWrite) {
+    const ro = document.createElement("span");
+    ro.className = "kb-readonly";
+    ro.textContent = L("kb.readOnly");
+    row.appendChild(ro);
+  }
+  twisty.addEventListener("click", ev => { ev.stopPropagation(); kbToggle(space.id, ""); });
+  row.addEventListener("click", () => kbSelect(space.id, "", true));
+  kel.tree.appendChild(row);
+  if (!open) return;
+  const walk = (folder, level) => {
+    (kbChildren.get(kbKey(space.id, folder)) || []).forEach(e => {
+      const node = document.createElement("div");
+      node.className = "kb-node" + (kbSelected.space === space.id && e.path === kbSelected.path ? " is-selected" : "");
+      node.style.paddingLeft = (6 + (depth + level) * 14) + "px";
+      node.setAttribute("role", "treeitem");
+      const isOpen = e.dir && kbExpanded.has(kbKey(space.id, e.path));
+      if (e.dir) node.setAttribute("aria-expanded", String(isOpen));
+      const tw = document.createElement("span");
+      tw.className = "kb-node__twisty";
+      tw.textContent = e.dir ? (isOpen ? "▾" : "▸") : "";
+      const label = document.createElement("span");
+      label.className = "kb-node__name";
+      label.textContent = kbIcon(e) + " " + e.name;
+      node.append(tw, label);
+      tw.addEventListener("click", ev => { ev.stopPropagation(); if (e.dir) kbToggle(space.id, e.path); });
+      node.addEventListener("click", () => kbSelect(space.id, e.path, e.dir));
+      kel.tree.appendChild(node);
+      if (isOpen) walk(e.path, level + 1);
     });
   };
-  walk("", 0);
-  if (!(kbChildren.get("") || []).length) {
-    kel.tree.innerHTML = '<p class="kb-empty kb-empty--tree">' + L("kb.treeEmpty") + "</p>";
+  walk("", 1);
+  if (!(kbChildren.get(rootKey) || []).length) {
+    const empty = document.createElement("p");
+    empty.className = "kb-space__empty";
+    empty.style.paddingLeft = (26 + depth * 14) + "px";
+    empty.textContent = L("kb.spaceEmpty");
+    kel.tree.appendChild(empty);
   }
 }
 
-async function kbToggle(path) {
-  if (kbExpanded.has(path)) {
-    kbExpanded.delete(path);
+async function kbToggle(space, path) {
+  const key = kbKey(space, path);
+  if (kbExpanded.has(key)) {
+    kbExpanded.delete(key);
   } else {
-    kbExpanded.add(path);
-    if (!kbChildren.has(path)) {
-      try { await kbLoad(path); } catch (e) { kbExpanded.delete(path); showToast(e.message, true); }
+    kbExpanded.add(key);
+    if (!kbChildren.has(key)) {
+      try { await kbLoad(space, path); } catch (e) { kbExpanded.delete(key); showToast(e.message, true); }
     }
   }
   renderKbTree();
 }
 
 // Selecting a folder opens it in the tree and lists it; selecting a file previews it.
-async function kbSelect(path, dir, quiet) {
-  kbSelected = { path, dir, name: kbBaseName(path) };
+async function kbSelect(space, path, dir, quiet) {
+  kbSelected = { space, path, dir, name: kbBaseName(path) };
   if (dir) {
-    // Open every ancestor too, so the selection is visible in the tree.
+    // Open every ancestor too (and the space itself), so the selection is visible in the tree.
     let p = path;
-    while (p) { kbExpanded.add(p); p = kbParent(p); }
-    for (const f of Array.from(kbExpanded)) {
-      if (!kbChildren.has(f)) { try { await kbLoad(f); } catch (e) { kbExpanded.delete(f); } }
+    while (p) { kbExpanded.add(kbKey(space, p)); p = kbParent(p); }
+    kbExpanded.add(kbKey(space, ""));
+    for (const key of Array.from(kbExpanded)) {
+      if (!key.startsWith(space + "|") || kbChildren.has(key)) continue;
+      try { await kbLoad(space, key.slice(space.length + 1)); } catch (e) { kbExpanded.delete(key); }
     }
   }
   renderKbTree();
   renderKbBar();
   try {
-    if (dir) renderKbFolder(kbChildren.has(path) ? kbChildren.get(path) : await kbLoad(path));
+    const key = kbKey(space, path);
+    if (dir) renderKbFolder(kbChildren.has(key) ? kbChildren.get(key) : await kbLoad(space, path));
     else await renderKbFile(path);
   } catch (e) {
     if (!quiet) showToast(e.message, true);
-    if (path) { kbSelect("", true, true); return; } // gone: fall back to the root
+    if (path) { kbSelect(space, "", true, true); return; } // gone: fall back to the space's root
     kel.view.innerHTML = "";
   }
 }
@@ -149,10 +214,11 @@ function renderKbBar() {
     b.type = "button";
     b.textContent = label;
     if (current) b.className = "is-current";
-    b.addEventListener("click", () => kbSelect(path, isDir));
+    b.addEventListener("click", () => kbSelect(kbSelected.space, path, isDir));
     kel.crumbs.appendChild(b);
   };
-  crumb(L("kb.root"), "", true, !parts.length);
+  const space = kbSpaceOf(kbSelected.space);
+  crumb(space ? (space.kind === "team" ? space.team : kbSpaceLabel(space)) : L("kb.root"), "", true, !parts.length);
   parts.forEach((part, i) => {
     const sep = document.createElement("span");
     sep.className = "kb-crumbs__sep";
@@ -162,8 +228,12 @@ function renderKbBar() {
     crumb(part, parts.slice(0, i + 1).join("/"), last ? kbSelected.dir : true, last);
   });
   const atRoot = !kbSelected.path;
+  const writable = kbCanWrite();
   kel.up.disabled = atRoot;
-  [kel.rename, kel.move, kel.del].forEach(b => { b.disabled = atRoot; });
+  [kel.rename, kel.move, kel.del].forEach(b => { b.disabled = atRoot || !writable; });
+  // A read-only space (a parent team's, or the company's for non-admins) can't get new folders either.
+  kel.newFolder.disabled = !writable;
+  kel.newFolder.title = writable ? "" : L("kb.readOnlyHint");
   kel.download.hidden = kbSelected.dir;
   if (!kbSelected.dir) kel.download.href = kbFileUrl(kbSelected.path, true);
 }
@@ -199,7 +269,7 @@ function renderKbFolder(entries) {
 }
 
 async function renderKbFile(path) {
-  const entry = (kbChildren.get(kbParent(path)) || []).find(e => e.path === path);
+  const entry = (kbChildren.get(kbKey(kbSelected.space, kbParent(path))) || []).find(e => e.path === path);
   kel.view.innerHTML = "";
   const meta = document.createElement("p");
   meta.className = "kb-preview__meta";
@@ -293,6 +363,7 @@ kel.form.addEventListener("submit", async e => {
 });
 
 kel.newFolder.addEventListener("click", () => {
+  const { space } = kbSelected;
   const parent = kbCurrentFolder();
   kbOpenModal({
     title: parent ? L("kb.newFolderIn", { folder: parent }) : L("kb.newFolderTitle"),
@@ -300,31 +371,31 @@ kel.newFolder.addEventListener("click", () => {
     action: async () => {
       const name = kel.nameInput.value.trim();
       if (!name) throw new Error(L("kb.nameRequired"));
-      const created = await api.kbCreateFolder(parent ? parent + "/" + name : name);
-      kbExpanded.add(parent);
-      kbSelected = { path: created.path, dir: true, name: created.name };
+      const created = await api.kbCreateFolder(space, parent ? parent + "/" + name : name);
+      kbExpanded.add(kbKey(space, parent));
+      kbSelected = { space, path: created.path, dir: true, name: created.name };
       await loadKnowledge();
     },
   });
 });
 kel.rename.addEventListener("click", () => {
-  const { path, dir, name } = kbSelected;
+  const { space, path, dir, name } = kbSelected;
   if (!path) return;
   kbOpenModal({
     title: L("kb.renameTitle"), submit: L("kb.rename"), name,
     action: async () => {
-      const updated = await api.kbRename(path, kel.nameInput.value.trim());
-      if (dir) kbRemapExpanded(path, updated.path);
-      kbSelected = { path: updated.path, dir, name: updated.name };
+      const updated = await api.kbRename(space, path, kel.nameInput.value.trim());
+      if (dir) kbRemapExpanded(space, path, updated.path);
+      kbSelected = { space, path: updated.path, dir, name: updated.name };
       await loadKnowledge();
     },
   });
 });
 kel.move.addEventListener("click", async () => {
-  const { path, dir, name } = kbSelected;
+  const { space, path, dir, name } = kbSelected;
   if (!path) return;
   let folders = [];
-  try { folders = await api.kbFolders(); } catch (e) { showToast(e.message, true); return; }
+  try { folders = await api.kbFolders(space); } catch (e) { showToast(e.message, true); return; }
   // A folder can't go into itself, and moving to where it already is is a no-op.
   const targets = folders.filter(f => f !== kbParent(path) && (!dir || (f !== path && !f.startsWith(path + "/"))));
   if (!targets.length) { showToast(L("kb.noTargets"), true); return; }
@@ -332,36 +403,36 @@ kel.move.addEventListener("click", async () => {
     title: L("kb.moveTitle", { name }), submit: L("kb.move"), targets,
     action: async () => {
       const target = kel.targetSelect.value;
-      const moved = await api.kbMove(path, target);
-      if (dir) kbRemapExpanded(path, moved.path);
-      kbExpanded.add(target);
-      kbSelected = { path: moved.path, dir, name: moved.name };
+      const moved = await api.kbMove(space, path, target);
+      if (dir) kbRemapExpanded(space, path, moved.path);
+      kbExpanded.add(kbKey(space, target));
+      kbSelected = { space, path: moved.path, dir, name: moved.name };
       await loadKnowledge();
     },
   });
 });
 kel.del.addEventListener("click", () => {
-  const { path, dir, name } = kbSelected;
+  const { space, path, dir, name } = kbSelected;
   if (!path) return;
   kbOpenModal({
     title: L("kb.deleteTitle"), submit: L("kb.delete"), danger: true,
     message: L(dir ? "kb.deleteFolderConfirm" : "kb.deleteFileConfirm", { name }),
     action: async () => {
-      await api.kbDelete(path);
-      kbRemapExpanded(path, null);
-      kbSelected = { path: kbParent(path), dir: true, name: kbBaseName(kbParent(path)) };
+      await api.kbDelete(space, path);
+      kbRemapExpanded(space, path, null);
+      kbSelected = { space, path: kbParent(path), dir: true, name: kbBaseName(kbParent(path)) };
       await loadKnowledge();
     },
   });
 });
 kel.up.addEventListener("click", () => {
-  if (kbSelected.path) kbSelect(kbParent(kbSelected.path), true);
+  if (kbSelected.path) kbSelect(kbSelected.space, kbParent(kbSelected.path), true);
 });
 
 // Task artifact → the signed-in user's knowledge base: pick a folder, optionally a new subfolder in it.
 async function saveArtifactToKb(taskId, name) {
   let folders = [];
-  try { folders = await api.kbFolders(); } catch (e) { showToast(e.message, true); return; }
+  try { folders = await api.kbFolders("personal"); } catch (e) { showToast(e.message, true); return; }
   kbOpenModal({
     title: L("tasks.saveToKbTitle", { name }), submit: L("tasks.saveToKbSubmit"),
     targets: folders, name: "", nameLabel: L("tasks.kbNewSubfolder"),
@@ -370,19 +441,20 @@ async function saveArtifactToKb(taskId, name) {
       const folder = [kel.targetSelect.value, sub].filter(Boolean).join("/");
       const saved = await kbPost("/api/v1/tasks/" + encodeURIComponent(taskId) + "/artifacts/"
         + encodeURIComponent(name) + "/knowledge", { folder });
-      kbSelected = { path: saved.path, dir: false, name: saved.name };
-      kbExpanded.add(kbParent(saved.path));
+      kbSelected = { space: "personal", path: saved.path, dir: false, name: saved.name };
+      kbExpanded.add(kbKey("personal", kbParent(saved.path)));
       showToast(L("tasks.savedToKb", { path: saved.path }), false);
     },
   });
 }
 
 // Keep open folders open across a rename/move (or drop them on delete).
-function kbRemapExpanded(from, to) {
-  Array.from(kbExpanded).forEach(p => {
-    if (p === from || p.startsWith(from + "/")) {
-      kbExpanded.delete(p);
-      if (to !== null) kbExpanded.add(to + p.slice(from.length));
+function kbRemapExpanded(space, from, to) {
+  const prefix = kbKey(space, from);
+  Array.from(kbExpanded).forEach(key => {
+    if (key === prefix || key.startsWith(prefix + "/")) {
+      kbExpanded.delete(key);
+      if (to !== null) kbExpanded.add(kbKey(space, to) + key.slice(prefix.length));
     }
   });
 }
@@ -394,12 +466,12 @@ let modelDetailId = null;
 // View state lives in the URL hash (#tasks, #connectors, …) so a refresh or
 // back/forward restores the same view. Admin-only views fall back to the default
 // for non-admins. See initialView().
-const KNOWN_VIEWS = new Set(["chat", "tasks", "inbox", "knowledge", "skills", "automation", "connectors", "models",
+const KNOWN_VIEWS = new Set(["todo", "chat", "tasks", "inbox", "knowledge", "skills", "automation", "connectors", "models",
   "users", "settings", "analytics"]);
 // The "Workspace" dropdown's pages, and the admin pages (shown with the admin sidebar).
-const WORKSPACE_VIEWS = new Set(["inbox", "automation", "knowledge", "skills", "connectors"]);
+const WORKSPACE_VIEWS = new Set(["inbox", "knowledge", "skills", "connectors"]);
 const ADMIN_VIEWS = new Set(["settings", "analytics", "models", "users"]);
-const DEFAULT_VIEW = "chat";
+const DEFAULT_VIEW = "todo"; // the to-do list is home: the first thing to look at each day
 let isAdmin = false;
 
 function initialView() {
@@ -413,7 +485,9 @@ function setView(view) {
   if (window.location.hash !== "#" + view) {
     history.replaceState(history.state, document.title, window.location.pathname + window.location.search + "#" + view);
   }
-  navItems.forEach(a => a.classList.toggle("is-active", a.dataset.view === view));
+  // Scheduled tasks are a tab of Tasks, so "Tasks" stays lit for both.
+  const navView = view === "automation" ? "tasks" : view;
+  navItems.forEach(a => a.classList.toggle("is-active", a.dataset.view === navView));
   // Top menu: the dropdown and "Admin" light up for any of their pages; the dropdown also says which one.
   const inWorkspace = WORKSPACE_VIEWS.has(view);
   const inAdmin = ADMIN_VIEWS.has(view);
@@ -435,6 +509,8 @@ function setView(view) {
   const isSkills = view === "skills";
   const isInbox = view === "inbox";
   const isAnalytics = view === "analytics";
+  const isTodo = view === "todo";
+  todoPane.hidden = !isTodo;
   chatPanes.forEach(p => { p.hidden = !isChat; });
   analyticsPane.hidden = !isAnalytics;
   automationPane.hidden = !isAutomation;
@@ -447,7 +523,7 @@ function setView(view) {
   skPane.hidden = !isSkills;
   ibPane.hidden = !isInbox;
   placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isSettings || isKnowledge
-    || isAutomation || isSkills || isInbox || isAnalytics;
+    || isAutomation || isSkills || isInbox || isAnalytics || isTodo;
   if (!placeholderPane.hidden) placeholderText.textContent = L(placeholderLabels[view] || "placeholder.default");
   if (isConnectors) loadConnectors();
   if (isUsers) loadUsers();
@@ -456,6 +532,7 @@ function setView(view) {
   if (isSkills) loadSkills();
   if (isInbox) loadInbox();
   if (isAnalytics) loadAnalytics();
+  if (isTodo) loadTodos();
   if (isAutomation) { showAutoList(); loadAutomations(); }
   if (isTasks) { showTaskList(); loadTasks(); } else { stopTaskPolling(); }
   if (isModels) { showModelList(); startModelPolling(); } else { stopModelPolling(); }

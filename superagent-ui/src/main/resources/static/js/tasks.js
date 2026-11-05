@@ -97,31 +97,73 @@ const TASK_STAT_CARDS = [
   { key: null, label: "tasks.statSpend", value: s => "$" + Number(s.spendThisMonth || 0).toFixed(2) },
 ];
 
+// Scheduled-task cards; each also filters the Scheduled tab (keys match its filters).
+const SCHEDULED_STAT_CARDS = [
+  { key: "all", label: "auto.statTotal", value: l => l.length },
+  { key: "active", label: "auto.statEnabled", value: l => l.filter(a => a.enabled).length, tone: "ok" },
+  { key: "recurring", label: "auto.typeRecurring", value: l => l.filter(a => a.type === "recurring").length },
+  { key: "once", label: "auto.typeOnce", value: l => l.filter(a => a.type === "once").length },
+];
+let workStats = null;     // task counters from /tasks/stats
+let workSchedules = [];   // the user's scheduled tasks
+
+// Tasks and scheduled tasks share one stats strip at the top of both tabs; clicking a card filters its tab.
 async function loadTaskStats() {
-  const res = await api.taskStats().catch(() => null);
-  const stats = res && res.data;
-  const box = document.getElementById("taskStats");
-  if (!stats) { box.replaceChildren(); return; }
-  box.replaceChildren(...TASK_STAT_CARDS.map(c => {
-    const card = document.createElement(c.key === null ? "div" : "button");
-    card.className = "stat-card" + (c.tone ? " is-" + c.tone : "") + (c.key === taskFilter ? " is-active" : "");
-    if (c.key !== null) {
-      card.type = "button";
-      card.addEventListener("click", () => {
-        taskFilter = taskFilter === c.key ? "" : c.key;
+  const [s, a] = await Promise.all([api.taskStats().catch(() => null), api.listAutomations().catch(() => null)]);
+  workStats = s && s.data;
+  workSchedules = (a && a.data) || [];
+  renderWorkStats();
+}
+
+function renderWorkStats() {
+  const onScheduled = !document.querySelector('[data-pane="automation"]').hidden;
+  const owner = document.getElementById("autoOwnerFilter");
+  const schedules = owner && owner.value === "all" ? workSchedules : workSchedules.filter(a => a.owner === currentUsername);
+  document.querySelectorAll("[data-work-stats]").forEach(box => {
+    const taskCards = workStats ? TASK_STAT_CARDS.map(c => statCard(L(c.label), c.value(workStats), c.tone,
+      c.key === null ? null : !onScheduled && c.key === taskFilter, () => {
+        taskFilter = !onScheduled && taskFilter === c.key ? "" : c.key;
         taskPage = 1;
-        loadTasks();
-      });
-    }
-    const v = document.createElement("span");
-    v.className = "stat-card__value";
-    v.textContent = c.value(stats);
-    const l = document.createElement("span");
-    l.className = "stat-card__label";
-    l.textContent = L(c.label);
-    card.append(v, l);
-    return card;
-  }));
+        if (onScheduled) setView("tasks"); else loadTasks();
+      })) : [];
+    const scheduleCards = SCHEDULED_STAT_CARDS.map(c => statCard(L(c.label), c.value(schedules), c.tone,
+      onScheduled && c.key === autoFilter, () => {
+        autoFilter = onScheduled && autoFilter === c.key ? "all" : c.key;
+        if (onScheduled) renderAutomations(); else setView("automation");
+      }));
+    box.replaceChildren(statGroup(L("tasks.tabTasks"), taskCards), statGroup(L("tasks.tabScheduled"), scheduleCards));
+  });
+}
+
+function statGroup(label, cards) {
+  const g = document.createElement("div");
+  g.className = "work-stats__group";
+  const h = document.createElement("div");
+  h.className = "work-stats__label";
+  h.textContent = label;
+  const grid = document.createElement("div");
+  grid.className = "stat-cards stat-cards--filter";
+  grid.append(...cards);
+  g.append(h, grid);
+  return g;
+}
+
+/** {@code active === null}: a plain figure, not a filter. */
+function statCard(label, value, tone, active, onClick) {
+  const card = document.createElement(active === null ? "div" : "button");
+  card.className = "stat-card" + (tone ? " is-" + tone : "") + (active ? " is-active" : "");
+  if (active !== null) {
+    card.type = "button";
+    card.addEventListener("click", onClick);
+  }
+  const v = document.createElement("span");
+  v.className = "stat-card__value";
+  v.textContent = value;
+  const l = document.createElement("span");
+  l.className = "stat-card__label";
+  l.textContent = label;
+  card.append(v, l);
+  return card;
 }
 
 async function loadTasks() {
@@ -251,6 +293,7 @@ function renderDetail(d) {
   tel.dTitle.textContent = t.title;
   const meta = [TASK_SOURCE_LABEL[t.source] || t.source, t.repo, t.branch, t.flow].filter(Boolean).join(" · ");
   tel.dMeta.textContent = meta;
+  if (t.source === "automation") linkScheduledTask(t.id);
 
   // Interleave agent events with the user's steering messages by time.
   const timeline = [];
@@ -595,4 +638,18 @@ async function loadAgentOptions() {
 function agentLabel(key) {
   const opt = agentOptions.find(a => a.key === key);
   return opt ? opt.name : (key || "—");
+}
+
+// A task a scheduled task started links back to it.
+async function linkScheduledTask(taskId) {
+  let a = null;
+  try { a = (await fetch("/api/v1/automations/by-task/" + encodeURIComponent(taskId)).then(r => r.json())).data; }
+  catch (e) { return; }
+  if (!a || tel.detailView.hidden || task.id !== taskId) return; // the user moved on meanwhile
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "link-btn task-detail__origin";
+  link.textContent = L("tasks.fromScheduled", { name: a.name });
+  link.addEventListener("click", () => { setView("automation"); openAutomation(a.id); });
+  tel.dMeta.append(" · ", link);
 }

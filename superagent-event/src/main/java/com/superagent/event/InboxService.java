@@ -5,10 +5,16 @@ import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.inbox.InboxEvent;
 import com.superagent.core.inbox.InboxEventStore;
+import com.superagent.core.inbox.InboxNotifyRequested;
+import com.superagent.core.inbox.InboxProcessor;
+import com.superagent.core.org.OrgStore;
+import com.superagent.core.user.User;
+import com.superagent.core.user.UserStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.SmartLifecycle;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -17,7 +23,9 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -27,11 +35,12 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.UnaryOperator;
+import java.util.stream.Stream;
 
 /**
- * The inbox: every received message is triaged and stored at once ({@link #ingest}), and processed
- * later in batches by priority — urgent (P0) right away, important (P1) hourly, routine (P2) in the
- * daily digest at the owner's chosen time. Receiving never waits on processing, so a slow model run
+ * The inbox — the owner's data intake: every message any source receives is triaged and stored at once
+ * ({@link #ingest}), then handed to SuperAgent in batches by priority — urgent (P0) right away, important
+ * (P1) hourly, routine (P2) in the daily digest. Receiving never waits on processing, so a slow model run
  * can't make a source drop messages.
  *
  * <p>Processing state lives in the DB (an event's {@code processed} flag, a source's last hourly /
@@ -48,6 +57,8 @@ public class InboxService implements SmartLifecycle {
     private final InboxEventStore events;
     private final EventSourceStore sources;
     private final InboxProcessor processor;
+    private final OrgStore org;
+    private final UserStore users;
     private final int retentionDays;
     private final Map<String, Object> ownerLocks = new ConcurrentHashMap<>();
     private final Map<String, Instant> failedUntil = new ConcurrentHashMap<>();
@@ -58,11 +69,13 @@ public class InboxService implements SmartLifecycle {
     private volatile LocalDate lastCleanup;
     private volatile boolean running;
 
-    public InboxService(InboxEventStore events, EventSourceStore sources, InboxProcessor processor,
-                        @Value("${superagent.inbox.retention-days:30}") int retentionDays) {
+    public InboxService(InboxEventStore events, EventSourceStore sources, InboxProcessor processor, OrgStore org,
+                        UserStore users, @Value("${superagent.inbox.retention-days:30}") int retentionDays) {
         this.events = events;
         this.sources = sources;
         this.processor = processor;
+        this.org = org;
+        this.users = users;
         this.retentionDays = Math.max(1, retentionDays);
     }
 
@@ -75,10 +88,11 @@ public class InboxService implements SmartLifecycle {
      * message is dropped. An urgent one is processed immediately on a background thread.
      */
     public InboxEvent ingest(EventSource source, InboxEvent e, boolean fromOwner, boolean fromBot) {
-        TriageRules.Decision d = TriageRules.triage(source, e, fromOwner, fromBot);
+        TriageRules.Decision d = TriageRules.triage(e, fromOwner, fromBot, people(source.owner()));
+        boolean ignored = d.priority() == EventPriority.IGNORE;
         InboxEvent triaged = new InboxEvent(e.id(), source.owner(), e.source(), e.externalId(), e.chatId(), e.chatName(),
                 e.chatType(), e.threadId(), e.senderId(), e.senderName(), e.text(), e.mentionsMe(), e.raw(),
-                d.priority(), d.reason(), d.priority() == EventPriority.IGNORE, e.occurredAt(), Instant.now(), Instant.now());
+                d.priority(), d.reason(), ignored, ignored ? "ignored" : null, e.occurredAt(), Instant.now(), Instant.now());
         if (!events.insertIfAbsent(triaged)) {
             return null;
         }
@@ -88,6 +102,41 @@ public class InboxService implements SmartLifecycle {
             urgent.execute(() -> runWindow(source.owner(), source.type(), EventPriority.P0));
         }
         return triaged;
+    }
+
+    /**
+     * Who matters to the owner, by the names a source shows (display name and login name): their manager
+     * and their direct reports. Names are matched as shown, so a namesake at the source counts too.
+     */
+    Map<String, String> people(String owner) {
+        Map<String, String> out = new HashMap<>();
+        org.managers().forEach((user, manager) -> {
+            if (owner.equals(user)) {
+                names(manager).forEach(n -> out.put(n, "上级"));
+            } else if (owner.equals(manager)) {
+                names(user).forEach(n -> out.putIfAbsent(n, "下属"));
+            }
+        });
+        return out;
+    }
+
+    private List<String> names(String username) {
+        String display = users.findByUsername(username).map(User::displayName).orElse(null);
+        return Stream.of(username, display).filter(n -> n != null && !n.isBlank())
+                .map(n -> n.strip().toLowerCase(Locale.ROOT)).distinct().toList();
+    }
+
+    /** SuperAgent wants the owner told now: push it through every enabled source that can message them. */
+    @EventListener
+    public void onNotify(InboxNotifyRequested request) {
+        notifiers.forEach((type, notifier) -> sources.find(request.owner(), type).filter(EventSource::enabled)
+                .ifPresent(source -> {
+                    try {
+                        notifier.accept(source, request.text());
+                    } catch (RuntimeException e) {
+                        log.warn("inbox {}: could not push notification via {}: {}", request.owner(), type, e.getMessage());
+                    }
+                }));
     }
 
     /** One scheduler pass over every enabled source; also retries urgent messages a failed run left behind. */

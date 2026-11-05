@@ -3,8 +3,10 @@ package com.superagent.web.knowledge;
 import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.knowledge.KnowledgeEntryDto;
+import com.superagent.api.knowledge.KnowledgeSpaceDto;
 import com.superagent.api.knowledge.KnowledgeRequests;
 import com.superagent.knowledge.KnowledgeService;
+import com.superagent.knowledge.KnowledgeSpaces;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -22,7 +24,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** The signed-in user's private knowledge base. The owner is always the authenticated user, never a parameter. */
+/**
+ * The knowledge bases the signed-in user can open: their own, their teams', the company's. Every call names
+ * the {@code space} (blank = personal); {@link KnowledgeSpaces} checks the user may read — or write — it.
+ */
 @RestController
 public class KnowledgeController {
 
@@ -37,39 +42,51 @@ public class KnowledgeController {
             Map.entry("gif", "image/gif"), Map.entry("webp", "image/webp"), Map.entry("svg", "image/svg+xml"));
 
     private final KnowledgeService knowledge;
+    private final KnowledgeSpaces spaces;
 
-    public KnowledgeController(KnowledgeService knowledge) {
+    public KnowledgeController(KnowledgeService knowledge, KnowledgeSpaces spaces) {
         this.knowledge = knowledge;
+        this.spaces = spaces;
+    }
+
+    @GetMapping(ApiPaths.KNOWLEDGE + "/spaces")
+    public ApiResponse<List<KnowledgeSpaceDto>> spaces(Authentication auth) {
+        return ApiResponse.ok(spaces.visible(auth.getName()));
     }
 
     @GetMapping(ApiPaths.KNOWLEDGE + "/entries")
-    public ApiResponse<List<KnowledgeEntryDto>> list(Authentication auth, @RequestParam(defaultValue = "") String path) {
-        return ApiResponse.ok(knowledge.list(auth.getName(), path));
+    public ApiResponse<List<KnowledgeEntryDto>> list(Authentication auth, @RequestParam(defaultValue = "") String space,
+                                                     @RequestParam(defaultValue = "") String path) {
+        return ApiResponse.ok(knowledge.list(spaces.resolve(auth.getName(), space, false), path));
     }
 
     @GetMapping(ApiPaths.KNOWLEDGE + "/folders")
-    public ApiResponse<List<String>> folders(Authentication auth) {
-        return ApiResponse.ok(knowledge.folders(auth.getName()));
+    public ApiResponse<List<String>> folders(Authentication auth, @RequestParam(defaultValue = "") String space) {
+        return ApiResponse.ok(knowledge.folders(spaces.resolve(auth.getName(), space, false)));
     }
 
     @PostMapping(ApiPaths.KNOWLEDGE + "/folders")
-    public ApiResponse<KnowledgeEntryDto> createFolder(Authentication auth, @RequestBody KnowledgeRequests.CreateFolder req) {
-        return ApiResponse.ok(knowledge.createFolder(auth.getName(), req.path()));
+    public ApiResponse<KnowledgeEntryDto> createFolder(Authentication auth, @RequestParam(defaultValue = "") String space,
+                                                       @RequestBody KnowledgeRequests.CreateFolder req) {
+        return ApiResponse.ok(knowledge.createFolder(spaces.resolve(auth.getName(), space, true), req.path()));
     }
 
     @PostMapping(ApiPaths.KNOWLEDGE + "/rename")
-    public ApiResponse<KnowledgeEntryDto> rename(Authentication auth, @RequestBody KnowledgeRequests.Rename req) {
-        return ApiResponse.ok(knowledge.rename(auth.getName(), req.path(), req.newName()));
+    public ApiResponse<KnowledgeEntryDto> rename(Authentication auth, @RequestParam(defaultValue = "") String space,
+                                                 @RequestBody KnowledgeRequests.Rename req) {
+        return ApiResponse.ok(knowledge.rename(spaces.resolve(auth.getName(), space, true), req.path(), req.newName()));
     }
 
     @PostMapping(ApiPaths.KNOWLEDGE + "/move")
-    public ApiResponse<KnowledgeEntryDto> move(Authentication auth, @RequestBody KnowledgeRequests.Move req) {
-        return ApiResponse.ok(knowledge.move(auth.getName(), req.path(), req.targetDir()));
+    public ApiResponse<KnowledgeEntryDto> move(Authentication auth, @RequestParam(defaultValue = "") String space,
+                                               @RequestBody KnowledgeRequests.Move req) {
+        return ApiResponse.ok(knowledge.move(spaces.resolve(auth.getName(), space, true), req.path(), req.targetDir()));
     }
 
     @DeleteMapping(ApiPaths.KNOWLEDGE + "/entries")
-    public ApiResponse<Void> delete(Authentication auth, @RequestParam String path) {
-        knowledge.delete(auth.getName(), path);
+    public ApiResponse<Void> delete(Authentication auth, @RequestParam(defaultValue = "") String space,
+                                    @RequestParam String path) {
+        knowledge.delete(spaces.resolve(auth.getName(), space, true), path);
         return ApiResponse.empty();
     }
 
@@ -78,9 +95,10 @@ public class KnowledgeController {
      * HTML from running script if opened directly; HTML is served as plain text for the same reason.
      */
     @GetMapping(ApiPaths.KNOWLEDGE + "/file")
-    public ResponseEntity<byte[]> file(Authentication auth, @RequestParam String path,
+    public ResponseEntity<byte[]> file(Authentication auth, @RequestParam(defaultValue = "") String space,
+                                       @RequestParam String path,
                                        @RequestParam(defaultValue = "false") boolean download) {
-        KnowledgeService.FileContent f = knowledge.read(auth.getName(), path);
+        KnowledgeService.FileContent f = knowledge.read(spaces.resolve(auth.getName(), space, false), path);
         String ext = f.name().contains(".") ? f.name().substring(f.name().lastIndexOf('.') + 1).toLowerCase(Locale.ROOT) : "";
         String type = INLINE_TYPES.get(ext);
         boolean inline = type != null && !download;

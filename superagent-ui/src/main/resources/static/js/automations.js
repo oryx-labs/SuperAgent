@@ -147,6 +147,7 @@ function showAutoList() {
 async function loadAutomations() {
   try { const res = await api.listAutomations(); automations = (res && res.data) || []; } catch (e) { automations = []; }
   renderAutomations();
+  loadTaskStats(); // the shared stats strip (task counters + these schedules)
 }
 
 function autoMatches(a, filter) {
@@ -165,9 +166,13 @@ function renderAutomations() {
     t.classList.toggle("is-active", t.dataset.filter === autoFilter);
     t.querySelector("b").textContent = scoped.filter(a => autoMatches(a, t.dataset.filter)).length;
   });
+  // API triggers aren't offered yet; the tab shows only for ones that already exist.
+  document.getElementById("autoTabApi").hidden = !scoped.some(a => a.type === "api");
   const shown = scoped.filter(a => autoMatches(a, autoFilter) && (!q || a.name.toLowerCase().includes(q)));
   ael2.rows.replaceChildren(...shown.map(autoRow));
   ael2.empty.hidden = shown.length > 0;
+  workSchedules = automations; // keep the shared stats in step with toggles, deletes and the owner filter
+  renderWorkStats();
 }
 
 const canEditAuto = a => isAdmin || a.owner === currentUsername;
@@ -472,6 +477,7 @@ async function openAutoForm(a) {
   ael2.fError.hidden = true;
   ael2.fPrompt.value = a ? a.prompt : "";
   ael2.fName.value = a ? a.name : "";
+  document.getElementById("afTypeApi").hidden = !(a && a.type === "api");
   ael2.fType.value = a ? a.type : "recurring";
   ael2.fOverlap.value = a ? a.overlap : "skip";
   if (a && a.timezone) {
@@ -543,4 +549,8 @@ initAuth().then(async ok => {
   await loadSystemSettings();  // before agents, so the agent panel shows the effective model
   loadAgents(true);
   setView(initialView());
+  if (todoPane.hidden) api.listNotices().then(list => { notices = list || []; updateTodoBadge(); }).catch(() => {});
 });
+
+// Tasks | Scheduled tasks: two tabs of one page, each its own view (and URL hash).
+document.querySelectorAll(".page-tabs [data-goto]").forEach(b => b.addEventListener("click", () => setView(b.dataset.goto)));

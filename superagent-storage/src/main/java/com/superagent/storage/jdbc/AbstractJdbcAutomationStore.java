@@ -87,6 +87,12 @@ abstract class AbstractJdbcAutomationStore implements AutomationStore {
                 runMapper, automationId, limit);
     }
 
+    @Override
+    public Optional<AutomationRun> findRunByTask(String taskId) {
+        return jdbc.query("SELECT * FROM automation_run WHERE task_id = ? ORDER BY fired_at DESC LIMIT 1",
+                runMapper, taskId).stream().findFirst();
+    }
+
     protected static final String COLUMNS =
             "(id, name, prompt, type, cron, run_at, timezone, model, overlap_policy, enabled, source, owner, "
                     + "api_token_hash, next_run_at, last_run_at, last_task_id, created_at, updated_at)";

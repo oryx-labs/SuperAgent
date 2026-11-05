@@ -2,6 +2,7 @@ package com.superagent.core.inbox;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 public interface InboxEventStore {
 
@@ -15,6 +16,8 @@ public interface InboxEventStore {
 
     /** The owner's most recent events, newest first. */
     List<InboxEvent> recent(String owner, int limit);
+
+    Optional<InboxEvent> findEvent(String id);
 
     /** Drops events received before {@code cutoff}; returns how many. */
     int deleteBefore(Instant cutoff);

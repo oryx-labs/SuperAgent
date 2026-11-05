@@ -54,6 +54,12 @@ public class AutomationController {
         return ApiResponse.ok(service.preview(request));
     }
 
+    /** Which scheduled task started this task; data is null when it wasn't one (or isn't the caller's). */
+    @GetMapping(ApiPaths.AUTOMATIONS + "/by-task/{taskId}")
+    public ApiResponse<AutomationDto> forTask(@PathVariable String taskId, Authentication auth) {
+        return ApiResponse.ok(service.forTask(taskId, auth.getName(), isAdmin(auth)).orElse(null));
+    }
+
     @GetMapping(ApiPaths.AUTOMATIONS + "/{id}")
     public ApiResponse<AutomationDetailDto> detail(@PathVariable String id, Authentication auth) {
         return ApiResponse.ok(service.detail(id, auth.getName(), isAdmin(auth)));

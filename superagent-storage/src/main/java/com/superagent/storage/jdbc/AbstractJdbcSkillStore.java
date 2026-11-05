@@ -34,17 +34,17 @@ abstract class AbstractJdbcSkillStore implements SkillStore {
     protected abstract String readFinal();
 
     protected static final String COLUMNS =
-            "(id, name, description, category, content, enabled, deleted, created_by, updated_by, created_at, updated_at)";
+            "(id, name, description, category, content, space, enabled, deleted, created_by, updated_by, created_at, updated_at)";
 
     private final RowMapper<Skill> mapper = (rs, n) -> new Skill(
             rs.getString("id"), rs.getString("name"), emptyToNull(rs.getString("description")),
-            emptyToNull(rs.getString("category")), nn(rs.getString("content")),
+            emptyToNull(rs.getString("category")), nn(rs.getString("content")), emptyToNull(rs.getString("space")),
             rs.getInt("enabled") != 0, rs.getInt("deleted") != 0,
             emptyToNull(rs.getString("created_by")), emptyToNull(rs.getString("updated_by")),
             instant(rs, "created_at"), instant(rs, "updated_at"));
 
     protected Object[] params(Skill s) {
-        return new Object[]{s.id(), nn(s.name()), nn(s.description()), nn(s.category()), nn(s.content()),
+        return new Object[]{s.id(), nn(s.name()), nn(s.description()), nn(s.category()), nn(s.content()), nn(s.space()),
                 s.enabled() ? 1 : 0, s.deleted() ? 1 : 0, nn(s.createdBy()), nn(s.updatedBy()),
                 utc(s.createdAt()), utc(s.updatedAt())};
     }

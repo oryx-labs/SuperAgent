@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repository. The canonical, detaile
 
 ## What this is
 
-SuperAgent is a self-hosted AI work platform for enterprises, at an early scaffolding stage (see [README.md](README.md)). You will usually be adding new functionality rather than changing existing behavior.
+SuperAgent is the AI work system for companies, not a personal assistant: everyone in the company works in one system, and the work becomes company assets (see [README.md](README.md)). Design from the company's and its employees' side. It iterates fast; you will often be adding new functionality as well as changing existing behavior.
 
 ## Build & test
 
@@ -32,6 +32,11 @@ Layered; depend only downward (full table and conventions in [CLAUDE.md](CLAUDE.
 
 Packages follow modules (`com.superagent.<module>…`); business logic stays out of web; each module contributes
 its own MCP tools via `McpToolProvider`. The server `@ComponentScan("com.superagent")`s everything.
+
+Put code in the module it belongs to by responsibility and layer — not wherever is nearest or open. If no
+existing module fits, create a new one at the right layer (register it in the parent `pom.xml`, depend only
+downward, keep packages under `com.superagent.*`) rather than bending an ill-fitting module. Aim for a sensible
+distribution of code across modules.
 
 ## Deployment
 

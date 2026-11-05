@@ -134,7 +134,7 @@ public class SuperAgentTools implements McpToolProvider {
                     yield sb.toString();
                 }
                 case "list_skills" -> {
-                    List<SkillDto> list = skills.list().stream().filter(SkillDto::enabled).toList();
+                    List<SkillDto> list = skills.list(owner).stream().filter(SkillDto::enabled).toList();
                     if (list.isEmpty()) {
                         yield "暂无可用技能。";
                     }

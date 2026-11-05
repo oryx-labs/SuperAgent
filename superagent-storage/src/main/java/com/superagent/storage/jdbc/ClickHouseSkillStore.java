@@ -16,6 +16,7 @@ public class ClickHouseSkillStore extends AbstractJdbcSkillStore {
               description String,
               category    String,
               content     String,
+              space       String,
               enabled     UInt8,
               deleted     UInt8,
               created_by  String,
@@ -33,7 +34,8 @@ public class ClickHouseSkillStore extends AbstractJdbcSkillStore {
               updated_at DateTime64(3, 'UTC')
             ) ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY (owner_type, owner_id)
-            """);
+            """,
+            "ALTER TABLE skill ADD COLUMN IF NOT EXISTS space String");
 
     public ClickHouseSkillStore(JdbcTemplate jdbc) {
         super(jdbc, SCHEMA);
@@ -46,7 +48,7 @@ public class ClickHouseSkillStore extends AbstractJdbcSkillStore {
 
     @Override
     public void save(Skill s) {
-        jdbc.update("INSERT INTO skill " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params(s));
+        jdbc.update("INSERT INTO skill " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params(s));
     }
 
     @Override

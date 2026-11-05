@@ -23,12 +23,13 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * The built-in ("local") knowledge base: a plain directory tree on disk, one private root per
- * user under {@code superagent.knowledge.dir}. The disk is the source of truth — there is no
+ * The built-in ("local") knowledge base: plain directory trees on disk under
+ * {@code superagent.knowledge.dir} — one per {@link KnowledgeSpace}: each user's own, each team's, and the
+ * company's. Who may read or write which space is decided by {@link KnowledgeSpaces}. The disk is the source of truth — there is no
  * index to drift out of sync.
  *
  * <p>Every client path is untrusted: it is split into validated segments (no {@code ..},
- * separators, dot-names or control characters), resolved under the owner's root, and refused
+ * separators, dot-names or control characters), resolved under the space's root, and refused
  * if any component is a symlink, so a request can never reach outside that root.
  */
 @Service
@@ -45,12 +46,54 @@ public class KnowledgeService {
         this.root = Path.of(dir).toAbsolutePath().normalize();
     }
 
+    // --- a user's own knowledge base (the personal space), for callers that act for one user ---
+
+    public List<KnowledgeEntryDto> list(String owner, String path) {
+        return list(KnowledgeSpace.personal(owner), path);
+    }
+
+    public List<String> folders(String owner) {
+        return folders(KnowledgeSpace.personal(owner));
+    }
+
+    public FileContent read(String owner, String path) {
+        return read(KnowledgeSpace.personal(owner), path);
+    }
+
+    public KnowledgeEntryDto createFolder(String owner, String path) {
+        return createFolder(KnowledgeSpace.personal(owner), path);
+    }
+
+    public KnowledgeEntryDto rename(String owner, String path, String newName) {
+        return rename(KnowledgeSpace.personal(owner), path, newName);
+    }
+
+    public KnowledgeEntryDto move(String owner, String path, String targetDir) {
+        return move(KnowledgeSpace.personal(owner), path, targetDir);
+    }
+
+    public KnowledgeEntryDto ensureFolder(String owner, String path) {
+        return ensureFolder(KnowledgeSpace.personal(owner), path);
+    }
+
+    public KnowledgeEntryDto saveFile(String owner, Path source, String folder, String name, boolean overwrite) {
+        return saveFile(KnowledgeSpace.personal(owner), source, folder, name, overwrite);
+    }
+
+    public KnowledgeEntryDto writeText(String owner, String folder, String name, String content, boolean overwrite) {
+        return writeText(KnowledgeSpace.personal(owner), folder, name, content, overwrite);
+    }
+
+    public void delete(String owner, String path) {
+        delete(KnowledgeSpace.personal(owner), path);
+    }
+
     /** A file's bytes plus its name, for the controller to pick a content type. */
     public record FileContent(String name, byte[] bytes) {
     }
 
-    public List<KnowledgeEntryDto> list(String owner, String path) {
-        Path base = ownerRoot(owner);
+    public List<KnowledgeEntryDto> list(KnowledgeSpace space, String path) {
+        Path base = spaceRoot(space);
         Path dir = existing(base, path);
         if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalArgumentException("Not a folder: " + path);
@@ -67,8 +110,8 @@ public class KnowledgeService {
     }
 
     /** Every folder path (root first, as ""), for the move-to picker. */
-    public List<String> folders(String owner) {
-        Path base = ownerRoot(owner);
+    public List<String> folders(KnowledgeSpace space) {
+        Path base = spaceRoot(space);
         List<String> out = new ArrayList<>();
         out.add("");
         try (Stream<Path> all = Files.walk(base)) { // walk doesn't follow symlinks by default
@@ -83,8 +126,8 @@ public class KnowledgeService {
         return out;
     }
 
-    public FileContent read(String owner, String path) {
-        Path file = existing(ownerRoot(owner), path);
+    public FileContent read(KnowledgeSpace space, String path) {
+        Path file = existing(spaceRoot(space), path);
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalArgumentException("Not a file: " + path);
         }
@@ -98,8 +141,8 @@ public class KnowledgeService {
         }
     }
 
-    public KnowledgeEntryDto createFolder(String owner, String path) {
-        Path base = ownerRoot(owner);
+    public KnowledgeEntryDto createFolder(KnowledgeSpace space, String path) {
+        Path base = spaceRoot(space);
         Path dir = resolve(base, path);
         if (dir.equals(base)) {
             throw new IllegalArgumentException("Folder name is required");
@@ -116,8 +159,8 @@ public class KnowledgeService {
     }
 
     /** Creates the folder and any missing parents; an existing folder is fine. */
-    public KnowledgeEntryDto ensureFolder(String owner, String path) {
-        Path base = ownerRoot(owner);
+    public KnowledgeEntryDto ensureFolder(KnowledgeSpace space, String path) {
+        Path base = spaceRoot(space);
         Path dir = resolve(base, path);
         if (Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
             requireFolder(dir);
@@ -136,9 +179,9 @@ public class KnowledgeService {
      * {@code folder}, creating the folder if needed. A taken name gets a " (2)" suffix unless
      * {@code overwrite} is set, so saving never silently replaces knowledge.
      */
-    public KnowledgeEntryDto saveFile(String owner, Path source, String folder, String name, boolean overwrite) {
-        Path base = ownerRoot(owner);
-        Path dir = resolve(base, ensureFolder(owner, folder).path());
+    public KnowledgeEntryDto saveFile(KnowledgeSpace space, Path source, String folder, String name, boolean overwrite) {
+        Path base = spaceRoot(space);
+        Path dir = resolve(base, ensureFolder(space, folder).path());
         String fileName = validName(name == null || name.isBlank() ? source.getFileName().toString() : name);
         Path target = dir.resolve(fileName);
         if (Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) {
@@ -159,13 +202,13 @@ public class KnowledgeService {
     }
 
     /** Writes text content as a new file in {@code folder} (created if needed); same naming rules as {@link #saveFile}. */
-    public KnowledgeEntryDto writeText(String owner, String folder, String name, String content, boolean overwrite) {
+    public KnowledgeEntryDto writeText(KnowledgeSpace space, String folder, String name, String content, boolean overwrite) {
         byte[] bytes = (content == null ? "" : content).getBytes(StandardCharsets.UTF_8);
         if (bytes.length > MAX_READ_BYTES) {
             throw new IllegalArgumentException("Content is larger than " + MAX_READ_BYTES / (1024 * 1024) + " MB");
         }
-        Path base = ownerRoot(owner);
-        Path dir = resolve(base, ensureFolder(owner, folder).path());
+        Path base = spaceRoot(space);
+        Path dir = resolve(base, ensureFolder(space, folder).path());
         String fileName = validName(name);
         Path target = dir.resolve(fileName);
         if (Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) {
@@ -193,14 +236,14 @@ public class KnowledgeService {
         return candidate;
     }
 
-    public KnowledgeEntryDto rename(String owner, String path, String newName) {
-        Path base = ownerRoot(owner);
+    public KnowledgeEntryDto rename(KnowledgeSpace space, String path, String newName) {
+        Path base = spaceRoot(space);
         Path from = existingNonRoot(base, path);
         return moveTo(base, from, from.resolveSibling(validName(newName)));
     }
 
-    public KnowledgeEntryDto move(String owner, String path, String targetDir) {
-        Path base = ownerRoot(owner);
+    public KnowledgeEntryDto move(KnowledgeSpace space, String path, String targetDir) {
+        Path base = spaceRoot(space);
         Path from = existingNonRoot(base, path);
         Path dir = existing(base, targetDir);
         requireFolder(dir);
@@ -211,8 +254,8 @@ public class KnowledgeService {
     }
 
     /** Deletes a file, or a folder with everything in it. Symlinks inside are removed, never followed. */
-    public void delete(String owner, String path) {
-        Path target = existingNonRoot(ownerRoot(owner), path);
+    public void delete(KnowledgeSpace space, String path) {
+        Path target = existingNonRoot(spaceRoot(space), path);
         try (Stream<Path> all = Files.walk(target)) {
             for (Path p : all.sorted(Comparator.reverseOrder()).toList()) {
                 Files.delete(p);
@@ -237,6 +280,58 @@ public class KnowledgeService {
             throw new UncheckedIOException(e);
         }
         return entry(base, to);
+    }
+
+    /**
+     * Where a space lives: a user's at {@code <dir>/<user>} (as before spaces existed), a team's at
+     * {@code <dir>/.teams/<a › b>} — one flat folder per team, so a parent team's tree never contains its
+     * sub-teams' — and the company's at {@code <dir>/.company}. Dot-names can't clash with user folders.
+     */
+    Path spaceRoot(KnowledgeSpace space) {
+        Path dir = switch (space.kind()) {
+            case PERSONAL -> ownerRoot(space.key());
+            case TEAM -> teamsRoot().resolve(teamDirName(space.key()));
+            case COMPANY -> root.resolve(".company");
+        };
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return dir;
+    }
+
+    private Path teamsRoot() {
+        return root.resolve(".teams");
+    }
+
+    /** Team paths are validated (see TeamPaths): no "›", no dot-names, no separators inside a name. */
+    static String teamDirName(String teamPath) {
+        return String.join(" › ", teamPath.split("/"));
+    }
+
+    /**
+     * Follows a team rename: the team's folder and every sub-team's folder move to their new names. A target
+     * that already has content is left alone rather than merged over.
+     */
+    public void renameTeamSpaces(String from, String to) {
+        Path teams = teamsRoot();
+        if (!Files.isDirectory(teams)) {
+            return;
+        }
+        try (Stream<Path> dirs = Files.list(teams)) {
+            for (Path dir : dirs.filter(p -> Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)).toList()) {
+                String team = String.join("/", dir.getFileName().toString().split(" › "));
+                if (team.equals(from) || team.startsWith(from + "/")) {
+                    Path target = teams.resolve(teamDirName(to + team.substring(from.length())));
+                    if (!Files.exists(target)) {
+                        Files.move(dir, target);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     Path ownerRoot(String owner) {

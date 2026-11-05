@@ -3,51 +3,47 @@
   <img src="docs/images/superagent-logo.png" alt="SuperAgent logo" style="max-width: 50%;" />
 </p>
 
-An open-source, self-hosted AI work platform for enterprises—model-agnostic, governed, and built to accumulate organizational knowledge.
+**The AI work system for companies, not personal assistants.** Everyone in the company works in one system, and the work becomes the company's assets. Open source and self-hosted.
+
+[Website](https://oryx-labs.github.io/SuperAgent/) · [Live demo](http://117.72.92.117:18081/login) · [中文](https://oryx-labs.github.io/SuperAgent/zh/)
 
 ## What is SuperAgent?
 
-SuperAgent is a self-hosted AI workspace that an enterprise deploys once and connects to its identity provider, models, knowledge, business systems, and execution environments. Employees can then use AI for engineering, content, operations, product, and other daily work through a shared, governed workspace.
+Most AI agents today are personal assistants. They make one person faster, keep the work in that person's account, and leave with them.
 
-The enterprise owns the work system—not a collection of disconnected employee subscriptions. Models and agents can change; the organization retains its goals, context, permissions, deliverables, and validated work methods.
+SuperAgent is designed from the company's side instead: the company and its employees. Companies need AI that actually gets used. It has to be useful, affordable, and able to do any kind of work. SuperAgent is a system the company deploys once for everyone. Employees get AI from their first day, everyone works in the same place, and that work automatically becomes company assets that don't disappear when people change.
 
-## What is it for?
+| | Personal AI assistants | SuperAgent |
+| --- | --- | --- |
+| Who it serves | One person | The whole company and its employees |
+| Where the work goes | A personal account; leaves with the person | Company assets that accumulate automatically |
+| Working together | Everyone separately | Shared agents, and handoff when people leave |
+| Cost | Every employee subscribes; tokens wasted | Ready on day one, billed by usage, routed to the right model |
+| Control | Invisible to the company | Company-controlled, audited, connected to approvals |
 
-AI models are increasingly capable of understanding goals, using tools, and completing long-running work. The missing piece is how to make that capability simple for employees and manageable for the enterprise.
+## Why SuperAgent?
 
-SuperAgent helps enterprises:
+Handing every employee a personal assistant doesn't make AI work for a company. The work leaves with the person, colleagues can't build on each other, knowledge never accumulates, costs are scattered and wasteful, and the company can't see any of it.
 
-- provide a shared AI work entry point instead of unmanaged individual accounts;
-- route work to the right model, agent, tool, and execution environment;
-- enforce identity, permissions, policies, approvals, budgets, and audit controls;
-- connect AI work to real enterprise systems, knowledge, and environments;
-- retain verified deliverables, decisions, evidence, and reusable work methods as organizational knowledge.
+**In short, SuperAgent is company-controlled, cost-efficient, accumulates assets automatically, and is easy to use.**
+
+## Core capabilities
+
+In priority order. Items marked *(coming soon)* are still being built.
+
+1. **Work becomes company assets.** Everyone works in one system, so conversations, tasks, and deliverables stay with the company. Agents distill what they learn into memory, and the system summarizes and consolidates work into company knowledge *(company-wide consolidation: coming soon)*.
+2. **Collaboration and handoff.** Collaboration happens inside one AI system: several people can work with the same agent on the same job. When someone leaves, their agents and context go to the next person, who continues from there *(handoff: coming soon)*.
+3. **Assets for each person, team, and the company.** Skills and knowledge bases at the employee, team, and company levels hold what everyday work needs, so a new hire starts with what the team already knows.
+4. **Cost and models.** Employees get AI on day one, with no personal subscriptions and no wasted tokens. The company pays by usage, sees spend per task and per model, works with any model provider, and routes each task to a model that fits its difficulty *(routing by difficulty: coming soon)*.
+5. **Audit and security.** Built-in audit and security: human confirmation for key decisions, identity and permissions, per-agent run logs, and office tools such as Feishu, with enterprise approvals connected *(approvals: coming soon)*.
+
+Also included: a SuperAgent for every employee (inbox, plan-then-execute, team assignment, reporting back), task execution in managed sessions including coding agents such as Claude Code and Codex, and scheduled, one-off, and API-triggered automations.
 
 ## Architecture
 
-SuperAgent separates how work enters, how it is coordinated and governed, and how it runs.
-
 <p align="center">
-  <img src="docs/images/superagent-architecture.jpg" alt="SuperAgent three-layer architecture" width="100%" />
+  <img src="docs/images/superagent-architecture.jpg" alt="SuperAgent architecture" width="100%" />
 </p>
-
-## First use cases
-
-### Engineering
-
-SuperAgent helps teams carry work from a requirement to code, tests, fixes, and delivery. It connects repositories, CI, team communication, and execution environments so that different coding agents can work under the same enterprise controls and produce evidence for the delivered result.
-
-### Content production
-
-SuperAgent gives non-technical teams a daily AI workspace for research, outlining, writing, review, revision, and publishing. Brand guidelines, approved sources, review standards, and successful work can be retained and reused instead of starting from an empty prompt every time.
-
-These use cases require different tools and acceptance criteria, but share the same foundation: identity, collaboration, model and agent routing, governance, cost visibility, and organizational memory.
-
-## Vision
-
-We want every company to own its AI work system, rather than merely distribute disconnected model accounts to individual employees.
-
-Models provide intelligence; SuperAgent turns that intelligence into durable enterprise productivity.
 
 ## Build and run
 
@@ -116,4 +112,4 @@ mvn -pl superagent-server spring-boot:run          # run locally on :8080
 
 ## Status
 
-SuperAgent is currently a product and architecture direction. This repository describes the intended system; it does not represent production-ready capabilities yet.
+SuperAgent is iterating fast. The core is already running in daily use; items marked *coming soon* above are still being built.

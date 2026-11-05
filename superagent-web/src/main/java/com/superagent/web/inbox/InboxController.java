@@ -4,6 +4,7 @@ import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.inbox.InboxEventDto;
 import com.superagent.api.inbox.InboxSourceDto;
+import com.superagent.api.inbox.InboxSummaryDto;
 import com.superagent.api.inbox.InboxTodoDto;
 import com.superagent.api.inbox.SaveInboxSourceRequest;
 import com.superagent.event.UserInboxService;
@@ -19,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.Map;
 
-/** The signed-in user's inbox; the owner is always the authenticated user. */
+/** The signed-in user's data sources and what they received; the owner is always the authenticated user. */
 @RestController
 public class InboxController {
 
@@ -27,6 +28,16 @@ public class InboxController {
 
     public InboxController(UserInboxService inbox) {
         this.inbox = inbox;
+    }
+
+    @GetMapping(ApiPaths.INBOX + "/sources")
+    public ApiResponse<List<InboxSourceDto>> sources(Authentication auth) {
+        return ApiResponse.ok(inbox.sources(auth.getName()));
+    }
+
+    @GetMapping(ApiPaths.INBOX + "/summary")
+    public ApiResponse<InboxSummaryDto> summary(Authentication auth) {
+        return ApiResponse.ok(inbox.summary(auth.getName()));
     }
 
     @GetMapping(ApiPaths.INBOX + "/source")

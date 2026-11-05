@@ -16,6 +16,7 @@ public class MysqlSkillStore extends AbstractJdbcSkillStore {
               description VARCHAR(1024),
               category    VARCHAR(64),
               content     MEDIUMTEXT,
+              space       VARCHAR(512),
               enabled     TINYINT      NOT NULL,
               deleted     TINYINT      NOT NULL,
               created_by  VARCHAR(128),
@@ -37,6 +38,11 @@ public class MysqlSkillStore extends AbstractJdbcSkillStore {
 
     public MysqlSkillStore(JdbcTemplate jdbc) {
         super(jdbc, SCHEMA);
+        Integer present = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                + "AND LOWER(table_name) = 'skill' AND LOWER(column_name) = 'space'", Integer.class);
+        if (present == null || present == 0) { // older skill tables predate the layers
+            jdbc.execute("ALTER TABLE skill ADD COLUMN space VARCHAR(512)");
+        }
     }
 
     @Override
@@ -46,9 +52,9 @@ public class MysqlSkillStore extends AbstractJdbcSkillStore {
 
     @Override
     public void save(Skill s) {
-        jdbc.update("INSERT INTO skill " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        jdbc.update("INSERT INTO skill " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 + "ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description), category=VALUES(category), "
-                + "content=VALUES(content), enabled=VALUES(enabled), deleted=VALUES(deleted), "
+                + "content=VALUES(content), space=VALUES(space), enabled=VALUES(enabled), deleted=VALUES(deleted), "
                 + "updated_by=VALUES(updated_by), updated_at=VALUES(updated_at)", params(s));
     }
 

@@ -41,15 +41,15 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
     // --- events ---
 
     protected static final String EVENT_COLUMNS = "(id, owner, source, external_id, chat_id, chat_name, chat_type, "
-            + "thread_id, sender_id, sender_name, text, mentions_me, raw, priority, triage_reason, processed, "
+            + "thread_id, sender_id, sender_name, text, mentions_me, raw, priority, triage_reason, processed, handling, "
             + "occurred_at, received_at, updated_at)";
-    protected static final String EVENT_VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String EVENT_VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] eventParams(InboxEvent e) {
         return new Object[]{e.id(), e.owner(), e.source(), e.externalId(), nn(e.chatId()), nn(e.chatName()),
                 nn(e.chatType()), nn(e.threadId()), nn(e.senderId()), nn(e.senderName()), nn(e.text()),
                 e.mentionsMe() ? 1 : 0, nn(e.raw()), e.priority().name(), nn(e.triageReason()), e.processed() ? 1 : 0,
-                utc(e.occurredAt()), utc(e.receivedAt()), utc(e.updatedAt())};
+                nn(e.handling()), utc(e.occurredAt()), utc(e.receivedAt()), utc(e.updatedAt())};
     }
 
     private final RowMapper<InboxEvent> eventMapper = (rs, n) -> new InboxEvent(
@@ -59,7 +59,7 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
             emptyToNull(rs.getString("sender_id")), emptyToNull(rs.getString("sender_name")),
             nn(rs.getString("text")), rs.getInt("mentions_me") != 0, emptyToNull(rs.getString("raw")),
             EventPriority.valueOf(rs.getString("priority")), emptyToNull(rs.getString("triage_reason")),
-            rs.getInt("processed") != 0, instant(rs, "occurred_at"), instant(rs, "received_at"), instant(rs, "updated_at"));
+            rs.getInt("processed") != 0, emptyToNull(rs.getString("handling")), instant(rs, "occurred_at"), instant(rs, "received_at"), instant(rs, "updated_at"));
 
     @Override
     public List<InboxEvent> pending(String owner, EventPriority priority, int limit) {
@@ -72,6 +72,11 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
     public List<InboxEvent> recent(String owner, int limit) {
         return jdbc.query("SELECT * FROM inbox_event" + readFinal() + " WHERE owner = ? ORDER BY received_at DESC LIMIT ?",
                 eventMapper, owner, limit);
+    }
+
+    @Override
+    public Optional<InboxEvent> findEvent(String id) {
+        return jdbc.query("SELECT * FROM inbox_event" + readFinal() + " WHERE id = ?", eventMapper, id).stream().findFirst();
     }
 
     protected boolean eventExists(String id) {
@@ -109,6 +114,7 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
 
     // --- sources ---
 
+    // vip_names / urgent_keywords are left over from user-set triage rules; nothing reads them any more.
     protected static final String SOURCE_COLUMNS = "(owner, type, app_id, secret_cipher, enabled, owner_external_id, "
             + "bind_code, vip_names, urgent_keywords, digest_time, timezone, secretary_agent_id, last_digest_date, "
             + "last_hourly_at, status, last_error, created_at, updated_at)";
@@ -116,7 +122,7 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
 
     protected Object[] sourceParams(EventSource s) {
         return new Object[]{s.owner(), s.type(), nn(s.appId()), nn(s.secretCipher()), s.enabled() ? 1 : 0,
-                nn(s.ownerExternalId()), nn(s.bindCode()), nn(s.vipNames()), nn(s.urgentKeywords()), nn(s.digestTime()),
+                nn(s.ownerExternalId()), nn(s.bindCode()), "", "", nn(s.digestTime()),
                 nn(s.timezone()), nn(s.secretaryAgentId()), s.lastDigestDate() == null ? "" : s.lastDigestDate().toString(),
                 utc(s.lastHourlyAt() == null ? Instant.EPOCH : s.lastHourlyAt()), nn(s.status()), nn(s.lastError()),
                 utc(s.createdAt()), utc(s.updatedAt())};
@@ -128,7 +134,6 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
         return new EventSource(rs.getString("owner"), rs.getString("type"), emptyToNull(rs.getString("app_id")),
                 emptyToNull(rs.getString("secret_cipher")), rs.getInt("enabled") != 0,
                 emptyToNull(rs.getString("owner_external_id")), emptyToNull(rs.getString("bind_code")),
-                emptyToNull(rs.getString("vip_names")), emptyToNull(rs.getString("urgent_keywords")),
                 emptyToNull(rs.getString("digest_time")), emptyToNull(rs.getString("timezone")),
                 emptyToNull(rs.getString("secretary_agent_id")),
                 digest == null || digest.isEmpty() ? null : LocalDate.parse(digest),
@@ -147,6 +152,11 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
     public List<EventSource> listEnabled(String type) {
         return jdbc.query("SELECT * FROM event_source" + readFinal() + " WHERE type = ? AND enabled = 1",
                 sourceMapper, type);
+    }
+
+    @Override
+    public List<EventSource> list() {
+        return jdbc.query("SELECT * FROM event_source" + readFinal(), sourceMapper);
     }
 
     // --- helpers ---

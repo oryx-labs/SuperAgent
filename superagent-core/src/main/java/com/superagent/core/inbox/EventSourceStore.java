@@ -9,6 +9,9 @@ public interface EventSourceStore {
 
     List<EventSource> listEnabled(String type);
 
+    /** Every source, enabled or not. */
+    List<EventSource> list();
+
     /** Insert or replace by owner + type. */
     void save(EventSource source);
 }

@@ -41,19 +41,23 @@ class SettingsServiceTest {
     }
 
     @Test
-    void savesTrimmedModelAndBlankClearsIt() {
-        assertThat(service.update(new SystemSettingsDto("  claude-opus-5-5 ")).agentDefaultModel())
+    void savesTrimmedValuesAndBlankClearsThem() {
+        assertThat(service.update(new SystemSettingsDto("  claude-opus-5-5 ", null, null)).agentDefaultModel())
                 .isEqualTo("claude-opus-5-5");
         assertThat(service.agentDefaultModel()).isEqualTo("claude-opus-5-5");
-        assertThat(service.update(new SystemSettingsDto("gpt-5.5")).agentDefaultModel()).isEqualTo("gpt-5.5");
+        assertThat(service.update(new SystemSettingsDto("gpt-5.5", null, null)).agentDefaultModel()).isEqualTo("gpt-5.5");
 
-        assertThat(service.update(new SystemSettingsDto(" ")).agentDefaultModel()).isNull();
+        assertThat(service.update(new SystemSettingsDto(" ", null, null)).agentDefaultModel()).isNull();
+        assertThat(service.update(new SystemSettingsDto(null, " 超级智能科技有限公司 ", "超智"))).satisfies(d -> {
+            assertThat(d.companyName()).isEqualTo("超级智能科技有限公司");
+            assertThat(d.companyShortName()).isEqualTo("超智");
+        });
         assertThat(service.agentDefaultModel()).isNull();
     }
 
     @Test
     void rejectsAModelThatCannotInfer() {
-        assertThatThrownBy(() -> service.update(new SystemSettingsDto("claude-listed-only")))
+        assertThatThrownBy(() -> service.update(new SystemSettingsDto("claude-listed-only", null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(service.agentDefaultModel()).isNull();
     }

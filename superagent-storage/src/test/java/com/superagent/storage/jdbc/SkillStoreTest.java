@@ -19,12 +19,13 @@ class SkillStoreTest {
         MysqlSkillStore store = new MysqlSkillStore(new JdbcTemplate(new DriverManagerDataSource(
                 "jdbc:h2:mem:skill-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant now = Instant.now();
-        Skill s = new Skill("s1", "写作", "写文章时", "写作", "短句", true, false, "ada", "ada", now, now);
+        Skill s = new Skill("s1", "写作", "写文章时", "写作", "短句", "team:技术中心", true, false, "ada", "ada", now, now);
         store.save(s);
-        store.save(new Skill("s1", "写作规范", "写文章时", "写作", "更短", false, false, "ada", "bob", now, now));
+        store.save(new Skill("s1", "写作规范", "写文章时", "写作", "更短", "team:技术中心", false, false, "ada", "bob", now, now));
         assertThat(store.find("s1")).hasValueSatisfying(got -> {
             assertThat(got.name()).isEqualTo("写作规范");
             assertThat(got.enabled()).isFalse();
+            assertThat(got.space()).isEqualTo("team:技术中心");
             assertThat(got.createdBy()).isEqualTo("ada");
             assertThat(got.updatedBy()).isEqualTo("bob");
         });

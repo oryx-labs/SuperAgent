@@ -33,9 +33,8 @@ public final class McpTools {
     public static ObjectNode props(ObjectNode... fields) {
         ObjectNode p = JSON.createObjectNode();
         for (ObjectNode f : fields) {
-            ObjectNode prop = JSON.createObjectNode();
-            prop.put("type", f.get("type").asText());
-            prop.put("description", f.get("description").asText());
+            ObjectNode prop = f.deepCopy(); // type, description and anything else set on it (e.g. items)
+            prop.remove("__name");
             p.set(f.get("__name").asText(), prop);
         }
         return p;

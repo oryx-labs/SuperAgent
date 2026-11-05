@@ -30,6 +30,7 @@ public class MysqlInboxStore extends AbstractJdbcInboxStore {
               priority      VARCHAR(16)  NOT NULL,
               triage_reason VARCHAR(255),
               processed     TINYINT      NOT NULL,
+              handling      VARCHAR(16),
               occurred_at   DATETIME(3),
               received_at   DATETIME(3)  NOT NULL,
               updated_at    DATETIME(3)  NOT NULL,
@@ -82,6 +83,11 @@ public class MysqlInboxStore extends AbstractJdbcInboxStore {
 
     public MysqlInboxStore(JdbcTemplate jdbc) {
         super(jdbc, SCHEMA);
+        Integer present = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                + "AND LOWER(table_name) = 'inbox_event' AND LOWER(column_name) = 'handling'", Integer.class);
+        if (present == null || present == 0) { // older tables predate SuperAgent handling the inbox
+            jdbc.execute("ALTER TABLE inbox_event ADD COLUMN handling VARCHAR(16)");
+        }
     }
 
     @Override

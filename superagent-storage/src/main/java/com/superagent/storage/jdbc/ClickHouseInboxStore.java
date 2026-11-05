@@ -16,7 +16,7 @@ public class ClickHouseInboxStore extends AbstractJdbcInboxStore {
             CREATE TABLE IF NOT EXISTS inbox_event (
               id String, owner String, source String, external_id String, chat_id String, chat_name String,
               chat_type String, thread_id String, sender_id String, sender_name String, text String,
-              mentions_me UInt8, raw String, priority String, triage_reason String, processed UInt8,
+              mentions_me UInt8, raw String, priority String, triage_reason String, processed UInt8, handling String,
               occurred_at Nullable(DateTime64(3, 'UTC')), received_at DateTime64(3, 'UTC'),
               updated_at DateTime64(3, 'UTC')
             ) ENGINE = ReplacingMergeTree(updated_at)
@@ -39,7 +39,8 @@ public class ClickHouseInboxStore extends AbstractJdbcInboxStore {
               created_at DateTime64(3, 'UTC'), updated_at DateTime64(3, 'UTC')
             ) ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY (owner, type)
-            """);
+            """,
+            "ALTER TABLE inbox_event ADD COLUMN IF NOT EXISTS handling String");
 
     public ClickHouseInboxStore(JdbcTemplate jdbc) {
         super(jdbc, SCHEMA);

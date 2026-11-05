@@ -39,6 +39,9 @@ class AutomationServiceTest {
         @Override public Automation save(Automation a) { rows.put(a.id(), a); return a; }
         @Override public void delete(String id) { rows.remove(id); }
         @Override public void appendRun(AutomationRun r) { runs.add(r); }
+        @Override public Optional<AutomationRun> findRunByTask(String taskId) {
+            return runs.stream().filter(r -> taskId.equals(r.taskId())).findFirst();
+        }
         @Override public List<AutomationRun> listRuns(String id, int limit) {
             return runs.stream().filter(r -> r.automationId().equals(id))
                     .sorted(Comparator.comparing(AutomationRun::firedAt).reversed()).limit(limit).toList();
@@ -117,6 +120,9 @@ class AutomationServiceTest {
             assertThat(r.brief()).startsWith("Summarize yesterday").contains("无人值守");
         });
         assertThat(tasks.owners).containsExactly("alice"); // runs as its owner
+        assertThat(store.runs).anySatisfy(r -> assertThat(service.forTask(r.taskId(), "alice", false))
+                .hasValueSatisfying(a -> assertThat(a.id()).isEqualTo(id)));
+        assertThat(service.forTask(store.runs.get(0).taskId(), "bob", false)).isEmpty(); // not bob's
         assertThat(store.rows.get(id).nextRunAt()).isAfter(Instant.now());
         assertThat(service.fireDue(Instant.now())).isZero(); // caught up: nothing more until the next hour
 

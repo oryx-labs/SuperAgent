@@ -152,7 +152,6 @@ public class ChatService {
             this.mcpGrants = mcpGrants;
             tools.addAll(SUPERAGENT_MCP_TOOLS);
             tools.addAll(McpGrants.KNOWLEDGE_TOOLS);
-            tools.addAll(McpGrants.INBOX_TOOLS);
         } else {
             this.mcpGrants = null;
         }
@@ -386,7 +385,7 @@ public class ChatService {
         // Character first, then the index of the agent's skills (their full text is read on demand).
         String character = agent == null ? null : AgentCharacters.systemPrompt(agent);
         String skillIndex = skills.install(session.workspaceDir(),
-                agent == null ? List.of() : skills.forAgent(agent.id()), mcpGrants != null);
+                agent == null ? List.of() : skills.forAgent(agent.id(), agent.owner()), mcpGrants != null);
         String systemPrompt = character == null ? skillIndex
                 : skillIndex == null ? character : character + "\n\n" + skillIndex;
 

@@ -1,11 +1,13 @@
-// SuperAgent UI — Skills: shared working standards — list, view, edit, images.
+// SuperAgent UI — Skills: working standards in three layers (personal / team / company) — list, view, edit, images.
 // Classic script sharing one global scope with the others; index.html loads them in order.
 "use strict";
 
 // ---------- skills ----------
-// Shared working standards. Agents get the skills attached to them; their tasks inherit those.
+// Working standards; a skill lives in a layer with the knowledge base's rules (team skills reach sub-teams,
+// company skills everyone). Agents get the skills attached to them; their tasks inherit those.
 Object.assign(api, {
   listSkills: () => fetch("/api/v1/skills").then(kbJson),
+  skillSpaces: () => fetch("/api/v1/knowledge/spaces").then(kbJson),
   createSkill: body => kbPost("/api/v1/skills", body),
   updateSkill: (id, body) => fetch("/api/v1/skills/" + id, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -30,6 +32,7 @@ const skel = {
   form: document.getElementById("skForm"),
   name: document.getElementById("sfName"),
   category: document.getElementById("sfCategory"),
+  space: document.getElementById("sfSpace"),
   categories: document.getElementById("skCategories"),
   description: document.getElementById("sfDescription"),
   content: document.getElementById("sfContent"),
@@ -66,8 +69,26 @@ function renderSkillList() {
     skel.list.innerHTML = '<p class="kb-empty">' + L(skills.length ? "sk.noMatch" : "sk.empty") + "</p>";
     return;
   }
-  let group = undefined;
+  let layer = undefined, group = undefined;
   shown.forEach(s => {
+    if (s.space !== layer) {
+      layer = s.space;
+      group = undefined;
+      const h = document.createElement("div");
+      h.className = "sk-layer";
+      const name = document.createElement("span");
+      name.className = "sk-layer__name";
+      name.textContent = skLayerLabel(s.space);
+      name.title = name.textContent;
+      h.appendChild(name);
+      if (!s.canWrite) {
+        const ro = document.createElement("span");
+        ro.className = "kb-readonly";
+        ro.textContent = L("sk.readOnly");
+        h.appendChild(ro);
+      }
+      skel.list.appendChild(h);
+    }
     const cat = s.category || L("sk.uncategorized");
     if (cat !== group) {
       group = cat;
@@ -92,6 +113,12 @@ function renderSkillList() {
 }
 skel.search.addEventListener("input", renderSkillList);
 
+function skLayerLabel(space) {
+  if (space === "personal") return L("sk.layerPersonal");
+  if (space === "company") return L("sk.layerCompany");
+  return (space || "").replace(/^team:/, "");
+}
+
 // Markdown references images as images/<name>; point those at the skill's image endpoint.
 function renderSkillMarkdown(skill) {
   const div = document.createElement("div");
@@ -108,7 +135,7 @@ function renderSkill() {
   const skill = skills.find(s => s.id === skSelectedId);
   skel.form.hidden = !skEditing;
   skel.view.hidden = !!skEditing;
-  skel.actions.hidden = !!skEditing || !skill;
+  skel.actions.hidden = !!skEditing || !skill || !skill.canWrite;
   if (skEditing) return;
   skel.view.innerHTML = "";
   if (!skill) {
@@ -119,7 +146,8 @@ function renderSkill() {
   skel.heading.textContent = skill.name;
   const meta = document.createElement("p");
   meta.className = "sk-meta";
-  meta.textContent = [skill.category || L("sk.uncategorized"), skill.enabled ? null : L("sk.disabled"),
+  meta.textContent = [skLayerLabel(skill.space), skill.category || L("sk.uncategorized"),
+    skill.canWrite ? null : L("sk.readOnly"), skill.enabled ? null : L("sk.disabled"),
     L("sk.updatedBy", { user: skill.updatedBy || skill.createdBy || "—", time: formatDateTime(skill.updatedAt) })]
     .filter(Boolean).join(" · ");
   skel.view.appendChild(meta);
@@ -149,8 +177,28 @@ function openSkillForm(skill) {
   });
   skel.imagesField.hidden = !skill; // images attach to a saved skill
   if (skill) renderSkillImages(skill);
+  renderSkillSpaces(skill ? skill.space : "personal");
   renderSkill();
   skel.name.focus();
+}
+
+// The layers the user may put a skill in: their own, their teams, the company's (admins).
+async function renderSkillSpaces(current) {
+  skel.space.innerHTML = "";
+  const add = (id, label) => {
+    const o = document.createElement("option");
+    o.value = id;
+    o.textContent = label;
+    skel.space.appendChild(o);
+  };
+  add(current, current === "personal" ? L("sk.spacePersonal") : skLayerLabel(current));
+  let spaces = [];
+  try { spaces = (await api.skillSpaces()) || []; } catch (e) { return; }
+  skel.space.innerHTML = "";
+  spaces.filter(sp => sp.canWrite || sp.id === current).forEach(sp => add(sp.id,
+    sp.kind === "personal" ? L("sk.spacePersonal")
+      : sp.kind === "company" ? L("sk.spaceCompany") : L("sk.spaceTeam", { team: sp.team })));
+  skel.space.value = current;
 }
 
 function renderSkillImages(skill) {
@@ -227,6 +275,7 @@ skel.form.addEventListener("submit", async e => {
   const body = {
     name: skel.name.value.trim(), category: skel.category.value.trim(),
     description: skel.description.value.trim(), content: skel.content.value, enabled: skel.enabled.checked,
+    space: skel.space.value || "personal",
   };
   skel.error.hidden = true;
   try {
@@ -284,7 +333,7 @@ async function renderSkillPicker(current) {
     name.textContent = s.name + (s.enabled ? "" : " (" + L("sk.disabled") + ")");
     const desc = document.createElement("span");
     desc.className = "multi-select__desc";
-    desc.textContent = s.description || "";
+    desc.textContent = [skLayerLabel(s.space), s.description].filter(Boolean).join(" · ");
     text.append(name, desc);
     label.append(cb, text);
     skillSelect.menu.appendChild(label);

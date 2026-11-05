@@ -2,9 +2,12 @@ package com.superagent.knowledge.skill;
 
 import com.superagent.api.skill.SkillDto;
 import com.superagent.api.skill.SkillRequest;
+import com.superagent.core.org.TeamRenamed;
 import com.superagent.core.settings.SystemSettingStore;
 import com.superagent.core.skill.Skill;
 import com.superagent.core.skill.SkillStore;
+import com.superagent.knowledge.KnowledgeService;
+import com.superagent.knowledge.TestOrg;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -43,40 +46,75 @@ class SkillServiceTest {
 
     private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0};
 
+    private SkillService service(InMemorySkills store, InMemorySettings settings, Path dir) {
+        return new SkillService(store, settings, TestOrg.spaces(new KnowledgeService(tmp.resolve("kb").toString())),
+                dir.toString());
+    }
+
+    private static SkillRequest req(String name, String space) {
+        return new SkillRequest(name, name + "时", null, name + "的规范。", true, space);
+    }
+
     @Test
-    void seedsOnceThenSharedEditingWithCreatorOnlyDelete() {
+    void seedsOnceIntoTheCompanyLayerWhichOnlyAdminsChange() {
         InMemorySkills store = new InMemorySkills();
         InMemorySettings settings = new InMemorySettings();
-        SkillService svc = new SkillService(store, settings, tmp.toString());
-        assertThat(svc.list()).hasSize(SkillSeeds.ALL.size());
-        svc.list().forEach(s -> svc.delete(s.id(), "x", true));
-        assertThat(new SkillService(store, settings, tmp.toString()).list()).isEmpty(); // not re-seeded
+        SkillService svc = service(store, settings, tmp.resolve("skills"));
+        assertThat(svc.list("ada")).hasSize(SkillSeeds.ALL.size())
+                .allSatisfy(s -> assertThat(s.space()).isEqualTo("company"))
+                .allSatisfy(s -> assertThat(s.canWrite()).isFalse());
+        String seed = svc.list("ada").get(0).id();
+        assertThatThrownBy(() -> svc.delete(seed, "ada")).isInstanceOf(SkillForbiddenException.class);
+        assertThatThrownBy(() -> svc.create(req("制度", "company"), "ada")).isInstanceOf(SkillForbiddenException.class);
+        svc.list("root").forEach(s -> svc.delete(s.id(), "root"));
+        assertThat(service(store, settings, tmp.resolve("skills")).list("root")).isEmpty(); // not re-seeded
+    }
 
-        SkillDto s = svc.create(new SkillRequest("写作", "写文章时", "写作", "短句。", null), "ada");
-        assertThat(svc.update(s.id(), new SkillRequest(null, null, null, "更短的句子。", null), "bob").content())
-                .isEqualTo("更短的句子。");
-        assertThatThrownBy(() -> svc.delete(s.id(), "bob", false)).isInstanceOf(SkillForbiddenException.class);
-        svc.delete(s.id(), "ada", false);
-        assertThat(svc.list()).isEmpty();
+    @Test
+    void personalAndTeamSkillsFollowTheKnowledgeLayers() {
+        InMemorySkills store = new InMemorySkills();
+        SkillService svc = service(store, new InMemorySettings(), tmp.resolve("skills"));
+        svc.list("root").forEach(s -> svc.delete(s.id(), "root"));
+        String mine = svc.create(req("周报", null), "bob").id();
+        String backend = svc.create(req("接口", "team:技术中心/后端组"), "bob").id();
+        String center = svc.create(req("评审", "team:技术中心"), "dan").id();
+
+        // bob: own + own team + the team above (read only); dan: only his team — not the sub-team, not bob's own.
+        assertThat(svc.list("bob")).extracting(SkillDto::id).containsExactly(mine, center, backend);
+        assertThat(svc.list("bob")).extracting(SkillDto::canWrite).containsExactly(true, false, true);
+        assertThat(svc.list("dan")).extracting(SkillDto::id).containsExactly(center);
+        assertThatThrownBy(() -> svc.get(mine, "dan")).isInstanceOf(SkillNotFoundException.class);
+        assertThatThrownBy(() -> svc.update(center, req("评审", null), "bob")).isInstanceOf(SkillForbiddenException.class);
+        assertThatThrownBy(() -> svc.create(req("x", "team:技术中心"), "bob")).isInstanceOf(SkillForbiddenException.class);
+
+        // An agent's owner attaches what they can see; a page task sees everything its owner can.
+        assertThatThrownBy(() -> svc.setAgentSkills("agent-d", List.of(mine), "dan")).isInstanceOf(SkillNotFoundException.class);
+        svc.setAgentSkills("agent-b", List.of(backend, center), "bob");
+        assertThat(svc.forAgent("agent-b", "bob")).extracting(Skill::id).containsExactly(backend, center);
+        assertThat(svc.forTask("page-task", "dan")).extracting(Skill::id).containsExactly(center);
+
+        svc.onTeamRenamed(new TeamRenamed("技术中心", "研发中心"));
+        assertThat(store.rows.get(backend).space()).isEqualTo("team:研发中心/后端组"); // sub-teams move along
+        assertThat(store.rows.get(center).space()).isEqualTo("team:研发中心");
     }
 
     @Test
     void agentTasksUseTheAgentsSkillsAndInstallWritesFilesPlusAnIndex() throws Exception {
-        SkillService svc = new SkillService(new InMemorySkills(), new InMemorySettings(), tmp.resolve("skills").toString());
-        String writing = svc.create(new SkillRequest("写作", "写文章时", null, "用短句。![例](images/x.png)", true), "ada").id();
-        String design = svc.create(new SkillRequest("画图", "画图时", null, "三种颜色。", true), "ada").id();
+        SkillService svc = service(new InMemorySkills(), new InMemorySettings(), tmp.resolve("skills"));
+        String writing = svc.create(new SkillRequest("写作", "写文章时", null, "用短句。![例](images/x.png)", true, null), "ada").id();
+        String design = svc.create(req("画图", null), "ada").id();
         String stored = svc.addImage(writing, "x.png", PNG, "ada");
         assertThat(stored).isEqualTo("x.png");
         assertThatThrownBy(() -> svc.addImage(writing, "evil.svg", "<svg/>".getBytes(), "ada"))
                 .isInstanceOf(IllegalArgumentException.class);
 
-        svc.setAgentSkills("agent-1", List.of(writing));
+        svc.setAgentSkills("agent-1", List.of(writing), "ada");
         svc.bindTaskToAgent("task-1", "agent-1");
-        assertThat(svc.forTask("task-1")).extracting(Skill::id).containsExactly(writing);
-        assertThat(svc.forTask("page-task")).extracting(Skill::id).contains(writing, design); // all, incl. seeds
+        assertThat(svc.forTask("task-1", "ada")).extracting(Skill::id).containsExactly(writing);
+        assertThat(svc.forTask("page-task", "ada")).extracting(Skill::id).contains(writing, design); // all, incl. seeds
 
         Path ws = Files.createDirectories(tmp.resolve("ws"));
-        String index = svc.install(ws.toString(), svc.forTask("task-1"), true);
+        String index = svc.install(ws.toString(), svc.forTask("task-1", "ada"), true);
         Path skillMd = ws.resolve(".superagent/skills/" + writing + "/SKILL.md");
         assertThat(index).contains("写作 — 写文章时").contains(skillMd.toString()).contains("skill_create");
         assertThat(Files.readString(skillMd)).contains("用短句。");

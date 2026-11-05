@@ -19,7 +19,7 @@ class InboxStoreTest {
 
     private static InboxEvent event(String id, EventPriority p, Instant at) {
         return new InboxEvent(id, "ada", "feishu", "ext-" + id, "c1", "研发群", "group", null, "u1", "老板",
-                "上线了吗", false, "{}", p, "rule", false, at, at, at);
+                "上线了吗", false, "{}", p, "rule", false, null, at, at, at);
     }
 
     @Test
@@ -33,7 +33,8 @@ class InboxStoreTest {
         store.insertIfAbsent(event("e3", EventPriority.P2, now));
 
         assertThat(store.pending("ada", EventPriority.P1, 10)).extracting(InboxEvent::id).containsExactly("e1", "e2");
-        store.update(store.pending("ada", EventPriority.P1, 10).get(0).processedNow());
+        store.update(store.pending("ada", EventPriority.P1, 10).get(0).processedNow().handledAs("todo"));
+        assertThat(store.findEvent("e1")).hasValueSatisfying(e -> assertThat(e.handling()).isEqualTo("todo"));
         assertThat(store.pending("ada", EventPriority.P1, 10)).extracting(InboxEvent::id).containsExactly("e2");
         assertThat(store.recent("ada", 10)).hasSize(3);
         assertThat(store.deleteBefore(now.minusSeconds(30))).isEqualTo(1);
@@ -44,7 +45,7 @@ class InboxStoreTest {
         assertThat(store.list("ada")).singleElement().satisfies(t -> assertThat(t.taskId()).isEqualTo("task-9"));
 
         EventSource s = new EventSource("ada", EventSource.FEISHU, "cli_x", "v1:abc", true, null, "123456",
-                "老板", "紧急", "09:00", "Asia/Shanghai", null, null, null, null, null, now, now);
+                "09:00", "Asia/Shanghai", null, null, null, null, null, now, now);
         store.save(s);
         store.save(s.withBinding("ou_ada").withRuns(LocalDate.of(2026, 11, 5), now.minus(Duration.ofHours(1))));
         assertThat(store.find("ada", EventSource.FEISHU)).hasValueSatisfying(got -> {
@@ -53,5 +54,6 @@ class InboxStoreTest {
             assertThat(got.lastDigestDate()).isEqualTo(LocalDate.of(2026, 11, 5));
         });
         assertThat(store.listEnabled(EventSource.FEISHU)).hasSize(1);
+        assertThat(store.list()).hasSize(1);
     }
 }

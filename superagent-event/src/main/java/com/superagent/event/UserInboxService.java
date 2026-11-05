@@ -2,6 +2,7 @@ package com.superagent.event;
 
 import com.superagent.api.inbox.InboxEventDto;
 import com.superagent.api.inbox.InboxSourceDto;
+import com.superagent.api.inbox.InboxSummaryDto;
 import com.superagent.api.inbox.InboxTodoDto;
 import com.superagent.api.inbox.SaveInboxSourceRequest;
 import com.superagent.api.task.CreateTaskRequest;
@@ -11,24 +12,31 @@ import com.superagent.core.inbox.EventSourceChanged;
 import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.inbox.InboxEvent;
 import com.superagent.core.inbox.InboxEventStore;
+import com.superagent.core.inbox.InboxNotifyRequested;
 import com.superagent.core.inbox.InboxTodo;
 import com.superagent.core.inbox.InboxTodoStore;
+import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.security.SecretCipher;
 import com.superagent.task.TaskService;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
- * The signed-in user's view of their inbox: Feishu bot settings, received messages and extracted
- * to-dos. Everything is scoped to the caller; saving settings tells the connector to reconnect.
+ * The signed-in user's data intake: their sources (v1: a Feishu bot), received messages and the to-dos
+ * SuperAgent extracted. Everything is scoped to the caller; saving settings tells the connector to reconnect.
+ * The {@code superAgent*} methods are what SuperAgent's inbox tools do on the owner's behalf.
  */
 @Service
 public class UserInboxService {
@@ -41,6 +49,11 @@ public class UserInboxService {
     private final ApplicationEventPublisher publisher;
     private final SecureRandom random = new SecureRandom();
 
+    /** How far back stats, search and refs look. */
+    private static final int RECENT = 2000;
+    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final String DIGEST_TIME = "09:00";
+
     public UserInboxService(EventSourceStore sources, InboxEventStore events, InboxTodoStore todos, SecretCipher cipher,
                             TaskService tasks, ApplicationEventPublisher publisher) {
         this.sources = sources;
@@ -52,10 +65,23 @@ public class UserInboxService {
     }
 
     public InboxSourceDto source(String owner) {
-        return sources.find(owner, EventSource.FEISHU).map(UserInboxService::toDto)
-                .orElse(new InboxSourceDto(EventSource.FEISHU, false, null, false, false, false, null, null,
-                        String.join("\n", EventSource.DEFAULT_URGENT_KEYWORDS), "09:00", "Asia/Shanghai",
-                        null, null, null, null));
+        return sources.find(owner, EventSource.FEISHU).map(s -> toDto(s, recentOf(owner)))
+                .orElse(new InboxSourceDto(EventSource.FEISHU, false, null, false, false, false, null, null, null,
+                        null, 0, null));
+    }
+
+    /** The sources the user has set up, each with what it received. */
+    public List<InboxSourceDto> sources(String owner) {
+        List<InboxEvent> recent = recentOf(owner);
+        return sources.list().stream().filter(s -> s.owner().equals(owner)).map(s -> toDto(s, recent)).toList();
+    }
+
+    public InboxSummaryDto summary(String owner) {
+        List<EventSource> mine = sources.list().stream().filter(s -> s.owner().equals(owner)).toList();
+        List<InboxEvent> today = recentOf(owner).stream().filter(e -> !e.receivedAt().isBefore(startOfToday())).toList();
+        return new InboxSummaryDto(mine.size(),
+                (int) mine.stream().filter(s -> s.enabled() && "connected".equals(s.status())).count(),
+                today.size(), (int) today.stream().filter(InboxEvent::processed).count());
     }
 
     public InboxSourceDto save(String owner, SaveInboxSourceRequest req) {
@@ -69,33 +95,21 @@ public class UserInboxService {
         if (secret == null) {
             throw new IllegalArgumentException("App Secret is required");
         }
-        String digest = blank(req.digestTime()) == null ? "09:00" : req.digestTime().strip();
-        try {
-            LocalTime.parse(digest);
-        } catch (RuntimeException e) {
-            throw new IllegalArgumentException("Digest time must be HH:mm");
-        }
-        String tz = blank(req.timezone()) == null ? "Asia/Shanghai" : req.timezone().strip();
-        try {
-            ZoneId.of(tz);
-        } catch (RuntimeException e) {
-            throw new IllegalArgumentException("Unknown time zone: " + tz);
-        }
         boolean appChanged = cur == null || !appId.equals(cur.appId());
         Instant now = Instant.now();
         EventSource next = new EventSource(owner, EventSource.FEISHU, appId, secret,
                 req.enabled() == null || req.enabled(),
                 appChanged ? null : cur.ownerExternalId(),                   // a different bot must be re-bound
                 appChanged || cur.bindCode() == null && cur.ownerExternalId() == null ? newBindCode() : cur.bindCode(),
-                limit(req.vipNames(), 4000), limit(req.urgentKeywords(), 4000), digest, tz,
+                cur == null ? DIGEST_TIME : cur.digestTime(), cur == null ? ZONE.getId() : cur.timezone(),
                 cur == null ? null : cur.secretaryAgentId(),
                 // A new setup starts its first digest tomorrow rather than firing one right away.
-                cur == null ? LocalDate.now(ZoneId.of(tz)) : cur.lastDigestDate(),
+                cur == null ? LocalDate.now(ZONE) : cur.lastDigestDate(),
                 cur == null ? now : cur.lastHourlyAt(),
                 "connecting", null, cur == null ? now : cur.createdAt(), now);
         sources.save(next);
         publisher.publishEvent(new EventSourceChanged(owner, EventSource.FEISHU));
-        return toDto(next);
+        return toDto(next, recentOf(owner));
     }
 
     /** A fresh 6-digit code to send the bot ("绑定 123456"); also re-binds after the user switched accounts. */
@@ -104,7 +118,7 @@ public class UserInboxService {
                 .orElseThrow(() -> new IllegalArgumentException("Set up the Feishu bot first"));
         EventSource next = cur.withBindCode(newBindCode());
         sources.save(next);
-        return toDto(next);
+        return toDto(next, recentOf(owner));
     }
 
     public List<InboxEventDto> events(String owner, int limit) {
@@ -128,10 +142,11 @@ public class UserInboxService {
         }
         InboxTodo next = t.withStatus(s, null);
         todos.save(next);
+        publisher.publishEvent(changed(next));
         return toDto(next);
     }
 
-    /** Starts a task from a to-do, run by the secretary's owner; the to-do keeps a link to it. */
+    /** Starts a task from a to-do, run by its owner; the to-do keeps a link to it. */
     public InboxTodoDto toTask(String owner, String id, String extra) {
         InboxTodo t = require(owner, id);
         if (t.status() == InboxTodo.TodoStatus.TASKED && t.taskId() != null) {
@@ -157,7 +172,92 @@ public class UserInboxService {
                 null, null, null), owner);
         InboxTodo next = t.withStatus(InboxTodo.TodoStatus.TASKED, task.id());
         todos.save(next);
+        publisher.publishEvent(changed(next));
         return toDto(next);
+    }
+
+    // --- what SuperAgent does with received messages ---
+
+    /** Messages matching {@code query} (sender, chat or text; blank = all), newest first. */
+    public List<InboxEvent> superAgentSearch(String owner, String query, int limit) {
+        String q = query == null ? "" : query.strip().toLowerCase(Locale.ROOT);
+        return recentOf(owner).stream()
+                .filter(e -> q.isEmpty() || Stream.of(e.senderName(), e.chatName(), e.text())
+                        .anyMatch(v -> v != null && v.toLowerCase(Locale.ROOT).contains(q)))
+                .limit(Math.max(1, Math.min(limit, 200))).toList();
+    }
+
+    /** A to-do for the owner, pointing back at the messages it came from (which are marked as such). */
+    public InboxTodoDto superAgentAddTodo(String owner, String title, String detail, String requester, String due,
+                                          List<String> refs) {
+        if (title == null || title.isBlank()) {
+            throw new IllegalArgumentException("A to-do needs a title");
+        }
+        List<InboxEvent> from = resolve(owner, refs);
+        String where = from.stream().map(InboxEvent::chatName).filter(n -> n != null && !n.isBlank())
+                .distinct().reduce((a, b) -> a + "、" + b).orElse(null);
+        Instant now = Instant.now();
+        InboxTodo todo = new InboxTodo(UUID.randomUUID().toString(), owner, clip(title.strip(), 480), blank(detail),
+                blank(requester), blank(due), from.isEmpty() ? null : String.join(",", from.stream().map(InboxEvent::id).toList()),
+                where, InboxTodo.TodoStatus.OPEN, null, now, now);
+        todos.save(todo);
+        publisher.publishEvent(changed(todo));
+        mark(from, "todo");
+        return toDto(todo);
+    }
+
+    /** Pushes a line to the owner at their sources now (e.g. their Feishu DM). */
+    public void superAgentNotify(String owner, String text, List<String> refs) {
+        if (text == null || text.isBlank()) {
+            throw new IllegalArgumentException("Nothing to send");
+        }
+        publisher.publishEvent(new InboxNotifyRequested(owner, "【SuperAgent】" + clip(text.strip(), 500)));
+        mark(resolve(owner, refs), "notified");
+    }
+
+    /** Records what SuperAgent did with messages it didn't turn into a to-do or a notification. */
+    public int superAgentMark(String owner, List<String> refs, String handling) {
+        if (!List.of("read", "ignored", "task").contains(handling)) {
+            throw new IllegalArgumentException("handling must be read, ignored or task");
+        }
+        List<InboxEvent> events = resolve(owner, refs);
+        mark(events, handling);
+        return events.size();
+    }
+
+    private List<InboxEvent> resolve(String owner, List<String> refs) {
+        if (refs == null || refs.isEmpty()) {
+            return List.of();
+        }
+        Set<String> wanted = refs.stream().map(String::strip).filter(r -> !r.isEmpty()).collect(Collectors.toSet());
+        return recentOf(owner).stream().filter(e -> wanted.contains(e.ref()) || wanted.contains(e.id())).toList();
+    }
+
+    private void mark(List<InboxEvent> events, String handling) {
+        events.forEach(e -> this.events.update(e.handledAs(handling)));
+    }
+
+    private List<InboxEvent> recentOf(String owner) {
+        return events.recent(owner, RECENT);
+    }
+
+    private static Instant startOfToday() {
+        return LocalDate.now(ZONE).atStartOfDay(ZONE).toInstant();
+    }
+
+    /** The to-do page mirrors inbox to-dos; this is what it's told on every change. */
+    static NoticeEvents.InboxTodoChanged changed(InboxTodo t) {
+        return new NoticeEvents.InboxTodoChanged(t.id(), t.owner(), t.title(), t.detail(), t.requester(), t.due(),
+                t.source(), t.status().name().toLowerCase(Locale.ROOT), t.taskId());
+    }
+
+    /** Ignoring a to-do on the to-do page dismisses it here too. */
+    @EventListener
+    public void onIgnored(NoticeEvents.NoticeIgnored e) {
+        if ("todo".equals(e.linkType())) {
+            todos.find(e.linkId()).filter(t -> t.owner().equals(e.owner()) && t.status() == InboxTodo.TodoStatus.OPEN)
+                    .ifPresent(t -> todos.save(t.withStatus(InboxTodo.TodoStatus.DISMISSED, null)));
+        }
     }
 
     private InboxTodo require(String owner, String id) {
@@ -179,21 +279,22 @@ public class UserInboxService {
         return s == null || s.isBlank() ? null : s;
     }
 
-    private static String limit(String s, int max) {
-        String v = blank(s);
-        return v == null ? null : v.length() <= max ? v.strip() : v.substring(0, max);
+    private static String clip(String s, int max) {
+        return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 
-    static InboxSourceDto toDto(EventSource s) {
+    private static InboxSourceDto toDto(EventSource s, List<InboxEvent> recent) {
+        List<InboxEvent> own = recent.stream().filter(e -> s.type().equals(e.source())).toList();
+        Instant today = startOfToday();
         return new InboxSourceDto(s.type(), true, s.appId(), s.secretCipher() != null, s.enabled(),
-                s.ownerExternalId() != null, s.ownerExternalId() == null ? s.bindCode() : null, s.vipNames(),
-                s.urgentKeywords(), s.digestTime(), s.timezone(), s.secretaryAgentId(), s.status(), s.lastError(),
-                s.updatedAt());
+                s.ownerExternalId() != null, s.ownerExternalId() == null ? s.bindCode() : null, s.status(),
+                s.lastError(), s.updatedAt(), (int) own.stream().filter(e -> !e.receivedAt().isBefore(today)).count(),
+                own.isEmpty() ? null : own.get(0).receivedAt());
     }
 
     static InboxEventDto toDto(InboxEvent e) {
         return new InboxEventDto(e.id(), e.source(), e.chatName(), e.chatType(), e.senderName(), e.text(),
-                e.mentionsMe(), e.priority().name(), e.triageReason(), e.processed(), e.receivedAt());
+                e.mentionsMe(), e.priority().name(), e.triageReason(), e.processed(), e.handling(), e.receivedAt());
     }
 
     static InboxTodoDto toDto(InboxTodo t) {

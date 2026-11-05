@@ -12,6 +12,8 @@ import java.util.Map;
 public class SettingsService {
 
     static final String AGENT_DEFAULT_MODEL = "agent.default-model";
+    static final String COMPANY_NAME = "company.name";
+    static final String COMPANY_SHORT_NAME = "company.short-name";
 
     private final SystemSettingStore store;
     private final ProviderService providerService;
@@ -23,7 +25,8 @@ public class SettingsService {
 
     public SystemSettingsDto get() {
         Map<String, String> all = store.all();
-        return new SystemSettingsDto(trimToNull(all.get(AGENT_DEFAULT_MODEL)));
+        return new SystemSettingsDto(trimToNull(all.get(AGENT_DEFAULT_MODEL)), trimToNull(all.get(COMPANY_NAME)),
+                trimToNull(all.get(COMPANY_SHORT_NAME)));
     }
 
     /**
@@ -36,12 +39,22 @@ public class SettingsService {
             throw new IllegalArgumentException("Model " + model + " has not passed the inference check");
         }
         store.put(AGENT_DEFAULT_MODEL, model);
+        store.put(COMPANY_NAME, name(request.companyName(), 100));
+        store.put(COMPANY_SHORT_NAME, name(request.companyShortName(), 20));
         return get();
     }
 
     /** The model Agents chat with when they don't set their own, or null to fall back further. */
     public String agentDefaultModel() {
         return get().agentDefaultModel();
+    }
+
+    private static String name(String value, int max) {
+        String v = trimToNull(value);
+        if (v != null && v.length() > max) {
+            throw new IllegalArgumentException("Company name is longer than " + max + " characters");
+        }
+        return v;
     }
 
     private static String trimToNull(String s) {

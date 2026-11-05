@@ -5,6 +5,8 @@ package com.superagent.api.settings;
  *
  * @param agentDefaultModel model every Agent chats with (a Claude CLI model id);
  *                          null means the CLI's own default
+ * @param companyName       the company's full name, shown in the account menu
+ * @param companyShortName  its short name, for tight spots
  */
-public record SystemSettingsDto(String agentDefaultModel) {
+public record SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName) {
 }

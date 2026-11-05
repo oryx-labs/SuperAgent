@@ -20,4 +20,7 @@ public interface AutomationStore {
 
     /** Most recent first, at most {@code limit}. */
     List<AutomationRun> listRuns(String automationId, int limit);
+
+    /** The run that started this task, if an automation started it. */
+    Optional<AutomationRun> findRunByTask(String taskId);
 }

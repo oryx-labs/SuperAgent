@@ -13,6 +13,8 @@ Object.assign(api, {
 const sel = {
   form: document.getElementById("settingsForm"),
   agentModel: document.getElementById("sfAgentModel"),
+  companyName: document.getElementById("sfCompanyName"),
+  companyShortName: document.getElementById("sfCompanyShortName"),
   missing: document.getElementById("sfAgentModelMissing"),
   filtered: document.getElementById("sfAgentModelFiltered"),
   status: document.getElementById("sfStatus"),
@@ -27,6 +29,8 @@ async function loadSettingsForm() {
   const [{ groups, listed }] = await Promise.all([loadChatModels(), loadSystemSettings()]);
   const ok = groups.reduce((n, g) => n + g.models.length, 0);
   const current = systemSettings.agentDefaultModel || "";
+  sel.companyName.value = systemSettings.companyName || "";
+  sel.companyShortName.value = systemSettings.companyShortName || "";
 
   sel.agentModel.innerHTML = "";
   const def = document.createElement("option");
@@ -49,10 +53,19 @@ sel.form.addEventListener("submit", async e => {
   e.preventDefault();
   sel.status.textContent = "";
   try {
-    const res = await api.updateSettings({ agentDefaultModel: sel.agentModel.value || null });
+    const res = await api.updateSettings({
+      agentDefaultModel: sel.agentModel.value || null,
+      companyName: sel.companyName.value.trim() || null,
+      companyShortName: sel.companyShortName.value.trim() || null,
+    });
     if (!res || !res.data) throw new Error((res && res.message) || "no data");
     systemSettings = res.data;
     sel.status.textContent = L("settings.saved");
+    if (currentMe) {
+      currentMe.companyName = systemSettings.companyName;
+      currentMe.companyShortName = systemSettings.companyShortName;
+      renderAccount();
+    }
     if (activeAgent) renderAgentPanel(activeAgent);
   } catch (err) {
     sel.status.textContent = L("settings.saveFailed") + " " + err.message;

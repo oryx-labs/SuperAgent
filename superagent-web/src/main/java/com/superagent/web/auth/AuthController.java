@@ -3,8 +3,11 @@ package com.superagent.web.auth;
 import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.auth.MeDto;
+import com.superagent.api.settings.SystemSettingsDto;
+import com.superagent.core.org.OrgStore;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
+import com.superagent.platform.settings.SettingsService;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,9 +24,13 @@ import java.util.List;
 public class AuthController {
 
     private final UserStore users;
+    private final OrgStore org;
+    private final SettingsService settings;
 
-    public AuthController(UserStore users) {
+    public AuthController(UserStore users, OrgStore org, SettingsService settings) {
         this.users = users;
+        this.org = org;
+        this.settings = settings;
     }
 
     @GetMapping(ApiPaths.AUTH + "/me")
@@ -35,6 +42,8 @@ public class AuthController {
         String username = authentication.getName();
         String displayName = users.findByUsername(username).map(User::displayName).orElse(username);
         boolean admin = roles.contains("ADMIN");
-        return ApiResponse.ok(new MeDto(username, displayName == null ? username : displayName, roles, admin));
+        SystemSettingsDto company = settings.get();
+        return ApiResponse.ok(new MeDto(username, displayName == null ? username : displayName, roles, admin,
+                org.teams(username), company.companyName(), company.companyShortName()));
     }
 }

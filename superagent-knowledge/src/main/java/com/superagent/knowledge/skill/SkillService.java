@@ -3,13 +3,18 @@ package com.superagent.knowledge.skill;
 import com.superagent.api.skill.SkillDto;
 import com.superagent.api.skill.SkillImageUpload;
 import com.superagent.api.skill.SkillRequest;
+import com.superagent.core.org.TeamPaths;
+import com.superagent.core.org.TeamRenamed;
 import com.superagent.core.settings.SystemSettingStore;
 import com.superagent.core.skill.Skill;
 import com.superagent.core.skill.SkillStore;
+import com.superagent.knowledge.KnowledgeSpace;
+import com.superagent.knowledge.KnowledgeSpaces;
 import com.superagent.runtime.attachment.ImageAttachmentStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -26,14 +31,17 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Shared skills: working standards agents follow. Skill text lives in the DB; images on disk
+ * Skills: working standards agents follow. Like the knowledge base they live in a layer — the user's own,
+ * a team's, or the company's — with the same rules (see {@link KnowledgeSpaces}). Skill text lives in the DB; images on disk
  * under {@code superagent.skill.dir/<skillId>/images/}.
  *
  * <p>At run time skills are offered by <em>progressive disclosure</em>: {@link #install} copies the
@@ -51,58 +59,59 @@ public class SkillService {
 
     private final SkillStore store;
     private final SystemSettingStore settings;
+    private final KnowledgeSpaces spaces;
     private final Path root;
 
-    public SkillService(SkillStore store, SystemSettingStore settings,
+    public SkillService(SkillStore store, SystemSettingStore settings, KnowledgeSpaces spaces,
                         @Value("${superagent.skill.dir:./data/skills}") String dir) {
         this.store = store;
         this.settings = settings;
+        this.spaces = spaces;
         this.root = Path.of(dir).toAbsolutePath().normalize();
         seedOnce();
     }
 
     // --- CRUD ---
 
-    public List<SkillDto> list() {
-        return live().sorted(Comparator.comparing((Skill s) -> s.category() == null ? "￿" : s.category())
+    /** What the user can see: their own skills, their teams' (and the teams above), the company's. */
+    public List<SkillDto> list(String user) {
+        Predicate<KnowledgeSpace> readable = spaces.readableBy(user);
+        Predicate<KnowledgeSpace> writable = spaces.writableBy(user);
+        return live().filter(s -> readable.test(spaceOf(s)))
+                .sorted(Comparator.comparingInt((Skill s) -> spaceOf(s).kind().ordinal())
+                        .thenComparing(s -> spaceOf(s).key())
+                        .thenComparing(s -> s.category() == null ? "￿" : s.category())
                         .thenComparing(Skill::name, String.CASE_INSENSITIVE_ORDER))
-                .map(this::toDto).toList();
+                .map(s -> toDto(s, writable)).toList();
     }
 
-    public SkillDto get(String id) {
-        return toDto(require(id));
+    public SkillDto get(String id, String user) {
+        return toDto(readable(id, user), spaces.writableBy(user));
     }
 
     public SkillDto create(SkillRequest req, String user) {
-        Instant now = Instant.now();
-        Skill s = new Skill(UUID.randomUUID().toString(), name(req.name()), text(req.description(), 500, "description"),
-                text(req.category(), 40, "category"), content(req.content()),
-                req.enabled() == null || req.enabled(), false, user, user, now, now);
-        store.save(s);
-        log.info("skill {} ({}) created by {}", s.id(), s.name(), user);
-        return toDto(s);
+        Skill s = insert(req, target(req.space(), user), user);
+        log.info("skill {} ({}) created by {} in {}", s.id(), s.name(), user, s.space());
+        return toDto(s, spaces.writableBy(user));
     }
 
+    /** Only those who may write the skill's layer may change it — or move it to another layer they may write. */
     public SkillDto update(String id, SkillRequest req, String user) {
-        Skill cur = require(id);
+        Skill cur = writable(id, user);
         Skill s = new Skill(cur.id(),
                 req.name() == null ? cur.name() : name(req.name()),
                 req.description() == null ? cur.description() : text(req.description(), 500, "description"),
                 req.category() == null ? cur.category() : text(req.category(), 40, "category"),
                 req.content() == null ? cur.content() : content(req.content()),
+                req.space() == null ? cur.space() : stored(target(req.space(), user)),
                 req.enabled() == null ? cur.enabled() : req.enabled(),
                 false, cur.createdBy(), user, cur.createdAt(), Instant.now());
         store.save(s);
-        return toDto(s);
+        return toDto(s, spaces.writableBy(user));
     }
 
-    /** Shared means anyone may edit, but only the creator (or an admin) may delete. */
-    public void delete(String id, String user, boolean admin) {
-        Skill s = require(id);
-        if (!admin && !(user != null && user.equals(s.createdBy()))) {
-            throw new SkillForbiddenException("Only the creator or an admin can delete this skill");
-        }
-        store.save(s.withDeleted(user));
+    public void delete(String id, String user) {
+        store.save(writable(id, user).withDeleted(user));
     }
 
     // --- images ---
@@ -115,12 +124,12 @@ public class SkillService {
             throw new IllegalArgumentException("Image is not valid base64");
         }
         addImage(id, upload.name(), bytes, user);
-        return get(id);
+        return get(id, user);
     }
 
     /** Stores an image (raster formats only, sniffed from the bytes) and returns the name to reference it by. */
     public String addImage(String id, String requestedName, byte[] bytes, String user) {
-        Skill s = require(id);
+        Skill s = writable(id, user);
         if (bytes.length > ImageAttachmentStore.MAX_BYTES) {
             throw new IllegalArgumentException("Image exceeds " + ImageAttachmentStore.MAX_BYTES / 1024 / 1024 + " MB");
         }
@@ -136,13 +145,13 @@ public class SkillService {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        store.save(new Skill(s.id(), s.name(), s.description(), s.category(), s.content(), s.enabled(), false,
+        store.save(new Skill(s.id(), s.name(), s.description(), s.category(), s.content(), s.space(), s.enabled(), false,
                 s.createdBy(), user, s.createdAt(), Instant.now()));
         return name;
     }
 
-    public ImageAttachmentStore.StoredImage readImage(String id, String name) {
-        require(id);
+    public ImageAttachmentStore.StoredImage readImage(String id, String name, String user) {
+        readable(id, user);
         Path file = imageFile(id, name);
         try {
             byte[] bytes = Files.readAllBytes(file);
@@ -156,14 +165,14 @@ public class SkillService {
         }
     }
 
-    public SkillDto deleteImage(String id, String name) {
-        require(id);
+    public SkillDto deleteImage(String id, String name, String user) {
+        writable(id, user);
         try {
             Files.deleteIfExists(imageFile(id, name));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        return get(id);
+        return get(id, user);
     }
 
     // --- bindings ---
@@ -174,10 +183,18 @@ public class SkillService {
         return store.binding(SkillStore.AGENT, agentId).orElse(List.of()).stream().filter(live::containsKey).toList();
     }
 
-    public void setAgentSkills(String agentId, List<String> skillIds) {
+    /**
+     * Replaces the agent's skills. The user (its owner) may attach skills they can see; skills already attached
+     * stay attachable even if the user has since lost sight of them, so re-saving an agent never fails on them.
+     */
+    public void setAgentSkills(String agentId, List<String> skillIds, String user) {
+        Set<String> bound = Set.copyOf(store.binding(SkillStore.AGENT, agentId).orElse(List.of()));
+        Predicate<KnowledgeSpace> readable = spaces.readableBy(user);
         List<String> ids = new ArrayList<>(new LinkedHashSet<>(skillIds));
         for (String id : ids) {
-            require(id);
+            if (!readable.test(spaceOf(require(id))) && !bound.contains(id)) {
+                throw new SkillNotFoundException(id);
+            }
         }
         store.bind(SkillStore.AGENT, agentId, ids);
     }
@@ -187,19 +204,35 @@ public class SkillService {
         store.bind(SkillStore.TASK, taskId, agentSkillIds(agentId));
     }
 
-    public List<Skill> forAgent(String agentId) {
-        return enabled(agentSkillIds(agentId));
+    /** The agent's enabled skills that its owner can still see (one who left a team loses that team's skills). */
+    public List<Skill> forAgent(String agentId, String owner) {
+        return enabled(agentSkillIds(agentId), owner);
     }
 
-    /** An agent-created task uses its agent's skills; a task with no agent (created on the page) sees all of them. */
-    public List<Skill> forTask(String taskId) {
-        return store.binding(SkillStore.TASK, taskId).map(this::enabled)
-                .orElseGet(() -> live().filter(Skill::enabled).toList());
+    /** An agent-created task uses its agent's skills; a task with no agent sees every skill its owner can. */
+    public List<Skill> forTask(String taskId, String owner) {
+        Predicate<KnowledgeSpace> readable = spaces.readableBy(owner);
+        return store.binding(SkillStore.TASK, taskId).map(ids -> enabled(ids, owner))
+                .orElseGet(() -> live().filter(s -> s.enabled() && readable.test(spaceOf(s))).toList());
     }
 
-    private List<Skill> enabled(List<String> ids) {
+    private List<Skill> enabled(List<String> ids, String owner) {
+        Predicate<KnowledgeSpace> readable = spaces.readableBy(owner);
         return ids.stream().map(store::find).flatMap(Optional::stream)
-                .filter(s -> s.enabled() && !s.deleted()).toList();
+                .filter(s -> s.enabled() && !s.deleted() && readable.test(spaceOf(s))).toList();
+    }
+
+    @EventListener
+    void onTeamRenamed(TeamRenamed event) {
+        for (Skill s : store.list()) {
+            KnowledgeSpace space = spaceOf(s);
+            if (space.kind() == KnowledgeSpace.Kind.TEAM && TeamPaths.within(space.key(), event.from())) {
+                String team = event.to() + space.key().substring(event.from().length());
+                store.save(new Skill(s.id(), s.name(), s.description(), s.category(), s.content(),
+                        stored(KnowledgeSpace.team(team)), s.enabled(), s.deleted(), s.createdBy(), s.updatedBy(),
+                        s.createdAt(), Instant.now()));
+            }
+        }
     }
 
     // --- run-time install ---
@@ -266,6 +299,57 @@ public class SkillService {
             throw new SkillNotFoundException(id);
         }
         return store.find(id).filter(s -> !s.deleted()).orElseThrow(() -> new SkillNotFoundException(id));
+    }
+
+    /** A skill the user can't see reads as not found. */
+    private Skill readable(String id, String user) {
+        Skill s = require(id);
+        if (!spaces.readableBy(user).test(spaceOf(s))) {
+            throw new SkillNotFoundException(id);
+        }
+        return s;
+    }
+
+    private Skill writable(String id, String user) {
+        Skill s = readable(id, user);
+        if (!spaces.writableBy(user).test(spaceOf(s))) {
+            throw new SkillForbiddenException("This skill is read-only for you");
+        }
+        return s;
+    }
+
+    /** The layer a new or moved skill goes to; blank = the user's own. */
+    private KnowledgeSpace target(String spaceId, String user) {
+        KnowledgeSpace space = spaces.resolve(user, spaceId, false);
+        if (!spaces.writableBy(user).test(space)) {
+            throw new SkillForbiddenException("You can't add skills to " + space.id());
+        }
+        return space;
+    }
+
+    private Skill insert(SkillRequest req, KnowledgeSpace space, String user) {
+        Instant now = Instant.now();
+        Skill s = new Skill(UUID.randomUUID().toString(), name(req.name()), text(req.description(), 500, "description"),
+                text(req.category(), 40, "category"), content(req.content()), stored(space),
+                req.enabled() == null || req.enabled(), false, user, user, now, now);
+        store.save(s);
+        return s;
+    }
+
+    /** Stored as {@code personal:<user>}, {@code team:<path>} or {@code company}; blank is a pre-layers skill = company. */
+    static KnowledgeSpace spaceOf(Skill s) {
+        String v = s.space();
+        if (v != null && v.startsWith("personal:")) {
+            return KnowledgeSpace.personal(v.substring("personal:".length()));
+        }
+        if (v != null && v.startsWith("team:")) {
+            return KnowledgeSpace.team(v.substring("team:".length()));
+        }
+        return KnowledgeSpace.company();
+    }
+
+    private static String stored(KnowledgeSpace space) {
+        return space.kind() == KnowledgeSpace.Kind.PERSONAL ? "personal:" + space.key() : space.id();
     }
 
     public List<String> images(String id) {
@@ -354,9 +438,10 @@ public class SkillService {
         }
     }
 
-    private SkillDto toDto(Skill s) {
-        return new SkillDto(s.id(), s.name(), s.description(), s.category(), s.content(), s.enabled(), images(s.id()),
-                s.createdBy(), s.updatedBy(), s.createdAt(), s.updatedAt());
+    private SkillDto toDto(Skill s, Predicate<KnowledgeSpace> writable) {
+        KnowledgeSpace space = spaceOf(s);
+        return new SkillDto(s.id(), s.name(), s.description(), s.category(), s.content(), s.enabled(), space.id(),
+                writable.test(space), images(s.id()), s.createdBy(), s.updatedBy(), s.createdAt(), s.updatedAt());
     }
 
     /** Examples on first start only; deleting them later doesn't bring them back. */
@@ -366,7 +451,7 @@ public class SkillService {
         }
         if (live().findAny().isEmpty()) {
             for (SkillRequest seed : SkillSeeds.ALL) {
-                create(seed, "system");
+                insert(seed, KnowledgeSpace.company(), "system");
             }
         }
         settings.put(SEEDED, "true");

@@ -22,6 +22,7 @@ import com.superagent.core.chat.ChatMessage;
 import com.superagent.core.chat.ChatStore;
 import com.superagent.core.chat.ImageAttachment;
 import com.superagent.core.chat.MessageRole;
+import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskKind;
 import com.superagent.core.task.TaskKindClassifier;
@@ -40,6 +41,7 @@ import com.superagent.runtime.mcp.McpGrants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -56,6 +58,7 @@ import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -97,6 +100,8 @@ public class TaskService implements TaskRecovery {
      * enter any of the run flows; after a restart it is rebuilt from the stored message.
      */
     private final Map<String, List<ImageAttachment>> nextTurnImages = new ConcurrentHashMap<>();
+    /** Each task's latest final reply, so the "finished" to-do item can say what came out of it. */
+    private final Map<String, String> lastReply = new ConcurrentHashMap<>();
     private final ImageAttachmentStore images;
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "task-run");
@@ -111,6 +116,7 @@ public class TaskService implements TaskRecovery {
     private final String defaultOwner;
     private final McpGrants mcpGrants;   // null = task runs get no knowledge-base tools
     private final SkillService skills;   // null = tasks run without skills (tests)
+    private final ApplicationEventPublisher events;   // null = no to-do items (tests)
     private final CodingFlow codingFlow;
 
     // Session reuse + per-owner parallelism. All pool/queue access is under schedulerLock.
@@ -139,7 +145,8 @@ public class TaskService implements TaskRecovery {
             @Value("${superagent.task.max-parallel:50}") int maxParallel,
             @Value("${superagent.task.default-owner:local}") String defaultOwner,
             McpGrants mcpGrants,
-            SkillService skills) {
+            SkillService skills,
+            ApplicationEventPublisher events) {
         this.tasks = tasks;
         this.phaseStore = phaseStore;
         this.codingFlow = new CodingFlow(phaseStore);
@@ -156,6 +163,7 @@ public class TaskService implements TaskRecovery {
         this.defaultOwner = defaultOwner;
         this.mcpGrants = mcpGrants != null && mcpGrants.available() ? mcpGrants : null;
         this.skills = skills;
+        this.events = events;
         this.pool = new TaskSessionPool(maxParallel, workspaceRoot);
         if (skipPermissions) {
             log.warn("superagent.task.skip-permissions=true: tasks run the agent WITHOUT tool-permission prompts "
@@ -462,6 +470,7 @@ public class TaskService implements TaskRecovery {
             skills.bindTaskToAgent(id, agentId); // before scheduling, so the first turn already has them
         }
         log.info("created task {} ({}), kind={}", id, task.title(), kind.storageName());
+        publish(task, agentId);
         schedule(task);
         return toDto(task);
     }
@@ -588,6 +597,7 @@ public class TaskService implements TaskRecovery {
     private void resumeRun(Task task, TaskSessionPool.Lease lease, String prompt) {
         Task running = task.withStatus(TaskStatus.RUNNING);
         tasks.save(running);
+        publish(running, null);
         String sessionId = lease.session().id;
         boolean firstTurn = lease.firstTurn();
         executor.execute(() -> run(running, prompt, sessionId, firstTurn, false));
@@ -672,8 +682,10 @@ public class TaskService implements TaskRecovery {
         TaskRunState state = runStates.find(id).orElseGet(() -> TaskRunState.initial(id, deriveSessionId(task)));
         if (state.attemptCount() >= MAX_ATTEMPTS) {
             if (task.status() != TaskStatus.ERROR) {
-                tasks.save(task.finished(TaskStatus.ERROR, task.progress(),
-                        "retry budget exhausted after " + MAX_ATTEMPTS + " attempts"));
+                Task failed = task.finished(TaskStatus.ERROR, task.progress(),
+                        "retry budget exhausted after " + MAX_ATTEMPTS + " attempts");
+                tasks.save(failed);
+                publish(failed, null);
             }
             log.warn("task {} given up after {} attempts", id, state.attemptCount());
             return;
@@ -707,6 +719,7 @@ public class TaskService implements TaskRecovery {
 
         Task running = task.withStatus(TaskStatus.RUNNING);
         tasks.save(running);
+        publish(running, null);
         String prompt = recoverPrompt(rotate);
         String sid = sessionId;
         boolean ft = firstTurn;
@@ -804,7 +817,7 @@ public class TaskService implements TaskRecovery {
                 wrapBriefPrompt ? wrapBrief(prompt) : prompt,
                 effectiveModel(task),
                 tools, skipPermissions, grant == null ? null : mcpGrants.mcpConfig(grant),
-                skills == null ? null : skills.install(task.workspaceDir(), skills.forTask(task.id()), grant != null),
+                skills == null ? null : skills.install(task.workspaceDir(), skills.forTask(task.id(), task.createdBy()), grant != null),
                 nextTurnImages.remove(task.id()));
         try {
             runner.run(request, sink, cancellation);
@@ -823,6 +836,9 @@ public class TaskService implements TaskRecovery {
         }
         runStore.appendMessage(new ChatMessage(messageId, task.id(),
                 MessageRole.ASSISTANT, finalText, Instant.now()));
+        if (finalText != null && !finalText.isBlank()) {
+            lastReply.put(task.id(), finalText);
+        }
         return new TurnResult(finalText, turnCost.get(), cancellation.isCancelled());
     }
 
@@ -991,6 +1007,7 @@ public class TaskService implements TaskRecovery {
                 .add(turnCost == null ? BigDecimal.ZERO : turnCost);
         tasks.save(next.withSpend(spend));
         log.info("task {} -> {} ({}%), spend={}", task.id(), status, next.progress(), spend);
+        publish(next, null);
 
         synchronized (schedulerLock) {
             TaskSessionPool.Session session = pool.sessionForTask(task.id());
@@ -1003,6 +1020,20 @@ public class TaskService implements TaskRecovery {
             }
         }
         tryDispatch(task.createdBy());
+    }
+
+    /** Tells the to-do page (and anyone else listening) the task's status; {@code agentId} only at creation. */
+    private void publish(Task t, String agentId) {
+        if (events != null) {
+            boolean settled = t.status() != TaskStatus.PENDING && t.status() != TaskStatus.RUNNING;
+            String result = t.status() == TaskStatus.DONE ? lastReply.get(t.id()) : null;
+            if (settled) {
+                lastReply.remove(t.id());
+            }
+            events.publishEvent(new NoticeEvents.TaskStatusChanged(t.id(), t.createdBy(), t.title(),
+                    t.source().name().toLowerCase(Locale.ROOT), t.status().name().toLowerCase(Locale.ROOT), t.error(),
+                    agentId, result));
+        }
     }
 
     private void nudgeProgress(Task task, AtomicInteger progress) {

@@ -29,8 +29,8 @@ public class SkillController {
     }
 
     @GetMapping(ApiPaths.SKILLS)
-    public ApiResponse<List<SkillDto>> list() {
-        return ApiResponse.ok(skills.list());
+    public ApiResponse<List<SkillDto>> list(Authentication auth) {
+        return ApiResponse.ok(skills.list(auth.getName()));
     }
 
     @PostMapping(ApiPaths.SKILLS)
@@ -39,8 +39,8 @@ public class SkillController {
     }
 
     @GetMapping(ApiPaths.SKILLS + "/{id}")
-    public ApiResponse<SkillDto> get(@PathVariable String id) {
-        return ApiResponse.ok(skills.get(id));
+    public ApiResponse<SkillDto> get(@PathVariable String id, Authentication auth) {
+        return ApiResponse.ok(skills.get(id, auth.getName()));
     }
 
     @PutMapping(ApiPaths.SKILLS + "/{id}")
@@ -50,8 +50,7 @@ public class SkillController {
 
     @DeleteMapping(ApiPaths.SKILLS + "/{id}")
     public ApiResponse<Void> delete(@PathVariable String id, Authentication auth) {
-        boolean admin = auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
-        skills.delete(id, auth.getName(), admin);
+        skills.delete(id, auth.getName());
         return ApiResponse.empty();
     }
 
@@ -61,12 +60,12 @@ public class SkillController {
     }
 
     @GetMapping(ApiPaths.SKILLS + "/{id}/images/{name}")
-    public ResponseEntity<byte[]> image(@PathVariable String id, @PathVariable String name) {
-        return skills.readImage(id, name).toResponse();
+    public ResponseEntity<byte[]> image(@PathVariable String id, @PathVariable String name, Authentication auth) {
+        return skills.readImage(id, name, auth.getName()).toResponse();
     }
 
     @DeleteMapping(ApiPaths.SKILLS + "/{id}/images/{name}")
-    public ApiResponse<SkillDto> deleteImage(@PathVariable String id, @PathVariable String name) {
-        return ApiResponse.ok(skills.deleteImage(id, name));
+    public ApiResponse<SkillDto> deleteImage(@PathVariable String id, @PathVariable String name, Authentication auth) {
+        return ApiResponse.ok(skills.deleteImage(id, name, auth.getName()));
     }
 }

@@ -9,11 +9,9 @@ function renderStoredMessage(role, content, id, images, sessionId) {
   msg.className = "msg " + (role === "user" ? "msg--user" : role === "system" ? "msg--system" : "msg--agent");
   if (id) msg.dataset.mid = id;
   if (sessionId) msg.dataset.sid = sessionId;
-  if (role === "system") { // SuperAgent inbox notes: task reports, plan approvals
-    const note = document.createElement("div");
-    note.className = "msg__note";
-    note.textContent = content;
-    msg.appendChild(note);
+  if (role === "system") { // SuperAgent inbox notes: task reports, plan approvals, received messages
+    msg.appendChild(content.startsWith(EXTERNAL_NOTE) ? externalNote(content) : Object.assign(
+      document.createElement("div"), { className: "msg__note", textContent: content }));
     el.messages.appendChild(msg);
     return msg;
   }
@@ -33,6 +31,23 @@ function renderStoredMessage(role, content, id, images, sessionId) {
   }
   el.messages.appendChild(msg);
   return msg;
+}
+
+// Messages a data source received, handed to the SuperAgent: one line, the messages folded away.
+const EXTERNAL_NOTE = "【外部消息】";
+function externalNote(content) {
+  const body = content.slice(EXTERNAL_NOTE.length);
+  const head = body.split("。")[0];
+  const m = /<messages>\n?([\s\S]*?)<\/messages>/.exec(body);
+  const box = document.createElement("details");
+  box.className = "msg__note msg__note--external";
+  const summary = document.createElement("summary");
+  summary.textContent = "📥 " + head;
+  const list = document.createElement("div");
+  list.className = "msg__note-list";
+  list.textContent = m ? m[1].trim() : body;
+  box.append(summary, list);
+  return box;
 }
 
 function beginEdit(msgEl, mid) {
@@ -222,9 +237,7 @@ function superThread(a) {
   const li = document.createElement("li");
   li.className = "thread thread--super" + (a.id === activeAgentId ? " is-active" : "");
   li.dataset.id = a.id;
-  const orb = document.createElement("span");
-  orb.className = "super-orb";
-  orb.setAttribute("aria-hidden", "true");
+  const stage = liquidCore("super-core");
   const body = document.createElement("span");
   body.className = "super-body";
   const name = document.createElement("span");
@@ -234,9 +247,27 @@ function superThread(a) {
   role.className = "super-role";
   role.textContent = L("super.role");
   body.append(name, role);
-  li.append(orb, body);
+  li.append(stage, body);
   li.addEventListener("click", () => selectAgent(a));
   return li;
+}
+
+/**
+ * SuperAgent's look: a frosted bubble with three soft pools of light drifting inside it, and two layers of
+ * glints rippling over them. Every layer starts at a random point of its cycle, so the drift never looks
+ * like the same loop twice.
+ */
+function liquidCore(className) {
+  const core = document.createElement("span");
+  core.className = "liquid-core " + className;
+  core.setAttribute("aria-hidden", "true");
+  ["lc-1", "lc-2", "lc-3", "lc-glint lc-glint--a", "lc-glint lc-glint--b"].forEach(c => {
+    const layer = document.createElement("i");
+    layer.className = c;
+    layer.style.animationDelay = "-" + (Math.random() * 30).toFixed(1) + "s";
+    core.appendChild(layer);
+  });
+  return core;
 }
 
 function threadSeparator() {
@@ -329,7 +360,9 @@ function renderAgentPanel(agent) {
   if (!agent) { panel.hidden = true; return; }
   panel.hidden = false;
   document.getElementById("agentInfoName").textContent = agent.name || "Agent";
-  document.getElementById("agentInfoAvatar").textContent = agent.avatar || "🙂";
+  const avatar = document.getElementById("agentInfoAvatar");
+  if (agent.kind === "super") avatar.replaceChildren(liquidCore("liquid-core--sm"));
+  else avatar.textContent = agent.avatar || "🙂";
   const ch = characterByKey(agent.character);
   document.getElementById("agentInfoCharacter").textContent = agent.kind === "super" ? L("super.role")
     : ch ? ch.emoji + " " + characterName(ch) : L("agent.characterCustom");
@@ -342,6 +375,7 @@ function renderAgentPanel(agent) {
   panel.classList.toggle("agent-info--super", agent.kind === "super");
   document.getElementById("agentInfoDetails").hidden = agent.kind === "super";
   document.getElementById("superIntro").hidden = agent.kind !== "super";
+  if (agent.kind === "super") loadSuperSources();
   const persona = document.getElementById("agentInfoPersona");
   persona.textContent = agent.persona || "";
   persona.hidden = !agent.persona;

@@ -115,7 +115,7 @@ class TaskServiceTest {
 
     private TaskService service(AgentRunner runner, InMemoryTaskStore tasks, InMemoryTaskPhaseStore phases, int maxParallel) {
         return new TaskService(tasks, phases, new InMemoryTaskRunStateStore(), new InMemoryRunStore(), List.of(runner), IMAGES,
-                System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID(), "", "", false, maxParallel, "tester", null, null);
+                System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID(), "", "", false, maxParallel, "tester", null, null, null);
     }
 
     private static final class InMemoryTaskRunStateStore implements TaskRunStateStore {
@@ -360,7 +360,7 @@ class TaskServiceTest {
         RecordingRunner runner = new RecordingRunner(0);
         TaskService service = new TaskService(tasks, new InMemoryTaskPhaseStore(), new InMemoryTaskRunStateStore(),
                 new InMemoryRunStore(), List.of(runner), IMAGES,
-                System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID(), "", "", false, 5, "tester", null, null);
+                System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID(), "", "", false, 5, "tester", null, null, null);
         String id = service.create(brief("A")).id();
         awaitStatus(tasks, id, "DONE");
 
@@ -385,7 +385,7 @@ class TaskServiceTest {
         RecordingRunner runner = new RecordingRunner(0);
         String root = System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID();
         TaskService service = new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES,
-                root, "", "", false, 5, "tester", null, null);
+                root, "", "", false, 5, "tester", null, null, null);
 
         String id = service.create(brief("A")).id();
         awaitStatus(tasks, id, "DONE");
@@ -402,7 +402,7 @@ class TaskServiceTest {
 
         // A new process starts with an empty pool: steering must still resume the same session.
         TaskService restarted = new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES,
-                root, "", "", false, 5, "tester", null, null);
+                root, "", "", false, 5, "tester", null, null, null);
         restarted.sendMessage(id, "tester", "one more fix");
         awaitStatus(tasks, id, "DONE");
         RecordingRunner.Call afterRestart = runner.calls.get(2);
@@ -456,7 +456,7 @@ class TaskServiceTest {
         List<RecordingRunner.Call> codex = Collections.synchronizedList(new ArrayList<>());
         TaskService service = new TaskService(tasks, new InMemoryTaskPhaseStore(), new InMemoryTaskRunStateStore(),
                 new InMemoryRunStore(), List.of(new TypedRunner(AgentType.CLAUDE, claude), new TypedRunner(AgentType.CODEX, codex)), IMAGES,
-                System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID(), "", "", false, 5, "tester", null, null);
+                System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID(), "", "", false, 5, "tester", null, null, null);
 
         String a = service.create(briefFor("A", "claude", null)).id();
         awaitStatus(tasks, a, "DONE");
@@ -479,11 +479,11 @@ class TaskServiceTest {
         InMemoryRunStore runStore = new InMemoryRunStore();
         RecordingRunner runner = new RecordingRunner(0);
         String root = System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID();
-        TaskService first = new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES, root, "", "", false, 5, "tester", null, null);
+        TaskService first = new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES, root, "", "", false, 5, "tester", null, null, null);
         String a = first.create(brief("A")).id();
         awaitStatus(tasks, a, "DONE");
 
-        TaskService restarted = new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES, root, "", "", false, 5, "tester", null, null);
+        TaskService restarted = new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES, root, "", "", false, 5, "tester", null, null, null);
         String b = restarted.create(brief("B")).id();
         awaitStatus(tasks, b, "DONE");
         assertThat(runner.calls.get(1).sessionId()).isEqualTo(runner.calls.get(0).sessionId());
@@ -556,7 +556,7 @@ class TaskServiceTest {
         InMemoryRunStore runStore = new InMemoryRunStore();
         RecordingRunner runner = new RecordingRunner(0);
         String root = System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID();
-        TaskService first = new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES, root, "", "", false, 5, "tester", null, null);
+        TaskService first = new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES, root, "", "", false, 5, "tester", null, null, null);
         String a = first.create(brief("A")).id();
         awaitStatus(tasks, a, "DONE");
         // Simulate the crash window: message stored and task PENDING, but the in-memory queue is gone.
@@ -564,7 +564,7 @@ class TaskServiceTest {
                 com.superagent.core.chat.MessageRole.USER, "please continue", Instant.now()));
         tasks.save(tasks.findTask(a).orElseThrow().withStatus(com.superagent.core.task.TaskStatus.PENDING));
 
-        new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES, root, "", "", false, 5, "tester", null, null);
+        new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES, root, "", "", false, 5, "tester", null, null, null);
         awaitStatus(tasks, a, "DONE");
         assertThat(runner.calls).hasSize(2);
         assertThat(runner.calls.get(1).resumeId()).isEqualTo(runner.calls.get(0).sessionId());

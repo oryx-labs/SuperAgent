@@ -35,6 +35,9 @@ public final class ApiPaths {
     /** Platform-wide figures for administrators. */
     public static final String ANALYTICS = V1 + "/admin/analytics";
 
+    /** The organisation: managers and teams (admin). */
+    public static final String ORG = V1 + "/admin/org";
+
     /** Model-vendor CLIs (claude, codex, ...) the runtime can call. */
     public static final String PROVIDERS = V1 + "/providers";
 
@@ -52,6 +55,9 @@ public final class ApiPaths {
 
     /** Messages received on the user's behalf (their Feishu bot, ...), triage, and extracted to-dos. */
     public static final String INBOX = V1 + "/inbox";
+
+    /** The signed-in user's to-do home page: decisions, actions, finished work, heads-ups. */
+    public static final String NOTICES = V1 + "/notices";
 
     private ApiPaths() {
     }
