@@ -361,12 +361,7 @@ async function loadArtifacts(id) {
     size.className = "artifact-size";
     size.textContent = formatBytes(a.size);
     link.append(name, size);
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "link-btn artifact-kb";
-    save.textContent = L("tasks.saveToKb");
-    save.addEventListener("click", () => saveArtifactToKb(id, a.name));
-    li.append(link, save);
+    li.append(link);
     tel.artifacts.appendChild(li);
   });
 }

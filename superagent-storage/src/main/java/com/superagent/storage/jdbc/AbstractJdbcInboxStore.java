@@ -114,17 +114,18 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
 
     // --- sources ---
 
-    // vip_names / urgent_keywords are left over from user-set triage rules; nothing reads them any more.
+    // Left over and written empty: vip_names / urgent_keywords (user-set triage rules), and secret_cipher /
+    // status / last_error from when each user ran their own bot (the company app's live in the connector now).
     protected static final String SOURCE_COLUMNS = "(owner, type, app_id, secret_cipher, enabled, owner_external_id, "
             + "bind_code, vip_names, urgent_keywords, digest_time, timezone, secretary_agent_id, last_digest_date, "
             + "last_hourly_at, status, last_error, created_at, updated_at)";
     protected static final String SOURCE_VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] sourceParams(EventSource s) {
-        return new Object[]{s.owner(), s.type(), nn(s.appId()), nn(s.secretCipher()), s.enabled() ? 1 : 0,
+        return new Object[]{s.owner(), s.type(), nn(s.appId()), "", s.enabled() ? 1 : 0,
                 nn(s.ownerExternalId()), nn(s.bindCode()), "", "", nn(s.digestTime()),
                 nn(s.timezone()), nn(s.secretaryAgentId()), s.lastDigestDate() == null ? "" : s.lastDigestDate().toString(),
-                utc(s.lastHourlyAt() == null ? Instant.EPOCH : s.lastHourlyAt()), nn(s.status()), nn(s.lastError()),
+                utc(s.lastHourlyAt() == null ? Instant.EPOCH : s.lastHourlyAt()), "", "",
                 utc(s.createdAt()), utc(s.updatedAt())};
     }
 
@@ -132,13 +133,12 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
         String digest = rs.getString("last_digest_date");
         Instant hourly = instant(rs, "last_hourly_at");
         return new EventSource(rs.getString("owner"), rs.getString("type"), emptyToNull(rs.getString("app_id")),
-                emptyToNull(rs.getString("secret_cipher")), rs.getInt("enabled") != 0,
+                rs.getInt("enabled") != 0,
                 emptyToNull(rs.getString("owner_external_id")), emptyToNull(rs.getString("bind_code")),
                 emptyToNull(rs.getString("digest_time")), emptyToNull(rs.getString("timezone")),
                 emptyToNull(rs.getString("secretary_agent_id")),
                 digest == null || digest.isEmpty() ? null : LocalDate.parse(digest),
                 hourly == null || hourly.equals(Instant.EPOCH) ? null : hourly,
-                emptyToNull(rs.getString("status")), emptyToNull(rs.getString("last_error")),
                 instant(rs, "created_at"), instant(rs, "updated_at"));
     };
 

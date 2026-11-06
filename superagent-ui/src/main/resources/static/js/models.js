@@ -26,6 +26,8 @@ Object.assign(api, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }),
   }).then(kbJson),
   installNode: () => fetch("/api/v1/providers/node/install", { method: "POST" }).then(r => r.json()),
+  installLog: id => fetch("/api/v1/providers/" + id + "/install-log").then(kbJson),
+  nodeInstallLog: () => fetch("/api/v1/providers/node/install-log").then(kbJson),
 });
 
 const mel = {
@@ -100,6 +102,7 @@ const nel = {
   state: document.getElementById("nodeState"),
   hint: document.getElementById("nodeHint"),
   btn: document.getElementById("nodeInstallBtn"),
+  logBtn: document.getElementById("nodeLogBtn"),
 };
 
 /** The highest Node any added CLI needs, so the card can say whether the current one is enough. */
@@ -125,7 +128,8 @@ async function renderNodeRuntime(providers) {
   nel.state.textContent = n.installing ? L("node.installing")
     : !n.version ? L("node.missing")
     : n.version + " · " + L(n.source === "private" ? "node.private" : "node.system");
-  nel.hint.textContent = n.error ? L("node.failed", { msg: n.error })
+  nel.hint.textContent = n.installing && n.step ? n.step
+    : n.error ? L("node.failed", { msg: n.error })
     : !n.version ? L("node.missingHint")
     : tooOld ? L("node.tooOld", { need })
     : n.source === "private" ? L("node.privateHint") : L("node.systemHint");
@@ -134,12 +138,67 @@ async function renderNodeRuntime(providers) {
   nel.btn.hidden = n.installing || (n.version && !tooOld && n.source !== "private");
   nel.btn.textContent = L(n.source === "private" ? "node.update" : "node.install");
   nel.btn.disabled = n.installing;
+  nel.logBtn.hidden = !n.hasLog;
 }
+
+nel.logBtn.addEventListener("click", () => openInstallLog("Node.js", api.nodeInstallLog));
+
+// ---------- install / upgrade log ----------
+const iel = {
+  drawer: document.getElementById("instDrawer"),
+  title: document.getElementById("instTitle"),
+  meta: document.getElementById("instMeta"),
+  error: document.getElementById("instError"),
+  log: document.getElementById("instLog"),
+};
+let instTimer = null;
+let instLoad = null;
+
+function openInstallLog(name, load) {
+  instLoad = load;
+  iel.title.textContent = L("inst.title", { name });
+  iel.meta.textContent = "";
+  iel.error.hidden = true;
+  iel.log.textContent = "";
+  iel.drawer.hidden = false;
+  renderInstallLog();
+}
+
+function closeInstallLog() {
+  iel.drawer.hidden = true;
+  instLoad = null;
+  if (instTimer) { clearTimeout(instTimer); instTimer = null; }
+}
+
+async function renderInstallLog() {
+  if (instTimer) { clearTimeout(instTimer); instTimer = null; }
+  const load = instLoad;
+  if (!load) return;
+  let j;
+  try { j = await load(); } catch (e) { iel.meta.textContent = e.message; return; }
+  if (load !== instLoad) return; // closed or switched meanwhile
+  if (!j) { iel.meta.textContent = L("inst.none"); return; }
+  const end = j.finishedAt ? new Date(j.finishedAt) : new Date();
+  const secs = Math.max(0, Math.round((end - new Date(j.startedAt)) / 1000));
+  const took = secs >= 60 ? L("inst.minSec", { m: Math.floor(secs / 60), s: secs % 60 }) : L("inst.sec", { s: secs });
+  iel.meta.textContent = [L("inst.action." + j.action), new Date(j.startedAt).toLocaleString(),
+    j.running ? L("inst.running", { t: took }) : j.error ? L("inst.failed", { t: took }) : L("inst.done", { t: took })].join(" · ");
+  iel.error.hidden = !j.error;
+  iel.error.textContent = j.error || "";
+  // Follow the end while the reader is there; leave the scroll alone when they've scrolled up to read.
+  const atEnd = iel.log.scrollHeight - iel.log.scrollTop - iel.log.clientHeight < 40;
+  iel.log.textContent = (j.lines || []).join("\n");
+  if (atEnd) iel.log.scrollTop = iel.log.scrollHeight;
+  if (j.running) instTimer = setTimeout(renderInstallLog, 1500);
+}
+
+iel.drawer.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", closeInstallLog));
 
 nel.btn.addEventListener("click", async () => {
   nel.btn.disabled = true;
   try { await api.installNode(); } catch (e) { showToast(e.message, true); }
   loadModels(); // the 3s poll keeps the card current while it installs
+  openInstallLog("Node.js", api.nodeInstallLog);
 });
 
 function yesNo(v, supported) {
@@ -166,9 +225,10 @@ function modelRow(p) {
   sub.appendChild(code);
   if (!p.installable) sub.appendChild(document.createTextNode("  · " + L("models.displayOnly")));
   tdName.appendChild(sub);
-  // Install-only CLIs: say what they are, since nothing runs on them yet (and two aren't plain agent CLIs).
+  // Say what the newer CLIs are (GLM isn't a CLI of its own) and whether tasks run on them yet.
   const note = L("models.note." + p.key);
-  if (p.installable && !p.supported) {
+  const hasNote = note !== "models.note." + p.key;
+  if (p.installable && (!p.supported || hasNote)) {
     const n = document.createElement("small");
     n.className = "model-note";
     if (p.preview) {
@@ -177,7 +237,7 @@ function modelRow(p) {
       tag.textContent = L("models.preview");
       n.appendChild(tag);
     }
-    n.appendChild(document.createTextNode(note !== "models.note." + p.key ? note : L("models.installOnly")));
+    n.appendChild(document.createTextNode(hasNote ? note : L("models.installOnly")));
     tdName.appendChild(n);
   }
 
@@ -185,6 +245,13 @@ function modelRow(p) {
 
   const tdStatus = document.createElement("td");
   tdStatus.appendChild(modelStatusBadge(p));
+  if (p.installStep) {
+    const st = document.createElement("small");
+    st.className = "model-step";
+    st.textContent = p.installStep;
+    st.title = p.installStep;
+    tdStatus.appendChild(st);
+  }
   if (p.message) {
     const m = document.createElement("small");
     m.className = "model-error";
@@ -224,6 +291,10 @@ function modelRow(p) {
       check.title = L("models.upToDate", { version: p.currentVersion });
     }
     wrap.appendChild(check);
+  }
+  if (p.hasInstallLog) {
+    wrap.appendChild(linkBtn(L("inst.log"), () => openInstallLog(p.name, () => api.installLog(p.id)),
+      p.message ? "link-btn--danger" : "link-btn--muted"));
   }
   wrap.append(
     linkBtn(L("models.details"), () => openModelDetail(p.id), "link-btn--muted"),
@@ -273,6 +344,7 @@ async function providerAction(p, action) {
     await (action === "install" ? api.installProvider(p.id) : api.upgradeProvider(p.id));
   } catch (e) { /* ignore */ }
   refreshModels();
+  openInstallLog(p.name, () => api.installLog(p.id)); // show what it's doing rather than a status that sits still
 }
 
 async function removeProvider(p) {
@@ -306,7 +378,7 @@ async function loadModelDetail(id) {
   if (!p || modelDetailId !== id) return;
   mel.title.textContent = p.name;
   credProviderKey = p.key;
-  cel2.tab.hidden = !p.supported; // only the CLIs runs use have a key pool
+  cel2.tab.hidden = !p.installable; // every installable CLI keeps its keys here
   mel.meta.textContent = p.cli || "";
   mel.status.className = "status-badge is-model-" + p.status;
   mel.status.textContent = L("models.status." + p.status);
@@ -557,7 +629,7 @@ function credRow(c, index, poolSize) {
         loadCredentials();
       }, "link-btn--muted"),
       linkBtn("×", () => kbOpenModal({
-        title: L("cred.deleteTitle"), submit: L("kb.delete"), danger: true,
+        title: L("cred.deleteTitle"), submit: L("common.delete"), danger: true,
         message: L("cred.deleteConfirm", { name: c.label }),
         action: async () => { await api.deleteCredential(modelDetailId, c.id); await loadCredentials(); },
       }), "link-btn--danger"));
@@ -585,7 +657,7 @@ function openCredentialForm(c) {
   cel2.key.placeholder = c ? L("cred.keepKey", { hint: c.keyHint }) : "";
   cel2.key.required = !c;
   cel2.bearer.checked = c ? c.bearer : true;
-  cel2.bearerField.hidden = credProviderKey !== "claude"; // Codex takes a plain API key
+  cel2.bearerField.hidden = credProviderKey !== "claude"; // the others' header is fixed by their API
   cel2.error.hidden = true;
   cel2.form.hidden = false;
   cel2.label.focus();

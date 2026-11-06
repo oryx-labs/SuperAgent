@@ -74,7 +74,7 @@ public final class McpTools {
         return v;
     }
 
-    /** Runs need a signed-in owner for anything personal (knowledge base, inbox). */
+    /** Runs need a signed-in owner for anything personal (files, inbox). */
     public static String requireOwner(McpGrants.Grant grant, String what) {
         if (grant.owner() == null || grant.owner().isBlank()) {
             throw new McpToolException(what + "需要登录用户，本次运行没有关联用户。");

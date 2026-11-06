@@ -7,7 +7,6 @@
 // company skills everyone). Agents get the skills attached to them; their tasks inherit those.
 Object.assign(api, {
   listSkills: () => fetch("/api/v1/skills").then(kbJson),
-  skillSpaces: () => fetch("/api/v1/knowledge/spaces").then(kbJson),
   createSkill: body => kbPost("/api/v1/skills", body),
   updateSkill: (id, body) => fetch("/api/v1/skills/" + id, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -204,7 +203,7 @@ function openSkillForm(skill) {
 
 // The layers the user may put a skill in: their own, or the company's (admins). A new skill starts in
 // the open tab's layer when the user may write there.
-async function renderSkillSpaces(current, preferLayer) {
+function renderSkillSpaces(current, preferLayer) {
   skel.space.innerHTML = "";
   const add = (id, label) => {
     const o = document.createElement("option");
@@ -212,14 +211,10 @@ async function renderSkillSpaces(current, preferLayer) {
     o.textContent = label;
     skel.space.appendChild(o);
   };
-  add(current, current === "personal" ? L("sk.spacePersonal") : skLayerLabel(current));
-  let spaces = [];
-  try { spaces = (await api.skillSpaces()) || []; } catch (e) { return; }
-  skel.space.innerHTML = "";
-  spaces.filter(sp => sp.kind !== "team" && (sp.canWrite || sp.id === current)).forEach(sp => add(sp.id,
-    L(sp.kind === "personal" ? "sk.spacePersonal" : "sk.spaceCompany")));
-  const preferred = preferLayer && spaces.find(sp => sp.canWrite && sp.kind === preferLayer);
-  skel.space.value = preferred ? preferred.id : current;
+  add("personal", L("sk.spacePersonal"));
+  if (isAdmin || current === "company") add("company", L("sk.spaceCompany"));
+  skel.space.value = !current || current === "personal" ? (preferLayer === "company" && isAdmin ? "company" : "personal")
+    : current;
 }
 
 function renderSkillImages(skill) {
@@ -245,7 +240,7 @@ function renderSkillImages(skill) {
     remove.type = "button";
     remove.className = "link-btn link-btn--danger";
     remove.textContent = "×";
-    remove.title = L("kb.delete");
+    remove.title = L("common.delete");
     remove.addEventListener("click", async () => {
       try { replaceSkill(await api.deleteSkillImage(skill.id, name)); renderSkillImages(skills.find(s => s.id === skill.id)); }
       catch (e) { showToast(e.message, true); }
@@ -314,7 +309,7 @@ skel.del.addEventListener("click", () => {
   const skill = skills.find(s => s.id === skSelectedId);
   if (!skill) return;
   kbOpenModal({
-    title: L("sk.deleteTitle"), submit: L("kb.delete"), danger: true,
+    title: L("sk.deleteTitle"), submit: L("common.delete"), danger: true,
     message: L("sk.deleteConfirm", { name: skill.name }),
     action: async () => { await api.deleteSkill(skill.id); closeSkillDrawer(); await loadSkills(); },
   });

@@ -433,7 +433,9 @@ async function renderComposerModel(agent) {
   }
   const def = document.createElement("option");
   def.value = "";
-  def.textContent = L("chat.modelDefault", { model: systemSettings.agentDefaultModel || L("settings.modelCliDefault") });
+  def.textContent = systemSettings.agentDefaultModel || failed || cliDefaultWorks(groups)
+    ? L("chat.modelDefault", { model: systemSettings.agentDefaultModel || L("settings.modelCliDefault") })
+    : L("settings.modelPick");
   composerModel.appendChild(def);
   fillModelGroups(composerModel, groups, m => m.id);
   // Show the truth when the saved model has since failed its probe, rather than silently displaying another.
@@ -442,6 +444,9 @@ async function renderComposerModel(agent) {
   }
   composerModel.value = agent.model || "";
 }
+
+/** With no model chosen, a turn runs on Claude Code's own default: that only works if Claude Code has a working model. */
+const cliDefaultWorks = groups => groups.some(g => g.key === "claude");
 
 function setNoChatModel(on) {
   noChatModel = on;
@@ -462,7 +467,7 @@ async function loadChatModels() {
   const groups = options.map(o => {
     const models = o.models || [];
     listed += models.length;
-    return { label: CLI_LABELS[o.key] || o.name || o.key, models: models.filter(m => m.inferStatus === "ok") };
+    return { key: o.key, label: CLI_LABELS[o.key] || o.name || o.key, models: models.filter(m => m.inferStatus === "ok") };
   }).filter(g => g.models.length);
   return { groups, listed, failed };
 }

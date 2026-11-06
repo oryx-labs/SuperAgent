@@ -43,20 +43,20 @@ L6  superagent-server        boots everything (the only executable jar); applica
 L5  superagent-web           HTTP only: REST controllers, the MCP endpoint, auth/security, GlobalExceptionHandler
 L5  superagent-ui            the browser UI: static HTML/CSS/JS served from classpath:/static
 L4  superagent-orchestrator  the user's SuperAgent: plans work, hires team members, assigns tasks
-L4  superagent-event         the inbox: Feishu bot connector, triage + batch schedule, secretary, to-dos
+L4  superagent-event         the inbox: the company Feishu app (routing to employees), triage + batch schedule, to-dos
 L3  superagent-agent         conversations: agents, chat turns, memory, characters, collaboration, run log
 L3  superagent-task          execution: tasks, session pool, watchdog, the coding flow, automations
-L2  superagent-knowledge     organizational knowledge: the file knowledge base and shared skills
+L2  superagent-skills        skills: the working standards agents follow (personal or company-wide)
 L2  superagent-files         work files: what agents produce (documents, images, videos), their storage and agent tools
-L2  superagent-platform      administration: users, system settings, model providers, connectors
-L1  superagent-runtime       driving the coding-agent CLIs (Claude Code, Codex), per-turn MCP grants, image attachments
+L2  superagent-platform      administration: users, system settings, model providers, connectors (and the MCP servers runs get)
+L1  superagent-runtime       driving the coding-agent CLIs (Claude Code, Codex, DeepSeek, Kimi, Qwen; GLM via Claude Code), per-turn MCP grants, image attachments
 L1  superagent-storage       JDBC implementations of the core store interfaces (MySQL, ClickHouse)
 L0  superagent-api           request/response DTOs and API paths
 L0  superagent-core          domain records, store interfaces, error base types, small shared utilities
 ```
 
-- **agent and task are siblings** and never depend on each other; what both need (skills, the knowledge
-  base) sits below them in knowledge. Anything that needs both (SuperAgent, the inbox secretary) is above.
+- **agent and task are siblings** and never depend on each other; what both need (skills, files) sits
+  below them in skills and files. Anything that needs both (SuperAgent, the inbox secretary) is above.
 - **Packages follow modules**: `com.superagent.<module>[.<area>]`, e.g. `com.superagent.task.automation`,
   `com.superagent.platform.provider`. Controllers stay in `com.superagent.web.<area>`.
 - **Business logic lives in the domain modules**, not in web: a controller only maps HTTP onto a service.

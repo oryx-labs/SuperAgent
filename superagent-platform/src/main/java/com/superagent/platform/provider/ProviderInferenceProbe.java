@@ -60,6 +60,7 @@ public class ProviderInferenceProbe {
         switch (providerKey) {
             case "claude" -> checkClaude(modelId, credential);
             case "codex" -> checkCodex(modelId, credential);
+            case "deepseek", "glm", "kimi", "qwen" -> checkVendor(providerKey, modelId, credential);
             default -> throw new IOException("Inference check is not available for " + providerKey + " yet");
         }
     }
@@ -72,7 +73,34 @@ public class ProviderInferenceProbe {
             checkClaudeCli(modelId);
             return;
         }
-        String base = access.get().base();
+        checkAnthropic(access.get(), modelId);
+    }
+
+    /**
+     * The vendors reached by key alone: no key, no check. {@code modelId} null (a new key, no model list yet) asks
+     * for the list instead of an inference, which still proves the key.
+     */
+    private void checkVendor(String providerKey, String modelId, RunCredential credential) throws IOException, InterruptedException {
+        var entry = com.superagent.core.provider.ProviderCatalog.find(providerKey).orElseThrow();
+        ApiAccess access = ApiAccess.of(entry, credential).orElseThrow(() -> new IOException("还没有配置 API Key"));
+        if (modelId == null) {
+            send(access.base(), access.authorizeBearer(HttpRequest.newBuilder(URI.create(access.modelsUrl(providerKey)))
+                    .timeout(Duration.ofSeconds(30)).GET()));
+        } else if (com.superagent.core.provider.ProviderCatalog.ANTHROPIC.equals(entry.access().protocol())) {
+            checkAnthropic(access, modelId);
+        } else {
+            ObjectNode body = mapper.createObjectNode();
+            body.put("model", modelId);
+            body.put("max_tokens", 8);
+            body.putArray("messages").addObject().put("role", "user").put("content", PROMPT);
+            send(access.base(), access.authorizeBearer(HttpRequest.newBuilder(URI.create(access.base() + "/chat/completions"))
+                    .timeout(Duration.ofSeconds(60)).header("content-type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))));
+        }
+    }
+
+    private void checkAnthropic(ApiAccess access, String modelId) throws IOException, InterruptedException {
+        String base = access.base();
 
         ObjectNode body = mapper.createObjectNode();
         body.put("model", modelId);
@@ -83,7 +111,15 @@ public class ProviderInferenceProbe {
                 .header("anthropic-version", "2023-06-01")
                 .header("content-type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)));
-        access.get().authorize(req);
+        access.authorize(req);
+        HttpResponse<String> resp = send(base, req);
+        JsonNode root = mapper.readTree(resp.body());
+        if (!root.path("content").isArray()) {
+            throw new IOException("response has no content");
+        }
+    }
+
+    private HttpResponse<String> send(String base, HttpRequest.Builder req) throws IOException, InterruptedException {
         HttpResponse<String> resp;
         try {
             resp = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
@@ -97,10 +133,7 @@ public class ProviderInferenceProbe {
         if (resp.statusCode() != 200) {
             throw new IOException("HTTP " + resp.statusCode() + errorDetail(resp.body()));
         }
-        JsonNode root = mapper.readTree(resp.body());
-        if (!root.path("content").isArray()) {
-            throw new IOException("response has no content");
-        }
+        return resp;
     }
 
     private void checkClaudeCli(String modelId) throws IOException, InterruptedException {

@@ -44,12 +44,14 @@ class InboxStoreTest {
         store.save(store.find("t1").orElseThrow().withStatus(InboxTodo.TodoStatus.TASKED, "task-9"));
         assertThat(store.list("ada")).singleElement().satisfies(t -> assertThat(t.taskId()).isEqualTo("task-9"));
 
-        EventSource s = new EventSource("ada", EventSource.FEISHU, "cli_x", "v1:abc", true, null, "123456",
-                "09:00", "Asia/Shanghai", null, null, null, null, null, now, now);
+        EventSource s = new EventSource("ada", EventSource.FEISHU, null, true, null, "123456",
+                "09:00", "Asia/Shanghai", null, null, null, now, now);
         store.save(s);
-        store.save(s.withBinding("ou_ada").withRuns(LocalDate.of(2026, 11, 5), now.minus(Duration.ofHours(1))));
+        store.save(s.withBinding("cli_x", "ou_ada").withRuns(LocalDate.of(2026, 11, 5), now.minus(Duration.ofHours(1))));
         assertThat(store.find("ada", EventSource.FEISHU)).hasValueSatisfying(got -> {
             assertThat(got.ownerExternalId()).isEqualTo("ou_ada");
+            assertThat(got.linkedTo("cli_x")).isTrue();
+            assertThat(got.linkedTo("cli_other")).isFalse();
             assertThat(got.bindCode()).isNull();
             assertThat(got.lastDigestDate()).isEqualTo(LocalDate.of(2026, 11, 5));
         });

@@ -27,12 +27,35 @@ record ApiAccess(String base, String key, boolean bearer) {
                 blank(apiKey) ? token : apiKey, blank(apiKey)));
     }
 
+    /** A vendor reached through a pool credential; its endpoint falls back to the catalogue's default. */
+    static Optional<ApiAccess> of(com.superagent.core.provider.ProviderCatalog.Entry entry, RunCredential credential) {
+        if (credential == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new ApiAccess(trim(credential.baseUrl(), entry.access().defaultBaseUrl()), credential.apiKey(),
+                credential.bearer()));
+    }
+
+    /** Where this endpoint lists models: its OpenAI-style API, which the Anthropic-compatible vendors keep beside it. */
+    String modelsUrl(String providerKey) {
+        return switch (providerKey) {
+            case "deepseek" -> base.replaceFirst("/anthropic$", "") + "/models";
+            case "glm" -> base.replaceFirst("/api/anthropic$", "/api/paas/v4") + "/models";
+            default -> base + "/models";
+        };
+    }
+
     boolean viaGateway() {
         return !ANTHROPIC.equals(base);
     }
 
     HttpRequest.Builder authorize(HttpRequest.Builder req) {
         return bearer ? req.header("Authorization", "Bearer " + key) : req.header("x-api-key", key);
+    }
+
+    /** OpenAI-style auth, whatever this entry's own header choice. */
+    HttpRequest.Builder authorizeBearer(HttpRequest.Builder req) {
+        return req.header("Authorization", "Bearer " + key);
     }
 
     private static String trim(String url, String fallback) {

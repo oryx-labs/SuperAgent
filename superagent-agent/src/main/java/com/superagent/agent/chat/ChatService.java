@@ -31,11 +31,12 @@ import com.superagent.core.chat.MessageRole;
 import com.superagent.core.chat.SessionStatus;
 import com.superagent.core.user.UserStore;
 import com.superagent.files.FileService;
-import com.superagent.knowledge.skill.SkillService;
+import com.superagent.skills.SkillService;
 import com.superagent.platform.provider.CredentialService;
 import com.superagent.platform.provider.ProviderService;
 import com.superagent.platform.settings.SettingsService;
 import com.superagent.runtime.attachment.ImageAttachmentStore;
+import com.superagent.core.connector.McpServerSpec;
 import com.superagent.runtime.mcp.McpGrants;
 
 import jakarta.annotation.PreDestroy;
@@ -183,6 +184,13 @@ public class ChatService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setCredentials(CredentialService credentials) {
         this.credentials = credentials;
+    }
+
+    private com.superagent.platform.connector.ConnectorService connectors; // null in tests: no company connectors
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setConnectors(com.superagent.platform.connector.ConnectorService connectors) {
+        this.connectors = connectors;
     }
 
     // --- session management ---
@@ -599,9 +607,16 @@ public class ChatService {
         McpGrants.Grant grant = mcpGrants == null ? null : mcpGrants.openChat(user, session.agentId(), session.id(), assistantMessageId, session.workspaceDir());
         String cli = agentType.cliName();
         CredentialService.Choice choice = credentials == null ? new CredentialService.Choice(null) : credentials.current(cli);
+        // The company's connectors, with the identity of whoever sent this message (their own authorizations).
+        List<McpServerSpec> connected = connectors == null ? List.of() : connectors.mcpServersFor(user);
+        List<String> tools = allowedTools;
+        if (!connected.isEmpty()) {
+            tools = new ArrayList<>(allowedTools);
+            tools.addAll(com.superagent.platform.connector.ConnectorService.toolPatterns(connected));
+        }
         AgentRunRequest request = new AgentRunRequest(session.id(), agentSessionId, session.workspaceDir(), prompt, model,
-                allowedTools, skipPermissions, grant == null ? null : mcpGrants.mcpConfig(grant), systemPrompt,
-                attached, agentMemory, choice.credential());
+                tools, skipPermissions, McpGrants.withServers(grant == null ? null : mcpGrants.mcpConfig(grant), connected),
+                systemPrompt, attached, agentMemory, choice.credential());
         try {
             runOnce(runner, request, sink, cancellation, error, session);
             // The endpoint or key failed (auth, quota, server down) before anything was said: switch to the

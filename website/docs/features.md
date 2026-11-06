@@ -11,9 +11,9 @@ SuperAgent is designed from the company's side: the company and its employees, n
 
 Everyone in the company works in the same system, so the work stays with the company instead of leaving with people.
 
-- **Everything stays.** Conversations, tasks, and deliverables are kept in the company's system, with a traceable record of what was done.
-- **Agents learn.** Each agent distills what it has learned into memory, which it uses in later sessions.
-- **The system consolidates.** The system distills, summarizes, and aggregates work into company knowledge. *(Company-wide consolidation: coming soon.)*
+- **Files.** Everything agents produce, and everything people send them (files and links), is kept in Files, with a traceable record of the task that made it.
+- **Agent memory.** Each agent keeps its own long-term memory and gets better at its job over time. Members can read it; the agent's owner can edit it.
+- **Nothing leaves with people.** When someone changes roles, the agent stays, along with its memory and files.
 
 ## 2. Collaboration and handoff
 
@@ -22,17 +22,16 @@ Collaboration between employees happens inside one AI system.
 - **Shared agents.** Several people can work with the same agent on the same job and let it finish the task together. Every member's message moves the work forward.
 - **Handoff.** When someone leaves, their agents and context are handed to the next person, who continues from where they stopped. *(Coming soon.)*
 
-## 3. Assets for each person, team, and the company
+## 3. Reusable methods
 
-Knowledge bases and skills hold what everyday work needs:
+Good practice becomes something the whole company can use.
 
-| Level | Who can use it | Knowledge base | Skills |
-| --- | --- | --- | --- |
-| **Company** | Everyone in the company | ✓ | ✓ |
-| **Team** | Members of the team | ✓ | |
-| **Personal** | Just the employee | ✓ | ✓ |
+| Skills | Who can use them | Who can edit them |
+| --- | --- | --- |
+| **Company** | Everyone in the company | Administrators |
+| **Personal** | Just the employee | The employee |
 
-Skills are reusable instruction sets that agents and tasks load as needed. Team membership comes from the company's directory. A new hire starts with what the team and company already know.
+Skills are reusable instruction sets that agents and tasks load as needed. Agents are team assets too: their setup, memory, and files belong to the company, so a new hire takes over instead of starting from zero.
 
 ## 4. Cost, models, and governance
 

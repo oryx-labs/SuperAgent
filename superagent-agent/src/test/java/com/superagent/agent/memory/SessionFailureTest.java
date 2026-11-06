@@ -1,5 +1,6 @@
 package com.superagent.agent.memory;
 
+import com.superagent.agent.log.AgentLogService;
 import com.superagent.core.agent.Agent;
 import com.superagent.core.agent.AgentKind;
 import com.superagent.core.agent.AgentMemoryState;
@@ -14,6 +15,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /** When an agent gives up on its session: ten real failures in a row; network trouble never counts. */
 class SessionFailureTest {
@@ -26,9 +28,9 @@ class SessionFailureTest {
     }
 
     private final InMemoryStates states = new InMemoryStates();
-    // Only the failure bookkeeping is exercised, which needs nothing but the state store.
-    private final AgentMemoryService memory = new AgentMemoryService(null, null, null, states, null, null, List.of(),
-            10, 2, 30, 3, "Asia/Shanghai", 10, 10, null);
+    // Failure bookkeeping and the memory text need nothing but the state store (and the run log, for edits).
+    private final AgentMemoryService memory = new AgentMemoryService(null, null, states, null, null, List.of(),
+            10, 2, 30, 3, "Asia/Shanghai", 10, 10, mock(AgentLogService.class));
     private final Agent agent = new Agent("a1", "Ada", null, null, null, null, AgentStatus.ACTIVE, "alice",
             AgentKind.STANDARD, null, Instant.now(), Instant.now());
 
@@ -60,5 +62,16 @@ class SessionFailureTest {
         }
         assertThat(memory.recordFailure(agent, "prompt is too long")).isTrue();
         assertThat(states.find("a1").orElseThrow().sessionFailures()).isZero(); // the fresh session starts clean
+    }
+
+    @Test
+    void theOwnersEditIsTheMemoryAndBlankClearsIt() {
+        assertThat(memory.read(agent)).isNull();
+        memory.recordFailure(agent, "prompt is too long");
+        memory.edit(agent, "  ## 偏好\n- 回答用中文  ", "alice");
+        assertThat(memory.read(agent)).isEqualTo("## 偏好\n- 回答用中文");
+        assertThat(states.find("a1").orElseThrow().sessionFailures()).isEqualTo(1); // bookkeeping is kept
+        memory.edit(agent, " ", "alice");
+        assertThat(memory.read(agent)).isNull();
     }
 }

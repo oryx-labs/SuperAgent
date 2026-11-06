@@ -3,6 +3,7 @@ package com.superagent.agent;
 import com.superagent.agent.chat.ChatService;
 import com.superagent.agent.memory.AgentMemoryService;
 import com.superagent.api.agent.AgentDto;
+import com.superagent.api.agent.AgentMemoryDto;
 import com.superagent.api.agent.AgentMemberDto;
 import com.superagent.api.agent.CreateAgentRequest;
 import com.superagent.api.agent.UpdateAgentRequest;
@@ -21,7 +22,7 @@ import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
-import com.superagent.knowledge.skill.SkillService;
+import com.superagent.skills.SkillService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -251,6 +252,28 @@ public class AgentService {
                 a.status().name().toLowerCase(), a.kind().name().toLowerCase(), a.managedBy(), sessionId,
                 a.createdAt(), a.updatedAt(), a.owner(), Objects.equals(a.owner(), viewer) ? "owner" : "collaborator",
                 people, shareable(a));
+    }
+
+    // --- memory ---
+
+    /** Members may read the agent's memory; only its owner changes it. */
+    public AgentMemoryDto memory(String id, String user) {
+        Agent agent = requireViewer(id, user);
+        return new AgentMemoryDto(memory.read(agent), memory.updatedAt(agent), Objects.equals(agent.owner(), user),
+                memory.distilling(agent.id()));
+    }
+
+    public AgentMemoryDto editMemory(String id, String user, String text) {
+        Agent agent = require(id, user);
+        memory.edit(agent, text, user);
+        return memory(id, user);
+    }
+
+    /** Folds the conversation not in memory yet into it now, in the background. */
+    public AgentMemoryDto distillMemory(String id, String user) {
+        Agent agent = require(id, user);
+        memory.distillNow(agent);
+        return memory(id, user);
     }
 
     // --- collaboration ---

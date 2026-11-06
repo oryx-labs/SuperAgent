@@ -2,6 +2,7 @@ package com.superagent.event.feishu;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.lark.oapi.Client;
 import com.lark.oapi.core.response.RawResponse;
 import com.lark.oapi.core.token.AccessTokenType;
@@ -19,12 +20,19 @@ import com.lark.oapi.service.im.v1.model.GetChatReq;
 import com.lark.oapi.service.im.v1.model.GetChatResp;
 import com.lark.oapi.service.im.v1.model.MentionEvent;
 import com.lark.oapi.service.im.v1.model.P2MessageReceiveV1;
+import com.superagent.core.connector.Connector;
+import com.superagent.core.connector.ConnectorChanged;
+import com.superagent.core.connector.ConnectorCredential;
+import com.superagent.core.connector.ConnectorCredentialStore;
+import com.superagent.core.connector.ConnectorKind;
+import com.superagent.core.connector.ConnectorStore;
 import com.superagent.core.inbox.EventPriority;
 import com.superagent.core.inbox.EventSource;
-import com.superagent.core.inbox.EventSourceChanged;
 import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.inbox.InboxEvent;
 import com.superagent.core.security.SecretCipher;
+import com.superagent.core.user.User;
+import com.superagent.core.user.UserStore;
 import com.superagent.event.InboxService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,104 +43,141 @@ import org.springframework.stereotype.Component;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Each user's own Feishu bot, connected over Feishu's long connection (the server dials out, so no
- * public callback URL is needed). Received messages are normalized and handed to {@link InboxService};
- * the handler returns at once because Feishu redelivers events not acknowledged within seconds.
+ * The company's Feishu app, connected over Feishu's long connection (the server dials out, so no public
+ * callback URL is needed). One app serves everyone: each received message goes to the inbox of the employees
+ * it concerns, and SuperAgent's alerts go back to each employee's own Feishu DM. The handler returns at once
+ * because Feishu redelivers events not acknowledged within seconds.
  *
- * <p>Binding: the user sends their bot "绑定 &lt;code&gt;" (the code shown in SuperAgent); that DM's
- * sender becomes the owner's Feishu identity, used to spot mentions of them and to DM them alerts.
+ * <p>Who is who: employees are matched to their Feishu account by phone number (contact API, on connect and
+ * hourly); anyone it can't match DMs the bot "绑定 &lt;code&gt;" with the code shown on the Connectors page.
+ * Routing: a DM to the bot belongs to its sender; a group message goes to every linked member of the chat
+ * (triage decides how much it matters to each of them).
  */
 @Component
 public class FeishuConnector implements SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(FeishuConnector.class);
     private static final Pattern BIND = Pattern.compile("^\\s*(?:绑定|bind)\\s*([A-Za-z0-9]{6,16})\\s*$", Pattern.CASE_INSENSITIVE);
-    /** Anyone in the tenant can DM the bot, so a code survives only a few wrong guesses. */
+    /** Anyone in the tenant can DM the bot, so a sender gets only a few wrong guesses. */
     private static final int MAX_BIND_FAILURES = 5;
+    private static final int PHONE_BATCH = 50;
+    private static final Duration MEMBERS_TTL = Duration.ofMinutes(10);
+    private static final Duration HINT_EVERY = Duration.ofHours(6);
+    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final String DIGEST_TIME = "09:00";
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private final EventSourceStore sources;
+    private final ConnectorStore connectors;
+    private final ConnectorCredentialStore credentials;
+    private final EventSourceStore links;
+    private final UserStore users;
     private final InboxService inbox;
     private final SecretCipher cipher;
-    private final Map<String, Connection> connections = new ConcurrentHashMap<>();
     private final Map<String, Integer> bindFailures = new ConcurrentHashMap<>();
+    private final Map<String, Instant> hinted = new ConcurrentHashMap<>();
     private final ExecutorService work = Executors.newFixedThreadPool(4, r -> {
         Thread t = new Thread(r, "feishu-inbox");
         t.setDaemon(true);
         return t;
     });
+    private final ScheduledExecutorService ticker = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "feishu-sync");
+        t.setDaemon(true);
+        return t;
+    });
+    private volatile Connection current;
     private volatile boolean running;
 
-    /** One user's live bot: the API client, the long connection, and lookups cached for its lifetime. */
+    /** The live app: the API client, the long connection, and lookups cached for its lifetime. */
     private static final class Connection {
-        final String owner;
+        final String appId;
         final Client api;
-        final String botOpenId;
         volatile com.lark.oapi.ws.Client ws;
         final Map<String, String> names = new ConcurrentHashMap<>();
         final Map<String, String> chats = new ConcurrentHashMap<>();
+        final Map<String, Members> members = new ConcurrentHashMap<>();
 
-        Connection(String owner, Client api, String botOpenId) {
-            this.owner = owner;
+        Connection(String appId, Client api) {
+            this.appId = appId;
             this.api = api;
-            this.botOpenId = botOpenId;
         }
     }
 
-    public FeishuConnector(EventSourceStore sources, InboxService inbox, SecretCipher cipher) {
-        this.sources = sources;
+    private record Members(Set<String> openIds, Instant fetchedAt) {
+    }
+
+    public FeishuConnector(ConnectorStore connectors, ConnectorCredentialStore credentials, EventSourceStore links,
+                           UserStore users, InboxService inbox, SecretCipher cipher) {
+        this.connectors = connectors;
+        this.credentials = credentials;
+        this.links = links;
+        this.users = users;
         this.inbox = inbox;
         this.cipher = cipher;
         inbox.registerNotifier(EventSource.FEISHU, this::notifyOwner);
     }
 
     @EventListener
-    public void onChanged(EventSourceChanged changed) {
-        if (EventSource.FEISHU.equals(changed.type()) && running) {
-            work.execute(() -> reconnect(changed.owner()));
+    public void onChanged(ConnectorChanged changed) {
+        if (running) {
+            work.execute(this::reconnect);
         }
     }
 
-    private synchronized void reconnect(String owner) {
-        disconnect(owner);
-        sources.find(owner, EventSource.FEISHU).filter(EventSource::enabled).ifPresent(this::connect);
+    private synchronized void reconnect() {
+        disconnect();
+        connectors.listConnectors().stream().filter(c -> c.kind() == ConnectorKind.FEISHU && c.enabled())
+                .findFirst().ifPresent(this::connect);
     }
 
     /** Verifies the credentials (fetching the bot's own id), then opens the long connection on its own thread. */
-    private void connect(EventSource source) {
-        String owner = source.owner();
-        if (source.appId() == null || source.secretCipher() == null) {
-            setStatus(owner, "error", "App ID 或 App Secret 未填写");
-            return;
-        }
+    private void connect(Connector app) {
         String secret;
         try {
-            secret = cipher.decrypt(source.secretCipher());
+            secret = credentials.find(app.id(), ConnectorCredential.COMPANY).map(c -> cipher.decrypt(c.secretCipher()))
+                    .orElse(null);
         } catch (IllegalStateException e) {
-            setStatus(owner, "error", "App Secret 无法解密，请重新填写");
+            setStatus(app.id(), "error", "App Secret 无法解密，请重新填写");
             return;
         }
-        Client api = Client.newBuilder(source.appId(), secret).build();
+        if (app.appId() == null || secret == null) {
+            setStatus(app.id(), "error", "App ID 或 App Secret 未填写");
+            return;
+        }
+        setStatus(app.id(), "connecting", null);
+        // Bounded, so an unreachable Feishu shows up as an error instead of a check that never returns.
+        Client api = Client.newBuilder(app.appId(), secret).requestTimeout(15, TimeUnit.SECONDS).build();
         String botOpenId;
         try {
             botOpenId = botOpenId(api);
         } catch (Exception e) {
-            setStatus(owner, "error", describe(e));
+            setStatus(app.id(), "error", describe(e));
             return;
         }
-        Connection conn = new Connection(owner, api, botOpenId);
+        Connection conn = new Connection(app.appId(), api);
         EventDispatcher dispatcher = EventDispatcher.newBuilder("", "")
                 .onP2MessageReceiveV1(new ImService.P2MessageReceiveV1Handler() {
                     @Override
@@ -141,39 +186,104 @@ public class FeishuConnector implements SmartLifecycle {
                     }
                 })
                 .build();
-        conn.ws = new com.lark.oapi.ws.Client.Builder(source.appId(), secret)
+        conn.ws = new com.lark.oapi.ws.Client.Builder(app.appId(), secret)
                 .eventHandler(dispatcher).autoReconnect(true).build();
-        connections.put(owner, conn);
-        setStatus(owner, "connecting", null);
+        current = conn;
         Thread t = new Thread(() -> {
             try {
                 conn.ws.start(); // connects (retrying itself on failure), then pings on its own executor
-                if (connections.get(owner) == conn) {
-                    setStatus(owner, "connected", null);
-                    log.info("feishu bot for {} connected (bot {})", owner, botOpenId);
+                if (current == conn) {
+                    setStatus(app.id(), "connected", null);
+                    log.info("feishu app {} connected (bot {})", app.appId(), botOpenId);
+                    syncIdentities(conn);
                 }
             } catch (RuntimeException e) {
-                setStatus(owner, "error", "长连接启动失败：" + e.getMessage());
+                setStatus(app.id(), "error", "长连接启动失败：" + e.getMessage());
             }
-        }, "feishu-ws-" + owner);
+        }, "feishu-ws");
         t.setDaemon(true);
         t.start();
     }
 
-    /** GET /bot/v3/info: the bot's own open_id (to recognise "@bot"); doubles as a credentials check. */
+    /** GET /bot/v3/info: the bot's own open_id, for the log; doubles as a credentials check. */
     private static String botOpenId(Client api) throws Exception {
-        RawResponse resp = api.get("/open-apis/bot/v3/info", null, AccessTokenType.Tenant);
-        JsonNode body = JSON.readTree(new String(resp.getBody(), StandardCharsets.UTF_8));
-        if (body.path("code").asInt(-1) != 0) {
-            throw new IllegalStateException(body.path("msg").asText("HTTP " + resp.getStatusCode()));
-        }
+        JsonNode body = call(api.get("/open-apis/bot/v3/info", null, AccessTokenType.Tenant));
         return body.path("bot").path("open_id").asText(null);
     }
 
+    // --- who is who ---
+
+    /**
+     * Links every employee with a phone number to their Feishu account, by asking the contact API who has that
+     * number. Someone already linked under this app keeps their link (it may have come from a bind code).
+     */
+    void syncIdentities(Connection conn) {
+        Map<String, User> byMobile = new LinkedHashMap<>();
+        for (User u : users.listUsers()) {
+            String mobile = mobile(u.phone());
+            if (u.enabled() && mobile != null) {
+                byMobile.put(mobile, u);
+            }
+        }
+        List<String> mobiles = new ArrayList<>(byMobile.keySet());
+        int linked = 0;
+        for (int i = 0; i < mobiles.size(); i += PHONE_BATCH) {
+            List<String> chunk = mobiles.subList(i, Math.min(mobiles.size(), i + PHONE_BATCH));
+            JsonNode found;
+            try {
+                ObjectNode req = JSON.createObjectNode();
+                chunk.forEach(req.putArray("mobiles")::add);
+                req.put("include_resigned", false);
+                found = call(conn.api.post("/open-apis/contact/v3/users/batch_get_id?user_id_type=open_id", req,
+                        AccessTokenType.Tenant));
+            } catch (Exception e) {
+                log.warn("feishu: can't match employees by phone (does the app have the contact permission?): {}",
+                        e.getMessage());
+                return;
+            }
+            for (JsonNode hit : found.path("user_list")) {
+                User u = byMobile.get(mobile(hit.path("mobile").asText(null)));
+                String openId = hit.path("user_id").asText("");
+                if (u != null && !openId.isEmpty() && link(conn, u.username(), openId, false)) {
+                    linked++;
+                }
+            }
+        }
+        if (linked > 0) {
+            log.info("feishu: linked {} employees by phone", linked);
+        }
+    }
+
+    /** Records {@code openId} as {@code owner}'s account under this app; returns whether anything changed. */
+    private boolean link(Connection conn, String owner, String openId, boolean replace) {
+        EventSource cur = links.find(owner, EventSource.FEISHU).orElse(null);
+        if (cur != null && cur.linkedTo(conn.appId) && (!replace || openId.equals(cur.ownerExternalId()))) {
+            return false;
+        }
+        // A Feishu account belongs to one employee: whoever had it under this app before loses it.
+        links.list().stream().filter(s -> EventSource.FEISHU.equals(s.type()) && !s.owner().equals(owner)
+                        && s.linkedTo(conn.appId) && openId.equals(s.ownerExternalId()))
+                .forEach(s -> links.save(s.withBinding(s.appId(), null)));
+        links.save(cur == null
+                ? EventSource.create(owner, EventSource.FEISHU, conn.appId, openId, null, DIGEST_TIME, ZONE.getId(),
+                LocalDate.now(ZONE))
+                : cur.withBinding(conn.appId, openId));
+        return true;
+    }
+
+    /** open_id → username for everyone linked under this app. */
+    private Map<String, String> owners(Connection conn) {
+        Map<String, String> out = new HashMap<>();
+        links.listEnabled(EventSource.FEISHU).stream().filter(s -> s.linkedTo(conn.appId))
+                .forEach(s -> out.put(s.ownerExternalId(), s.owner()));
+        return out;
+    }
+
+    // --- receiving ---
+
     private void receive(Connection conn, P2MessageReceiveV1 event) {
         try {
-            EventSource source = sources.find(conn.owner, EventSource.FEISHU).orElse(null);
-            if (source == null || !source.enabled() || event.getEvent() == null) {
+            if (current != conn || event.getEvent() == null) {
                 return;
             }
             EventMessage m = event.getEvent().getMessage();
@@ -182,62 +292,99 @@ public class FeishuConnector implements SmartLifecycle {
             boolean fromBot = sender != null && "app".equals(sender.getSenderType());
 
             Map<String, String> mentionNames = new LinkedHashMap<>();
-            boolean mentionsMe = false;
+            Set<String> mentioned = new HashSet<>();
             if (m.getMentions() != null) {
                 for (MentionEvent mention : m.getMentions()) {
                     mentionNames.put(mention.getKey(), mention.getName());
-                    String id = mention.getId() == null ? null : mention.getId().getOpenId();
-                    if (id != null && (id.equals(conn.botOpenId) || id.equals(source.ownerExternalId()))) {
-                        mentionsMe = true;
+                    if (mention.getId() != null && mention.getId().getOpenId() != null) {
+                        mentioned.add(mention.getId().getOpenId());
                     }
                 }
             }
             String text = FeishuMessages.text(m.getMessageType(), m.getContent(), mentionNames);
-            boolean direct = "p2p".equals(m.getChatType());
+            String raw = Jsons.DEFAULT.toJson(event);
+            Map<String, String> owners = owners(conn);
 
-            if (direct && bind(conn, source, senderOpenId, text)) {
+            if ("p2p".equals(m.getChatType())) {
+                if (senderOpenId == null || bind(conn, senderOpenId, text)) {
+                    return;
+                }
+                String owner = owners.get(senderOpenId);
+                if (owner == null) {
+                    hint(conn, senderOpenId);
+                    return;
+                }
+                deliver(conn, owner, m, raw, senderOpenId, text, true, true, fromBot);
                 return;
             }
-            InboxEvent e = new InboxEvent(
-                    UUID.nameUUIDFromBytes(("feishu:" + m.getMessageId()).getBytes(StandardCharsets.UTF_8)).toString(),
-                    conn.owner, EventSource.FEISHU, m.getMessageId(), m.getChatId(),
-                    direct ? "私聊" : chatName(conn, m.getChatId()), m.getChatType(),
-                    m.getThreadId() != null ? m.getThreadId() : m.getRootId(),
-                    senderOpenId, userName(conn, senderOpenId), text, direct || mentionsMe, Jsons.DEFAULT.toJson(event),
-                    EventPriority.P2, null, false, null, millis(m.getCreateTime()), Instant.now(), Instant.now());
-            boolean fromOwner = senderOpenId != null && senderOpenId.equals(source.ownerExternalId());
-            inbox.ingest(source, e, fromOwner, fromBot);
+            Set<String> recipients = new LinkedHashSet<>();
+            mentioned.stream().filter(owners::containsKey).forEach(recipients::add);
+            members(conn, m.getChatId()).stream().filter(owners::containsKey).forEach(recipients::add);
+            recipients.remove(senderOpenId); // your own group messages aren't news to you
+            for (String openId : recipients) {
+                deliver(conn, owners.get(openId), m, raw, senderOpenId, text, mentioned.contains(openId), false, fromBot);
+            }
         } catch (RuntimeException e) {
-            log.warn("feishu message for {} dropped: {}", conn.owner, e.getMessage());
+            log.warn("feishu message dropped: {}", e.getMessage());
         }
     }
 
-    /** "绑定 123456" with the code shown in SuperAgent: remembers who the owner is on Feishu. */
-    private boolean bind(Connection conn, EventSource source, String senderOpenId, String text) {
-        Matcher m = BIND.matcher(text);
-        if (!m.matches() || senderOpenId == null) {
+    private void deliver(Connection conn, String owner, EventMessage m, String raw, String senderOpenId, String text,
+                         boolean mentionsOwner, boolean fromOwner, boolean fromBot) {
+        EventSource source = links.find(owner, EventSource.FEISHU).orElse(null);
+        if (source == null || !source.enabled()) {
+            return;
+        }
+        boolean direct = "p2p".equals(m.getChatType());
+        InboxEvent e = new InboxEvent(
+                UUID.nameUUIDFromBytes(("feishu:" + m.getMessageId() + ":" + owner).getBytes(StandardCharsets.UTF_8)).toString(),
+                owner, EventSource.FEISHU, m.getMessageId(), m.getChatId(),
+                direct ? "私聊" : chatName(conn, m.getChatId()), m.getChatType(),
+                m.getThreadId() != null ? m.getThreadId() : m.getRootId(),
+                senderOpenId, userName(conn, senderOpenId), text, direct || mentionsOwner, raw,
+                EventPriority.P2, null, false, null, millis(m.getCreateTime()), Instant.now(), Instant.now());
+        inbox.ingest(source, e, fromOwner, fromBot);
+    }
+
+    /** "绑定 XXXX" with the code from the Connectors page: links the sender's Feishu account to that employee. */
+    private boolean bind(Connection conn, String senderOpenId, String text) {
+        Matcher m = BIND.matcher(text == null ? "" : text);
+        if (!m.matches()) {
             return false;
         }
-        boolean ok = source.bindCode() != null && source.bindCode().equalsIgnoreCase(m.group(1));
-        if (ok) {
-            bindFailures.remove(conn.owner);
-            sources.save(source.withBinding(senderOpenId));
-            log.info("feishu bot for {} bound to {}", conn.owner, senderOpenId);
-        } else if (source.bindCode() != null
-                && bindFailures.merge(conn.owner, 1, Integer::sum) >= MAX_BIND_FAILURES) {
-            bindFailures.remove(conn.owner);
-            sources.save(source.withBindCode(null)); // burn it: the owner generates a new one in SuperAgent
-            log.warn("feishu bot for {}: bind code invalidated after {} wrong attempts", conn.owner, MAX_BIND_FAILURES);
+        if (bindFailures.getOrDefault(senderOpenId, 0) >= MAX_BIND_FAILURES) {
+            send(conn, senderOpenId, "绑定码错误次数过多，请联系管理员。");
+            return true;
         }
-        send(conn, senderOpenId, ok ? "已绑定。紧急消息会私聊提醒你，其他消息会整理进 SuperAgent 的秘书对话。"
-                : "绑定码不正确或已失效，请在 SuperAgent 的收件箱设置里重新生成。");
+        Optional<EventSource> match = links.list().stream()
+                .filter(s -> EventSource.FEISHU.equals(s.type()) && m.group(1).equalsIgnoreCase(s.bindCode()))
+                .findFirst();
+        if (match.isPresent()) {
+            bindFailures.remove(senderOpenId);
+            link(conn, match.get().owner(), senderOpenId, true);
+            log.info("feishu: {} linked by bind code", match.get().owner());
+            send(conn, senderOpenId, "已关联。发给我的消息和群里与你有关的消息会交给你的 SuperAgent，紧急的事会私聊提醒你。");
+        } else {
+            bindFailures.merge(senderOpenId, 1, Integer::sum);
+            send(conn, senderOpenId, "绑定码不正确或已失效，请在 SuperAgent 的「连接」页面重新生成。");
+        }
         return true;
     }
 
-    /** Pushes a short alert to the owner's Feishu DM (needs a completed bind). */
+    /** Someone the app doesn't know DMed the bot: tell them how to link, now and then. */
+    private void hint(Connection conn, String openId) {
+        Instant last = hinted.get(openId);
+        if (last != null && Instant.now().isBefore(last.plus(HINT_EVERY))) {
+            return;
+        }
+        hinted.put(openId, Instant.now());
+        send(conn, openId, "你的飞书账号还没有关联 SuperAgent。请在 SuperAgent 的「连接」页面找到飞书，按提示把绑定码发给我。");
+    }
+
+    /** Pushes a short alert to an employee's Feishu DM (needs them linked under the current app). */
     private void notifyOwner(EventSource source, String text) {
-        Connection conn = connections.get(source.owner());
-        if (conn == null || source.ownerExternalId() == null) {
+        Connection conn = current;
+        if (conn == null || !source.linkedTo(conn.appId)) {
             return;
         }
         send(conn, source.ownerExternalId(), text);
@@ -252,11 +399,42 @@ public class FeishuConnector implements SmartLifecycle {
                             .receiveId(openId).msgType("text").content(content).build())
                     .build());
             if (!resp.success()) {
-                log.warn("feishu send for {} failed: {} {}", conn.owner, resp.getCode(), resp.getMsg());
+                log.warn("feishu send failed: {} {}", resp.getCode(), resp.getMsg());
             }
         } catch (Exception e) {
-            log.warn("feishu send for {} failed: {}", conn.owner, e.getMessage());
+            log.warn("feishu send failed: {}", e.getMessage());
         }
+    }
+
+    // --- lookups (cached per connection) ---
+
+    /** A chat's members' open_ids; needs the chat-member permission, so a failure means "mentions only". */
+    private Set<String> members(Connection conn, String chatId) {
+        if (chatId == null) {
+            return Set.of();
+        }
+        Members cached = conn.members.get(chatId);
+        if (cached != null && Instant.now().isBefore(cached.fetchedAt().plus(MEMBERS_TTL))) {
+            return cached.openIds();
+        }
+        Set<String> ids = new HashSet<>();
+        String page = null;
+        try {
+            for (int i = 0; i < 20; i++) {
+                String path = "/open-apis/im/v1/chats/" + chatId + "/members?member_id_type=open_id&page_size=100"
+                        + (page == null ? "" : "&page_token=" + page);
+                JsonNode data = call(conn.api.get(path, null, AccessTokenType.Tenant));
+                data.path("items").forEach(it -> ids.add(it.path("member_id").asText()));
+                page = data.path("has_more").asBoolean(false) ? data.path("page_token").asText(null) : null;
+                if (page == null) {
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("feishu: members of {} unavailable: {}", chatId, e.getMessage());
+        }
+        conn.members.put(chatId, new Members(Set.copyOf(ids), Instant.now()));
+        return ids;
     }
 
     /** Display name via the contact API; needs a contact permission, so a failure just falls back to the id. */
@@ -296,20 +474,39 @@ public class FeishuConnector implements SmartLifecycle {
         });
     }
 
-    private void setStatus(String owner, String status, String error) {
-        sources.find(owner, EventSource.FEISHU).ifPresent(s -> sources.save(s.withStatus(status, error)));
+    /** A Feishu open-API reply's {@code data}, or an exception carrying its error message. */
+    private static JsonNode call(RawResponse resp) throws Exception {
+        JsonNode body = JSON.readTree(new String(resp.getBody(), StandardCharsets.UTF_8));
+        if (body.path("code").asInt(-1) != 0) {
+            throw new IllegalStateException(body.path("msg").asText("HTTP " + resp.getStatusCode()));
+        }
+        return body.has("data") ? body.path("data") : body;
+    }
+
+    /** Digits (and a leading +) only, so "138 0000-0000" and "13800000000" are the same number. */
+    static String mobile(String phone) {
+        if (phone == null) {
+            return null;
+        }
+        String s = phone.strip().replaceAll("[\\s()-]", "");
+        return s.matches("\\+?\\d{5,20}") ? s : null;
+    }
+
+    private void setStatus(String connectorId, String status, String error) {
+        connectors.findConnector(connectorId).ifPresent(c -> connectors.save(c.withStatus(status, error)));
         if (error != null) {
-            log.warn("feishu bot for {}: {}", owner, error);
+            log.warn("feishu: {}", error);
         }
     }
 
     /**
      * The SDK's long-connection client has no public close: turn off its auto-reconnect and call its
      * protected disconnect, then stop its ping executor, so an old connection doesn't linger after the
-     * user changes or disables their bot.
+     * administrator changes or disables the app.
      */
-    private void disconnect(String owner) {
-        Connection conn = connections.remove(owner);
+    private void disconnect() {
+        Connection conn = current;
+        current = null;
         if (conn == null || conn.ws == null) {
             return;
         }
@@ -324,7 +521,7 @@ public class FeishuConnector implements SmartLifecycle {
             executor.setAccessible(true);
             ((ExecutorService) executor.get(conn.ws)).shutdownNow();
         } catch (ReflectiveOperationException | RuntimeException e) {
-            log.warn("feishu bot for {}: could not close the old connection cleanly: {}", owner, e.getMessage());
+            log.warn("feishu: could not close the old connection cleanly: {}", e.getMessage());
         }
     }
 
@@ -347,23 +544,29 @@ public class FeishuConnector implements SmartLifecycle {
         }
     }
 
-    /** For the UI: whether this owner has a live connection object. */
-    public Optional<String> botOpenId(String owner) {
-        return Optional.ofNullable(connections.get(owner)).map(c -> c.botOpenId);
-    }
-
     // --- lifecycle ---
 
     @Override
     public void start() {
         running = true;
-        work.execute(() -> sources.listEnabled(EventSource.FEISHU).forEach(s -> reconnect(s.owner())));
+        work.execute(this::reconnect);
+        ticker.scheduleWithFixedDelay(() -> {
+            Connection conn = current;
+            if (conn != null) {
+                try {
+                    syncIdentities(conn);
+                } catch (RuntimeException e) {
+                    log.warn("feishu: phone matching failed: {}", e.getMessage());
+                }
+            }
+        }, 1, 1, TimeUnit.HOURS);
     }
 
     @Override
     public void stop() {
         running = false;
-        connections.keySet().forEach(this::disconnect);
+        disconnect();
+        ticker.shutdownNow();
         work.shutdownNow();
     }
 

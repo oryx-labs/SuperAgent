@@ -39,9 +39,14 @@ import java.util.function.Consumer;
 @Service
 public class CredentialService {
 
-    /** The CLIs tasks and chat run on; only they get a pool (the install-only CLIs have nothing to use one). */
-    public static final Set<String> POOLED = Set.of("claude", "codex");
+    /** Every installable CLI has a pool; failover and checks apply to those whose protocol we can speak. */
+    public static final Set<String> POOLED = com.superagent.core.provider.ProviderCatalog.all().stream()
+            .filter(com.superagent.core.provider.ProviderCatalog.Entry::installable)
+            .map(com.superagent.core.provider.ProviderCatalog.Entry::key).collect(java.util.stream.Collectors.toSet());
     public static final String ENV_ID = "env";
+
+    private static final Set<String> VENDOR_CHECKED = Set.of("deepseek", "glm", "kimi", "qwen");
+    private static final Set<String> CHECKED = Set.of("claude", "codex", "deepseek", "glm", "kimi", "qwen");
 
     private static final Logger log = LoggerFactory.getLogger(CredentialService.class);
     private static final TypeReference<List<ProviderModelDto>> MODEL_LIST = new TypeReference<>() {
@@ -186,8 +191,15 @@ public class CredentialService {
         return new Choice(toRun(pool.get(0)));
     }
 
+    /** Claude and Codex know their own default; the vendors' endpoints come from the catalogue. */
+    private static String defaultBaseUrl(String providerKey) {
+        return "claude".equals(providerKey) ? null : com.superagent.core.provider.ProviderCatalog.find(providerKey)
+                .map(e -> e.access().defaultBaseUrl()).orElse(null);
+    }
+
     private RunCredential toRun(ProviderCredential c) {
-        return new RunCredential(c.id(), c.baseUrl(), cipher.decrypt(c.keyCipher()), c.bearer());
+        return new RunCredential(c.id(), c.baseUrl() != null ? c.baseUrl() : defaultBaseUrl(c.providerKey()),
+                cipher.decrypt(c.keyCipher()), c.bearer());
     }
 
     // --- checking ---
@@ -208,8 +220,10 @@ public class CredentialService {
     ProviderCredential check(ProviderCredential c) {
         String model = testModel(c.providerKey());
         ProviderCredential checked;
-        if (model == null) {
-            checked = c.withHealth(ProviderCredential.UNKNOWN, "还没有可用来测试的模型（等模型列表刷新后再检查）");
+        boolean vendor = VENDOR_CHECKED.contains(c.providerKey()); // these can check a key without a model
+        if (model == null && !vendor) {
+            checked = c.withHealth(ProviderCredential.UNKNOWN, CHECKED.contains(c.providerKey())
+                    ? "还没有可用来测试的模型（等模型列表刷新后再检查）" : "这个 CLI 暂不支持检查 Key");
         } else {
             try {
                 probe.check(c.providerKey(), model, toRun(c));
@@ -342,7 +356,7 @@ public class CredentialService {
 
     private static void requirePooled(String providerKey) {
         if (!POOLED.contains(providerKey)) {
-            throw new IllegalArgumentException("API Key 只能给 Claude Code 和 Codex 配置");
+            throw new IllegalArgumentException("这个 CLI 不能配置 API Key：" + providerKey);
         }
     }
 
@@ -388,9 +402,9 @@ public class CredentialService {
         return u;
     }
 
-    /** Codex takes a plain API key; for Claude the page chooses (relays usually want a Bearer token). */
+    /** For Claude the page chooses (relays usually want a Bearer token); GLM wants one; the rest take a plain key. */
     private static boolean bearer(String providerKey, Boolean requested) {
-        return "claude".equals(providerKey) && (requested == null || requested);
+        return "glm".equals(providerKey) || ("claude".equals(providerKey) && (requested == null || requested));
     }
 
     private List<ProviderModelDto> parse(String json) {

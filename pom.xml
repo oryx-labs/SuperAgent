@@ -25,7 +25,7 @@
     <module>superagent-storage</module>
     <module>superagent-runtime</module>
     <module>superagent-platform</module>
-    <module>superagent-knowledge</module>
+    <module>superagent-skills</module>
     <module>superagent-files</module>
     <module>superagent-agent</module>
     <module>superagent-task</module>
@@ -77,7 +77,7 @@
       </dependency>
       <dependency>
         <groupId>com.superagent</groupId>
-        <artifactId>superagent-knowledge</artifactId>
+        <artifactId>superagent-skills</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

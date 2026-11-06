@@ -76,7 +76,11 @@ public class CliConfigWriter {
             switch (providerKey) {
                 case "claude" -> writeClaude(machine.claudeDir(), choice.credential());
                 case "codex" -> writeCodex(machine.codexHome(), choice.credential());
-                default -> { /* no pool */ }
+                case "qwen" -> writeEnvFile(machine.home(".qwen").resolve(".env"), "OPENAI_API_KEY", "OPENAI_BASE_URL", choice.credential());
+                case "gemini" -> writeEnvFile(machine.home(".gemini").resolve(".env"), "GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL", choice.credential());
+                // GLM shares Claude Code's config (Claude's pool owns it), Kimi's runs have a home of their own;
+                // DeepSeek, CodeBuddy and MiniMax have no key file we can write safely: their keys reach runs only.
+                default -> { /* nothing machine-wide */ }
             }
         } catch (IOException | RuntimeException e) {
             log.warn("{}: could not update the CLI's config: {}", providerKey, e.getMessage());
@@ -185,6 +189,35 @@ public class CliConfigWriter {
         }
         writeOwnerOnly(config, String.join("\n", lines) + "\n");
         return true;
+    }
+
+    // --- .env files (Qwen, Gemini) ---
+
+    /** Sets the two variables in a CLI's .env, leaving its other lines alone; null restores the file's original. */
+    void writeEnvFile(Path file, String keyVar, String urlVar, RunCredential c) throws IOException {
+        if (c == null) {
+            restoreWhole(file);
+            return;
+        }
+        List<String> lines = new ArrayList<>();
+        if (Files.isRegularFile(file)) {
+            for (String l : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                if (!l.startsWith(keyVar + "=") && !l.startsWith(urlVar + "=")) {
+                    lines.add(l);
+                }
+            }
+        }
+        lines.add(keyVar + "=" + c.apiKey());
+        if (c.baseUrl() != null) {
+            lines.add(urlVar + "=" + c.baseUrl());
+        }
+        String content = String.join("\n", lines) + "\n";
+        if (Files.isRegularFile(file) && content.equals(Files.readString(file))) {
+            return;
+        }
+        keepOriginal(file);
+        writeOwnerOnly(file, content);
+        log.info("{} now uses {}", file.getFileName(), c);
     }
 
     // --- originals ---

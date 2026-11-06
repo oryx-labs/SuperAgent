@@ -102,3 +102,73 @@ function setBubbleContent(bubble, role, content) {
   if (isUserRole(role)) bubble.textContent = content;
   else bubble.innerHTML = renderMarkdown(content);
 }
+
+// ---------- shared request helpers and the small dialog ----------
+// Server errors come back as {code, message}; surface the message.
+async function kbJson(r) {
+  const body = await r.json().catch(() => null);
+  if (!r.ok) throw new Error((body && body.message) || ("HTTP " + r.status));
+  return body ? body.data : null;
+}
+function kbPost(url, body) {
+  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(kbJson);
+}
+function kbFormatSize(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+
+// One small dialog for a name, a confirmation or a choice; action() does the request and may throw.
+const kel = {
+  modal: document.getElementById("kbModal"),
+  form: document.getElementById("kbForm"),
+  modalTitle: document.getElementById("kbModalTitle"),
+  modalMsg: document.getElementById("kbModalMsg"),
+  nameField: document.getElementById("kbNameField"),
+  nameInput: document.getElementById("kbNameInput"),
+  targetField: document.getElementById("kbTargetField"),
+  targetSelect: document.getElementById("kbTargetSelect"),
+  modalError: document.getElementById("kbModalError"),
+  modalSubmit: document.getElementById("kbModalSubmit"),
+};
+let kbModalAction = null;
+
+function kbOpenModal({ title, submit, danger, message, name, nameLabel, targets, action }) {
+  kbModalAction = action;
+  kel.modalTitle.textContent = title;
+  kel.modalSubmit.textContent = submit;
+  kel.modalSubmit.classList.toggle("btn--danger", !!danger);
+  kel.modalMsg.hidden = !message;
+  kel.modalMsg.textContent = message || "";
+  kel.nameField.hidden = name === undefined;
+  kel.nameField.querySelector("span").textContent = nameLabel || L("common.name");
+  kel.nameInput.value = name || "";
+  kel.targetField.hidden = !targets;
+  kel.targetSelect.innerHTML = "";
+  (targets || []).forEach(t => {
+    const o = document.createElement("option");
+    o.value = t;
+    o.textContent = t;
+    kel.targetSelect.appendChild(o);
+  });
+  kel.modalError.hidden = true;
+  kel.modal.hidden = false;
+  if (name !== undefined) { kel.nameInput.focus(); kel.nameInput.select(); }
+}
+const kbCloseModal = () => { kel.modal.hidden = true; kbModalAction = null; };
+kel.modal.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", kbCloseModal));
+kel.form.addEventListener("submit", async e => {
+  e.preventDefault();
+  if (!kbModalAction) return;
+  kel.modalSubmit.disabled = true;
+  try {
+    await kbModalAction();
+    kbCloseModal();
+  } catch (err) {
+    kel.modalError.textContent = err.message;
+    kel.modalError.hidden = false;
+  } finally {
+    kel.modalSubmit.disabled = false;
+  }
+});

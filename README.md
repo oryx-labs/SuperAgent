@@ -23,7 +23,7 @@ SuperAgent is designed from the company's side instead: the company and its empl
 
 ## Why SuperAgent?
 
-Handing every employee a personal assistant doesn't make AI work for a company. The work leaves with the person, colleagues can't build on each other, knowledge never accumulates, costs are scattered and wasteful, and the company can't see any of it.
+Handing every employee a personal assistant doesn't make AI work for a company. The work leaves with the person, colleagues can't build on each other, nothing accumulates, costs are scattered and wasteful, and the company can't see any of it.
 
 **In short, SuperAgent is company-controlled, cost-efficient, accumulates assets automatically, and is easy to use.**
 
@@ -31,9 +31,9 @@ Handing every employee a personal assistant doesn't make AI work for a company. 
 
 In priority order. Items marked *(coming soon)* are still being built.
 
-1. **Work becomes company assets.** Everyone works in one system, so conversations, tasks, and deliverables stay with the company. Agents distill what they learn into memory, and the system summarizes and consolidates work into company knowledge *(company-wide consolidation: coming soon)*.
+1. **Work becomes company assets.** Everyone works in one system. Everything agents produce, and everything people send them (files and links), is kept in Files, and each agent builds its own long-term memory. When people change, the agent stays with its memory and files.
 2. **Collaboration and handoff.** Collaboration happens inside one AI system: several people can work with the same agent on the same job. When someone leaves, their agents and context go to the next person, who continues from there *(handoff: coming soon)*.
-3. **Assets for each person, team, and the company.** Knowledge bases at the employee, team, and company levels, plus personal and company skills, hold what everyday work needs, so a new hire starts with what the team already knows.
+3. **Reusable methods.** Skills at the personal and company levels turn good practice into company practice. Agents are team assets too: their setup, memory, and files belong to the company, so a new hire takes over instead of starting from zero.
 4. **Cost and models.** Employees get AI on day one, with no personal subscriptions and no wasted tokens. The company pays by usage, sees spend per task and per model, works with any model provider, and routes each task to a model that fits its difficulty *(routing by difficulty: coming soon)*.
 5. **Audit and security.** Built-in audit and security: human confirmation for key decisions, identity and permissions, per-agent run logs, and office tools such as Feishu, with enterprise approvals connected *(approvals: coming soon)*.
 

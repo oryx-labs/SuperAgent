@@ -57,6 +57,8 @@ public class NodeRuntimeService {
     });
     private final AtomicBoolean installing = new AtomicBoolean();
     private final AtomicReference<String> lastError = new AtomicReference<>();
+    /** The last private-Node install, from the Node card or as a CLI install's first step. */
+    private volatile InstallJob lastJob;
 
     public NodeRuntimeService(CliPaths paths, ProviderProbe probe) {
         this.paths = paths;
@@ -81,35 +83,47 @@ public class NodeRuntimeService {
         Optional<Path> bin = paths.find("node");
         String version = bin.flatMap(b -> probe.version(b, List.of("--version"))).orElse(null);
         String source = bin.isEmpty() ? null : bin.get().startsWith(paths.nodeRoot()) ? "private" : "system";
+        InstallJob job = lastJob;
         return new NodeRuntimeDto(version, source, bin.map(Path::toString).orElse(null), installing.get(),
-                lastError.get());
+                lastError.get(), job == null ? null : job.currentStep(), job != null);
     }
 
     /** Starts installing (or replacing) the private Node in the background; the status reports progress. */
     public NodeRuntimeDto install() {
+        InstallJob job = new InstallJob("install", "排队中：等前一个 Node.js 安装结束");
+        lastJob = job;
         installer.execute(() -> {
             try {
-                installPrivate();
+                installPrivate(job);
+                job.finish(null);
             } catch (IOException e) {
-                // recorded in lastError for the status
+                job.finish(e.getMessage()); // also in lastError for the status
             } catch (InterruptedException e) {
+                job.finish("已中断");
                 Thread.currentThread().interrupt();
             }
         });
         return status();
     }
 
+    /** The log of the last private-Node install, or null when there's been none since the server started. */
+    public com.superagent.api.provider.InstallLogDto installLog() {
+        InstallJob job = lastJob;
+        return job == null ? null : job.toDto();
+    }
+
     /**
      * Makes sure a Node of at least {@code minNode} is usable, installing the private LTS when there is none or
      * it's too old (a CLI install's dependency). Blocking; null when ready, else why not.
      */
-    public String ensure(String minNode) throws InterruptedException {
+    String ensure(String minNode, InstallJob job) throws InterruptedException {
         Optional<String> have = version();
         if (have.isPresent() && !ProviderProbe.isNewer(minNode, have.get()) && paths.find("npm").isPresent()) {
             return null;
         }
+        job.step("安装 Node.js（需要 ≥ " + minNode + "，当前 " + have.orElse("没有") + "）");
         try {
-            installPrivate();
+            installPrivate(job);
         } catch (IOException e) {
             return "自动安装 Node.js 失败：" + e.getMessage();
         }
@@ -119,9 +133,9 @@ public class NodeRuntimeService {
     }
 
     /** Installs the private Node now (blocking); null when done, else why it failed. */
-    public String installPrivateNow() throws InterruptedException {
+    String installPrivateNow(InstallJob job) throws InterruptedException {
         try {
-            installPrivate();
+            installPrivate(job);
             return null;
         } catch (IOException e) {
             return "自动安装 Node.js 失败：" + e.getMessage();
@@ -134,11 +148,12 @@ public class NodeRuntimeService {
     }
 
     /** One install at a time; a caller arriving mid-install waits for it instead of starting another. */
-    private synchronized void installPrivate() throws IOException, InterruptedException {
+    private synchronized void installPrivate(InstallJob job) throws IOException, InterruptedException {
         installing.set(true);
         lastError.set(null);
+        lastJob = job;
         try {
-            String installed = installLatestLts();
+            String installed = installLatestLts(job);
             log.info("private Node {} installed under {}", installed, paths.nodeRoot());
         } catch (IOException | RuntimeException e) {
             log.warn("private Node install failed: {}", e.getMessage());
@@ -149,7 +164,8 @@ public class NodeRuntimeService {
         }
     }
 
-    private String installLatestLts() throws IOException, InterruptedException {
+    private String installLatestLts(InstallJob job) throws IOException, InterruptedException {
+        job.step("查询 Node.js 最新 LTS 版本（" + DIST + "index.json）");
         String version = latestLts();
         String platform = platform();
         String dirName = "node-" + version + "-" + platform;
@@ -159,8 +175,11 @@ public class NodeRuntimeService {
         Path staging = Files.createTempDirectory(root, ".staging-");
         try {
             Path archive = staging.resolve(file);
-            download(DIST + version + "/" + file, archive);
+            job.step("下载 " + DIST + version + "/" + file);
+            download(DIST + version + "/" + file, archive, job);
+            job.step("校验 SHA-256");
             verify(archive, expectedSha256(version, file));
+            job.step("解压到 " + root.resolve("current"));
             run(List.of("tar", "-xzf", archive.toString(), "-C", staging.toString()));
             Path unpacked = staging.resolve(dirName);
             if (!Files.isExecutable(unpacked.resolve("bin").resolve("node"))) {
@@ -217,12 +236,66 @@ public class NodeRuntimeService {
         return resp.body();
     }
 
-    private void download(String url, Path target) throws IOException, InterruptedException {
-        HttpResponse<Path> resp = http.send(HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofMinutes(10))
-                .build(), HttpResponse.BodyHandlers.ofFile(target));
+    /**
+     * Streams the archive to disk, logging progress every tenth. HttpClient has no read timeout, so a watchdog
+     * gives up when no bytes arrive for {@link #STALL}: a dead connection otherwise hangs the install for good.
+     */
+    private void download(String url, Path target, InstallJob job) throws IOException, InterruptedException {
+        HttpResponse<InputStream> resp = http.send(HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(30))
+                .build(), HttpResponse.BodyHandlers.ofInputStream());
         if (resp.statusCode() != 200) {
+            resp.body().close();
             throw new IOException("下载 " + url + " 失败：HTTP " + resp.statusCode());
         }
+        long total = resp.headers().firstValueAsLong("content-length").orElse(-1);
+        java.util.concurrent.atomic.AtomicLong lastByteAt = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
+        AtomicBoolean stalled = new AtomicBoolean();
+        InputStream in = resp.body();
+        Thread watchdog = Thread.ofVirtual().start(() -> {
+            try {
+                while (!Thread.currentThread().isInterrupted()) {
+                    Thread.sleep(5_000);
+                    if (System.nanoTime() - lastByteAt.get() > STALL.toNanos()) {
+                        stalled.set(true);
+                        in.close(); // unblocks the read below
+                        return;
+                    }
+                }
+            } catch (InterruptedException | IOException ignored) {
+                // download finished
+            }
+        });
+        try (in; var out = Files.newOutputStream(target)) {
+            byte[] buf = new byte[1 << 16];
+            long done = 0;
+            int reported = 0;
+            for (int n; (n = in.read(buf)) > 0; ) {
+                out.write(buf, 0, n);
+                done += n;
+                lastByteAt.set(System.nanoTime());
+                int tenth = total > 0 ? (int) (done * 10 / total) : (int) (done / (10L << 20));
+                if (tenth > reported) {
+                    reported = tenth;
+                    job.line("已下载 " + mb(done) + (total > 0 ? " / " + mb(total) : ""));
+                }
+            }
+            if (total > 0 && done < total) {
+                throw new IOException("下载中断（" + mb(done) + " / " + mb(total) + "）");
+            }
+        } catch (IOException e) {
+            if (stalled.get()) {
+                throw new IOException("下载 " + url + " 超过 " + STALL.toSeconds() + " 秒没有收到数据，已放弃。请检查服务器能否访问 nodejs.org");
+            }
+            throw e;
+        } finally {
+            watchdog.interrupt();
+        }
+    }
+
+    private static final Duration STALL = Duration.ofSeconds(60);
+
+    private static String mb(long bytes) {
+        return String.format(Locale.ROOT, "%.1f MB", bytes / 1048576.0);
     }
 
     /** The archive must match nodejs.org's published checksum, or nothing is unpacked. */

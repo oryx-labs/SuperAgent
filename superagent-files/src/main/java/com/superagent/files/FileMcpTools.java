@@ -24,8 +24,7 @@ import static com.superagent.runtime.mcp.McpTools.tool;
 
 /**
  * The agent's way to hand over work results: write a text file, save a file from its workspace (images,
- * videos, slides…), and list what it made before so it can revise one. Files land in the user's 文件, not
- * the knowledge base.
+ * videos, slides…), and list what it made before so it can revise one. Files land in the user's 文件.
  */
 @Component
 public class FileMcpTools implements McpToolProvider {

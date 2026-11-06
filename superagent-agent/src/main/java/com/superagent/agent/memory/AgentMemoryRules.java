@@ -20,8 +20,9 @@ final class AgentMemoryRules {
 
     /** The model's answer when this conversation adds nothing worth remembering. */
     static final String NO_CHANGE = "NO_CHANGE";
-    static final String FOLDER = "Agent 记忆";
     static final int MAX_MEMORY_CHARS = 3000;
+    /** What a person may write by hand; the model keeps to {@link #MAX_MEMORY_CHARS}. */
+    static final int MAX_CHARS = 10_000;
     private static final int MAX_TRANSCRIPT_CHARS = 40_000;
     private static final int MAX_MESSAGE_CHARS = 2_000;
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT);
@@ -44,20 +45,6 @@ final class AgentMemoryRules {
             return false;
         }
         return fresh.size() >= minMessages || !last.plus(idle).isAfter(now);
-    }
-
-    /** The memory file of an agent: readable name plus a short id, so two agents with one name never collide. */
-    static String fileName(String agentName, String agentId) {
-        String clean = (agentName == null ? "" : agentName).replaceAll("[/\\\\\\p{Cntrl}]", " ").strip();
-        if (clean.isEmpty() || clean.startsWith(".")) {
-            clean = "Agent";
-        }
-        return clean + idSuffix(agentId);
-    }
-
-    /** What every file name of this agent ends with, whatever the agent was called when it was written. */
-    static String idSuffix(String agentId) {
-        return "（" + agentId.substring(0, Math.min(8, agentId.length())) + "）.md";
     }
 
     /** Oldest first, most recent kept when it doesn't all fit. */

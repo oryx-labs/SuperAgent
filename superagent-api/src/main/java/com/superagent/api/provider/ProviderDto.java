@@ -36,6 +36,10 @@ public record ProviderDto(
         Instant modelsCheckedAt,
         /** Last install/upgrade failure (tail of its output), or null; survives status refreshes. */
         String message,
+        /** What a running install/upgrade is doing now (e.g. downloading Node.js), else null. */
+        String installStep,
+        /** There's a log of the last install/upgrade to show. */
+        boolean hasInstallLog,
         Instant lastCheckedAt,
         Instant createdAt) {
 }

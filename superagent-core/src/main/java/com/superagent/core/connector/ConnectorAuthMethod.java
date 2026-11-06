@@ -1,7 +1,17 @@
 package com.superagent.core.connector;
 
-/** How a connector authenticates: a shared system OAuth app, or a per-user token. */
+/**
+ * How an MCP connector authenticates. {@code SHARED_TOKEN} is one token the administrator enters for the
+ * whole company; {@code PERSONAL_TOKEN} and {@code OAUTH} are per employee (each authorizes with their own
+ * account), so an agent acts with the identity of whoever it is working for.
+ */
 public enum ConnectorAuthMethod {
-    SYSTEM_OAUTH,
-    PERSONAL_TOKEN
+    NONE,
+    SHARED_TOKEN,
+    PERSONAL_TOKEN,
+    OAUTH;
+
+    public boolean personal() {
+        return this == PERSONAL_TOKEN || this == OAUTH;
+    }
 }

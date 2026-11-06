@@ -75,7 +75,10 @@ class ProviderServiceTest {
         }
         @Override public Optional<String> version() { return Optional.ofNullable(version).map(v -> v.replace("v", "")); }
         /** The automatic dependency install, as if the server can't reach nodejs.org. */
-        @Override public String ensure(String minNode) { return "自动安装 Node.js 失败：无法连接 nodejs.org"; }
+        @Override String ensure(String minNode, InstallJob job) {
+            job.step("安装 Node.js");
+            return "自动安装 Node.js 失败：无法连接 nodejs.org";
+        }
     }
 
     /** Inference double: every model answers except those listed in {@code failing}. */
@@ -198,36 +201,33 @@ class ProviderServiceTest {
     }
 
     @Test
-    void displayOnlyEntriesCannotInstall() {
-        ProviderService service = service(new InMemoryStore(), new FakeProbe(false, false), new FakeFetcher());
-        ProviderDto gemini = service.add("gemini");
-        assertThat(gemini.installable()).isFalse();
-        assertThat(gemini.status()).isEqualTo("unsupported");
-        assertThatThrownBy(() -> service.install(gemini.id())).isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
     void installOnlyClisTrackInstallAndVersionButNeedARecentEnoughNode() throws InterruptedException {
         InMemoryStore store = new InMemoryStore();
         FakeProbe probe = new FakeProbe(true, false);
         ProviderService service = new ProviderService(store, probe, new FakeFetcher(), new FakeInference(),
                 new FakeNode(probe, "v20.11.0"), null);
-        ProviderDto kimi = service.add("kimi");
-        assertThat(kimi.installable()).isTrue();
-        assertThat(kimi.supported()).isFalse();
-        assertThat(kimi.status()).isEqualTo("installed"); // no auth to check: nothing runs on it
-        assertThat(kimi.models()).isEmpty();
+        ProviderDto minimax = service.add("minimax");
+        assertThat(minimax.installable()).isTrue();
+        assertThat(minimax.supported()).isFalse();
+        assertThat(minimax.status()).isEqualTo("installed"); // no auth to check: nothing runs on it
+        assertThat(minimax.models()).isEmpty();
 
-        // Kimi Code needs Node ≥ 22.19: its install first installs Node; when that fails the row says why
+        // MiniMax Code needs Node ≥ 22.19: its install first installs Node; when that fails the row says why
         // and the CLI install isn't attempted.
-        assertThat(service.install(kimi.id()).status()).isEqualTo("installing");
-        ProviderDto after = service.detail(kimi.id());
+        assertThat(service.install(minimax.id()).status()).isEqualTo("installing");
+        ProviderDto after = service.detail(minimax.id());
         for (int i = 0; i < 100 && "installing".equals(after.status()); i++) {
             Thread.sleep(20);
-            after = service.detail(kimi.id());
+            after = service.detail(minimax.id());
         }
         assertThat(after.status()).isNotEqualTo("installing");
         assertThat(after.message()).contains("Node.js").contains("nodejs.org");
-        assertThat(after.installCommand()).isEqualTo("npm install -g @moonshot-ai/kimi-code@latest --no-fund --no-audit");
+        // The page can show what happened, step by step, not just a status that stopped changing.
+        assertThat(after.hasInstallLog()).isTrue();
+        var installLog = service.installLog(minimax.id());
+        assertThat(installLog.running()).isFalse();
+        assertThat(installLog.error()).contains("nodejs.org");
+        assertThat(installLog.lines()).anyMatch(l -> l.contains("安装 Node.js")).last().asString().startsWith("✗");
+        assertThat(after.installCommand()).isEqualTo("npm install -g @minimax-ai/code@latest --no-fund --no-audit");
     }
 }

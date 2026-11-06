@@ -3,23 +3,32 @@ package com.superagent.core.connector;
 import java.time.Instant;
 
 /**
- * An MCP server the agent can connect to, held as a registry entry. {@code endpoint}
- * is the stdio command for {@link ConnectorTransport#STDIO}, else the server URL.
+ * A link from the company to an outside system, added by an administrator. For {@link ConnectorKind#MCP},
+ * {@code endpoint} is the stdio command line (split on whitespace) or the server URL, and {@code tokenEnv}
+ * names the environment variable a stdio server reads its token from. For {@link ConnectorKind#FEISHU},
+ * {@code appId} is the company app; its secret lives in the credential store.
+ *
+ * <p>{@code status} / {@code lastError} report a live connection (Feishu's long connection): connecting,
+ * connected or error; null for connectors that have none.
  */
 public record Connector(
         String id,
         String name,
         String description,
-        ConnectorType type,
+        ConnectorKind kind,
         ConnectorAuthMethod authMethod,
-        ConnectorStatus status,
+        boolean enabled,
         ConnectorTransport transport,
         String endpoint,
+        String tokenEnv,
+        String appId,
+        String status,
+        String lastError,
         Instant createdAt,
         Instant updatedAt) {
 
-    public Connector withStatus(ConnectorStatus newStatus) {
-        return new Connector(id, name, description, type, authMethod, newStatus,
-                transport, endpoint, createdAt, Instant.now());
+    public Connector withStatus(String newStatus, String newError) {
+        return new Connector(id, name, description, kind, authMethod, enabled, transport, endpoint, tokenEnv, appId,
+                newStatus, newError, createdAt, Instant.now());
     }
 }

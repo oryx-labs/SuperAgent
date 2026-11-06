@@ -26,8 +26,6 @@
         </button>
         <div class="topmenu__panel" role="menu">
           <nav class="nav" aria-label="Workspace">
-            <a class="nav__item" href="#inbox" data-view="inbox"><span class="nav__dot"></span><span data-i18n="nav.inbox">Inbox</span></a>
-            <a class="nav__item" href="#knowledge" data-view="knowledge"><span class="nav__dot"></span><span data-i18n="nav.knowledge">Knowledge</span></a>
             <a class="nav__item" href="#skills" data-view="skills"><span class="nav__dot"></span><span data-i18n="nav.skills">Skills</span></a>
             <a class="nav__item" href="#connectors" data-view="connectors"><span class="nav__dot"></span><span data-i18n="nav.connectors">Connectors</span></a>
           </nav>
@@ -104,6 +102,7 @@
         <div class="agent-info__head">
           <h3 class="panel__title agent-info__title"><span class="agent-avatar" id="agentInfoAvatar" aria-hidden="true"></span><span id="agentInfoName">Agent</span></h3>
           <span class="agent-info__actions">
+            <button class="link-btn link-btn--muted" id="agentMemoryBtn" type="button" data-i18n="mem.open">Memory</button>
             <button class="link-btn link-btn--muted" id="agentDetailBtn" type="button" data-i18n="agent.details">Details</button>
             <button class="link-btn link-btn--muted" id="superLogBtn" type="button" data-i18n="log.open" hidden>Run log</button>
           </span>
@@ -119,7 +118,7 @@
         </div>
         <!-- The SuperAgent has no character, skills or model to show: just what it is and how it works. -->
         <div class="super-intro" id="superIntro" hidden>
-          <a class="super-sources" id="superSources" href="#inbox"></a>
+          <a class="super-sources" id="superSources" href="#messages"></a>
           <p class="super-intro__lead" data-i18n="super.introLead">Your super-self — it can help you get anything done.</p>
           <ol class="super-intro__steps">
             <li><b data-i18n="super.introStep1Title">Drop it in</b><span data-i18n="super.introStep1">Send your thoughts any time, as many as you like — no need to wait for a reply.</span></li>
@@ -138,26 +137,6 @@
       </section>
     </aside>
 
-    <section class="kb" data-pane="knowledge" aria-label="Knowledge" hidden>
-      <div class="kb__side">
-        <button class="new-chat" type="button" id="kbNewFolderBtn" data-i18n="kb.newFolder">+ New folder</button>
-        <div class="kb-tree" id="kbTree" role="tree"></div>
-      </div>
-      <div class="kb__main">
-        <div class="kb__bar">
-          <button class="btn kb__up" type="button" id="kbUpBtn" data-i18n-title="kb.up" aria-label="Up">↑</button>
-          <nav class="kb-crumbs" id="kbCrumbs" aria-label="Path"></nav>
-          <div class="kb__actions">
-            <a class="link-btn" id="kbDownloadBtn" hidden data-i18n="kb.download">Download</a>
-            <button class="link-btn" type="button" id="kbRenameBtn" data-i18n="kb.rename">Rename</button>
-            <button class="link-btn" type="button" id="kbMoveBtn" data-i18n="kb.move">Move</button>
-            <button class="link-btn link-btn--danger" type="button" id="kbDeleteBtn" data-i18n="kb.delete">Delete</button>
-          </div>
-        </div>
-        <div class="kb__view" id="kbView"></div>
-      </div>
-    </section>
-
     <section class="admin" data-pane="todo" aria-label="To-do" hidden>
       <div class="todo-stats" id="todoStats"></div>
       <div class="model-tabs page-tabs todo-tabs" id="todoTabs" role="tablist">
@@ -175,70 +154,26 @@
       </div>
     </section>
 
-    <section class="admin" data-pane="inbox" aria-label="Data sources" hidden>
+    <!-- Outside messages that reached SuperAgent; opened from the SuperAgent panel, not the menu. -->
+    <section class="admin" data-pane="inbox" aria-label="Message stream" hidden>
       <div class="admin__head">
         <div>
-          <h2 class="admin__title" data-i18n="ib.title">Data sources</h2>
-          <p class="admin__sub" data-i18n="ib.sub">Where your SuperAgent hears from the outside world.</p>
+          <h2 class="admin__title" data-i18n="ib.title">Message stream</h2>
+          <p class="admin__sub" data-i18n="ib.sub">Messages from Feishu that reached your SuperAgent, and what it did with each.</p>
         </div>
-      </div>
-      <div class="model-tabs" id="ibTabs">
-        <button type="button" class="model-tab is-active" data-tab="sources" data-i18n="ib.tabSources">Sources</button>
-        <button type="button" class="model-tab" data-tab="events" data-i18n="ib.tabEvents">Message stream</button>
       </div>
       <div class="admin__body">
-        <div data-ib="sources">
-          <div class="ib-cards" id="ibCards"></div>
-          <button class="btn ib-add" type="button" id="ibAddBtn" data-i18n="ib.add">+ Add a data source</button>
-          <div class="ib-picker" id="ibPicker" hidden></div>
-          <!-- Setting up (or changing) the Feishu bot: three steps on one form. -->
-          <form class="ib-settings" id="ibForm" hidden>
-            <h3 class="ib-settings__title" data-i18n="ib.feishuTitle">Feishu bot</h3>
-            <div class="ib-step">
-              <span class="ib-step__no">1</span>
-              <div class="ib-step__body">
-                <b data-i18n="ib.step1">Create the bot</b>
-                <p class="field-hint" data-i18n="ib.setupHint"></p>
-                <div class="field-row">
-                  <label class="field"><span>App ID</span><input type="text" id="ibAppId" autocomplete="off" required /></label>
-                  <label class="field"><span>App Secret</span><input type="password" id="ibAppSecret" autocomplete="new-password" /></label>
-                </div>
-                <p class="field-hint" id="ibSecretHint" data-i18n="ib.secretKept" hidden></p>
-              </div>
-            </div>
-            <div class="ib-step">
-              <span class="ib-step__no">2</span>
-              <div class="ib-step__body">
-                <b data-i18n="ib.step2">Connect</b>
-                <label class="check-field"><input type="checkbox" id="ibEnabled" checked /><span data-i18n="ib.fEnabled">Receive messages</span></label>
-                <p class="field-hint kb-modal__error" id="ibError" hidden></p>
-              </div>
-            </div>
-            <div class="ib-step">
-              <span class="ib-step__no">3</span>
-              <div class="ib-step__body">
-                <b data-i18n="ib.step3">Tell it who you are</b>
-                <div class="ib-bind" id="ibBind"><span data-i18n="ib.bindAfterSave">After saving, a bind code appears here.</span></div>
-              </div>
-            </div>
-            <div class="modal__actions">
-              <button type="button" class="btn" id="ibCancel" data-i18n="common.cancel">Cancel</button>
-              <button type="submit" class="btn btn--primary" data-i18n="ib.saveConnect">Save and connect</button>
-            </div>
-          </form>
+        <p class="ib-notice" id="ibNotLinked" hidden><span data-i18n="ib.notLinked">Your Feishu account isn't linked yet.</span>
+          <a href="#connectors" data-i18n="ib.goConnectors">Link it on the Connectors page →</a></p>
+        <div class="ib-filters">
+          <select id="ibFilterPriority" aria-label="Priority"></select>
+          <select id="ibFilterHandling" aria-label="Handling"></select>
         </div>
-        <div data-ib="events" hidden>
-          <div class="ib-filters">
-            <select id="ibFilterSource" aria-label="Source"></select>
-            <select id="ibFilterPriority" aria-label="Priority"></select>
-            <select id="ibFilterHandling" aria-label="Handling"></select>
-          </div>
-          <table class="ctable ib-events">
-            <thead><tr><th data-i18n="ib.colSource">Source</th><th data-i18n="ib.colFrom">From</th><th data-i18n="ib.colText">Message</th><th data-i18n="ib.colPriority">Priority</th><th data-i18n="ib.colHandling">SuperAgent</th><th data-i18n="ib.colTime">Received</th></tr></thead>
-            <tbody id="ibEvents"></tbody>
-          </table>
-          <p class="kb-empty" id="ibEventsEmpty" data-i18n="ib.eventsEmpty" hidden></p>
-        </div>
+        <table class="ctable ib-events">
+          <thead><tr><th data-i18n="ib.colSource">Source</th><th data-i18n="ib.colFrom">From</th><th data-i18n="ib.colText">Message</th><th data-i18n="ib.colPriority">Priority</th><th data-i18n="ib.colHandling">SuperAgent</th><th data-i18n="ib.colTime">Received</th></tr></thead>
+          <tbody id="ibEvents"></tbody>
+        </table>
+        <p class="kb-empty" id="ibEventsEmpty" data-i18n="ib.eventsEmpty" hidden></p>
       </div>
     </section>
 
@@ -291,17 +226,17 @@
       <div class="admin__head">
         <div>
           <h2 class="admin__title" data-i18n="conn.title">Connectors</h2>
-          <p class="admin__sub" data-i18n="conn.sub">Manage the MCP services your models can connect to.</p>
+          <p class="admin__sub" data-i18n="conn.sub">How the company links to outside systems.</p>
         </div>
-        <button class="btn btn--primary" id="addConnectorBtn" type="button" data-i18n="conn.add">+ Add Connector</button>
+        <button class="btn btn--primary" id="addConnectorBtn" type="button" data-i18n="conn.add" hidden>+ Add connector</button>
       </div>
       <div class="admin__body">
-        <table class="ctable">
+        <table class="ctable conn-table">
           <thead>
             <tr>
-              <th data-i18n="conn.colConnector">Connector</th><th data-i18n="conn.colType">Type</th>
-              <th data-i18n="conn.colStatus">Status</th><th data-i18n="conn.colMethod">Method</th>
-              <th class="ctable__actions-col" data-i18n="conn.colActions">Actions</th>
+              <th data-i18n="conn.colConnector">Connector</th><th data-i18n="conn.colUse">Used for</th>
+              <th data-i18n="conn.colStatus">Status</th><th data-i18n="conn.colMine">Your authorization</th>
+              <th class="ctable__actions-col"></th>
             </tr>
           </thead>
           <tbody id="connectorRows"></tbody>
@@ -487,6 +422,7 @@
             </div>
             <p class="node-card__hint" id="nodeHint"></p>
             <button class="btn btn--sm" type="button" id="nodeInstallBtn" hidden></button>
+            <button class="link-btn link-btn--muted" type="button" id="nodeLogBtn" data-i18n="inst.log" hidden>Log</button>
           </div>
           <table class="ctable">
             <thead>
@@ -695,7 +631,7 @@
         <h3 class="drawer__title sk-heading" id="skHeading"></h3>
         <div class="kb__actions" id="skActions" hidden>
           <button class="btn btn--sm" type="button" id="skEditBtn" data-i18n="sk.edit">Edit</button>
-          <button class="link-btn link-btn--danger" type="button" id="skDeleteBtn" data-i18n="kb.delete">Delete</button>
+          <button class="link-btn link-btn--danger" type="button" id="skDeleteBtn" data-i18n="common.delete">Delete</button>
         </div>
       </div>
       <div class="drawer__body">
@@ -728,6 +664,24 @@
     </div>
   </div>
 
+  <!-- What an install / upgrade of a CLI (or of Node.js) is doing and has printed; refreshes while it runs. -->
+  <div class="drawer" id="instDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <div class="drawer__panel drawer__panel--wide">
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <div class="inst-head">
+          <h3 class="drawer__title" id="instTitle"></h3>
+          <p class="inst-meta" id="instMeta"></p>
+        </div>
+      </div>
+      <div class="drawer__body">
+        <p class="inst-error" id="instError" hidden></p>
+        <pre class="inst-log" id="instLog"></pre>
+      </div>
+    </div>
+  </div>
+
   <!-- A work file, previewed: from the Files page, a chat card or an agent's panel. -->
   <div class="drawer" id="flDrawer" hidden>
     <div class="drawer__backdrop" data-close></div>
@@ -741,9 +695,8 @@
         </div>
         <span class="agent-detail__actions">
           <a class="btn btn--sm" id="flDownload" href="#" data-i18n="fl.download">Download</a>
-          <button class="btn btn--sm" type="button" id="flToKb" data-i18n="fl.toKb">Save to knowledge base</button>
           <button class="link-btn" type="button" id="flRename" data-i18n="fl.rename">Rename</button>
-          <button class="link-btn link-btn--danger" type="button" id="flDelete" data-i18n="kb.delete">Delete</button>
+          <button class="link-btn link-btn--danger" type="button" id="flDelete" data-i18n="common.delete">Delete</button>
         </span>
       </div>
       <div class="drawer__body fl-preview" id="flPreview"></div>
@@ -753,40 +706,74 @@
   <div class="modal" id="connectorModal" hidden>
     <div class="modal__backdrop" data-close></div>
     <form class="modal__card" id="connectorForm">
-      <h3 class="modal__title" id="connectorModalTitle" data-i18n="conn.modalAdd">Add Connector</h3>
-      <label class="field"><span data-i18n="conn.fName">Name</span>
-        <input type="text" id="cfName" required placeholder="e.g. GitHub" />
+      <h3 class="modal__title" id="connectorModalTitle" data-i18n="conn.modalAdd">Add connector</h3>
+      <label class="field"><span data-i18n="conn.fKind">Kind</span>
+        <select id="cfKind">
+          <option value="mcp" data-i18n="conn.kind.mcp">MCP server (agent tools)</option>
+          <option value="feishu" data-i18n="conn.kind.feishu">Feishu (messages)</option>
+        </select>
       </label>
-      <label class="field"><span data-i18n="conn.fEndpoint">Endpoint</span>
-        <input type="text" id="cfEndpoint" data-i18n-ph="conn.fEndpointPh" />
-      </label>
+      <label class="field"><span data-i18n="conn.fName">Name</span><input type="text" id="cfName" /></label>
       <label class="field"><span data-i18n="conn.fDescription">Description</span>
-        <input type="text" id="cfDescription" data-i18n-ph="common.optional" />
-      </label>
-      <div class="field-row">
-        <label class="field"><span data-i18n="conn.fTransport">Transport</span>
-          <select id="cfTransport">
-            <option value="stdio">stdio</option>
-            <option value="http">http</option>
-            <option value="sse">sse</option>
-          </select>
-        </label>
-        <label class="field"><span data-i18n="conn.fType">Type</span>
-          <select id="cfType">
-            <option value="optional" data-i18n="conn.typeOptional">Optional</option>
-            <option value="required" data-i18n="conn.typeRequired">Required</option>
-          </select>
-        </label>
-        <label class="field"><span data-i18n="conn.fMethod">Method</span>
-          <select id="cfAuthMethod">
-            <option value="system_oauth" data-i18n="conn.methodSystem">System OAuth</option>
-            <option value="personal_token" data-i18n="conn.methodToken">Personal Token</option>
-          </select>
-        </label>
+        <input type="text" id="cfDescription" data-i18n-ph="common.optional" /></label>
+      <!-- An MCP server: how agents reach it and whose identity it acts with. -->
+      <div class="conn-section" data-conn-kind="mcp">
+        <div class="field-row">
+          <label class="field"><span data-i18n="conn.fTransport">Transport</span>
+            <select id="cfTransport">
+              <option value="stdio">stdio</option>
+              <option value="http">http</option>
+              <option value="sse">sse</option>
+            </select>
+          </label>
+          <label class="field"><span data-i18n="conn.fAuth">Authorization</span>
+            <select id="cfAuthMethod">
+              <option value="none" data-i18n="conn.auth.none">None</option>
+              <option value="shared_token" data-i18n="conn.auth.shared_token">One company token</option>
+              <option value="personal_token" data-i18n="conn.auth.personal_token">Each employee's own token</option>
+              <option value="oauth" data-i18n="conn.auth.oauth" hidden>Each employee's own account (OAuth)</option>
+            </select>
+          </label>
+        </div>
+        <p class="field-hint" data-i18n="conn.transportHint"></p>
+        <label class="field"><span data-i18n="conn.fEndpoint">Command or URL</span>
+          <input type="text" id="cfEndpoint" data-i18n-ph="conn.fEndpointPh" /></label>
+        <label class="field" id="cfTokenField"><span data-i18n="conn.fToken">Company token</span>
+          <input type="password" id="cfToken" autocomplete="new-password" /></label>
+        <label class="field" id="cfTokenEnvField"><span data-i18n="conn.fTokenEnv">Token environment variable</span>
+          <input type="text" id="cfTokenEnv" autocomplete="off" />
+          <small class="field-hint" data-i18n="conn.fTokenEnvHint"></small></label>
       </div>
+      <!-- The company's Feishu app: one for everyone. -->
+      <div class="conn-section" data-conn-kind="feishu" hidden>
+        <p class="field-hint" data-i18n="conn.feishuHint"></p>
+        <div class="field-row">
+          <label class="field"><span data-i18n="conn.fAppId">App ID</span><input type="text" id="cfAppId" autocomplete="off" /></label>
+          <label class="field"><span data-i18n="conn.fAppSecret">App Secret</span>
+            <input type="password" id="cfAppSecret" autocomplete="new-password" /></label>
+        </div>
+      </div>
+      <p class="field-hint" id="cfSecretKept" data-i18n="conn.secretKept" hidden></p>
+      <label class="check-field"><input type="checkbox" id="cfEnabled" checked /><span data-i18n="conn.fEnabled">Enabled</span></label>
+      <p class="field-hint kb-modal__error" id="cfError" hidden></p>
       <div class="modal__actions">
         <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
         <button type="submit" class="btn btn--primary" id="cfSubmit" data-i18n="common.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- An employee's own token for a connector that acts as each person. -->
+  <div class="modal" id="connTokenModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="connTokenForm">
+      <h3 class="modal__title" id="connTokenTitle"></h3>
+      <p class="field-hint" data-i18n="conn.tokenHint"></p>
+      <label class="field"><span>Token</span><input type="password" id="connTokenInput" autocomplete="new-password" required /></label>
+      <p class="field-hint kb-modal__error" id="connTokenError" hidden></p>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
       </div>
     </form>
   </div>
@@ -846,7 +833,12 @@
       <label class="field" data-for="local"><span id="ufPasswordLabel" data-i18n="users.fPassword">Password</span>
         <input type="password" id="ufPassword" autocomplete="new-password" />
       </label>
-      <label class="checkbox-row" id="ufAdminRow" hidden><input type="checkbox" id="ufAdmin" /> <span data-i18n="users.fAdmin">Administrator</span></label>
+      <label class="field"><span data-i18n="users.fRole">Role</span>
+        <select id="ufRole">
+          <option value="USER" data-i18n="users.roleUser">Member</option>
+          <option value="ADMIN" data-i18n="users.roleAdmin">Administrator</option>
+        </select>
+      </label>
       <p class="field-hint" id="ufHint"></p>
       <div class="modal__actions">
         <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
@@ -874,10 +866,10 @@
     <form class="modal__card" id="kbForm">
       <h3 class="modal__title" id="kbModalTitle"></h3>
       <p class="kb-modal__msg" id="kbModalMsg" hidden></p>
-      <label class="field" id="kbNameField"><span data-i18n="kb.name">Name</span>
+      <label class="field" id="kbNameField"><span data-i18n="common.name">Name</span>
         <input type="text" id="kbNameInput" maxlength="255" />
       </label>
-      <label class="field" id="kbTargetField"><span data-i18n="kb.moveTo">Move to</span>
+      <label class="field" id="kbTargetField"><span data-i18n="common.choose">Choose</span>
         <select id="kbTargetSelect"></select>
       </label>
       <p class="field-hint kb-modal__error" id="kbModalError" hidden></p>
@@ -955,6 +947,35 @@
           <span class="agent-field__label" data-i18n="agent.fModel">Default model</span>
           <p class="agent-info__model" id="agentInfoModel"></p>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- An agent's long-term memory: what it carries into every new conversation. -->
+  <div class="drawer" id="memDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <div class="drawer__panel drawer__panel--wide">
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <h3 class="drawer__title" id="memTitle">Memory</h3>
+        <span class="kb__actions">
+          <button class="btn btn--sm" id="memDistill" type="button" data-i18n="mem.distill">Update now</button>
+          <button class="btn btn--sm" id="memEdit" type="button" data-i18n="common.edit">Edit</button>
+        </span>
+      </div>
+      <div class="drawer__body">
+        <p class="mem-meta" id="memMeta"></p>
+        <div class="markdown mem-view" id="memView"></div>
+        <form class="mem-form" id="memForm" hidden>
+          <textarea id="memText" rows="20" data-i18n-ph="mem.placeholder"></textarea>
+          <p class="field-hint" data-i18n="mem.editHint">The agent reads this at the start of every new conversation. Keep only what will still matter.</p>
+          <div class="modal__actions">
+            <button type="button" class="btn link-btn--danger" id="memClear" data-i18n="mem.clear">Clear memory</button>
+            <span class="mem-form__spacer"></span>
+            <button type="button" class="btn" id="memCancel" data-i18n="common.cancel">Cancel</button>
+            <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
@@ -1089,12 +1110,12 @@
   <script src="/js/agent-form.js"></script>
   <script src="/js/superagent.js"></script>
   <script src="/js/agent-log.js"></script>
+  <script src="/js/memory.js"></script>
   <script src="/js/files.js"></script>
   <script src="/js/agent-work.js"></script>
   <script src="/js/views.js"></script>
   <script src="/js/inbox.js"></script>
   <script src="/js/skills.js"></script>
-  <script src="/js/knowledge.js"></script>
   <script src="/js/connectors.js"></script>
   <script src="/js/tasks.js"></script>
   <script src="/js/auth.js"></script>

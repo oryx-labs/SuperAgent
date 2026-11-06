@@ -37,6 +37,7 @@ abstract class AbstractJdbcAgentMemoryStateStore implements AgentMemoryStateStor
             instant(rs, "summarized_until"),
             emptyToNull(rs.getString("last_model")),
             rs.getInt("session_failures"),
+            emptyToNull(rs.getString("memory")),
             instant(rs, "updated_at"));
 
     @Override
@@ -45,12 +46,13 @@ abstract class AbstractJdbcAgentMemoryStateStore implements AgentMemoryStateStor
                 .stream().findFirst();
     }
 
-    protected static final String COLUMNS = "(agent_id, owner, summarized_until, last_model, session_failures, updated_at)";
-    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?)";
+    protected static final String COLUMNS =
+            "(agent_id, owner, summarized_until, last_model, session_failures, memory, updated_at)";
+    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(AgentMemoryState s) {
         return new Object[]{s.agentId(), nn(s.owner()), utc(s.summarizedUntil()), nn(s.lastModel()),
-                s.sessionFailures(), utc(s.updatedAt())};
+                s.sessionFailures(), nn(s.memory()), utc(s.updatedAt())};
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

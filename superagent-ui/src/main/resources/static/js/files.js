@@ -1,5 +1,5 @@
-// SuperAgent UI — Files: the work results agents produced (documents, images, videos), kept apart from the
-// knowledge base. One preview drawer serves the Files page, the file cards in a chat and an agent's panel.
+// SuperAgent UI — Files: what agents produced and what people sent them (documents, images, videos, links).
+// One preview drawer serves the Files page, the file cards in a chat and an agent's panel.
 // Classic script sharing one global scope with the others; index.html loads them in order.
 "use strict";
 
@@ -10,7 +10,6 @@ Object.assign(api, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
   }).then(kbJson),
   deleteFile: id => fetch("/api/v1/files/" + encodeURIComponent(id), { method: "DELETE" }).then(kbJson),
-  fileToKb: (id, folder) => kbPost("/api/v1/files/" + encodeURIComponent(id) + "/knowledge", { folder }),
   setFileTags: (id, tags) => fetch("/api/v1/files/" + encodeURIComponent(id) + "/tags", {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags }),
   }).then(kbJson),
@@ -29,7 +28,6 @@ const flel = {
   title: document.getElementById("flTitle"),
   meta: document.getElementById("flMeta"),
   download: document.getElementById("flDownload"),
-  toKb: document.getElementById("flToKb"),
   rename: document.getElementById("flRename"),
   del: document.getElementById("flDelete"),
   preview: document.getElementById("flPreview"),
@@ -176,7 +174,7 @@ async function openFile(fileOrId) {
   flel.meta.textContent = [fileSource(f), L(link ? "fl.sharedBy" : "fl.askedBy", { name: f.ownerName || f.owner }),
     link ? null : kbFormatSize(f.size), formatDateTime(f.updatedAt)].filter(Boolean).join(" · ");
   flel.download.href = fileContentUrl(f.id, true);
-  flel.download.hidden = flel.toKb.hidden = link; // a link has no content of its own
+  flel.download.hidden = link; // a link has no content of its own
   flel.rename.hidden = flel.del.hidden = !f.canManage;
   renderDrawerTags(f);
   flel.drawer.hidden = false;
@@ -323,26 +321,9 @@ flel.del.addEventListener("click", () => {
   const f = flOpen;
   if (!f) return;
   kbOpenModal({
-    title: L("fl.deleteTitle"), submit: L("kb.delete"), danger: true,
+    title: L("fl.deleteTitle"), submit: L("common.delete"), danger: true,
     message: L("fl.deleteConfirm", { name: f.name }),
     action: async () => { await api.deleteFile(f.id); closeFile(); await filesChanged(); },
-  });
-});
-
-// A person decides a result is worth keeping as knowledge: pick a folder in their own knowledge base.
-flel.toKb.addEventListener("click", async () => {
-  const f = flOpen;
-  if (!f) return;
-  let folders = [];
-  try { folders = await api.kbFolders("personal"); } catch (e) { showToast(e.message, true); return; }
-  kbOpenModal({
-    title: L("fl.toKbTitle", { name: f.name }), submit: L("tasks.saveToKbSubmit"),
-    targets: folders, name: "", nameLabel: L("tasks.kbNewSubfolder"),
-    action: async () => {
-      const folder = [kel.targetSelect.value, kel.nameInput.value.trim()].filter(Boolean).join("/");
-      const saved = await api.fileToKb(f.id, folder);
-      showToast(L("tasks.savedToKb", { path: saved.path }), false);
-    },
   });
 });
 

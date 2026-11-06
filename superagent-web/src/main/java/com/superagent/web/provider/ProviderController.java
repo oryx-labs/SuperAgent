@@ -52,6 +52,18 @@ public class ProviderController {
         return ApiResponse.ok(node.install());
     }
 
+    /** The last private Node.js install's log (null data when there's been none since the server started). */
+    @GetMapping(ApiPaths.PROVIDERS + "/node/install-log")
+    public ApiResponse<com.superagent.api.provider.InstallLogDto> nodeInstallLog() {
+        return ApiResponse.ok(node.installLog());
+    }
+
+    /** What the last install / upgrade of this CLI did and printed. */
+    @GetMapping(ApiPaths.PROVIDERS + "/{id}/install-log")
+    public ApiResponse<com.superagent.api.provider.InstallLogDto> installLog(@PathVariable String id) {
+        return ApiResponse.ok(service.installLog(id));
+    }
+
     @GetMapping(ApiPaths.PROVIDERS + "/catalog")
     public ApiResponse<List<CatalogEntryDto>> catalog() {
         return ApiResponse.ok(service.catalog());

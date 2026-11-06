@@ -17,7 +17,6 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -30,7 +29,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -73,6 +71,8 @@ public class ProviderService {
     private final Object writeLock = new Object();
     private final Set<String> busy = ConcurrentHashMap.newKeySet();
     private final Map<String, String> lastError = new ConcurrentHashMap<>();
+    /** The last install/upgrade per provider row, with its output; in memory, so a restart forgets it. */
+    private final Map<String, InstallJob> jobs = new ConcurrentHashMap<>();
     /** Source label of the last model fetch per provider; in memory only, refilled by the next fetch. */
     private final Map<String, String> modelsSource = new ConcurrentHashMap<>();
     private final ExecutorService installer = Executors.newSingleThreadExecutor(r -> {
@@ -103,7 +103,10 @@ public class ProviderService {
             credentials.onSwitch("models", key -> {
                 String now = credentials.current(key).id();
                 String before = seen.put(key, now);
-                if (before == null || before.equals(now)) {
+                // The first event per CLI is usually startup, except a CLI's first key: its list is still empty.
+                boolean firstKey = before == null && store.findByKey(key)
+                        .map(p -> parseModels(p.modelsJson()).isEmpty()).orElse(false);
+                if (!firstKey && (before == null || before.equals(now))) {
                     return;
                 }
                 store.findByKey(key).ifPresent(p -> lookup.execute(() -> {
@@ -112,6 +115,10 @@ public class ProviderService {
                 }));
             });
         }
+    }
+
+    private boolean hasKey(String providerKey) {
+        return credentials != null && currentCredential(providerKey) != null;
     }
 
     /** The endpoint/key runs on this CLI use now (null = the server's environment / CLI login). */
@@ -199,8 +206,11 @@ public class ProviderService {
     }
 
     /** Re-fetches the model list now (the detail page's Refresh button). Synchronous so the caller sees the result. */
+    /** The list now; whether each model answers follows in the background (one inference per model). */
     public ProviderDto refreshModelsNow(String id) {
-        return toDto(refreshModels(require(id)));
+        ModelProvider refreshed = refreshModels(require(id));
+        lookup.execute(() -> store.findById(id).ifPresent(this::refreshInference));
+        return toDto(refreshed);
     }
 
     /** "Check for updates": asks the registry for the latest version now, rather than at the hourly sweep. */
@@ -233,12 +243,16 @@ public class ProviderService {
         if (!busy.add(id)) {
             return toDto(p); // already installing
         }
+        // One install at a time (npm's global folder isn't safe to write concurrently): a second one waits.
+        InstallJob job = new InstallJob(upgrade ? "upgrade" : "install", "排队中：等前一个安装结束");
+        jobs.put(id, job);
         installer.execute(() -> {
             lastError.remove(id);
+            log.info("provider {}: {} started", entry.key(), upgrade ? "upgrade" : "install");
             // Dependencies first: a missing or too-old Node is installed (privately) before the CLI.
             if (nodeProblem(entry) != null) {
                 try {
-                    String problem = nodeRuntime.ensure(entry.minNode());
+                    String problem = nodeRuntime.ensure(entry.minNode(), job);
                     if (problem != null) {
                         lastError.put(id, problem);
                         finish(id);
@@ -250,7 +264,7 @@ public class ProviderService {
                     return;
                 }
             }
-            execute(id, entry, command);
+            execute(id, entry, command, job);
         });
         return toDto(p);
     }
@@ -274,15 +288,16 @@ public class ProviderService {
     }
 
     /** Runs a catalogue command as argv. Async: the result surfaces as status, not to a request. */
-    private void execute(String id, ProviderCatalog.Entry entry, String command) {
+    private void execute(String id, ProviderCatalog.Entry entry, String command, InstallJob job) {
         try {
-            String failure = runCommand(entry, command);
+            String failure = runCommand(entry, command, job);
             // The system npm can't write its global folder (an apt/yum Node owned by root): rather than asking for
             // sudo, install the private Node and put the CLI beside it.
             if (failure != null && entry.minNode() != null && permissionDenied(failure) && !nodeRuntime.hasPrivate()) {
                 log.info("provider {}: system npm can't write its global folder, retrying with a private Node", entry.key());
-                String problem = nodeRuntime.installPrivateNow();
-                failure = problem != null ? problem : runCommand(entry, command);
+                job.step("系统 npm 没有写权限，改为安装 SuperAgent 自带的 Node.js 后重试");
+                String problem = nodeRuntime.installPrivateNow(job);
+                failure = problem != null ? problem : runCommand(entry, command, job);
             }
             if (failure != null) {
                 lastError.put(id, failure);
@@ -300,6 +315,10 @@ public class ProviderService {
 
     /** Clears the busy mark and re-reads the row's state (installed? which version?). */
     private void finish(String id) {
+        InstallJob job = jobs.get(id);
+        if (job != null && job.running()) {
+            job.finish(lastError.get(id));
+        }
         busy.remove(id);
         store.findById(id).ifPresent(p -> {
             refreshLatest(p);
@@ -308,12 +327,20 @@ public class ProviderService {
         });
     }
 
-    /** One run of a catalogue command; null on success, else what went wrong (the output's tail). */
-    private String runCommand(ProviderCatalog.Entry entry, String command) throws InterruptedException {
+    /**
+     * One run of a catalogue command, its output streamed into the job line by line; null on success, else what
+     * went wrong (the output's tail). npm runs at http log level so a slow download still shows progress, and a run
+     * that prints nothing for {@link #QUIET} is stopped: npm retries an unreachable registry for a very long time.
+     */
+    private String runCommand(ProviderCatalog.Entry entry, String command, InstallJob job) throws InterruptedException {
         try {
             List<String> argv = new ArrayList<>(Arrays.asList(command.trim().split("\\s+")));
+            boolean npm = "npm".equals(argv.get(0));
             Optional<Path> bin = probe.findBinary(argv.get(0));
             bin.ifPresent(b -> argv.set(0, b.toString()));
+            if (npm) {
+                argv.add("--loglevel=http");
+            }
             ProcessBuilder pb = new ProcessBuilder(argv).redirectErrorStream(true);
             // npm needs node on PATH; a service process often lacks the global bin dirs.
             pb.environment().put("PATH", String.join(File.pathSeparator, probe.searchPath()));
@@ -321,24 +348,69 @@ public class ProviderService {
             // lands on the search path and nothing outside SuperAgent's data dir changes.
             bin.flatMap(nodeRuntime::privatePrefixFor)
                     .ifPresent(prefix -> pb.environment().put("npm_config_prefix", prefix.toString()));
+            job.step("运行 " + String.join(" ", argv));
             Process proc = pb.start();
+            java.util.concurrent.atomic.AtomicLong lastOutputAt = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
+            StringBuilder out = new StringBuilder();
             // Drain while waiting: npm can print enough to fill the pipe and block forever.
-            CompletableFuture<String> output = CompletableFuture.supplyAsync(() -> readAll(proc.getInputStream()));
-            boolean finished = proc.waitFor(10, TimeUnit.MINUTES);
-            if (!finished) {
-                proc.destroyForcibly();
+            Thread reader = Thread.ofVirtual().start(() -> {
+                try (var r = new java.io.BufferedReader(new java.io.InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
+                    for (String line; (line = r.readLine()) != null; ) {
+                        lastOutputAt.set(System.nanoTime());
+                        String clean = line.replaceAll("\u001B\\[[;\\d]*[A-Za-z]", "").stripTrailing();
+                        if (!clean.isBlank()) {
+                            job.line(clean);
+                            synchronized (out) {
+                                out.append(clean).append('\n');
+                            }
+                        }
+                    }
+                } catch (IOException ignored) {
+                    // process gone
+                }
+            });
+            long deadline = System.nanoTime() + TOTAL.toNanos();
+            String stopped = null;
+            while (!proc.waitFor(1, TimeUnit.SECONDS)) {
+                if (System.nanoTime() - lastOutputAt.get() > QUIET.toNanos()) {
+                    stopped = QUIET.toMinutes() + " 分钟没有任何输出，已停止。多半是连不上 npm 源"
+                            + (npm ? "（默认 registry.npmjs.org，配了镜像则是镜像地址）" : "") + "，请检查服务器网络或代理";
+                } else if (System.nanoTime() > deadline) {
+                    stopped = "超过 " + TOTAL.toMinutes() + " 分钟仍未完成，已停止";
+                }
+                if (stopped != null) {
+                    proc.descendants().forEach(ProcessHandle::destroyForcibly);
+                    proc.destroyForcibly();
+                    proc.waitFor(10, TimeUnit.SECONDS);
+                    break;
+                }
             }
-            String out = output.join();
-            if (!finished || proc.exitValue() != 0) {
-                log.warn("provider {} command failed ({}): {}", entry.key(), command, tail(out));
-                return (finished ? "" : "timed out. ") + tail(out);
+            reader.join(5_000);
+            String output;
+            synchronized (out) {
+                output = out.toString();
+            }
+            if (stopped != null || proc.exitValue() != 0) {
+                String why = stopped != null ? stopped : InstallFailures.summarize(output, proc.exitValue());
+                log.warn("provider {} command failed ({}): {}", entry.key(), command, why);
+                return why;
             }
             log.info("provider {} command succeeded: {}", entry.key(), command);
             return null;
         } catch (IOException e) {
             log.warn("provider {} command could not start: {}", entry.key(), e.getMessage());
-            return "could not start: " + e.getMessage();
+            return "无法启动：" + e.getMessage();
         }
+    }
+
+    private static final java.time.Duration QUIET = java.time.Duration.ofMinutes(3);
+    private static final java.time.Duration TOTAL = java.time.Duration.ofMinutes(30);
+
+    /** The last install/upgrade of a row, with its output; null when there's been none since the server started. */
+    public com.superagent.api.provider.InstallLogDto installLog(String id) {
+        require(id);
+        InstallJob job = jobs.get(id);
+        return job == null ? null : job.toDto();
     }
 
     // --- refreshes (driven by ProviderStatusChecker) ---
@@ -356,7 +428,7 @@ public class ProviderService {
         Optional<Path> bin = probe.findBinary(entry.cli());
         boolean installed = bin.isPresent();
         String version = bin.flatMap(b -> probe.version(b, entry)).orElse(null);
-        boolean auth = installed && entry.supported() && probe.looksAuthenticated(entry);
+        boolean auth = installed && entry.supported() && (probe.looksAuthenticated(entry) || hasKey(entry.key()));
         return update(p, cur -> {
             boolean outdated = ProviderProbe.isNewer(cur.latestVersion(), version);
             String status = !installed ? NOT_INSTALLED
@@ -510,21 +582,16 @@ public class ProviderService {
     private ProviderDto toDto(ModelProvider p) {
         ProviderCatalog.Entry e = entryOf(p);
         String status = busy.contains(p.id()) ? INSTALLING : p.status();
+        InstallJob job = jobs.get(p.id());
         return new ProviderDto(p.id(), e.key(), e.name(), e.cli(), e.supported(), e.installable(), e.preview(),
                 e.minNode(), p.installed(), p.canInfer(),
                 p.currentVersion(), p.latestVersion(), ProviderProbe.isNewer(p.latestVersion(), p.currentVersion()),
                 status, e.installCommand(), e.upgradeCommand(),
                 parseModels(p.modelsJson()), modelsSource.get(p.id()), p.modelsError(), p.modelsCheckedAt(),
-                lastError.get(p.id()), p.lastCheckedAt(), p.createdAt());
+                lastError.get(p.id()), job == null ? null : job.currentStep(), job != null,
+                p.lastCheckedAt(), p.createdAt());
     }
 
-    private static String readAll(InputStream in) {
-        try (in) {
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            return "";
-        }
-    }
 
     private static String tail(String s) {
         return s.length() <= 600 ? s : s.substring(s.length() - 600);

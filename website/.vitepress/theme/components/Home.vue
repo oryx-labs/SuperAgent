@@ -44,11 +44,11 @@ const features = computed(() => [
   {
     icon: 'M4 6h16M4 12h16M4 18h10',
     eyebrow: t('工作即资产', 'Work becomes assets'),
-    title: t('人会变,积累不会丢', 'People change. The knowledge stays.'),
+    title: t('人会变,积累不会丢', 'People change. The work stays.'),
     bullets: [
-      { text: t('对话、任务、交付物都留在公司', 'Conversations, tasks, and deliverables stay') },
-      { text: t('Agent 自动提炼记忆', 'Agents distill their own memory') },
-      { text: t('公司知识自动汇聚', 'Company knowledge consolidates itself'), soon: true },
+      { text: t('Agent 的产出和员工发来的资料都存进「文件」', 'Everything agents make, and everything people send them, lands in Files') },
+      { text: t('每个 Agent 有长期记忆,越用越懂这份工作', 'Each agent keeps long-term memory and gets better at the job') },
+      { text: t('换人时,Agent 连同记忆和文件一起留下', 'When people change, the agent, its memory, and its files stay') },
     ],
     panel: 'flow',
   },
@@ -64,12 +64,12 @@ const features = computed(() => [
   },
   {
     icon: 'M12 2l9 5-9 5-9-5 9-5zM3 12l9 5 9-5M3 17l9 5 9-5',
-    eyebrow: t('三级资产', 'Three levels of assets'),
-    title: t('个人、团队、公司,各有积累', 'For each person, team, and the company'),
+    eyebrow: t('方法复用', 'Reusable methods'),
+    title: t('好的做法,变成全公司的规范', 'Good practice becomes company practice'),
     bullets: [
-      { text: t('知识库分个人、团队、公司三级', 'Knowledge at personal, team, and company levels') },
       { text: t('Skills 分个人和公司两级', 'Skills at personal and company levels') },
-      { text: t('新人入职直接继承', 'New hires inherit it all') },
+      { text: t('Agent 是团队资产:设定、记忆、文件都属于公司', 'Agents are team assets: setup, memory, and files belong to the company') },
+      { text: t('新人直接接手,不用从零开始', 'New hires take over instead of starting from zero') },
     ],
     panel: 'tiers',
   },
@@ -214,17 +214,17 @@ const more = computed(() => [
             <div v-else-if="f.panel === 'flow'" class="sa-panel">
               <div class="sa-flow">
                 <div class="sa-frow"><span class="n">1</span>{{ t('员工在系统里工作', 'People work in the system') }}</div>
-                <div class="sa-frow"><span class="n">2</span>{{ t('记录和交付物留存', 'Records and deliverables kept') }}</div>
-                <div class="sa-frow active"><span class="n">3</span>{{ t('系统提炼、汇聚', 'The system distills them') }}<span class="arrow">→</span></div>
-                <div class="sa-frow"><span class="n done">✓</span>{{ t('成为公司知识资产', 'Company knowledge') }}</div>
+                <div class="sa-frow"><span class="n">2</span>{{ t('产出和资料存进文件', 'Output and material saved to Files') }}</div>
+                <div class="sa-frow active"><span class="n">3</span>{{ t('Agent 沉淀长期记忆', 'Agents build long-term memory') }}<span class="arrow">→</span></div>
+                <div class="sa-frow"><span class="n done">✓</span>{{ t('留在公司,换人不丢', 'Stays with the company') }}</div>
               </div>
             </div>
 
             <div v-else-if="f.panel === 'tiers'" class="sa-panel">
               <div class="sa-agents">
-                <div class="sa-acard"><span class="av"></span><div class="meta"><b>{{ t('公司', 'Company') }}</b><i></i></div><span class="tag">{{ t('全员', 'everyone') }}</span></div>
-                <div class="sa-acard"><span class="av v2"></span><div class="meta"><b>{{ t('团队', 'Team') }}</b><i></i></div><span class="tag">{{ t('团队成员', 'members') }}</span></div>
-                <div class="sa-acard"><span class="av v3"></span><div class="meta"><b>{{ t('个人', 'Personal') }}</b><i></i></div><span class="tag">{{ t('仅自己', 'just you') }}</span></div>
+                <div class="sa-acard"><span class="av"></span><div class="meta"><b>{{ t('公司 Skills', 'Company skills') }}</b><i></i></div><span class="tag">{{ t('全员', 'everyone') }}</span></div>
+                <div class="sa-acard"><span class="av v3"></span><div class="meta"><b>{{ t('个人 Skills', 'Personal skills') }}</b><i></i></div><span class="tag">{{ t('仅自己', 'just you') }}</span></div>
+                <div class="sa-acard"><span class="av v2"></span><div class="meta"><b>{{ t('团队 Agent', 'Team agents') }}</b><i></i></div><span class="tag">{{ t('记忆 + 文件', 'memory + files') }}</span></div>
               </div>
             </div>
           </div>

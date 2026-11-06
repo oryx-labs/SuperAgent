@@ -23,7 +23,7 @@ public class ClickHouseConnectorStore extends AbstractJdbcConnectorStore {
 
     @Override
     public Connector save(Connector c) {
-        insert(c);
+        jdbc.update("INSERT INTO connector " + COLUMNS + " VALUES " + VALUES, params(c));
         return c;
     }
 

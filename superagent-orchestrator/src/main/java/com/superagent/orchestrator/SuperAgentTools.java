@@ -10,7 +10,7 @@ import com.superagent.api.superagent.SuperAgentPlanDto;
 import com.superagent.core.agent.Agent;
 import com.superagent.core.agent.SuperAgentWork;
 import com.superagent.core.task.Task;
-import com.superagent.knowledge.skill.SkillService;
+import com.superagent.skills.SkillService;
 import com.superagent.runtime.mcp.McpGrants;
 import com.superagent.runtime.mcp.McpToolProvider;
 import com.superagent.runtime.mcp.McpToolResult;

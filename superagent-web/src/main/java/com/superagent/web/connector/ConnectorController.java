@@ -5,6 +5,7 @@ import com.superagent.api.ApiResponse;
 import com.superagent.api.connector.ConnectorDto;
 import com.superagent.api.connector.SaveConnectorRequest;
 import com.superagent.platform.connector.ConnectorService;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,8 +15,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
-/** MCP connector registry endpoints: CRUD plus connect/disconnect toggles. */
+/**
+ * Connectors. Everyone lists them and manages their own authorization ({@code /token}, {@code /bind-code});
+ * adding, editing and removing them is for administrators (enforced in the security config).
+ */
 @RestController
 public class ConnectorController {
 
@@ -26,18 +31,19 @@ public class ConnectorController {
     }
 
     @GetMapping(ApiPaths.CONNECTORS)
-    public ApiResponse<List<ConnectorDto>> list() {
-        return ApiResponse.ok(connectorService.list());
+    public ApiResponse<List<ConnectorDto>> list(Authentication auth) {
+        return ApiResponse.ok(connectorService.list(auth.getName(), isAdmin(auth)));
     }
 
     @PostMapping(ApiPaths.CONNECTORS)
-    public ApiResponse<ConnectorDto> create(@RequestBody SaveConnectorRequest request) {
-        return ApiResponse.ok(connectorService.create(request));
+    public ApiResponse<ConnectorDto> create(@RequestBody SaveConnectorRequest request, Authentication auth) {
+        return ApiResponse.ok(connectorService.create(request, auth.getName()));
     }
 
     @PutMapping(ApiPaths.CONNECTORS + "/{id}")
-    public ApiResponse<ConnectorDto> update(@PathVariable String id, @RequestBody SaveConnectorRequest request) {
-        return ApiResponse.ok(connectorService.update(id, request));
+    public ApiResponse<ConnectorDto> update(@PathVariable String id, @RequestBody SaveConnectorRequest request,
+                                            Authentication auth) {
+        return ApiResponse.ok(connectorService.update(id, request, auth.getName()));
     }
 
     @DeleteMapping(ApiPaths.CONNECTORS + "/{id}")
@@ -46,13 +52,23 @@ public class ConnectorController {
         return ApiResponse.empty();
     }
 
-    @PostMapping(ApiPaths.CONNECTORS + "/{id}/connect")
-    public ApiResponse<ConnectorDto> connect(@PathVariable String id) {
-        return ApiResponse.ok(connectorService.connect(id));
+    @PutMapping(ApiPaths.CONNECTORS + "/{id}/token")
+    public ApiResponse<ConnectorDto> authorize(@PathVariable String id, @RequestBody Map<String, String> body,
+                                               Authentication auth) {
+        return ApiResponse.ok(connectorService.authorize(id, auth.getName(), body.get("token"), isAdmin(auth)));
     }
 
-    @PostMapping(ApiPaths.CONNECTORS + "/{id}/disconnect")
-    public ApiResponse<ConnectorDto> disconnect(@PathVariable String id) {
-        return ApiResponse.ok(connectorService.disconnect(id));
+    @DeleteMapping(ApiPaths.CONNECTORS + "/{id}/token")
+    public ApiResponse<ConnectorDto> revoke(@PathVariable String id, Authentication auth) {
+        return ApiResponse.ok(connectorService.revoke(id, auth.getName(), isAdmin(auth)));
+    }
+
+    @PostMapping(ApiPaths.CONNECTORS + "/{id}/bind-code")
+    public ApiResponse<ConnectorDto> bindCode(@PathVariable String id, Authentication auth) {
+        return ApiResponse.ok(connectorService.newBindCode(id, auth.getName(), isAdmin(auth)));
+    }
+
+    private static boolean isAdmin(Authentication auth) {
+        return auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
     }
 }

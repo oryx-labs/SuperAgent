@@ -31,8 +31,8 @@ class SettingsServiceTest {
         }
     }
 
-    private final SettingsService service =
-            new SettingsService(new InMemoryStore(), new FakeProviders("claude-opus-5-5", "gpt-5.5"));
+    private final InMemoryStore store = new InMemoryStore();
+    private final SettingsService service = new SettingsService(store, new FakeProviders("claude-opus-5-5", "gpt-5.5"));
 
     @Test
     void unsetByDefault() {
@@ -60,5 +60,9 @@ class SettingsServiceTest {
         assertThatThrownBy(() -> service.update(new SystemSettingsDto("claude-listed-only", null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(service.agentDefaultModel()).isNull();
+
+        // A saved default that has since failed its check doesn't stop the other settings being saved.
+        store.put(SettingsService.AGENT_DEFAULT_MODEL, "claude-gone");
+        assertThat(service.update(new SystemSettingsDto("claude-gone", "OKG", null)).companyName()).isEqualTo("OKG");
     }
 }

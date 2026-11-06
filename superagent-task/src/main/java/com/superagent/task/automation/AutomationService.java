@@ -43,7 +43,7 @@ import java.util.UUID;
  * missed while the server was down collapse into a single catch-up run.
  *
  * <p>Only the owner (or an admin) may change, run or delete an automation: it runs as its owner
- * and writes to their knowledge base. All mutations and firings share one lock.
+ * and what it makes is theirs. All mutations and firings share one lock.
  */
 @Service
 public class AutomationService {

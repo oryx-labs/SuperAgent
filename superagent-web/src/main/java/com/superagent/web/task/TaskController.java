@@ -3,8 +3,6 @@ package com.superagent.web.task;
 import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.chat.SendMessageRequest;
-import com.superagent.api.knowledge.KnowledgeEntryDto;
-import com.superagent.api.knowledge.KnowledgeRequests;
 import com.superagent.api.task.ArtifactDto;
 import com.superagent.api.task.CreateTaskRequest;
 import com.superagent.api.task.TaskAgentOptionDto;
@@ -15,7 +13,6 @@ import com.superagent.api.task.TaskPageDto;
 import com.superagent.api.task.TaskStatsDto;
 import com.superagent.core.chat.AgentType;
 import com.superagent.core.provider.ProviderCatalog;
-import com.superagent.knowledge.KnowledgeService;
 import com.superagent.platform.provider.ProviderService;
 import com.superagent.runtime.attachment.ImageAttachmentStore;
 import com.superagent.task.TaskService;
@@ -45,14 +42,11 @@ public class TaskController {
     private final TaskService taskService;
     private final ProviderService providerService;
     private final ImageAttachmentStore images;
-    private final KnowledgeService knowledge;
 
-    public TaskController(TaskService taskService, ProviderService providerService, ImageAttachmentStore images,
-                          KnowledgeService knowledge) {
+    public TaskController(TaskService taskService, ProviderService providerService, ImageAttachmentStore images) {
         this.taskService = taskService;
         this.providerService = providerService;
         this.images = images;
-        this.knowledge = knowledge;
     }
 
     @PostMapping(ApiPaths.TASKS)
@@ -114,15 +108,6 @@ public class TaskController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + sanitize(name) + "\"")
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .body(content);
-    }
-
-    /** Manual "save to knowledge base": copies an artifact into the signed-in user's own knowledge base. */
-    @PostMapping(ApiPaths.TASKS + "/{id}/artifacts/{name}/knowledge")
-    public ApiResponse<KnowledgeEntryDto> saveArtifactToKnowledge(@PathVariable String id, @PathVariable String name,
-                                                                  @RequestBody KnowledgeRequests.SaveArtifact request,
-                                                                  Authentication auth) {
-        String folder = request.folder() == null ? "" : request.folder().strip().replaceAll("^/+|/+$", "");
-        return ApiResponse.ok(knowledge.saveFile(auth.getName(), taskService.artifactFile(id, auth.getName(), name), folder, name, false));
     }
 
     private static String sanitize(String name) {

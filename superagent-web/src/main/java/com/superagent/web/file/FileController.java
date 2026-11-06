@@ -4,9 +4,7 @@ import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.file.WorkFileDto;
 import com.superagent.api.file.WorkFileRequests;
-import com.superagent.api.knowledge.KnowledgeEntryDto;
 import com.superagent.files.FileService;
-import com.superagent.knowledge.KnowledgeService;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
@@ -31,7 +29,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** Work files: list, read, rename, delete, and copy one into the caller's knowledge base. */
+/** Work files: list, read, upload, rename, delete. */
 @RestController
 public class FileController {
 
@@ -50,11 +48,9 @@ public class FileController {
             Map.entry("m4v", "video/mp4"), Map.entry("pdf", "application/pdf"));
 
     private final FileService files;
-    private final KnowledgeService knowledge;
 
-    public FileController(FileService files, KnowledgeService knowledge) {
+    public FileController(FileService files) {
         this.files = files;
-        this.knowledge = knowledge;
     }
 
     /** Everything the caller can see, newest first; {@code agent} narrows to one agent's files. */
@@ -117,15 +113,5 @@ public class FileController {
     public ApiResponse<Void> delete(@PathVariable String id, Authentication auth) {
         files.delete(id, auth.getName());
         return ApiResponse.empty();
-    }
-
-    /** A person decides a file is worth keeping as knowledge: copy it into their own knowledge base. */
-    @PostMapping(ApiPaths.FILES + "/{id}/knowledge")
-    public ApiResponse<KnowledgeEntryDto> saveToKnowledge(@PathVariable String id,
-                                                          @RequestBody WorkFileRequests.SaveToKnowledge request,
-                                                          Authentication auth) {
-        FileService.Content c = files.content(id, auth.getName());
-        String folder = request.folder() == null ? "" : request.folder().strip().replaceAll("^/+|/+$", "");
-        return ApiResponse.ok(knowledge.saveFile(auth.getName(), c.path(), folder, c.name(), false));
     }
 }

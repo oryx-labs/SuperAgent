@@ -38,8 +38,9 @@ import com.superagent.core.task.TaskStatus;
 import com.superagent.core.task.TaskStore;
 import jakarta.annotation.PreDestroy;
 import com.superagent.files.FileService;
-import com.superagent.knowledge.skill.SkillService;
+import com.superagent.skills.SkillService;
 import com.superagent.runtime.attachment.ImageAttachmentStore;
+import com.superagent.core.connector.McpServerSpec;
 import com.superagent.runtime.mcp.McpGrants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -118,7 +119,7 @@ public class TaskService implements TaskRecovery {
     private final List<String> allowedTools;
     private final boolean skipPermissions;
     private final String defaultOwner;
-    private final McpGrants mcpGrants;   // null = task runs get no knowledge-base tools
+    private final McpGrants mcpGrants;   // null = task runs get no SuperAgent tools (files, skills)
     private final SkillService skills;   // null = tasks run without skills (tests)
     private final TaskAgentStore taskAgents;   // null = task→agent links not recorded (tests)
     private CredentialService credentials;     // null in tests: runs use the server's environment
@@ -126,6 +127,19 @@ public class TaskService implements TaskRecovery {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setCredentials(CredentialService credentials) {
         this.credentials = credentials;
+    }
+
+    private com.superagent.platform.connector.ConnectorService connectors; // null in tests: no company connectors
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setConnectors(com.superagent.platform.connector.ConnectorService connectors) {
+        this.connectors = connectors;
+    }
+    private com.superagent.platform.provider.ProviderService providers; // null in tests: no model fallback
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setProviders(com.superagent.platform.provider.ProviderService providers) {
+        this.providers = providers;
     }
     private final ApplicationEventPublisher events;   // null = no to-do items (tests)
     private final CodingFlow codingFlow;
@@ -449,7 +463,7 @@ public class TaskService implements TaskRecovery {
     }
 
     /**
-     * {@code owner} is the requesting user (null = the default owner); their knowledge base receives saves.
+     * {@code owner} is the requesting user (null = the default owner); the files it makes are theirs.
      * {@code agentId} is the agent creating it, whose skills the task then uses (null = all skills).
      */
     public TaskDto create(CreateTaskRequest request, String owner, String agentId) {
@@ -636,7 +650,14 @@ public class TaskService implements TaskRecovery {
         if (task.model() != null) {
             return task.model();
         }
-        return task.agentType() == AgentType.CLAUDE ? defaultModel : null;
+        if (task.agentType() == AgentType.CLAUDE) {
+            return defaultModel;
+        }
+        // Kimi and Qwen need a model named; any CLI does better with one the probe saw answer than none.
+        return providers == null || task.agentType() == AgentType.CODEX ? null
+                : providers.storedModels(task.agentType().cliName()).stream()
+                        .filter(com.superagent.api.provider.ProviderModelDto::canInfer)
+                        .map(com.superagent.api.provider.ProviderModelDto::id).findFirst().orElse(null);
     }
 
     /**
@@ -832,10 +853,15 @@ public class TaskService implements TaskRecovery {
         // A per-turn token gives this run the file and skill tools for its owner only, revoked after the turn.
         McpGrants.Grant grant = mcpGrants == null || task.workspaceDir() == null ? null
                 : mcpGrants.openTask(task.createdBy(), task.id(), task.workspaceDir());
+        // The company's connectors, with the identity of whoever created the task (their own authorizations).
+        List<McpServerSpec> connected = connectors == null ? List.of() : connectors.mcpServersFor(task.createdBy());
         List<String> tools = allowedTools;
-        if (grant != null) {
+        if (grant != null || !connected.isEmpty()) {
             tools = new ArrayList<>(allowedTools);
-            tools.addAll(McpGrants.WORK_TOOLS);
+            if (grant != null) {
+                tools.addAll(McpGrants.WORK_TOOLS);
+            }
+            tools.addAll(com.superagent.platform.connector.ConnectorService.toolPatterns(connected));
         }
         String cli = task.agentType().cliName();
         CredentialService.Choice choice = credentials == null ? new CredentialService.Choice(null) : credentials.current(cli);
@@ -843,7 +869,7 @@ public class TaskService implements TaskRecovery {
                 agentSessionId, sessionFirstTurn ? null : agentSessionId, task.workspaceDir(),
                 wrapBriefPrompt ? wrapBrief(prompt) : prompt,
                 effectiveModel(task),
-                tools, skipPermissions, grant == null ? null : mcpGrants.mcpConfig(grant),
+                tools, skipPermissions, McpGrants.withServers(grant == null ? null : mcpGrants.mcpConfig(grant), connected),
                 taskSystemPrompt(task, grant != null),
                 nextTurnImages.remove(task.id()), null, choice.credential());
         try {

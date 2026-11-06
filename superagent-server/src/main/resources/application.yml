@@ -42,8 +42,6 @@ superagent:
       password: ${SUPERAGENT_STORAGE_MYSQL_PASSWORD:}
   agent:
     workspace-dir: ./data/workspaces
-  knowledge:
-    dir: ./data/knowledge
   attachments:
     dir: ./data/attachments
   files:

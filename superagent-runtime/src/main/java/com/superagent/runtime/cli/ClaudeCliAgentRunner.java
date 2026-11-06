@@ -84,6 +84,11 @@ public class ClaudeCliAgentRunner implements AgentRunner {
      * Points this run at the pool entry's endpoint and key. The server's own Anthropic variables are cleared
      * first: Claude Code prefers an API key over a token, so a leftover one would silently win over the choice.
      */
+    /** The run's endpoint and key; a subclass running Claude Code against another vendor adds what it needs. */
+    protected void applyEnvironment(ProcessBuilder pb, AgentRunRequest request) {
+        applyCredential(pb, request.credential());
+    }
+
     static void applyCredential(ProcessBuilder pb, com.superagent.core.chat.RunCredential credential) {
         if (credential == null) {
             return;
@@ -147,7 +152,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         if (cliPaths != null) {
             cliPaths.apply(pb);
         }
-        applyCredential(pb, request.credential());
+        applyEnvironment(pb, request);
 
         Process process;
         try {

@@ -26,7 +26,7 @@ async function loadSystemSettings() {
 
 async function loadSettingsForm() {
   sel.status.textContent = "";
-  const [{ groups, listed }] = await Promise.all([loadChatModels(), loadSystemSettings()]);
+  const [{ groups, listed, failed }] = await Promise.all([loadChatModels(), loadSystemSettings()]);
   const ok = groups.reduce((n, g) => n + g.models.length, 0);
   const current = systemSettings.agentDefaultModel || "";
   sel.companyName.value = systemSettings.companyName || "";
@@ -35,7 +35,9 @@ async function loadSettingsForm() {
   sel.agentModel.innerHTML = "";
   const def = document.createElement("option");
   def.value = "";
-  def.textContent = L("settings.modelCliDefault");
+  // Never offer a default that can't run: say there's nothing, or ask for a pick.
+  def.textContent = L(failed || cliDefaultWorks(groups) ? "settings.modelCliDefault"
+    : ok ? "settings.modelPick" : "chat.noModel");
   sel.agentModel.appendChild(def);
   fillModelGroups(sel.agentModel, groups,
     m => m.displayName && m.displayName !== m.id ? m.displayName + " (" + m.id + ")" : m.id);
@@ -44,7 +46,10 @@ async function loadSettingsForm() {
     fillModelGroups(sel.agentModel, [{ label: L("settings.modelCurrent"), models: [{ id: current }] }], m => m.id);
   }
   sel.agentModel.value = current;
-  sel.missing.hidden = ok > 0;
+  const none = !failed && !ok;
+  sel.agentModel.disabled = none && !current;
+  sel.agentModel.classList.toggle("is-unavailable", none && !current);
+  sel.missing.hidden = !none;
   sel.filtered.hidden = !ok || ok === listed;
   sel.filtered.textContent = L("settings.modelsFiltered", { ok, total: listed });
 }

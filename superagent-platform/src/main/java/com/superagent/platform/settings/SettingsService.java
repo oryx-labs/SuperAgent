@@ -35,7 +35,8 @@ public class SettingsService {
      */
     public SystemSettingsDto update(SystemSettingsDto request) {
         String model = trimToNull(request.agentDefaultModel());
-        if (model != null && providerService.cliFor(model).isEmpty()) {
+        // Only a newly chosen model is checked: one that has since failed mustn't block saving the other settings.
+        if (model != null && !model.equals(agentDefaultModel()) && providerService.cliFor(model).isEmpty()) {
             throw new IllegalArgumentException("Model " + model + " has not passed the inference check");
         }
         store.put(AGENT_DEFAULT_MODEL, model);

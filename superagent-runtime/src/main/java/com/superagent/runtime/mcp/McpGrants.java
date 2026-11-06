@@ -1,7 +1,10 @@
 package com.superagent.runtime.mcp;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.superagent.core.connector.ConnectorTransport;
+import com.superagent.core.connector.McpServerSpec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -116,6 +119,45 @@ public class McpGrants {
         server.put("type", "http");
         server.put("url", selfUrl);
         server.putObject("headers").put("Authorization", "Bearer " + grant.token());
+        return root.toString();
+    }
+
+    /**
+     * {@code baseConfig} (SuperAgent's own server, or null) plus the company's connectors, in the same
+     * {@code --mcp-config} shape. Stdio servers carry {@code command}/{@code args}/{@code env}; runners that only
+     * speak HTTP MCP skip them. Null when there is nothing to configure.
+     */
+    public static String withServers(String baseConfig, List<McpServerSpec> servers) {
+        if (servers == null || servers.isEmpty()) {
+            return baseConfig;
+        }
+        ObjectMapper json = new ObjectMapper();
+        ObjectNode root;
+        try {
+            JsonNode parsed = baseConfig == null ? null : json.readTree(baseConfig);
+            root = parsed instanceof ObjectNode o ? o : json.createObjectNode();
+        } catch (IOException e) {
+            root = json.createObjectNode();
+        }
+        ObjectNode all = root.has("mcpServers") ? (ObjectNode) root.get("mcpServers") : root.putObject("mcpServers");
+        for (McpServerSpec s : servers) {
+            if (all.has(s.name())) {
+                continue;
+            }
+            ObjectNode server = all.putObject(s.name());
+            if (s.transport() == ConnectorTransport.STDIO) {
+                server.put("type", "stdio");
+                server.put("command", s.command());
+                s.args().forEach(server.putArray("args")::add);
+                ObjectNode env = server.putObject("env");
+                s.env().forEach(env::put);
+            } else {
+                server.put("type", s.transport() == ConnectorTransport.SSE ? "sse" : "http");
+                server.put("url", s.url());
+                ObjectNode headers = server.putObject("headers");
+                s.headers().forEach(headers::put);
+            }
+        }
         return root.toString();
     }
 

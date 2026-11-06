@@ -217,8 +217,7 @@ const uel = {
   phone: document.getElementById("ufPhone"),
   password: document.getElementById("ufPassword"),
   passwordLabel: document.getElementById("ufPasswordLabel"),
-  adminRow: document.getElementById("ufAdminRow"),
-  admin: document.getElementById("ufAdmin"),
+  role: document.getElementById("ufRole"),
   hint: document.getElementById("ufHint"),
   submit: document.getElementById("ufSubmit"),
   orgTree: document.getElementById("orgTree"),
@@ -392,8 +391,7 @@ function openUserModal(u) {
   uel.password.value = "";
   uel.passwordLabel.textContent = L(u ? "users.fNewPassword" : "users.fPassword");
   uel.password.placeholder = u ? L("users.fNewPasswordPh") : "";
-  uel.adminRow.hidden = !u;
-  uel.admin.checked = !!u && (u.roles || []).includes("ADMIN");
+  uel.role.value = u && (u.roles || []).includes("ADMIN") ? "ADMIN" : "USER";
   uel.modal.hidden = false;
   (u ? uel.displayName : userKind === "phone" ? uel.displayName : uel.username).focus();
 }
@@ -405,19 +403,19 @@ uel.form.addEventListener("submit", async e => {
   e.preventDefault();
   let body;
   if (editingUser) {
-    body = { displayName: uel.displayName.value.trim(), roles: [uel.admin.checked ? "ADMIN" : "USER"] };
+    body = { displayName: uel.displayName.value.trim(), roles: [uel.role.value] };
     if (uel.password.value) body.password = uel.password.value;
   } else if (userKind === "phone") {
     const phone = uel.phone.value.replace(/[\s-]/g, "");
     const name = uel.displayName.value.trim();
     if (!/^\+?\d{6,15}$/.test(phone)) { showToast(L("users.phoneInvalid"), true); return; }
     if (!name) { showToast(L("users.nameRequired"), true); return; }
-    body = { username: phone, displayName: name, phone, source: "phone", roles: ["USER"] };
+    body = { username: phone, displayName: name, phone, source: "phone", roles: [uel.role.value] };
   } else {
     const username = uel.username.value.trim();
     if (!username) { showToast(L("users.usernameRequired"), true); return; }
     if (!uel.password.value) { showToast(L("users.passwordRequired"), true); return; }
-    body = { username, displayName: uel.displayName.value.trim(), password: uel.password.value, source: "local", roles: ["USER"] };
+    body = { username, displayName: uel.displayName.value.trim(), password: uel.password.value, source: "local", roles: [uel.role.value] };
   }
   uel.submit.disabled = true;
   try {

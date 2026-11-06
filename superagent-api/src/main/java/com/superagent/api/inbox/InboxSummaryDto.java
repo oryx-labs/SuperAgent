@@ -1,5 +1,5 @@
 package com.superagent.api.inbox;
 
-/** The user's data intake at a glance: sources set up / connected, messages received today and handled so far. */
-public record InboxSummaryDto(int sources, int connected, int today, int handled) {
+/** The SuperAgent panel's line about outside messages: whether the user is linked to Feishu, and today's messages. */
+public record InboxSummaryDto(boolean linked, int today, int handled) {
 }

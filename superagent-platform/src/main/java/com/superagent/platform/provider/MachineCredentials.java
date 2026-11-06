@@ -57,6 +57,11 @@ public class MachineCredentials {
         return fromEnv != null && !fromEnv.isBlank() ? Path.of(fromEnv) : Path.of(System.getProperty("user.home"), defaultName);
     }
 
+    /** A CLI's folder under the same home as Claude's config (the writer's tests point this at a temp dir). */
+    public Path home(String name) {
+        return claudeDir.resolveSibling(name);
+    }
+
     public Path claudeDir() {
         return claudeDir;
     }
@@ -69,8 +74,19 @@ public class MachineCredentials {
         return switch (providerKey) {
             case "claude" -> claude();
             case "codex" -> codex();
-            default -> List.of();
+            default -> vendor(providerKey);
         };
+    }
+
+    /** The others: the catalogue's variables in the server's environment. */
+    private List<Found> vendor(String providerKey) {
+        var access = com.superagent.core.provider.ProviderCatalog.find(providerKey).map(e -> e.access()).orElse(null);
+        String key = access == null || access.keyEnv() == null ? null : blankToNull(env.apply(access.keyEnv()));
+        if (key == null) {
+            return List.of();
+        }
+        String base = access.baseUrlEnv() == null ? null : blankToNull(env.apply(access.baseUrlEnv()));
+        return List.of(new Found(providerKey, base, key, "glm".equals(providerKey), "服务器环境变量 " + access.keyEnv()));
     }
 
     private List<Found> claude() {

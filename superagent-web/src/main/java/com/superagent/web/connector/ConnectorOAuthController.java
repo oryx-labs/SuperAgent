@@ -7,6 +7,7 @@ import com.superagent.platform.connector.OAuthException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -15,9 +16,9 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 
 /**
- * GitHub OAuth endpoints. These are reached by full-page browser navigation, so
- * every outcome (success, cancel, misconfiguration) is a 302 back to the app with
- * a query flag the UI surfaces — never a JSON error page.
+ * GitHub OAuth endpoints, for an employee authorizing a connector with their own account. These are
+ * reached by full-page browser navigation, so every outcome (success, cancel, misconfiguration) is a 302
+ * back to the app with a query flag the UI surfaces — never a JSON error page.
  */
 @RestController
 public class ConnectorOAuthController {
@@ -32,9 +33,9 @@ public class ConnectorOAuthController {
     }
 
     @GetMapping(ApiPaths.OAUTH + "/github/authorize")
-    public ResponseEntity<Void> authorize(@RequestParam String connectorId) {
+    public ResponseEntity<Void> authorize(@RequestParam String connectorId, Authentication auth) {
         try {
-            return redirect(oauth.buildAuthorizeUrl(connectorId));
+            return redirect(oauth.buildAuthorizeUrl(connectorId, auth.getName()));
         } catch (OAuthException e) {
             return redirect(appReturn("connect_error", e.code()));
         } catch (ConnectorNotFoundException e) {
@@ -45,12 +46,13 @@ public class ConnectorOAuthController {
     @GetMapping(ApiPaths.OAUTH + "/github/callback")
     public ResponseEntity<Void> callback(@RequestParam(required = false) String code,
                                          @RequestParam(required = false) String state,
-                                         @RequestParam(required = false) String error) {
+                                         @RequestParam(required = false) String error,
+                                         Authentication auth) {
         if (error != null && !error.isBlank()) {
             return redirect(appReturn("connect_error", error));
         }
         try {
-            return redirect(appReturn("connected", oauth.handleCallback(code, state)));
+            return redirect(appReturn("connected", oauth.handleCallback(code, state, auth.getName())));
         } catch (OAuthException e) {
             return redirect(appReturn("connect_error", e.code()));
         } catch (ConnectorNotFoundException e) {

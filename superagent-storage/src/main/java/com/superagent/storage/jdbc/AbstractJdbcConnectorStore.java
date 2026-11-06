@@ -2,10 +2,9 @@ package com.superagent.storage.jdbc;
 
 import com.superagent.core.connector.Connector;
 import com.superagent.core.connector.ConnectorAuthMethod;
-import com.superagent.core.connector.ConnectorStatus;
+import com.superagent.core.connector.ConnectorKind;
 import com.superagent.core.connector.ConnectorStore;
 import com.superagent.core.connector.ConnectorTransport;
-import com.superagent.core.connector.ConnectorType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
@@ -24,6 +23,10 @@ import java.util.Optional;
  */
 abstract class AbstractJdbcConnectorStore implements ConnectorStore {
 
+    protected static final String COLUMNS = "(id, name, description, kind, auth_method, enabled, transport, endpoint, "
+            + "token_env, app_id, status, last_error, created_at, updated_at)";
+    protected static final String VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
     protected final JdbcTemplate jdbc;
 
     protected AbstractJdbcConnectorStore(JdbcTemplate jdbc, List<String> schemaDdl) {
@@ -40,11 +43,15 @@ abstract class AbstractJdbcConnectorStore implements ConnectorStore {
             rs.getString("id"),
             rs.getString("name"),
             emptyToNull(rs.getString("description")),
-            ConnectorType.valueOf(rs.getString("type")),
+            ConnectorKind.valueOf(rs.getString("kind")),
             ConnectorAuthMethod.valueOf(rs.getString("auth_method")),
-            ConnectorStatus.valueOf(rs.getString("status")),
+            rs.getInt("enabled") != 0,
             ConnectorTransport.valueOf(rs.getString("transport")),
             emptyToNull(rs.getString("endpoint")),
+            emptyToNull(rs.getString("token_env")),
+            emptyToNull(rs.getString("app_id")),
+            emptyToNull(rs.getString("status")),
+            emptyToNull(rs.getString("last_error")),
             instant(rs, "created_at"),
             instant(rs, "updated_at"));
 
@@ -59,12 +66,10 @@ abstract class AbstractJdbcConnectorStore implements ConnectorStore {
                 .stream().findFirst();
     }
 
-    protected void insert(Connector c) {
-        jdbc.update("INSERT INTO connector "
-                        + "(id, name, description, type, auth_method, status, transport, endpoint, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                c.id(), c.name(), nn(c.description()), c.type().name(), c.authMethod().name(),
-                c.status().name(), c.transport().name(), nn(c.endpoint()), utc(c.createdAt()), utc(c.updatedAt()));
+    protected Object[] params(Connector c) {
+        return new Object[]{c.id(), c.name(), nn(c.description()), c.kind().name(), c.authMethod().name(),
+                c.enabled() ? 1 : 0, c.transport().name(), nn(c.endpoint()), nn(c.tokenEnv()), nn(c.appId()),
+                nn(c.status()), nn(c.lastError()), utc(c.createdAt()), utc(c.updatedAt())};
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {
@@ -82,5 +87,19 @@ abstract class AbstractJdbcConnectorStore implements ConnectorStore {
 
     private static String emptyToNull(String value) {
         return value == null || value.isEmpty() ? null : value;
+    }
+
+    /**
+     * Connectors and their credentials changed shape (kinds, per-employee secrets) with no migration: an
+     * older table is dropped so the new one can be created.
+     */
+    static void dropIfOld(JdbcTemplate jdbc, String table, String newColumn) {
+        Integer exists = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = SCHEMA() "
+                + "AND LOWER(table_name) = ?", Integer.class, table);
+        Integer current = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                + "AND LOWER(table_name) = ? AND LOWER(column_name) = ?", Integer.class, table, newColumn);
+        if (exists != null && exists > 0 && (current == null || current == 0)) {
+            jdbc.execute("DROP TABLE " + table);
+        }
     }
 }

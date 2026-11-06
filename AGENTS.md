@@ -24,7 +24,7 @@ Layered; depend only downward (full table and conventions in [CLAUDE.md](CLAUDE.
 
 - **L0** superagent-core (domain records, store interfaces, error bases), superagent-api (DTOs)
 - **L1** superagent-storage (JDBC), superagent-runtime (agent CLIs, MCP grants, attachments)
-- **L2** superagent-platform (users, settings, providers, connectors), superagent-knowledge (knowledge base, skills)
+- **L2** superagent-platform (users, settings, providers, connectors), superagent-skills (skills)
 - **L3** superagent-agent (chat, memory, collaboration), superagent-task (tasks, automations) — siblings, never depend on each other
 - **L4** superagent-orchestrator (SuperAgent), superagent-event (inbox)
 - **L5** superagent-web (controllers, MCP endpoint, auth), superagent-ui (static UI)

@@ -3,10 +3,8 @@ package com.superagent.web.inbox;
 import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.inbox.InboxEventDto;
-import com.superagent.api.inbox.InboxSourceDto;
 import com.superagent.api.inbox.InboxSummaryDto;
 import com.superagent.api.inbox.InboxTodoDto;
-import com.superagent.api.inbox.SaveInboxSourceRequest;
 import com.superagent.event.UserInboxService;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,7 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.Map;
 
-/** The signed-in user's data sources and what they received; the owner is always the authenticated user. */
+/** The signed-in user's outside messages and the to-dos made from them; the owner is always the authenticated user. */
 @RestController
 public class InboxController {
 
@@ -30,29 +28,9 @@ public class InboxController {
         this.inbox = inbox;
     }
 
-    @GetMapping(ApiPaths.INBOX + "/sources")
-    public ApiResponse<List<InboxSourceDto>> sources(Authentication auth) {
-        return ApiResponse.ok(inbox.sources(auth.getName()));
-    }
-
     @GetMapping(ApiPaths.INBOX + "/summary")
     public ApiResponse<InboxSummaryDto> summary(Authentication auth) {
         return ApiResponse.ok(inbox.summary(auth.getName()));
-    }
-
-    @GetMapping(ApiPaths.INBOX + "/source")
-    public ApiResponse<InboxSourceDto> source(Authentication auth) {
-        return ApiResponse.ok(inbox.source(auth.getName()));
-    }
-
-    @PutMapping(ApiPaths.INBOX + "/source")
-    public ApiResponse<InboxSourceDto> save(@RequestBody SaveInboxSourceRequest request, Authentication auth) {
-        return ApiResponse.ok(inbox.save(auth.getName(), request));
-    }
-
-    @PostMapping(ApiPaths.INBOX + "/source/bind-code")
-    public ApiResponse<InboxSourceDto> bindCode(Authentication auth) {
-        return ApiResponse.ok(inbox.newBindCode(auth.getName()));
     }
 
     @GetMapping(ApiPaths.INBOX + "/events")

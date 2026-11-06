@@ -54,8 +54,6 @@ public final class ApiPaths {
     /** OAuth authorize/callback endpoints for connectors that use a provider handshake. */
     public static final String OAUTH = V1 + "/oauth";
 
-    /** The caller's private file-system knowledge base (folders, files, previews). */
-    public static final String KNOWLEDGE = V1 + "/knowledge";
 
     /** Shared skills (working standards) that agents and tasks follow. */
     public static final String SKILLS = V1 + "/skills";

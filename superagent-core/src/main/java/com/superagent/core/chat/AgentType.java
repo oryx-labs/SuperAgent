@@ -9,7 +9,11 @@ public enum AgentType {
 
     CLAUDE("claude"),
     CODEX("codex"),
-    KIMI("kimi");
+    KIMI("kimi"),
+    DEEPSEEK("deepseek"),
+    QWEN("qwen"),
+    /** Zhipu has no agent CLI: Claude Code, pointed at GLM's Anthropic-compatible endpoint. */
+    GLM("glm");
 
     private final String cliName;
 
@@ -17,7 +21,7 @@ public enum AgentType {
         this.cliName = cliName;
     }
 
-    /** The executable / identifier used on the command line. */
+    /** The agent's identifier: its key in the provider catalogue (for most, also the executable's name). */
     public String cliName() {
         return cliName;
     }

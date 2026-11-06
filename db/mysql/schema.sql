@@ -42,27 +42,32 @@ CREATE TABLE IF NOT EXISTS agent_event (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS connector (
-  id          VARCHAR(64)  NOT NULL,
-  name        VARCHAR(255) NOT NULL,
+  id          VARCHAR(64)   NOT NULL,
+  name        VARCHAR(255)  NOT NULL,
   description VARCHAR(1024),
-  type        VARCHAR(16)  NOT NULL,
-  auth_method VARCHAR(32)  NOT NULL,
-  status      VARCHAR(32)  NOT NULL,
-  transport   VARCHAR(16)  NOT NULL,
+  kind        VARCHAR(16)   NOT NULL,
+  auth_method VARCHAR(32)   NOT NULL,
+  enabled     TINYINT       NOT NULL,
+  transport   VARCHAR(16)   NOT NULL,
   endpoint    VARCHAR(2048),
-  created_at  DATETIME(3)  NOT NULL,
-  updated_at  DATETIME(3)  NOT NULL,
+  token_env   VARCHAR(128),
+  app_id      VARCHAR(128),
+  status      VARCHAR(32),
+  last_error  VARCHAR(1024),
+  created_at  DATETIME(3)   NOT NULL,
+  updated_at  DATETIME(3)   NOT NULL,
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Per-connector secrets (e.g. OAuth access tokens); kept out of the connector row
--- and never returned by the API.
+-- Connector secrets, encrypted: per employee (owner = username) or the company's own (owner = '');
+-- kept out of the connector row and never returned by the API.
 CREATE TABLE IF NOT EXISTS connector_credential (
   connector_id  VARCHAR(64)   NOT NULL,
-  access_token  VARCHAR(2048) NOT NULL,
+  owner         VARCHAR(128)  NOT NULL,
+  secret_cipher VARCHAR(4096) NOT NULL,
   account_label VARCHAR(255),
   updated_at    DATETIME(3)   NOT NULL,
-  PRIMARY KEY (connector_id)
+  PRIMARY KEY (connector_id, owner)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Provisioned users who may sign in (preprovision-only). The admin comes from config.

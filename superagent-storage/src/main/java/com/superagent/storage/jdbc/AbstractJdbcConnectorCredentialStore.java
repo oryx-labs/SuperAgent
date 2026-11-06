@@ -15,10 +15,12 @@ import java.util.Optional;
 
 /**
  * JDBC {@link ConnectorCredentialStore} shared by MySQL and ClickHouse, mirroring
- * {@link AbstractJdbcConnectorStore}. Backends differ only in {@link #save} and
- * whether reads need {@code FINAL}.
+ * {@link AbstractJdbcConnectorStore}. Backends differ only in writes and whether
+ * reads need {@code FINAL}.
  */
 abstract class AbstractJdbcConnectorCredentialStore implements ConnectorCredentialStore {
+
+    protected static final String INSERT = "(connector_id, owner, secret_cipher, account_label, updated_at) VALUES (?, ?, ?, ?, ?)";
 
     protected final JdbcTemplate jdbc;
 
@@ -34,20 +36,25 @@ abstract class AbstractJdbcConnectorCredentialStore implements ConnectorCredenti
 
     private final RowMapper<ConnectorCredential> mapper = (rs, n) -> new ConnectorCredential(
             rs.getString("connector_id"),
-            rs.getString("access_token"),
+            rs.getString("owner"),
+            emptyToNull(rs.getString("secret_cipher")),
             emptyToNull(rs.getString("account_label")),
             instant(rs, "updated_at"));
 
     @Override
-    public Optional<ConnectorCredential> find(String connectorId) {
-        return jdbc.query("SELECT * FROM connector_credential" + credentialFinal() + " WHERE connector_id = ?",
-                mapper, connectorId).stream().findFirst();
+    public Optional<ConnectorCredential> find(String connectorId, String owner) {
+        return jdbc.query("SELECT * FROM connector_credential" + credentialFinal() + " WHERE connector_id = ? AND owner = ?",
+                mapper, connectorId, owner).stream().findFirst();
     }
 
-    protected void insert(ConnectorCredential c) {
-        jdbc.update("INSERT INTO connector_credential (connector_id, access_token, account_label, updated_at) "
-                        + "VALUES (?, ?, ?, ?)",
-                c.connectorId(), nn(c.accessToken()), nn(c.accountLabel()), utc(c.updatedAt()));
+    @Override
+    public List<ConnectorCredential> list(String connectorId) {
+        return jdbc.query("SELECT * FROM connector_credential" + credentialFinal() + " WHERE connector_id = ?",
+                mapper, connectorId);
+    }
+
+    protected Object[] params(ConnectorCredential c) {
+        return new Object[]{c.connectorId(), c.owner(), nn(c.secretCipher()), nn(c.accountLabel()), utc(c.updatedAt())};
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

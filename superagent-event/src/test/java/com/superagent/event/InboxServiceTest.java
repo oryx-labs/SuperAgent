@@ -85,8 +85,8 @@ class InboxServiceTest {
 
     private static EventSource source() {
         Instant now = Instant.now();
-        return new EventSource("ada", EventSource.FEISHU, "cli", "v1:x", true, "ou_ada", null,
-                "09:00", "Asia/Shanghai", null, null, null, null, null, now, now);
+        return new EventSource("ada", EventSource.FEISHU, "cli", true, "ou_ada", null,
+                "09:00", "Asia/Shanghai", null, null, null, now, now);
     }
 
     private static InboxEvent msg(String id, String chatType, boolean mentionsMe, String sender, String text) {

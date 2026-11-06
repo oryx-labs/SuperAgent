@@ -60,10 +60,12 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/users/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/providers/**").hasRole("ADMIN") // runs install commands on the host
-                        // Everyone may see which connectors exist and whether they're connected. Credentials are
-                        // shared by the whole platform, so adding, editing and (dis)connecting stay with admins.
+                        // Everyone sees the connectors and manages their own authorization (a personal token,
+                        // an OAuth handshake, a Feishu bind code); adding, editing and removing stay with admins.
                         .requestMatchers(HttpMethod.GET, "/api/v1/connectors").authenticated()
-                        .requestMatchers("/api/v1/connectors/**", "/api/v1/oauth/**").hasRole("ADMIN")
+                        .requestMatchers("/api/v1/connectors/*/token", "/api/v1/connectors/*/bind-code",
+                                "/api/v1/oauth/**").authenticated()
+                        .requestMatchers("/api/v1/connectors/**").hasRole("ADMIN")
                         // Everyone reads the defaults (e.g. to show an agent's effective model); only admins change them.
                         .requestMatchers(HttpMethod.GET, "/api/v1/settings").authenticated()
                         .requestMatchers("/api/v1/settings/**").hasRole("ADMIN")

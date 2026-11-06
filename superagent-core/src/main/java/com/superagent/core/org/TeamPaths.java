@@ -11,7 +11,7 @@ public final class TeamPaths {
 
     /**
      * Trims each segment and joins them with "/". Rejects empty segments, dot-names, control characters
-     * and "›" (used in the knowledge base's on-disk names), so a path is always safe to store and show.
+     * and "›", so a path is always safe to store and show.
      */
     public static String normalize(String path) {
         if (path == null || path.isBlank()) {

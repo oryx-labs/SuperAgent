@@ -71,8 +71,32 @@ public class ProviderModelFetcher {
         return switch (providerKey) {
             case "codex" -> fetchCodex();
             case "claude" -> fetchClaude(credential);
+            case "deepseek", "glm", "kimi", "qwen" -> fetchVendor(providerKey, credential);
             default -> throw new IOException("Model listing is not available for " + providerKey + " yet");
         };
+    }
+
+    // --- the vendors reached by key: their OpenAI-style model list ---
+
+    private Result fetchVendor(String providerKey, com.superagent.core.chat.RunCredential credential)
+            throws IOException, InterruptedException {
+        var entry = com.superagent.core.provider.ProviderCatalog.find(providerKey).orElseThrow();
+        ApiAccess access = ApiAccess.of(entry, credential).orElseThrow(() -> new IOException("请先在 API Key 页配置 Key"));
+        String url = access.modelsUrl(providerKey);
+        HttpResponse<String> resp = http.send(access.authorizeBearer(HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(20)).GET()).build(), HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() != 200) {
+            throw new IOException("GET " + url + " returned HTTP " + resp.statusCode());
+        }
+        List<ProviderModelDto> out = new ArrayList<>();
+        for (JsonNode m : mapper.readTree(resp.body()).path("data")) {
+            String id = m.path("id").asText("");
+            if (!id.isBlank() && !NON_CHAT.matcher(id).find()) {
+                out.add(new ProviderModelDto(id, null, List.of(), null, "none", null, true));
+            }
+        }
+        out.sort(Comparator.comparing(ProviderModelDto::id));
+        return new Result(out, "GET " + url);
     }
 
     // --- codex ---

@@ -51,11 +51,7 @@ class AgentMemoryRulesTest {
     }
 
     @Test
-    void theFileIsNamedForTheAgentAndFoundByIdAfterARename() {
-        String id = "0f3c9a2e-1111-2222-3333-444455556666";
-        assertThat(AgentMemoryRules.fileName("市场/调研员", id)).isEqualTo("市场 调研员（0f3c9a2e）.md");
-        assertThat(AgentMemoryRules.fileName("改名后", id)).endsWith(AgentMemoryRules.idSuffix(id));
-
+    void theTranscriptIsStampedOldestFirst() {
         String transcript = AgentMemoryRules.transcript(messages(2, 0), ZoneId.of("Asia/Shanghai"));
         assertThat(transcript).startsWith("[2026-11-05 09:59] 用户：msg 0").contains("助手：msg 1");
     }

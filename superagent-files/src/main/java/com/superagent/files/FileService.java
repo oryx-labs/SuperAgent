@@ -44,7 +44,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Work files: what agents produce, kept apart from the knowledge base (which people curate). Content lives on
+ * Work files: what agents produce and what people send them. Content lives on
  * this server under {@code <dir>/<id>/content}; only the latest version is kept, so an agent revising a file
  * overwrites it in place — and only when it names that file explicitly, so two pieces of work that happen to
  * share a name never clobber each other.

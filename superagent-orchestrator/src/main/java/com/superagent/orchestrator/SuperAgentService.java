@@ -38,7 +38,7 @@ import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskStatus;
 import com.superagent.core.task.TaskStore;
-import com.superagent.knowledge.skill.SkillService;
+import com.superagent.skills.SkillService;
 import com.superagent.platform.provider.ProviderService;
 import com.superagent.platform.settings.SettingsService;
 import com.superagent.runtime.attachment.ImageAttachmentStore;

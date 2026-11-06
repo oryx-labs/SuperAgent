@@ -19,12 +19,14 @@ public class ClickHouseAgentMemoryStateStore extends AbstractJdbcAgentMemoryStat
               summarized_until Nullable(DateTime64(3, 'UTC')),
               last_model       String,
               session_failures Int32,
+              memory           String,
               updated_at       DateTime64(3, 'UTC')
             ) ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY agent_id
             """,
             // Older tables predate failure counting.
-            "ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS session_failures Int32 DEFAULT 0");
+            "ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS session_failures Int32 DEFAULT 0",
+            "ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS memory String");
 
     public ClickHouseAgentMemoryStateStore(JdbcTemplate jdbc) {
         super(jdbc, SCHEMA);
