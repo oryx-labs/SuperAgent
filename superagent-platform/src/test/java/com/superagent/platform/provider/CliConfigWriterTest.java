@@ -60,4 +60,23 @@ class CliConfigWriterTest {
         assertThat(tmp.resolve("auth.json")).doesNotExist(); // there was none before SuperAgent
         assertThat(Files.readString(config)).isEqualTo("model = \"gpt-6\"\n\n[mcp_servers.x]\nurl = \"http://x\"\n");
     }
+
+    @Test
+    void aRelaySetUpAsACodexProviderIsWhereThatMachinesKeyBelongs() throws Exception {
+        Path config = tmp.resolve("relay.toml");
+        Files.writeString(config, """
+                model_provider = "relay"
+                openai_base_url = "https://ignored.example/v1"
+
+                [model_providers.other]
+                base_url = "https://other.example/v1"
+
+                [model_providers.relay]
+                name = "relay"
+                base_url = "https://relay.example/v1" # the gateway
+                """);
+        assertThat(MachineCredentials.codexEndpoint(config)).isEqualTo("https://relay.example/v1");
+        Files.writeString(config, "openai_base_url = \"https://plain.example/v1\"\n");
+        assertThat(MachineCredentials.codexEndpoint(config)).isEqualTo("https://plain.example/v1");
+    }
 }

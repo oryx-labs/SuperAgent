@@ -642,7 +642,7 @@ public class ChatService {
         };
 
         AgentTurnCustomizer special = emitter.special();
-        McpGrants.Grant grant = special != null ? special.openGrant(emitter.agent(), user, session)
+        McpGrants.Grant grant = special != null ? special.openGrant(emitter.agent(), user, session, assistantMessageId)
                 : mcpGrants == null ? null : mcpGrants.openChat(user, session.agentId(), session.id(), assistantMessageId, session.workspaceDir());
         String cli = agentType.cliName();
         CredentialService.Choice choice = credentials == null ? new CredentialService.Choice(null) : credentials.current(cli);

@@ -276,6 +276,7 @@ async function attachInviteCards(agent) {
   });
 }
 
+/** {@code agent}: the agent the invitation is for; in the SuperAgent's chat it isn't the one on screen, so it's named. */
 function inviteCard(agent, inv) {
   const card = document.createElement("div");
   card.className = "invite-card is-" + inv.status;
@@ -283,7 +284,9 @@ function inviteCard(agent, inv) {
   const text = document.createElement("div");
   text.className = "invite-card__text";
   const title = document.createElement("b");
-  title.textContent = L("co.inviteCardTitle", { names: (inv.names || inv.usernames).join("、") });
+  const names = (inv.names || inv.usernames).join("、");
+  title.textContent = activeAgent && activeAgent.kind === "super" && inv.agentName
+    ? L("co.inviteCardTitleFor", { names, agent: inv.agentName }) : L("co.inviteCardTitle", { names });
   const hint = document.createElement("span");
   hint.textContent = L("co.inviteCard." + inv.status + (inv.status === "pending" && !isOwner(agent) ? "Member" : ""));
   text.append(title, hint);

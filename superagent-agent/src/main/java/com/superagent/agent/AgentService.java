@@ -17,8 +17,6 @@ import com.superagent.core.agent.AgentMember;
 import com.superagent.core.agent.AgentMemberStore;
 import com.superagent.core.agent.AgentStatus;
 import com.superagent.core.agent.AgentStore;
-import com.superagent.core.inbox.EventSource;
-import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
@@ -74,19 +72,17 @@ public class AgentService {
     private final ApplicationEventPublisher events;
     private final UserStore users;
     private final PeopleDirectory people;
-    private final EventSourceStore sources;
     private final String adminUsername;
     private final Object superLock = new Object();
 
     public AgentService(AgentStore store, ChatService chatService, SkillService skills, AgentMemoryService memory,
-                        AgentMemberStore members, UserStore users, EventSourceStore sources,
+                        AgentMemberStore members, UserStore users,
                         ApplicationEventPublisher events, PeopleDirectory people,
                         @Value("${superagent.auth.admin.username:admin}") String adminUsername) {
         this.events = events;
         this.members = members;
         this.users = users;
         this.people = people;
-        this.sources = sources;
         this.store = store;
         this.chatService = chatService;
         this.skills = skills;
@@ -185,6 +181,11 @@ public class AgentService {
     }
 
     /** The agent if it is the user's and live; throws {@link AgentNotFoundException} otherwise. */
+    /** The agent's name, for labels (null when it's gone). */
+    public String findName(String id) {
+        return store.find(id).map(Agent::name).orElse(null);
+    }
+
     public Agent require(String id, String owner) {
         return store.find(id)
                 .filter(a -> a.status() != AgentStatus.DELETED && Objects.equals(a.owner(), owner))
@@ -303,15 +304,11 @@ public class AgentService {
     }
 
     /**
-     * The SuperAgent, the members it hired and the inbox secretary act on one person's private data
-     * (their requests, their messages), so they can't be shared.
+     * Every agent but the SuperAgent can be shared — the ones it hired included. The SuperAgent is the owner's own
+     * leader: it acts on their requests and the messages their data sources receive.
      */
     private boolean shareable(Agent a) {
-        if (a.isSuper() || a.managedBy() != null) {
-            return false;
-        }
-        return sources.find(a.owner(), EventSource.FEISHU).map(EventSource::secretaryAgentId)
-                .map(id -> !id.equals(a.id())).orElse(true);
+        return !a.isSuper();
     }
 
     /** Adds collaborators (owner only). They see the whole history, including what was said before they joined. */
@@ -340,7 +337,7 @@ public class AgentService {
         return members.members(id).stream().map(AgentMember::username).toList();
     }
 
-    /** Whether the owner may share this agent at all (the SuperAgent and its hires can't be). */
+    /** Whether the owner may share this agent at all (only the SuperAgent can't be). */
     public boolean canShare(String id, String owner) {
         return shareable(require(id, owner));
     }

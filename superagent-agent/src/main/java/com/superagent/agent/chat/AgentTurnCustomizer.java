@@ -21,8 +21,8 @@ public interface AgentTurnCustomizer {
     /** MCP tool names the CLI may call, on top of the built-in tools. */
     List<String> tools(Agent agent);
 
-    /** The grant the turn's MCP calls run under; closed by the caller. */
-    McpGrants.Grant openGrant(Agent agent, String user, ChatSession session);
+    /** The grant the turn's MCP calls run under; closed by the caller. {@code messageId} is the reply being written. */
+    McpGrants.Grant openGrant(Agent agent, String user, ChatSession session, String messageId);
 
     /** The prompt actually sent for {@code userPrompt}: may add context the agent's CLI conversation lacks. */
     String prompt(Agent agent, ChatSession session, String userPrompt);

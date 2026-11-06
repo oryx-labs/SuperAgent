@@ -171,8 +171,14 @@ public class CodexCliAgentRunner implements AgentRunner {
             boolean canWrite = request.allowedTools() != null && request.allowedTools().stream().anyMatch(WRITE_TOOLS::contains);
             cmd.add(canWrite ? "workspace-write" : "read-only");
         }
+        if (request.credential() != null) {
+            // The machine's config.toml may select a provider of its own (a relay): that would ignore the base URL
+            // below and this run's key. Back to the built-in one, whose endpoint is the entry's.
+            cmd.add("-c");
+            cmd.add("model_provider=\"openai\"");
+        }
         if (request.credential() != null && request.credential().baseUrl() != null) {
-            // Points the built-in OpenAI provider at a relay/proxy, per run (not written to config.toml).
+            // Points the built-in OpenAI provider at the entry's endpoint, per run (not written to config.toml).
             cmd.add("-c");
             cmd.add("openai_base_url=" + jsonString(request.credential().baseUrl()));
         }

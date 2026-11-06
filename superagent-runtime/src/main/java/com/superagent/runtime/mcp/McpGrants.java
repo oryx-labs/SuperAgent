@@ -174,7 +174,12 @@ public class McpGrants {
 
     /** A SuperAgent round for {@code owner}; {@code agentId} is that user's SuperAgent. */
     public Grant openSuper(String owner, String agentId, String workspaceDir) {
-        return open(Kind.SUPER, owner, null, agentId, null, null, workspaceDir == null ? null : Path.of(workspaceDir));
+        return openSuper(owner, agentId, null, null, workspaceDir);
+    }
+
+    /** A SuperAgent chat turn: its session and reply, so what it proposes (an invitation) shows under that reply. */
+    public Grant openSuper(String owner, String agentId, String sessionId, String messageId, String workspaceDir) {
+        return open(Kind.SUPER, owner, null, agentId, sessionId, messageId, workspaceDir == null ? null : Path.of(workspaceDir));
     }
 
     public Grant openTask(String owner, String taskId, String workspaceDir) {

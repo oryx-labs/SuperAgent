@@ -101,9 +101,20 @@ public class AgentInviteService {
         return toDto(done);
     }
 
+    /**
+     * Invitations {@code user} proposed for their own agents from the given conversations (the SuperAgent's chat
+     * sessions), so its chat can show their cards.
+     */
+    public List<AgentInviteDto> proposedIn(String user, java.util.Set<String> sessionIds) {
+        return agents.owned(user).stream().flatMap(a -> invites.forAgent(a.id()).stream())
+                .filter(i -> i.sessionId() != null && sessionIds.contains(i.sessionId()))
+                .map(this::toDto).toList();
+    }
+
     private AgentInviteDto toDto(AgentInvite i) {
+        String agentName = agents.findName(i.agentId());
         return new AgentInviteDto(i.id(), i.usernames(), i.usernames().stream().map(agents::displayName).toList(),
-                i.messageId(), i.status().name().toLowerCase(Locale.ROOT), i.createdAt());
+                i.messageId(), i.status().name().toLowerCase(Locale.ROOT), i.createdAt(), i.agentId(), agentName);
     }
 
     private AgentInvite pending(String agentId, String inviteId, String user) {

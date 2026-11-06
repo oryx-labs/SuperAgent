@@ -139,8 +139,16 @@ public class ClaudeCliAgentRunner implements AgentRunner {
             emitError(sink, request, seq.getAndIncrement(), "Cannot read attached image: " + e.getMessage());
             return Retry.NONE;
         }
+        Path settingsFile;
+        try {
+            settingsFile = writeRunSettings(request);
+        } catch (IOException e) {
+            // Without it the machine's own config could send this key to another endpoint: don't run.
+            emitError(sink, request, seq.getAndIncrement(), "Cannot prepare the run's settings: " + e.getMessage());
+            return Retry.NONE;
+        }
         Path mcpConfigFile = writeMcpConfig(request);
-        List<String> cmd = buildCommand(request, mcpConfigFile);
+        List<String> cmd = buildCommand(request, mcpConfigFile, settingsFile);
         // Never log the prompt: with images it's on stdin; otherwise it's the last argv entry.
         log.info("session {} running: {} (cwd={}, images={})", request.sessionId(),
                 String.join(" ", stdinMessage != null ? cmd : cmd.subList(0, cmd.size() - 1)),
@@ -165,6 +173,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         } catch (IOException e) {
             emitError(sink, request, seq.getAndIncrement(), "Failed to start agent: " + e.getMessage());
             deleteQuietly(mcpConfigFile);
+            deleteQuietly(settingsFile);
             return Retry.NONE;
         }
 
@@ -235,12 +244,17 @@ public class ClaudeCliAgentRunner implements AgentRunner {
             emitError(sink, request, seq.getAndIncrement(), "Agent run interrupted");
         } finally {
             deleteQuietly(mcpConfigFile);
+            deleteQuietly(settingsFile);
         }
         return conversationMissing ? Retry.NEW_CONVERSATION : Retry.NONE;
     }
 
     // Package-private for unit testing of the argv assembly (persona injection, flag ordering).
     List<String> buildCommand(AgentRunRequest request, Path mcpConfigFile) {
+        return buildCommand(request, mcpConfigFile, null);
+    }
+
+    List<String> buildCommand(AgentRunRequest request, Path mcpConfigFile, Path settingsFile) {
         List<String> cmd = new ArrayList<>();
         cmd.add(command);
         cmd.add("-p");
@@ -284,14 +298,14 @@ public class ClaudeCliAgentRunner implements AgentRunner {
             cmd.add(String.join(" ", request.allowedTools()));
         }
 
+        if (settingsFile != null) {
+            cmd.add("--settings");
+            cmd.add(settingsFile.toString());
+        }
         if (!request.images().isEmpty()) {
             // Images can only travel as content blocks, so the whole message goes on stdin instead.
             cmd.add("--input-format");
             cmd.add("stream-json");
-            // The Claude gateway rejects image requests from a CLI with Artifacts on ("request is not
-            // representable on this edge"); turn it off for this run only, not in the host's settings.
-            cmd.add("--settings");
-            cmd.add("{\"enableArtifact\":false}");
             return cmd;
         }
         // End-of-options separator: the CLI treats everything after "--" as a
@@ -326,6 +340,36 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         sink.emit(new AgentEvent(request.sessionId(), null, seq, AgentEventType.ERROR, message, Instant.now()));
     }
 
+    /**
+     * This run's own settings, for {@code --settings} (null if it needs none). The endpoint and key go here as well
+     * as in the environment because a CLI's settings files outrank its environment: a relay in the machine's or the
+     * workspace's settings would otherwise take the run, and the key with it. A file, since keys never go in argv.
+     */
+    static Path writeRunSettings(AgentRunRequest request) throws IOException {
+        var credential = request.credential();
+        if (credential == null && request.images().isEmpty()) {
+            return null;
+        }
+        var root = JSON.createObjectNode();
+        if (!request.images().isEmpty()) {
+            // The Claude gateway rejects image requests from a CLI with Artifacts on ("request is not
+            // representable on this edge"); turn it off for this run only, not in the host's settings.
+            root.put("enableArtifact", false);
+        }
+        if (credential != null) {
+            var env = root.putObject("env");
+            if (credential.baseUrl() != null) {
+                env.put("ANTHROPIC_BASE_URL", credential.baseUrl());
+            }
+            // Blank the other one: set in a settings file, it would win or be sent alongside.
+            env.put("ANTHROPIC_API_KEY", credential.bearer() ? "" : credential.apiKey());
+            env.put("ANTHROPIC_AUTH_TOKEN", credential.bearer() ? credential.apiKey() : "");
+        }
+        Path file = Files.createTempFile("superagent-settings-", ".json"); // owner-only: it can hold a key
+        Files.writeString(file, JSON.writeValueAsString(root), StandardCharsets.UTF_8);
+        return file;
+    }
+
     /** Writes the request's MCP config (if any) to a temp file the CLI reads via {@code --mcp-config}. */
     private Path writeMcpConfig(AgentRunRequest request) {
         if (request.mcpConfig() == null || request.mcpConfig().isBlank()) {
@@ -349,7 +393,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         try {
             Files.deleteIfExists(file);
         } catch (IOException e) {
-            log.debug("could not delete mcp config temp file {}: {}", file, e.getMessage());
+            log.debug("could not delete temp file {}: {}", file, e.getMessage());
         }
     }
 

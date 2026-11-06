@@ -115,7 +115,7 @@ public class MachineCredentials {
 
     private List<Found> codex() {
         List<Found> out = new ArrayList<>();
-        String base = openaiBaseUrl(codexHome.resolve("config.toml"));
+        String base = codexEndpoint(codexHome.resolve("config.toml"));
         for (String var : List.of("CODEX_API_KEY", "OPENAI_API_KEY")) {
             String key = blankToNull(env.apply(var));
             if (key != null) {
@@ -131,6 +131,42 @@ public class MachineCredentials {
         return out;
     }
 
+    /**
+     * Where this machine's Codex sends its key: the {@code base_url} of the provider {@code model_provider} selects
+     * (a relay set up as {@code [model_providers.x]}), else the top-level {@code openai_base_url}.
+     */
+    static String codexEndpoint(Path configToml) {
+        if (!Files.isRegularFile(configToml)) {
+            return null;
+        }
+        try {
+            String provider = null;
+            boolean inProvider = false, topLevel = true;
+            for (String line : Files.readAllLines(configToml, StandardCharsets.UTF_8)) {
+                String t = line.strip();
+                if (t.startsWith("[")) {
+                    topLevel = false;
+                    inProvider = provider != null && (t.equals("[model_providers." + provider + "]")
+                            || t.equals("[model_providers.\"" + provider + "\"]"));
+                } else if (topLevel && t.startsWith("model_provider") && t.substring(14).strip().startsWith("=")) {
+                    provider = tomlString(t);
+                } else if (inProvider && t.startsWith("base_url") && t.substring(8).strip().startsWith("=")) {
+                    return tomlString(t);
+                }
+            }
+        } catch (IOException e) {
+            return null;
+        }
+        return openaiBaseUrl(configToml);
+    }
+
+    private static String tomlString(String keyValueLine) {
+        int eq = keyValueLine.indexOf('=');
+        String v = eq < 0 ? "" : keyValueLine.substring(eq + 1).strip();
+        int hash = v.indexOf(" #");
+        return blankToNull((hash >= 0 ? v.substring(0, hash) : v).strip().replaceAll("^[\"']|[\"']$", ""));
+    }
+
     /** The top-level {@code openai_base_url} of a Codex config.toml (before any [table]), or null. */
     static String openaiBaseUrl(Path configToml) {
         if (!Files.isRegularFile(configToml)) {
@@ -143,11 +179,7 @@ public class MachineCredentials {
                     return null;
                 }
                 if (t.startsWith("openai_base_url")) {
-                    int eq = t.indexOf('=');
-                    String v = eq < 0 ? "" : t.substring(eq + 1).strip();
-                    int hash = v.indexOf(" #");
-                    v = (hash >= 0 ? v.substring(0, hash) : v).strip().replaceAll("^[\"']|[\"']$", "");
-                    return blankToNull(v);
+                    return tomlString(t);
                 }
             }
         } catch (IOException e) {

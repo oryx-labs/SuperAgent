@@ -66,7 +66,7 @@ class CodexCliAgentRunnerTest {
         AgentRunRequest req = new AgentRunRequest("s1", null, "/w", "hi", null, List.of(), false, null, null)
                 .withCredential(new RunCredential("c1", "https://relay.example/v1", "sk-relay-key", false));
         List<String> cmd = runner.buildCommand(req, null);
-        assertThat(cmd).containsSubsequence("-c", "openai_base_url=\"https://relay.example/v1\"");
+        assertThat(cmd).containsSubsequence("-c", "model_provider=\"openai\"", "-c", "openai_base_url=\"https://relay.example/v1\"");
         assertThat(String.join(" ", cmd)).doesNotContain("sk-relay-key");
     }
 

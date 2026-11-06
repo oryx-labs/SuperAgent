@@ -43,9 +43,10 @@ class SuperAgentChat implements AgentTurnCustomizer {
     }
 
     @Override
-    public McpGrants.Grant openGrant(Agent agent, String user, ChatSession session) {
+    public McpGrants.Grant openGrant(Agent agent, String user, ChatSession session, String messageId) {
         // The SuperAgent is never shared: its turns always act for its owner.
-        return grants.available() ? grants.openSuper(agent.owner(), agent.id(), session.workspaceDir()) : null;
+        return grants.available() ? grants.openSuper(agent.owner(), agent.id(), session.id(), messageId,
+                session.workspaceDir()) : null;
     }
 
     @Override

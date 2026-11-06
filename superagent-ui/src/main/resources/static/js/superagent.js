@@ -64,7 +64,25 @@ async function refreshSuper(force) {
   });
   if (!planShown) el.messages.appendChild(planCard(state.plan));
   if (activeAgent) attachFileCards(activeAgent);
+  attachSuperInviteCards();
   if (force || nearBottom || !last || last.role !== "assistant") scrollToBottom();
+}
+
+/**
+ * Invitations the SuperAgent proposed for the user's other agents: the same confirm card as in an agent's own chat,
+ * under the reply that proposed it, acting on the agent it's for.
+ */
+async function attachSuperInviteCards() {
+  const agentId = activeAgentId;
+  const list = (await fetch("/api/v1/superagent/invites").then(kbJson).catch(() => null)) || [];
+  if (!superMode || activeAgentId !== agentId) return;
+  list.forEach(inv => {
+    const msg = inv.messageId && el.messages.querySelector('.msg[data-mid="' + CSS.escape(inv.messageId) + '"]');
+    if (!msg) return;
+    const card = inviteCard({ id: inv.agentId, name: inv.agentName }, inv); // the user owns it: they confirm
+    const old = msg.querySelector('.invite-card[data-iid="' + CSS.escape(inv.id) + '"]');
+    if (old) old.replaceWith(card); else (msg.querySelector(".bubble") || msg).appendChild(card);
+  });
 }
 
 // ---------- the background ----------

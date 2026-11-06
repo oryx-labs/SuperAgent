@@ -120,4 +120,26 @@ class ClaudeCliAgentRunnerTest {
                 .doesNotContainKey("ANTHROPIC_API_KEY"); // a leftover key would win over the token
         assertThat(pb.command()).containsExactly("claude");
     }
+
+    /** The CLI's settings files outrank its environment, so the entry's endpoint and key also go in as --settings. */
+    @Test
+    void aPoolCredentialOutranksTheMachinesSettingsWithTheKeyOutOfArgv() throws Exception {
+        ClaudeCliAgentRunner runner = new ClaudeCliAgentRunner("claude", 600);
+        AgentRunRequest req = request(null).withCredential(new RunCredential("c1", "https://api.anthropic.com", "sk-official", false));
+        java.nio.file.Path file = ClaudeCliAgentRunner.writeRunSettings(req);
+        try {
+            var env = new com.fasterxml.jackson.databind.ObjectMapper().readTree(file.toFile()).path("env");
+            assertThat(env.path("ANTHROPIC_BASE_URL").asText()).isEqualTo("https://api.anthropic.com");
+            assertThat(env.path("ANTHROPIC_API_KEY").asText()).isEqualTo("sk-official");
+            assertThat(env.path("ANTHROPIC_AUTH_TOKEN").asText()).isEmpty(); // or the machine's token would win
+            assertThat(java.nio.file.Files.getPosixFilePermissions(file)).containsExactlyInAnyOrder(
+                    java.nio.file.attribute.PosixFilePermission.OWNER_READ, java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
+            List<String> cmd = runner.buildCommand(req, null, file);
+            assertThat(cmd).containsSubsequence("--settings", file.toString());
+            assertThat(String.join(" ", cmd)).doesNotContain("sk-official");
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+        }
+        assertThat(ClaudeCliAgentRunner.writeRunSettings(request(null))).isNull();
+    }
 }

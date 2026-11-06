@@ -34,6 +34,12 @@ public class SuperAgentController {
         return ApiResponse.ok(service.state(auth.getName()));
     }
 
+    /** Invitations the SuperAgent proposed in its chat (for the user's other agents), for their confirm cards. */
+    @GetMapping(ApiPaths.SUPER_AGENT + "/invites")
+    public ApiResponse<List<com.superagent.api.agent.AgentInviteDto>> invites(Authentication auth) {
+        return ApiResponse.ok(service.invites(auth.getName()));
+    }
+
     /** The background record: what reached the queue (task results, received messages) and how each round answered. */
     @GetMapping(ApiPaths.SUPER_AGENT + "/background")
     public ApiResponse<List<MessageDto>> background(@RequestParam(defaultValue = "200") int limit, Authentication auth) {

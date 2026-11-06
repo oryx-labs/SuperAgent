@@ -103,9 +103,12 @@ public class SuperAgentService {
     /** Tool names as the CLI sees them; a background round may call these and nothing else. */
     static final List<String> BACKGROUND_TOOLS = Stream.concat(
             SuperAgentTools.NAMES.stream().map(n -> "mcp__superagent__" + n), McpGrants.INBOX_TOOLS.stream()).toList();
-    /** The chat answers the user directly, so it has no use for posting into its own conversation. */
-    static final List<String> CHAT_TOOLS = BACKGROUND_TOOLS.stream()
-            .filter(t -> !t.equals("mcp__superagent__" + SuperAgentTools.TELL_USER)).toList();
+    /**
+     * The chat answers the user directly, so it has no use for posting into its own conversation; it alone manages
+     * collaborators (a background round reads third-party messages, which must not bring people in).
+     */
+    static final List<String> CHAT_TOOLS = Stream.concat(BACKGROUND_TOOLS.stream()
+            .filter(t -> !t.equals("mcp__superagent__" + SuperAgentTools.TELL_USER)), SuperAgentCollabTools.TOOLS.stream()).toList();
 
     /** Marks a delivery of received messages; such rounds can't touch the team or its tasks. */
     static final String EXTERNAL = "【外部消息】";
@@ -139,6 +142,7 @@ public class SuperAgentService {
     private final AgentLogService runLog;
     private final ApplicationEventPublisher events;
     private final SkillService skills;
+    private final com.superagent.agent.AgentInviteService inviteService;
     private final Map<AgentType, AgentRunner> runners = new EnumMap<>(AgentType.class);
 
     private CredentialService credentials; // null in tests: runs use the server's environment
@@ -171,7 +175,7 @@ public class SuperAgentService {
 
     public SuperAgentService(AgentService agents, SuperAgentStateStore states, ChatStore chats, TaskService taskService,
                              TaskStore tasks, ProviderService providers, SettingsService settings,
-                             McpGrants grants, SkillService skills,
+                             McpGrants grants, SkillService skills, com.superagent.agent.AgentInviteService inviteService,
                              ChatService chatService, AgentMemoryService memory, SuperAgentWorkStore works,
                              AgentLogService runLog, ApplicationEventPublisher events,
                              List<AgentRunner> agentRunners,
@@ -193,6 +197,7 @@ public class SuperAgentService {
         this.works = works;
         this.runLog = runLog;
         this.skills = skills;
+        this.inviteService = inviteService;
         for (AgentRunner r : agentRunners) {
             runners.put(r.type(), r);
         }
@@ -683,6 +688,18 @@ public class SuperAgentService {
 
     Optional<Task> task(String owner, String taskId) {
         return tasks.findTask(taskId).filter(t -> Objects.equals(t.createdBy(), owner));
+    }
+
+    /** The grant belongs to a background round (not the chat). */
+    boolean isBackground(McpGrants.Grant grant) {
+        return backgroundGrants.containsKey(grant.token());
+    }
+
+    /** Invitations the SuperAgent proposed in its chat, for their cards there. */
+    public List<com.superagent.api.agent.AgentInviteDto> invites(String owner) {
+        Agent sa = agents.require(ensureState(owner).agentId(), owner);
+        Set<String> sessions = chats.listSessionsByAgent(sa.id()).stream().map(ChatSession::id).collect(Collectors.toSet());
+        return inviteService.proposedIn(owner, sessions);
     }
 
     /** Refuses the team-changing tools in a background round that works received messages. */
