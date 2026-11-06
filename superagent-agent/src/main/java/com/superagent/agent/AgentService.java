@@ -207,6 +207,9 @@ public class AgentService {
                     trimToNull(request.persona()), trimToNull(request.model()), agent.status(), agent.owner(),
                     agent.kind(), agent.managedBy(), agent.createdAt(), Instant.now());
         }
+        // Null keeps the tier (edit forms don't send it); blank is back to the default.
+        com.superagent.core.provider.ModelTier tier = com.superagent.core.provider.ModelTier.of(request.tier());
+        updated = updated.withTier(request.tier() == null ? agent.tier() : tier == null ? null : tier.key());
         store.update(updated);
         if (request.skillIds() != null) {
             skills.setAgentSkills(id, request.skillIds(), agent.owner());
@@ -255,7 +258,7 @@ public class AgentService {
         return new AgentDto(a.id(), a.name(), a.avatar(), a.character(), a.persona(), a.model(), skills.agentSkillIds(a.id()),
                 a.status().name().toLowerCase(), a.kind().name().toLowerCase(), a.managedBy(), sessionId,
                 a.createdAt(), a.updatedAt(), a.owner(), Objects.equals(a.owner(), viewer) ? "owner" : "collaborator",
-                people, shareable(a));
+                people, shareable(a), a.tier());
     }
 
     // --- memory ---

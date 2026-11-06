@@ -15,5 +15,12 @@ public record SaveAutomationRequest(
         String timezone,
         String model,
         String overlap,
-        Boolean enabled) {
+        Boolean enabled,
+        /** Used when tiers are on: null keeps it on an update, blank is the default tier. */
+        String tier) {
+
+    public SaveAutomationRequest(String name, String prompt, String type, String cron, String runAt, String timezone,
+                                 String model, String overlap, Boolean enabled) {
+        this(name, prompt, type, cron, runAt, timezone, model, overlap, enabled, null);
+    }
 }

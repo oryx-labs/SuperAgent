@@ -15,5 +15,12 @@ public record CreateTaskRequest(
         String flow,
         String model,
         String agentType,
-        String kind) {
+        String kind,
+        /** The tier to run at, when tiers are on (null = the default tier); then {@code model} and {@code agentType} follow from it. */
+        String tier) {
+
+    public CreateTaskRequest(String title, String brief, String source, String repo, String branch, String flow,
+                             String model, String agentType, String kind) {
+        this(title, brief, source, repo, branch, flow, model, agentType, kind, null);
+    }
 }

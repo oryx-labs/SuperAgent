@@ -32,7 +32,19 @@ public record Agent(
         AgentKind kind,
         String managedBy,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        /** The tier chosen when the admin has turned tiers on (null = the default tier). */
+        String tier) {
+
+    public Agent(String id, String name, String avatar, String character, String persona, String model, AgentStatus status,
+                 String owner, AgentKind kind, String managedBy, Instant createdAt, Instant updatedAt) {
+        this(id, name, avatar, character, persona, model, status, owner, kind, managedBy, createdAt, updatedAt, null);
+    }
+
+    public Agent withTier(String newTier) {
+        return new Agent(id, name, avatar, character, persona, model, status, owner, kind, managedBy, createdAt, updatedAt, newTier);
+    }
+
 
     public Agent {
         kind = kind == null ? AgentKind.STANDARD : kind;
@@ -44,37 +56,37 @@ public record Agent(
 
     public Agent withName(String newName) {
         return new Agent(id, newName, avatar, character, persona, model, status, owner, kind, managedBy,
-                createdAt, Instant.now());
+                createdAt, Instant.now(), tier);
     }
 
     public Agent withAvatar(String newAvatar) {
         return new Agent(id, name, newAvatar, character, persona, model, status, owner, kind, managedBy,
-                createdAt, Instant.now());
+                createdAt, Instant.now(), tier);
     }
 
     public Agent withPersona(String newPersona) {
         return new Agent(id, name, avatar, character, newPersona, model, status, owner, kind, managedBy,
-                createdAt, Instant.now());
+                createdAt, Instant.now(), tier);
     }
 
     public Agent withModel(String newModel) {
         return new Agent(id, name, avatar, character, persona, newModel, status, owner, kind, managedBy,
-                createdAt, Instant.now());
+                createdAt, Instant.now(), tier);
     }
 
     public Agent withOwner(String newOwner) {
         return new Agent(id, name, avatar, character, persona, model, status, newOwner, kind, managedBy,
-                createdAt, Instant.now());
+                createdAt, Instant.now(), tier);
     }
 
     /** Soft delete: marks the agent DELETED so it drops out of listings; the row is kept. */
     public Agent deleted() {
         return new Agent(id, name, avatar, character, persona, model, AgentStatus.DELETED, owner, kind, managedBy,
-                createdAt, Instant.now());
+                createdAt, Instant.now(), tier);
     }
 
     public Agent touched() {
         return new Agent(id, name, avatar, character, persona, model, status, owner, kind, managedBy,
-                createdAt, Instant.now());
+                createdAt, Instant.now(), tier);
     }
 }

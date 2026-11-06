@@ -384,7 +384,7 @@ function renderAgentPanel(agent) {
   setupPersonaClamp();
   if (!characterChoices.length) loadCharacters().then(() => { if (activeAgent === agent && agent.character) renderAgentPanel(agent); });
   const model = agent.model || systemSettings.agentDefaultModel || "default";
-  document.getElementById("agentInfoModel").textContent = model;
+  document.getElementById("agentInfoModel").textContent = systemSettings.tiersEnabled ? tierLabel(agent.tier || systemSettings.defaultTier) : model;
   renderComposerModel(agent);
   renderAgentSkills(agent);
 }
@@ -415,6 +415,7 @@ const composerModel = document.getElementById("statusHint");
 let noChatModel = false;
 
 async function renderComposerModel(agent) {
+  if (systemSettings.tiersEnabled) return renderComposerTiers(agent);
   const { groups, failed } = await loadChatModels();
   if (activeAgent !== agent) return; // switched agents while loading
   composerModel.innerHTML = "";
@@ -488,12 +489,12 @@ composerModel.addEventListener("change", async () => {
   try {
     const res = await api.updateAgent(agent.id, {
       name: agent.name, avatar: agent.avatar, character: agent.character, persona: agent.persona,
-      model: composerModel.value || null,
+      ...(systemSettings.tiersEnabled ? { model: agent.model, tier: composerModel.value } : { model: composerModel.value || null }),
     });
     activeAgent = res.data;
     renderAgentPanel(res.data);
   } catch (e) {
     showToast(L("chat.modelSaveFailed"), true);
-    composerModel.value = agent.model || "";
+    composerModel.value = (systemSettings.tiersEnabled ? agent.tier : agent.model) || "";
   }
 });

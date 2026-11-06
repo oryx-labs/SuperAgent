@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-SuperAgent is the AI work system for companies, not a personal assistant: everyone in the company works in one system, and the work becomes company assets (see [README.md](README.md) for the positioning, in priority order). Design features from the company's and its employees' side, not one person's. The core is running and iterating fast; you will often be scaffolding new functionality as well as modifying existing behavior.
+SuperAgent is an AI collaborative work system for companies, not a personal assistant: everyone works with AI in one system, and the work becomes company assets (see [README.md](README.md) for the positioning, in priority order). Design features from the company's and its employees' side, not one person's. The core is running and iterating fast; you will often be scaffolding new functionality as well as modifying existing behavior.
 
 ## Build & test
 
@@ -35,7 +35,7 @@ superagent-server's pom), so front-end edits show on a browser refresh. Java cha
 
 ## Module architecture
 
-Fifteen Maven modules, layered; a module may only depend on modules below it (Maven enforces this — a
+Sixteen Maven modules, layered; a module may only depend on modules below it (Maven enforces this — a
 module only sees what its pom declares):
 
 ```text
@@ -44,6 +44,7 @@ L5  superagent-web           HTTP only: REST controllers, the MCP endpoint, auth
 L5  superagent-ui            the browser UI: static HTML/CSS/JS served from classpath:/static
 L4  superagent-orchestrator  the user's SuperAgent: plans work, hires team members, assigns tasks
 L4  superagent-event         the inbox: the company Feishu app (routing to employees), triage + batch schedule, to-dos
+L3  superagent-cost         cost optimisation: model tiers worked out from prices and what can run (a core ModelRouter)
 L3  superagent-agent         conversations: agents, chat turns, memory, characters, collaboration, run log
 L3  superagent-task          execution: tasks, session pool, watchdog, the coding flow, automations
 L2  superagent-skills        skills: the working standards agents follow (personal or company-wide)

@@ -195,7 +195,7 @@ function autoRow(a) {
   }
 
   const tdModel = document.createElement("td");
-  tdModel.textContent = a.model || L("auto.modelDefault");
+  tdModel.textContent = autoModelLabel(a);
   const tdSource = document.createElement("td");
   tdSource.textContent = L(a.source === "chat" ? "auto.sourceChat" : "auto.sourceManual");
 
@@ -340,7 +340,7 @@ async function openAutomation(id, freshToken) {
     [L("auto.type"), L(a.type === "recurring" ? "auto.typeRecurringLong" : a.type === "once" ? "auto.typeOnceLong" : "auto.typeApi")],
     [L("auto.colSchedule"), describeSchedule(a) + (a.type === "recurring" ? "  (" + a.cron + ")" : "")],
     [L("auto.timezone"), a.timezone],
-    [L("auto.colModel"), a.model || L("auto.modelDefault")],
+    [L("auto.colModel"), autoModelLabel(a)],
     [L("auto.overlap"), L(a.overlap === "parallel" ? "auto.overlapParallel" : "auto.overlapSkip")],
     [L("auto.upcoming"), d.upcoming.length ? d.upcoming.map(formatDateTime).join("  ·  ") : "—"],
   ];
@@ -375,7 +375,14 @@ async function openAutomation(id, freshToken) {
 }
 
 // --- form (drawer) ---
-async function loadAutoModelOptions(selected) {
+const autoModelLabel = a => systemSettings.tiersEnabled ? tierLabel(a.tier || systemSettings.defaultTier) : a.model || L("auto.modelDefault");
+let autoSavedModel = null; // with tiers on the form picks a tier; the model chosen before stays for if they're turned off
+async function loadAutoModelOptions(selected, tier) {
+  autoSavedModel = selected || null;
+  if (systemSettings.tiersEnabled) {
+    await mtFillSelect(ael2.fModel, tier);
+    return;
+  }
   let options = [];
   try { const res = await api.taskAgents(); options = (res && res.data) || []; } catch (e) { /* default only */ }
   ael2.fModel.replaceChildren();
@@ -430,7 +437,7 @@ function autoFormBody() {
     cron: type === "recurring" ? presetToCron() : null,
     runAt: type === "once" ? ael2.fRunAt.value || null : null,
     timezone: ael2.fTimezone.value,
-    model: ael2.fModel.value,
+    ...(systemSettings.tiersEnabled ? { model: autoSavedModel, tier: ael2.fModel.value } : { model: ael2.fModel.value }),
     overlap: ael2.fOverlap.value,
   };
 }
@@ -501,7 +508,7 @@ async function openAutoForm(a) {
   ael2.fRunAt.value = a && a.type === "once" ? toLocalInput(a.runAt, a.timezone) : "";
   ael2.drawer.hidden = false;
   syncAutoForm();
-  await loadAutoModelOptions(a ? a.model : null);
+  await loadAutoModelOptions(a ? a.model : null, a ? a.tier : null);
   ael2.fPrompt.focus();
 }
 

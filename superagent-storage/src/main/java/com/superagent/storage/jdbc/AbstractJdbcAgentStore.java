@@ -46,16 +46,17 @@ abstract class AbstractJdbcAgentStore implements AgentStore {
             kind(rs.getString("kind")),
             emptyToNull(rs.getString("managed_by")),
             instant(rs, "created_at"),
-            instant(rs, "updated_at"));
+            instant(rs, "updated_at"),
+            emptyToNull(rs.getString("tier")));
 
     protected static final String COLUMNS = "(id, name, avatar, character_key, persona, model, status, owner, kind, "
-            + "managed_by, created_at, updated_at)";
-    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            + "managed_by, created_at, updated_at, tier)";
+    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(Agent a) {
         return new Object[]{
                 a.id(), nn(a.name()), nn(a.avatar()), nn(a.character()), nn(a.persona()), nn(a.model()), a.status().name(),
-                nn(a.owner()), a.kind().name(), nn(a.managedBy()), utc(a.createdAt()), utc(a.updatedAt())};
+                nn(a.owner()), a.kind().name(), nn(a.managedBy()), utc(a.createdAt()), utc(a.updatedAt()), nn(a.tier())};
     }
 
     protected void insert(Agent a) {

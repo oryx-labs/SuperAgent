@@ -36,6 +36,7 @@ public class ClickHouseAutomationStore extends AbstractJdbcAutomationStore {
             ) ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY id
             """,
+            "ALTER TABLE automation ADD COLUMN IF NOT EXISTS tier String",
             """
             CREATE TABLE IF NOT EXISTS automation_run (
               id             String,

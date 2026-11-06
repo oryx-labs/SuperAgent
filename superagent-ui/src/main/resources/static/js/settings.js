@@ -56,6 +56,7 @@ async function loadSettingsForm() {
   sel.missing.hidden = !none;
   sel.filtered.hidden = !ok || ok === listed;
   sel.filtered.textContent = L("settings.modelsFiltered", { ok, total: listed });
+  mtFillSettings();
 }
 
 sel.form.addEventListener("submit", async e => {
@@ -66,10 +67,13 @@ sel.form.addEventListener("submit", async e => {
       agentDefaultModel: sel.agentModel.value || null,
       companyName: sel.companyName.value.trim() || null,
       companyShortName: sel.companyShortName.value.trim() || null,
+      tiersEnabled: mtEl.enabled.checked,
+      defaultTier: mtEl.defaultTier.value,
     });
     if (!res || !res.data) throw new Error((res && res.message) || "no data");
     systemSettings = res.data;
     sel.status.textContent = L("settings.saved");
+    mtFillSettings();
     if (currentMe) {
       currentMe.companyName = systemSettings.companyName;
       currentMe.companyShortName = systemSettings.companyShortName;

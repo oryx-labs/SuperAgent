@@ -18,7 +18,8 @@ public class ClickHouseAgentStore extends AbstractJdbcAgentStore {
                 "ALTER TABLE agent ADD COLUMN IF NOT EXISTS character_key String",
                 "ALTER TABLE agent ADD COLUMN IF NOT EXISTS owner String",
                 "ALTER TABLE agent ADD COLUMN IF NOT EXISTS kind String",
-                "ALTER TABLE agent ADD COLUMN IF NOT EXISTS managed_by String"));
+                "ALTER TABLE agent ADD COLUMN IF NOT EXISTS managed_by String",
+                "ALTER TABLE agent ADD COLUMN IF NOT EXISTS tier String"));
     }
 
     @Override

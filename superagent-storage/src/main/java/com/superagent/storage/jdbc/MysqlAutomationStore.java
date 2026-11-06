@@ -48,6 +48,15 @@ public class MysqlAutomationStore extends AbstractJdbcAutomationStore {
 
     public MysqlAutomationStore(JdbcTemplate jdbc) {
         super(jdbc, SCHEMA);
+        ensureTier();
+    }
+
+    private void ensureTier() {
+        Integer present = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                + "AND LOWER(table_name) = 'automation' AND LOWER(column_name) = 'tier'", Integer.class);
+        if (present == null || present == 0) {
+            jdbc.execute("ALTER TABLE automation ADD COLUMN tier VARCHAR(16)"); // older tables don't get it from CREATE TABLE IF NOT EXISTS
+        }
     }
 
     @Override
@@ -63,7 +72,7 @@ public class MysqlAutomationStore extends AbstractJdbcAutomationStore {
                         + "overlap_policy=VALUES(overlap_policy), enabled=VALUES(enabled), source=VALUES(source), "
                         + "owner=VALUES(owner), api_token_hash=VALUES(api_token_hash), "
                         + "next_run_at=VALUES(next_run_at), last_run_at=VALUES(last_run_at), "
-                        + "last_task_id=VALUES(last_task_id), updated_at=VALUES(updated_at)",
+                        + "last_task_id=VALUES(last_task_id), updated_at=VALUES(updated_at), tier=VALUES(tier)",
                 params(a));
         return a;
     }

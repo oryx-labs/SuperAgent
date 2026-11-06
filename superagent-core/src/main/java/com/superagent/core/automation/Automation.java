@@ -30,26 +30,41 @@ public record Automation(
         Instant lastRunAt,
         String lastTaskId,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        /** The tier chosen when the admin has turned tiers on (null = the default tier). */
+        String tier) {
+
+    public Automation(String id, String name, String prompt, AutomationType type, String cron, Instant runAt, String timezone,
+                      String model, OverlapPolicy overlap, boolean enabled, String source, String owner, String apiTokenHash,
+                      Instant nextRunAt, Instant lastRunAt, String lastTaskId, Instant createdAt, Instant updatedAt) {
+        this(id, name, prompt, type, cron, runAt, timezone, model, overlap, enabled, source, owner, apiTokenHash,
+                nextRunAt, lastRunAt, lastTaskId, createdAt, updatedAt, null);
+    }
+
+    public Automation withTier(String newTier) {
+        return new Automation(id, name, prompt, type, cron, runAt, timezone, model, overlap, enabled, source, owner,
+                apiTokenHash, nextRunAt, lastRunAt, lastTaskId, createdAt, updatedAt, newTier);
+    }
+
 
     public Automation withNextRun(Instant next) {
         return new Automation(id, name, prompt, type, cron, runAt, timezone, model, overlap, enabled, source, owner,
-                apiTokenHash, next, lastRunAt, lastTaskId, createdAt, Instant.now());
+                apiTokenHash, next, lastRunAt, lastTaskId, createdAt, Instant.now(), tier);
     }
 
     public Automation withEnabled(boolean on, Instant next) {
         return new Automation(id, name, prompt, type, cron, runAt, timezone, model, overlap, on, source, owner,
-                apiTokenHash, next, lastRunAt, lastTaskId, createdAt, Instant.now());
+                apiTokenHash, next, lastRunAt, lastTaskId, createdAt, Instant.now(), tier);
     }
 
     /** Records a firing; {@code taskId} null when it was skipped (the last real run stays the latest). */
     public Automation fired(Instant at, String taskId) {
         return new Automation(id, name, prompt, type, cron, runAt, timezone, model, overlap, enabled, source, owner,
-                apiTokenHash, nextRunAt, at, taskId != null ? taskId : lastTaskId, createdAt, Instant.now());
+                apiTokenHash, nextRunAt, at, taskId != null ? taskId : lastTaskId, createdAt, Instant.now(), tier);
     }
 
     public Automation withApiTokenHash(String hash) {
         return new Automation(id, name, prompt, type, cron, runAt, timezone, model, overlap, enabled, source, owner,
-                hash, nextRunAt, lastRunAt, lastTaskId, createdAt, Instant.now());
+                hash, nextRunAt, lastRunAt, lastTaskId, createdAt, Instant.now(), tier);
     }
 }

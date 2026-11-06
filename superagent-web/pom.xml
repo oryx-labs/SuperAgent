@@ -30,6 +30,10 @@
       <groupId>com.superagent</groupId>
       <artifactId>superagent-files</artifactId>
     </dependency>
+    <dependency>
+      <groupId>com.superagent</groupId>
+      <artifactId>superagent-cost</artifactId>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>

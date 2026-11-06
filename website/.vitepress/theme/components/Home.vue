@@ -118,14 +118,14 @@ const more = computed(() => [
             >{{ t('为公司而建,不是个人助手', 'Built for companies, not personal assistants') }}</span
           >
           <h1>
-            {{ t('公司的', 'AI work system') }}
-            <span class="accent">{{ t('AI 工作系统', 'for your company') }}</span>
+            {{ t('企业的', 'AI collaborative work system') }}
+            <span class="accent">{{ t('AI 协作工作系统', 'for companies') }}</span>
           </h1>
           <p class="lede">
             {{
               t(
-                '全公司在一个系统里工作,工作自动沉淀为公司资产,人走了也不会丢。',
-                'Everyone works in one system, and the work becomes company assets that stay when people leave.'
+                '全员与 AI 在一个系统里协作,工作自动沉淀为公司资产,人走了也不会丢。',
+                'Everyone works with AI in one system, and the work becomes company assets that stay when people leave.'
               )
             }}
           </p>

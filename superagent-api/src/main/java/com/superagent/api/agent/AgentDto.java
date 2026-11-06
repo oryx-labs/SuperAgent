@@ -33,5 +33,7 @@ public record AgentDto(
         /** Everyone on the agent, owner first; just the owner for a private agent. */
         List<AgentMemberDto> members,
         /** Whether others can be invited (not the SuperAgent, its hired members, or the inbox secretary). */
-        boolean shareable) {
+        boolean shareable,
+        /** The chosen tier (when tiers are on), or null for the system's default tier. */
+        String tier) {
 }

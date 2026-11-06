@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title data-i18n="title.app">SuperAgent</title>
+  <title data-i18n="title.app">SuperAgent · AI collaborative work system for companies</title>
   <link rel="stylesheet" href="/app.css" />
 </head>
 <body>
@@ -615,17 +615,43 @@
             <p class="field-hint" data-i18n="settings.logoHint">Shown on the sign-in page and at the top left. PNG, JPEG, GIF or WebP, up to 1 MB; a wide image with a transparent background works best.</p>
           </div>
           <h3 class="settings-form__section" data-i18n="settings.sectionAgent">Agent</h3>
-          <label class="field"><span data-i18n="settings.agentModel">Default chat model</span>
-            <select id="sfAgentModel"></select>
+          <label class="mt-switch">
+            <input type="checkbox" id="sfTiersEnabled" />
+            <span><b data-i18n="tier.switch">Choose by tier</b><small data-i18n="tier.switchHint">People pick Fast, Standard or Strong instead of a model; the system works out which models those mean.</small></span>
           </label>
-          <p class="field-hint" id="sfAgentModelHint" data-i18n="settings.agentModelHint"></p>
-          <p class="field-hint" id="sfAgentModelMissing" data-i18n="settings.modelsMissing" hidden></p>
-          <p class="field-hint" id="sfAgentModelFiltered" hidden></p>
+          <div id="sfModelFields">
+            <label class="field"><span data-i18n="settings.agentModel">Default chat model</span>
+              <select id="sfAgentModel"></select>
+            </label>
+            <p class="field-hint" id="sfAgentModelHint" data-i18n="settings.agentModelHint"></p>
+            <p class="field-hint" id="sfAgentModelMissing" data-i18n="settings.modelsMissing" hidden></p>
+            <p class="field-hint" id="sfAgentModelFiltered" hidden></p>
+          </div>
+          <div id="sfTierFields" hidden>
+            <label class="field"><span data-i18n="tier.default">Default tier</span>
+              <select id="sfDefaultTier"></select>
+            </label>
+            <p class="field-hint" data-i18n="tier.defaultHint">Used wherever nobody chose a tier.</p>
+          </div>
           <div class="settings-form__actions">
             <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
             <span class="settings-form__status" id="sfStatus" role="status"></span>
           </div>
         </form>
+        <div class="mt-panel" id="mtPanel" hidden>
+          <div class="mt-panel__head">
+            <div>
+              <h3 class="settings-form__section" data-i18n="tier.overview">How models are tiered</h3>
+              <p class="field-hint" id="mtStatus"></p>
+            </div>
+            <button type="button" class="btn btn--sm" id="mtRefresh" data-i18n="tier.refresh">Update prices</button>
+          </div>
+          <div class="mt-table-wrap"><table class="ctable mt-table"><thead><tr>
+            <th data-i18n="tier.colModel">Model</th><th data-i18n="tier.colTier">Tier</th><th data-i18n="tier.colPrice">Price (input / output)</th>
+            <th data-i18n="tier.colReleased">Released</th><th data-i18n="tier.colSource">Price from</th>
+          </tr></thead><tbody id="mtRows"></tbody></table></div>
+          <p class="field-hint" id="mtEmpty" data-i18n="tier.noModels" hidden>No model can run yet.</p>
+        </div>
       </div>
     </section>
 
@@ -1246,6 +1272,7 @@
   <script src="/js/auth.js"></script>
   <script src="/js/models.js"></script>
   <script src="/js/settings.js"></script>
+  <script src="/js/model-tiers.js"></script>
   <script src="/js/integrations.js"></script>
   <script src="/js/file-storage.js"></script>
   <script src="/js/analytics.js"></script>

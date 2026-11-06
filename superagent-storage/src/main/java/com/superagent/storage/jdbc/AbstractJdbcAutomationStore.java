@@ -53,7 +53,8 @@ abstract class AbstractJdbcAutomationStore implements AutomationStore {
             instant(rs, "last_run_at"),
             emptyToNull(rs.getString("last_task_id")),
             instant(rs, "created_at"),
-            instant(rs, "updated_at"));
+            instant(rs, "updated_at"),
+            emptyToNull(rs.getString("tier")));
 
     private final RowMapper<AutomationRun> runMapper = (rs, n) -> new AutomationRun(
             rs.getString("id"),
@@ -95,15 +96,15 @@ abstract class AbstractJdbcAutomationStore implements AutomationStore {
 
     protected static final String COLUMNS =
             "(id, name, prompt, type, cron, run_at, timezone, model, overlap_policy, enabled, source, owner, "
-                    + "api_token_hash, next_run_at, last_run_at, last_task_id, created_at, updated_at)";
+                    + "api_token_hash, next_run_at, last_run_at, last_task_id, created_at, updated_at, tier)";
 
-    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(Automation a) {
         return new Object[]{
                 a.id(), a.name(), a.prompt(), a.type().name(), nn(a.cron()), utc(a.runAt()), a.timezone(),
                 nn(a.model()), a.overlap().name(), a.enabled(), a.source(), nn(a.owner()), nn(a.apiTokenHash()),
-                utc(a.nextRunAt()), utc(a.lastRunAt()), nn(a.lastTaskId()), utc(a.createdAt()), utc(a.updatedAt())};
+                utc(a.nextRunAt()), utc(a.lastRunAt()), nn(a.lastTaskId()), utc(a.createdAt()), utc(a.updatedAt()), nn(a.tier())};
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

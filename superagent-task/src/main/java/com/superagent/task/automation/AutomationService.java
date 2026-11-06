@@ -98,7 +98,7 @@ public class AutomationService {
             String token = spec.type == AutomationType.API ? newToken() : null;
             Automation a = new Automation(UUID.randomUUID().toString(), spec.name, spec.prompt, spec.type, spec.cron,
                     spec.runAt, spec.timezone, spec.model, spec.overlap, spec.enabled, source, owner,
-                    token == null ? null : hash(token), null, null, null, now, now);
+                    token == null ? null : hash(token), null, null, null, now, now, spec.tier);
             a = a.withNextRun(nextRun(a, now));
             store.save(a);
             log.info("automation {} ({}, {}) created by {} via {}", a.id(), a.name(), a.type(), owner, source);
@@ -123,7 +123,7 @@ public class AutomationService {
             }
             Automation a = new Automation(cur.id(), spec.name, spec.prompt, spec.type, spec.cron, spec.runAt,
                     spec.timezone, spec.model, spec.overlap, spec.enabled, cur.source(), cur.owner(), tokenHash,
-                    null, cur.lastRunAt(), cur.lastTaskId(), cur.createdAt(), now);
+                    null, cur.lastRunAt(), cur.lastTaskId(), cur.createdAt(), now, spec.tier);
             a = a.withNextRun(nextRun(a, now));
             store.save(a);
             return toDto(a, token);
@@ -250,7 +250,7 @@ public class AutomationService {
         String brief = a.prompt()
                 + (input == null || input.isBlank() ? "" : "\n\n## 本次输入\n" + input.strip())
                 + "\n\n" + UNATTENDED_NOTE;
-        return new CreateTaskRequest(title, brief, "automation", null, null, null, model, agentType, null);
+        return new CreateTaskRequest(title, brief, "automation", null, null, null, model, agentType, null, a.tier());
     }
 
     private boolean stillRunning(String taskId) {
@@ -287,7 +287,7 @@ public class AutomationService {
     // --- validation ---
 
     private record Spec(String name, String prompt, AutomationType type, String cron, Instant runAt,
-                        String timezone, String model, OverlapPolicy overlap, boolean enabled) {
+                        String timezone, String model, OverlapPolicy overlap, boolean enabled, String tier) {
     }
 
     /** A request with every omitted field taken from the current automation. */
@@ -301,7 +301,8 @@ public class AutomationService {
                 r.timezone() != null ? r.timezone() : cur.timezone(),
                 r.model() != null ? r.model() : cur.model(),
                 r.overlap() != null ? r.overlap() : cur.overlap().name(),
-                r.enabled() != null ? r.enabled() : cur.enabled());
+                r.enabled() != null ? r.enabled() : cur.enabled(),
+                r.tier() != null ? r.tier() : cur.tier());
     }
 
     private static String localRunAt(Automation cur) {
@@ -333,7 +334,8 @@ public class AutomationService {
         }
         OverlapPolicy overlap = parse(OverlapPolicy.class, r.overlap(), OverlapPolicy.SKIP, "overlap");
         boolean enabled = r.enabled() == null || r.enabled();
-        return new Spec(name, prompt, type, cron, runAt, timezone, model, overlap, enabled);
+        com.superagent.core.provider.ModelTier tier = com.superagent.core.provider.ModelTier.of(r.tier());
+        return new Spec(name, prompt, type, cron, runAt, timezone, model, overlap, enabled, tier == null ? null : tier.key());
     }
 
     private static <E extends Enum<E>> E parse(Class<E> type, String value, E fallback, String field) {
@@ -403,7 +405,7 @@ public class AutomationService {
         return new AutomationDto(a.id(), a.name(), a.prompt(), a.type().name().toLowerCase(Locale.ROOT), a.cron(),
                 a.runAt(), a.timezone(), a.model(), a.overlap().name().toLowerCase(Locale.ROOT), a.enabled(),
                 a.source(), a.owner(), a.nextRunAt(), a.lastRunAt(), a.lastTaskId(), lastStatus, triggerPath, token,
-                a.createdAt(), a.updatedAt());
+                a.createdAt(), a.updatedAt(), a.tier());
     }
 
     private AutomationRunDto toRunDto(AutomationRun r) {

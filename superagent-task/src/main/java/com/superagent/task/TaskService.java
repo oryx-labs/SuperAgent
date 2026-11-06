@@ -124,6 +124,17 @@ public class TaskService implements TaskRecovery {
     private final TaskAgentStore taskAgents;   // null = task→agent links not recorded (tests)
     private CredentialService credentials;     // null in tests: runs use the server's environment
 
+    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests; off unless the admin turns tiers on
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
+        this.modelRouter = modelRouter;
+    }
+
+    private boolean tiersOn() {
+        return modelRouter != null && modelRouter.enabled();
+    }
+
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setCredentials(CredentialService credentials) {
         this.credentials = credentials;
@@ -469,6 +480,18 @@ public class TaskService implements TaskRecovery {
     public TaskDto create(CreateTaskRequest request, String owner, String agentId) {
         String id = UUID.randomUUID().toString();
         AgentType agentType = AgentType.fromString(request.agentType());
+        String model = blankToNull(request.model());
+        String tier = null;
+        if (tiersOn()) {
+            // The tier decides everything: nothing below may pick a model of its own. Empty when no model can run,
+            // and then the request stands as it is.
+            var choice = modelRouter.choose(request.tier(), null).orElse(null);
+            if (choice != null) {
+                tier = choice.tier();
+                model = choice.model();
+                agentType = AgentType.fromString(choice.cli());
+            }
+        }
         if (!runners.containsKey(agentType)) {
             // Fail at creation rather than letting the task start and error with "no runner".
             throw new IllegalArgumentException("Agent " + agentType.cliName() + " can't run tasks here yet; available: "
@@ -482,8 +505,8 @@ public class TaskService implements TaskRecovery {
         Task task = new Task(id, cleanTitle(request.title()), blankToNull(request.brief()),
                 source,
                 blankToNull(request.repo()), blankToNull(request.branch()), kind.storageName(),
-                TaskStatus.PENDING, 0, BigDecimal.ZERO, blankToNull(request.model()), agentType,
-                null, owner == null || owner.isBlank() ? defaultOwner : owner, null, now, null, null, now);
+                TaskStatus.PENDING, 0, BigDecimal.ZERO, model, agentType,
+                null, owner == null || owner.isBlank() ? defaultOwner : owner, null, now, null, null, now, tier);
         tasks.save(task);
         if (kind == TaskKind.CODING) {
             codingFlow.persist(id, CodingFlow.initialPhases());
@@ -1181,7 +1204,7 @@ public class TaskService implements TaskRecovery {
                 t.repo(), t.branch(), t.flow(), t.status().name().toLowerCase(),
                 t.progress(), t.spend(), t.model(), t.createdBy(), t.error(),
                 t.createdAt(), t.startedAt(), t.finishedAt(), t.updatedAt(),
-                t.agentType().name().toLowerCase(), sessionId, t.workspaceDir(), sessionState(t.id(), sessionId));
+                t.agentType().name().toLowerCase(), sessionId, t.workspaceDir(), sessionState(t.id(), sessionId), t.tier());
     }
 
     private String sessionState(String taskId, String sessionId) {

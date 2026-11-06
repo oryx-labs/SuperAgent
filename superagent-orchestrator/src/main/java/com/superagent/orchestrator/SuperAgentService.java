@@ -147,6 +147,17 @@ public class SuperAgentService {
 
     private CredentialService credentials; // null in tests: runs use the server's environment
 
+    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests; off unless the admin turns tiers on
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
+        this.modelRouter = modelRouter;
+    }
+
+    private boolean tiersOn() {
+        return modelRouter != null && modelRouter.enabled();
+    }
+
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setCredentials(CredentialService credentials) {
         this.credentials = credentials;
@@ -324,7 +335,8 @@ public class SuperAgentService {
      */
     private void runRound(String owner, Agent sa, List<ChatMessage> batch, Instant cutoff) {
         long startedAt = System.currentTimeMillis();
-        String model = sa.model() != null ? sa.model() : settings.agentDefaultModel();
+        String model = tiersOn() ? modelRouter.choose(sa.tier(), null).map(com.superagent.core.provider.ModelRouter.ModelChoice::model).orElse(null)
+                : sa.model() != null ? sa.model() : settings.agentDefaultModel();
         ChatSession session = backgroundSession(sa);
         String replyId = UUID.randomUUID().toString();
         RoundAttempt attempt = attemptRound(owner, sa, session, model, batch, memory.read(sa), replyId);
@@ -595,7 +607,7 @@ public class SuperAgentService {
                 + "\n\n## 任务\n" + brief.strip()
                 + "\n\n完成后给出简明的交付总结，说明产出放在哪里。";
         String taskId = taskService.create(new CreateTaskRequest(title.strip(), fullBrief, "web_chat", null, null, null,
-                model, providers.cliFor(model).orElse(null), null), owner, m.id()).id();
+                model, providers.cliFor(model).orElse(null), null, m.tier()), owner, m.id()).id();
         synchronized (stateLock) {
             Instant now = Instant.now();
             works.save(new SuperAgentWork(taskId, owner, ensureState(owner).planId(), title.strip(), m.id(), m.name(),

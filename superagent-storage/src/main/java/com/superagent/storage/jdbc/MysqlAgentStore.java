@@ -39,6 +39,7 @@ public class MysqlAgentStore extends AbstractJdbcAgentStore {
         ensureColumn("owner", "VARCHAR(255)");
         ensureColumn("kind", "VARCHAR(16)");
         ensureColumn("managed_by", "VARCHAR(64)");
+        ensureColumn("tier", "VARCHAR(16)");
     }
 
     private void ensureColumn(String column, String type) {
@@ -59,7 +60,7 @@ public class MysqlAgentStore extends AbstractJdbcAgentStore {
         jdbc.update("INSERT INTO agent " + COLUMNS + VALUES + " "
                         + "ON DUPLICATE KEY UPDATE name=VALUES(name), avatar=VALUES(avatar), character_key=VALUES(character_key), persona=VALUES(persona), "
                         + "model=VALUES(model), status=VALUES(status), owner=VALUES(owner), kind=VALUES(kind), "
-                        + "managed_by=VALUES(managed_by), updated_at=VALUES(updated_at)",
+                        + "managed_by=VALUES(managed_by), updated_at=VALUES(updated_at), tier=VALUES(tier)",
                 params(a));
     }
 }

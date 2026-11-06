@@ -210,7 +210,7 @@ function taskRow(t) {
   const agentName = document.createElement("div");
   agentName.textContent = agentLabel(t.agentType);
   const modelName = document.createElement("small");
-  modelName.textContent = t.model || L("tasks.modelDefault");
+  modelName.textContent = taskModelLabel(t);
   tdAgent.append(agentName, modelName);
 
   const tdSource = document.createElement("td");
@@ -575,10 +575,16 @@ function updateStatusUi(t) {
   tel.stopBtn.disabled = !busy;
 }
 
+// What a task records: the tier it ran at, when tiers were on, and the model that actually ran.
+function taskModelLabel(t) {
+  const model = t.model || L("tasks.modelDefault");
+  return t.tier ? tierLabel(t.tier) + " · " + model : model;
+}
+
 function renderFacts(t) {
   const facts = [
     [L("tasks.agent"), agentLabel(t.agentType)],
-    [L("tasks.model"), t.model || L("tasks.modelDefault")],
+    [L("tasks.model"), taskModelLabel(t)],
     // No effort setting exists yet: tasks run at the CLI's default.
     [L("tasks.effort"), L("tasks.effortDefault"), L("tasks.effortHint")],
     [L("tasks.session"), t.sessionId ? t.sessionId.slice(0, 8) : "—", t.sessionId || ""],
@@ -598,7 +604,7 @@ function renderSessionInfo(t) {
     [L("tasks.sessionState"), state],
     [L("tasks.workspace"), t.workspaceDir || "—"],
     [L("tasks.agentType"), t.agentType ? agentLabel(t.agentType) + " (" + t.agentType + ")" : "—"],
-    [L("tasks.model"), t.model || L("tasks.modelDefault")],
+    [L("tasks.model"), taskModelLabel(t)],
     [L("tasks.effort"), L("tasks.effortDefault"), L("tasks.effortHint")],
   ]);
 }

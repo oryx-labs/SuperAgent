@@ -183,6 +183,17 @@ public class ChatService {
         return List.copyOf(out);
     }
 
+    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests; off unless the admin turns tiers on
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
+        this.modelRouter = modelRouter;
+    }
+
+    private boolean tiersOn() {
+        return modelRouter != null && modelRouter.enabled();
+    }
+
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setCredentials(CredentialService credentials) {
         this.credentials = credentials;
@@ -528,6 +539,11 @@ public class ChatService {
 
     /** Model precedence: the agent's own override > admin's system default > deployment config. */
     private String resolveModel(Agent agent) {
+        if (tiersOn()) {
+            // Stays on the session's model while it still belongs to the tier: a different model means a new session.
+            return modelRouter.choose(agent == null ? null : agent.tier(), agent == null ? null : memory.lastModel(agent.id()))
+                    .map(com.superagent.core.provider.ModelRouter.ModelChoice::model).orElse(defaultModel);
+        }
         if (agent != null && agent.model() != null && !agent.model().isBlank()) {
             return agent.model().trim();
         }

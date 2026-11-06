@@ -28,5 +28,6 @@ public record AutomationDto(
         String triggerPath,
         String apiToken,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        String tier) {
 }

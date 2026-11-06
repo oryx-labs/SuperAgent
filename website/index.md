@@ -1,7 +1,7 @@
 ---
 layout: page
-title: SuperAgent — AI work system for your company
-description: Built for companies, not personal assistants. Everyone works in one system, and the work becomes company assets.
+title: SuperAgent — AI collaborative work system for companies
+description: Built for companies, not personal assistants. Everyone works with AI in one system, and the work becomes company assets.
 ---
 
 <Home />

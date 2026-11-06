@@ -334,9 +334,21 @@ public class AgentMemoryService {
         backoff.remove(agent.id());
     }
 
-    /** One run of the system default model, no tools, in a scratch directory; returns its final text. */
+    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests; off unless the admin turns tiers on
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
+        this.modelRouter = modelRouter;
+    }
+
+    private boolean tiersOn() {
+        return modelRouter != null && modelRouter.enabled();
+    }
+
+    /** One run of the system default model (with tiers on, the fast tier), no tools, in a scratch directory; returns its final text. */
     private String summarize(String prompt) {
-        String model = settings.agentDefaultModel();
+        String model = tiersOn() ? modelRouter.background().map(com.superagent.core.provider.ModelRouter.ModelChoice::model)
+                .orElse(null) : settings.agentDefaultModel();
         AgentType type = providers.cliFor(model).map(AgentType::fromString).filter(runners::containsKey)
                 .orElse(AgentType.CLAUDE);
         AgentRunner runner = runners.get(type);

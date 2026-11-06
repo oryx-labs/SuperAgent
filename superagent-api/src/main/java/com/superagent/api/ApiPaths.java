@@ -46,6 +46,8 @@ public final class ApiPaths {
     public static final String ORG = V1 + "/admin/org";
     /** Where Files keeps content: the store new files go to, and each store's settings (admin). */
     public static final String FILE_STORAGE = V1 + "/admin/file-storage";
+    public static final String MODEL_TIERS = V1 + "/model-tiers";
+    public static final String ADMIN_MODEL_TIERS = V1 + "/admin/model-tiers";
 
     /** Model-vendor CLIs (claude, codex, ...) the runtime can call. */
     public static final String PROVIDERS = V1 + "/providers";

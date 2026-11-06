@@ -56,7 +56,8 @@ abstract class AbstractJdbcTaskStore implements TaskStore {
             instant(rs, "created_at"),
             instant(rs, "started_at"),
             instant(rs, "finished_at"),
-            instant(rs, "updated_at"));
+            instant(rs, "updated_at"),
+            emptyToNull(rs.getString("tier")));
 
     @Override
     public List<Task> listTasks() {
@@ -71,18 +72,18 @@ abstract class AbstractJdbcTaskStore implements TaskStore {
 
     protected static final String COLUMNS =
             "(id, title, brief, source, repo, branch, flow, status, progress, spend, model, agent_type, "
-                    + "workspace_dir, created_by, error, created_at, started_at, finished_at, updated_at)";
+                    + "workspace_dir, created_by, error, created_at, started_at, finished_at, updated_at, tier)";
 
     protected Object[] params(Task t) {
         return new Object[]{
                 t.id(), t.title(), nn(t.brief()), t.source().name(), nn(t.repo()), nn(t.branch()), nn(t.flow()),
                 t.status().name(), t.progress(), t.spend() == null ? BigDecimal.ZERO : t.spend(),
                 nn(t.model()), t.agentType().name(), nn(t.workspaceDir()), nn(t.createdBy()), nn(t.error()),
-                utc(t.createdAt()), utc(t.startedAt()), utc(t.finishedAt()), utc(t.updatedAt())};
+                utc(t.createdAt()), utc(t.startedAt()), utc(t.finishedAt()), utc(t.updatedAt()), nn(t.tier())};
     }
 
     protected void insert(Task t) {
-        jdbc.update("INSERT INTO task " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        jdbc.update("INSERT INTO task " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params(t));
     }
 

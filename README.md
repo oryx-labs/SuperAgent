@@ -3,7 +3,7 @@
   <img src="docs/images/superagent-logo.png" alt="SuperAgent logo" style="max-width: 50%;" />
 </p>
 
-**The AI work system for companies, not personal assistants.** Everyone in the company works in one system, and the work becomes the company's assets. Open source and self-hosted.
+**AI collaborative work system for companies, not personal assistants.** Everyone works with AI in one system, and the work becomes the company's assets. Open source and self-hosted.
 
 [Website](https://oryx-labs.github.io/SuperAgent/) · [Live demo](http://117.72.92.117:18081/login) · [中文](https://oryx-labs.github.io/SuperAgent/zh/)
 

@@ -1,11 +1,11 @@
 ---
 title: What is SuperAgent
-description: SuperAgent is the AI work system for companies. Everyone works in one system, and the work becomes the company's.
+description: SuperAgent is an AI collaborative work system for companies. Everyone works with AI in one system, and the work becomes the company's.
 ---
 
 # What is SuperAgent
 
-**SuperAgent is the AI work system for companies, not a personal assistant.** Everyone in the company does their work in one system, and that work automatically becomes company assets that stay when people change.
+**SuperAgent is an AI collaborative work system for companies, not a personal assistant.** Everyone in the company does their work in one system, and that work automatically becomes company assets that stay when people change.
 
 ## Not a personal assistant
 

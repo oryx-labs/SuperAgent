@@ -13,7 +13,7 @@ import java.util.List;
 public class ClickHouseTaskStore extends AbstractJdbcTaskStore {
 
     public ClickHouseTaskStore(JdbcTemplate jdbc) {
-        super(jdbc, List.of());
+        super(jdbc, List.of("ALTER TABLE task ADD COLUMN IF NOT EXISTS tier String"));
     }
 
     @Override

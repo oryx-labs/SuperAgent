@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS task (
   progress      INT           NOT NULL DEFAULT 0,
   spend         DECIMAL(12,2) NOT NULL DEFAULT 0,
   model         VARCHAR(128),
+  tier          VARCHAR(16),
   agent_type    VARCHAR(32)   NOT NULL,
   workspace_dir VARCHAR(1024),
   created_by    VARCHAR(255),

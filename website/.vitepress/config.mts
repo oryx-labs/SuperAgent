@@ -9,7 +9,7 @@ export default defineConfig({
   title: 'SuperAgent',
   titleTemplate: ':title — SuperAgent',
   description:
-    'The AI work system for companies, not personal assistants. Everyone works in one system, and the work becomes company assets.',
+    'AI collaborative work system for companies, not personal assistants. Everyone works with AI in one system, and the work becomes company assets.',
   base,
   cleanUrls: true,
   appearance: false, // light only

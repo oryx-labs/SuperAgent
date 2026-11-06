@@ -204,7 +204,21 @@ public class FileTagger {
     }
 
     /** Tagging is a small job: a Haiku-class model that passed its inference check, else the system default. */
+    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests; off unless the admin turns tiers on
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
+        this.modelRouter = modelRouter;
+    }
+
+    private boolean tiersOn() {
+        return modelRouter != null && modelRouter.enabled();
+    }
+
     private String cheapModel() {
+        if (tiersOn()) {
+            return modelRouter.background().map(com.superagent.core.provider.ModelRouter.ModelChoice::model).orElse(null);
+        }
         return providers.list().stream()
                 .filter(p -> "claude".equals(p.key()))
                 .flatMap(p -> p.models().stream())
