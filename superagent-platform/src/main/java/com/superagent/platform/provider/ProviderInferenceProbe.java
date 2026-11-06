@@ -193,13 +193,59 @@ public class ProviderInferenceProbe {
             }
             String out = output.join();
             if (p.exitValue() != 0) {
-                String detail = "exited with " + p.exitValue() + ": " + tail(out);
+                String detail = cliFailure(p.exitValue(), out);
                 throw unreachable(out) ? new ProbeUnreachableException(detail) : new IOException(detail);
             }
             return out;
         } finally {
             deleteTree(dir);
         }
+    }
+
+    /**
+     * Why a CLI run failed, in a line an administrator can act on: the exit code, then Codex's own failure
+     * ({@code turn.failed}, else its last error event) or, for plain output, its last lines. Config warnings
+     * ("ignoring unrecognized configuration settings") are left out: they're noise that used to push the real
+     * reason out of the shown tail.
+     */
+    static String cliFailure(int exit, String out) {
+        String failed = null;
+        String lastError = null;
+        List<String> plain = new java.util.ArrayList<>();
+        ObjectMapper json = new ObjectMapper();
+        for (String line : (out == null ? "" : out).split("\\R")) {
+            String t = line.strip();
+            if (t.isEmpty()) {
+                continue;
+            }
+            if (t.startsWith("{")) {
+                try {
+                    JsonNode e = json.readTree(t);
+                    String type = e.path("type").asText("");
+                    if (type.equals("turn.failed")) {
+                        failed = e.path("error").path("message").asText(null);
+                    } else if (type.equals("error")) {
+                        lastError = e.path("message").asText(null);
+                    } else if (type.equals("item.completed") && "error".equals(e.path("item").path("type").asText())) {
+                        String message = e.path("item").path("message").asText("");
+                        if (!message.contains("unrecognized configuration settings")) {
+                            lastError = message;
+                        }
+                    }
+                    continue;
+                } catch (IOException notJson) {
+                    // a plain line that happens to start with a brace
+                }
+            }
+            plain.add(t);
+        }
+        String reason = failed != null ? failed : lastError;
+        if (reason == null) {
+            reason = plain.isEmpty() ? "没有输出任何错误信息（CLI 开始请求后就退出了）"
+                    : String.join("\n", plain.subList(Math.max(0, plain.size() - 8), plain.size()));
+        }
+        String code = exit == 137 || exit == 143 ? exit + "（进程被终止）" : String.valueOf(exit);
+        return "退出码 " + code + "：" + reason.strip();
     }
 
     /** CLI output that means the CLI couldn't reach its service, rather than that the model refused. */

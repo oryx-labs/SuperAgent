@@ -605,13 +605,19 @@ function credRow(c, index, poolSize) {
     const st = c.enabled ? c.status : "off";
     b.className = "status-badge is-cred-" + st;
     b.textContent = L("cred.status." + st);
-    status.appendChild(b);
     if (c.lastError && c.enabled) {
-      // Why it failed (or why it couldn't be checked), right there: not only on hover.
-      const why = document.createElement("small");
-      why.className = "cred-reason" + (c.status === "error" ? " is-error" : "");
-      why.textContent = c.lastError;
-      status.appendChild(why);
+      // The badge alone in the row; the whole reason on hover (or keyboard focus), however long.
+      const tip = document.createElement("span");
+      tip.className = "cred-tip";
+      tip.tabIndex = 0;
+      const body = document.createElement("span");
+      body.className = "cred-tip__body" + (c.status === "error" ? " is-error" : "");
+      body.setAttribute("role", "tooltip");
+      body.textContent = c.lastError;
+      tip.append(b, body);
+      status.appendChild(tip);
+    } else {
+      status.appendChild(b);
     }
     if (c.checkedAt) {
       const when = document.createElement("small");

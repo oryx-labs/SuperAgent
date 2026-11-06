@@ -420,8 +420,9 @@ public class CredentialService {
         }
     }
 
+    /** A failure reason as stored (the column holds 1000): its beginning, where the cause is said, is kept. */
     private static String tail(String s) {
         String t = s == null ? "" : s.strip();
-        return t.length() <= 300 ? t : "…" + t.substring(t.length() - 300);
+        return t.length() <= 990 ? t : t.substring(0, 990) + "…";
     }
 }
