@@ -97,10 +97,20 @@ public class ProviderService {
         this.credentials = credentials;
         if (credentials != null) {
             // A switch to another endpoint can change which models answer: re-check them against it.
-            credentials.onSwitch("models", key -> store.findByKey(key).ifPresent(p -> lookup.execute(() -> {
-                refreshModels(p);
-                store.findById(p.id()).ifPresent(this::refreshInference);
-            })));
+            // Only when the entry actually changed (the first one seen is startup, which the checker sweeps anyway):
+            // a model check is one inference per model.
+            Map<String, String> seen = new java.util.concurrent.ConcurrentHashMap<>();
+            credentials.onSwitch("models", key -> {
+                String now = credentials.current(key).id();
+                String before = seen.put(key, now);
+                if (before == null || before.equals(now)) {
+                    return;
+                }
+                store.findByKey(key).ifPresent(p -> lookup.execute(() -> {
+                    refreshModels(p);
+                    store.findById(p.id()).ifPresent(this::refreshInference);
+                }));
+            });
         }
     }
 

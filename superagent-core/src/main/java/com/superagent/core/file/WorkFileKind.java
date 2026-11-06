@@ -2,9 +2,9 @@ package com.superagent.core.file;
 
 import java.util.Locale;
 
-/** What a work file is, for filtering and picking a preview. Decided from the file name. */
+/** What a work file is, for filtering and picking a preview. Decided from the file name; a LINK is a web address. */
 public enum WorkFileKind {
-    DOCUMENT, IMAGE, VIDEO, OTHER;
+    DOCUMENT, IMAGE, VIDEO, LINK, OTHER;
 
     public static WorkFileKind of(String name) {
         String n = name == null ? "" : name.toLowerCase(Locale.ROOT);

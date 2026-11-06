@@ -22,6 +22,9 @@ public interface WorkFileStore {
      */
     List<WorkFile> listFor(String owner, Collection<String> agentIds);
 
+    /** Live files nobody has tagged yet (oldest first), for the tagger. */
+    List<WorkFile> untagged(int limit);
+
     /** A task's automatically captured delivery file, if any (deleted ones included, so it isn't re-created). */
     Optional<WorkFile> delivery(String taskId);
 

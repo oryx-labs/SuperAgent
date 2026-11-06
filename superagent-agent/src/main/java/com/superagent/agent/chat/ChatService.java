@@ -438,6 +438,9 @@ public class ChatService {
         }
         String text = content == null ? "" : content;
         store.appendMessage(new ChatMessage(userMessageId, sessionId, MessageRole.USER, text, Instant.now(), user));
+        if (agent != null) {
+            files.saveLinks(user, agent.id(), null, sessionId, userMessageId, text); // links are resources too
+        }
         String prompt = text.isBlank() && !attached.isEmpty() ? ImageAttachmentStore.IMAGE_ONLY_PROMPT : text;
         if (delivered != null) {
             prompt = (text.isBlank() && attached.isEmpty() ? "" : prompt + "\n\n") + delivered.note();

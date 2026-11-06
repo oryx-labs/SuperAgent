@@ -32,6 +32,10 @@ public final class ApiPaths {
     public static final String AUTOMATIONS = V1 + "/automations";
 
     public static final String AUTH = V1 + "/auth";
+    /** The signed-in user's own account (avatar, password). */
+    public static final String ACCOUNT = V1 + "/account";
+    /** Anyone's avatar, for any signed-in user. */
+    public static final String AVATARS = V1 + "/avatars";
 
     public static final String USERS = V1 + "/users";
 

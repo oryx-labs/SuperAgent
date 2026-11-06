@@ -8,6 +8,7 @@ import com.superagent.core.org.OrgStore;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
 import com.superagent.platform.settings.SettingsService;
+import com.superagent.platform.user.AccountService;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,11 +27,13 @@ public class AuthController {
     private final UserStore users;
     private final OrgStore org;
     private final SettingsService settings;
+    private final AccountService account;
 
-    public AuthController(UserStore users, OrgStore org, SettingsService settings) {
+    public AuthController(UserStore users, OrgStore org, SettingsService settings, AccountService account) {
         this.users = users;
         this.org = org;
         this.settings = settings;
+        this.account = account;
     }
 
     @GetMapping(ApiPaths.AUTH + "/me")
@@ -44,6 +47,7 @@ public class AuthController {
         boolean admin = roles.contains("ADMIN");
         SystemSettingsDto company = settings.get();
         return ApiResponse.ok(new MeDto(username, displayName == null ? username : displayName, roles, admin,
-                org.teams(username), company.companyName(), company.companyShortName()));
+                org.teams(username), company.companyName(), company.companyShortName(),
+                account.avatarVersion(username), account.canChangePassword(username)));
     }
 }

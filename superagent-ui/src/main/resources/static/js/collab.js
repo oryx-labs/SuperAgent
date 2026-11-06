@@ -14,7 +14,7 @@ function renderMembers(agent) {
     const li = document.createElement("li");
     const initial = document.createElement("span");
     initial.className = "member-initial";
-    initial.textContent = (m.displayName || m.username || "?").slice(0, 1).toUpperCase();
+    paintAvatar(initial, m.username, m.displayName);
     const name = document.createElement("span");
     name.textContent = m.username === currentUsername ? m.displayName + "（" + L("co.me") + "）" : m.displayName;
     const role = document.createElement("span");

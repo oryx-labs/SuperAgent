@@ -11,6 +11,9 @@ public interface ProviderCredentialStore {
 
     Optional<ProviderCredential> find(String id);
 
+    /** Key hashes ever stored in this pool, deleted entries included (a deleted machine key isn't re-imported). */
+    java.util.Set<String> knownKeyHashes(String providerKey);
+
     /** Inserts or replaces by id. */
     void save(ProviderCredential credential);
 

@@ -15,7 +15,7 @@ class WorkFileStoreTest {
 
     private static WorkFile file(String id, String owner, String agent, String task, String origin, Instant at) {
         return new WorkFile(id, id + ".md", WorkFileKind.DOCUMENT, "text/markdown", 3, WorkFile.INTERNAL, id,
-                owner, agent, task, origin, false, at, at);
+                owner, agent, task, origin, false, at, at, List.of(), WorkFile.TAGS_PENDING);
     }
 
     @Test
@@ -34,6 +34,11 @@ class WorkFileStoreTest {
         assertThat(store.delivery("t1")).map(WorkFile::id).contains("c");
         assertThat(store.find("b").orElseThrow().agentId()).isEqualTo("shared");
         assertThat(store.find("c").orElseThrow().agentId()).isNull();
+
+        // Tags round-trip; tagged files leave the tagger's queue (oldest untagged first).
+        store.save(store.find("b").orElseThrow().withTags(List.of("周报", " #方案 ", "周报"), WorkFile.TAGS_AGENT));
+        assertThat(store.find("b").orElseThrow().tags()).containsExactly("周报", "方案");
+        assertThat(store.untagged(10)).extracting(WorkFile::id).containsExactly("c");
 
         store.link("b", "s1", "m1");
         store.link("b", "s1", "m2");

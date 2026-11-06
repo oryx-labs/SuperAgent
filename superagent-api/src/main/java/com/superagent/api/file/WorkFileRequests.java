@@ -9,6 +9,10 @@ public final class WorkFileRequests {
     public record Rename(String name) {
     }
 
+    /** The file's tags as a person sets them; these win over the agent's and the tagger's from then on. */
+    public record Tags(java.util.List<String> tags) {
+    }
+
     /** Copy the file into the caller's own knowledge base; blank folder = the root. */
     public record SaveToKnowledge(String folder) {
     }

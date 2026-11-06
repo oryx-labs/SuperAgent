@@ -211,13 +211,19 @@ function modelRow(p) {
   }
   if (p.installable && p.installed && p.status !== "installing") {
     // The hourly sweep finds new releases; this asks the registry now.
-    wrap.appendChild(linkBtn(L("models.checkLatest"), async () => {
+    const check = linkBtn(L("models.checkLatest"), async () => {
       let res;
       try { res = await api.checkLatest(p.id); } catch (e) { showToast(e.message, true); return; }
       const d = res && res.data;
       if (d && !d.upgradeAvailable) showToast(L("models.upToDate", { version: d.currentVersion || "" }), false);
       loadModels();
-    }, "link-btn--muted"));
+    }, "link-btn--muted");
+    // Already on the latest known release: nothing to check. (Unknown latest stays clickable, to go and find out.)
+    if (p.latestVersion && p.currentVersion === p.latestVersion) {
+      check.disabled = true;
+      check.title = L("models.upToDate", { version: p.currentVersion });
+    }
+    wrap.appendChild(check);
   }
   wrap.append(
     linkBtn(L("models.details"), () => openModelDetail(p.id), "link-btn--muted"),
@@ -498,6 +504,13 @@ function credRow(c, index, poolSize) {
     const badge = document.createElement("span");
     badge.className = "cred-current";
     badge.textContent = L("cred.current");
+    name.appendChild(badge);
+  }
+  if (!c.env && c.source === "machine") {
+    const badge = document.createElement("span");
+    badge.className = "cred-source";
+    badge.textContent = L("cred.fromMachine");
+    badge.title = L("cred.fromMachineHint");
     name.appendChild(badge);
   }
   if (c.env) {

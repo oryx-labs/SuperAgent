@@ -165,6 +165,25 @@ img { max-width: 100%; }
   background: linear-gradient(135deg, #3f3f46, #a1a1aa); color: #fff;
   font-size: 14px; font-weight: 600; letter-spacing: .02em;
 }
+.user__avatar.has-image { background: none; overflow: hidden; }
+.user__avatar img, .member-initial img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%; }
+.member-initial.has-image { background: none; overflow: hidden; }
+.user-menu__item {
+  display: block; width: 100%; text-align: left; border: 0; background: none; font: inherit;
+  font-size: 13.5px; color: var(--ink); padding: 8px 10px; border-radius: 8px; cursor: pointer;
+}
+.user-menu__item:hover { background: var(--panel); }
+/* Account settings: avatar, then password. */
+.account-modal { width: min(440px, 92vw); }
+.account-section { padding: 14px 0; border-top: 1px solid var(--line); }
+.account-section:first-of-type { border-top: 0; padding-top: 4px; }
+.account-section__title { margin: 0 0 10px; font-size: 13px; font-weight: 650; }
+.account-avatar { display: flex; align-items: center; gap: 16px; }
+.account-avatar__pic { width: 64px; height: 64px; font-size: 24px; }
+.account-avatar__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.account-avatar__actions .field-hint { flex-basis: 100%; margin: 0; }
+.account-avatar__actions .btn { cursor: pointer; }
+.account-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
 .user__name { font-size: 14px; font-weight: 500; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- Layout ---------- */
@@ -409,6 +428,31 @@ img { max-width: 100%; }
 .fl-row__name { display: flex; align-items: center; gap: 8px; }
 .fl-row__name span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fl-icon { flex: 0 0 auto; font-size: 14px; }
+/* Tags: the filter bar above the table, chips on rows and in the preview drawer */
+.fl-tagbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; }
+.fl-tagbar__label { font-size: 12px; color: var(--muted); margin-right: 2px; }
+.fl-tag {
+  display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12.5px; cursor: pointer;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+}
+.fl-tag:hover { border-color: var(--line-strong); }
+.fl-tag.is-active { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.fl-tag__count { font-size: 11px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+.fl-tag.is-active .fl-tag__count { color: var(--muted-2); }
+.fl-row__tags { display: inline-flex; gap: 4px; margin-left: 4px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.fl-chip {
+  display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; font-size: 11px; font-weight: 500;
+  padding: 1px 7px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+}
+.fl-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 6px; }
+.fl-tags .fl-chip { font-size: 12px; padding: 2px 8px; color: var(--ink); }
+.fl-chip__x { border: 0; background: none; padding: 0 0 0 3px; font: inherit; font-size: 13px; line-height: 1; color: var(--muted-2); cursor: pointer; }
+.fl-chip__x:hover { color: #b91c1c; }
+.fl-tag-input {
+  font: inherit; font-size: 12px; width: 110px; padding: 2px 8px; border-radius: 999px;
+  border: 1px dashed var(--line-strong); background: var(--paper); color: var(--ink);
+}
+.fl-tag-input:focus { outline: none; border-style: solid; border-color: var(--ink); }
 .fl-head { min-width: 0; flex: 1 1 auto; }
 .fl-head .drawer__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fl-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -420,6 +464,7 @@ img { max-width: 100%; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px;
 }
 .fl-open-tab { align-self: flex-start; }
+.fl-link { margin: 0 0 12px; font-size: 13px; color: var(--ink); word-break: break-all; }
 /* A reply's files: cards under its text, opening the preview. */
 .file-cards { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .file-card {
@@ -1524,6 +1569,8 @@ button.stat-card:hover { border-color: var(--line-strong); }
 .cred-name small { display: block; margin-top: 3px; font-weight: 400; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
 .cred-current { display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600;
   background: rgba(37, 99, 235, .1); color: var(--accent); vertical-align: 1px; }
+.cred-source { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600;
+  background: var(--panel); border: 1px solid var(--line); color: var(--muted); vertical-align: 1px; cursor: help; }
 .cred-url, .cred-key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--muted); }
 .cred-key { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .cred-muted { color: var(--muted); font-size: 12.5px; }

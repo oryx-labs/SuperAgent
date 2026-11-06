@@ -11,6 +11,9 @@ Object.assign(api, {
   }).then(kbJson),
   deleteFile: id => fetch("/api/v1/files/" + encodeURIComponent(id), { method: "DELETE" }).then(kbJson),
   fileToKb: (id, folder) => kbPost("/api/v1/files/" + encodeURIComponent(id) + "/knowledge", { folder }),
+  setFileTags: (id, tags) => fetch("/api/v1/files/" + encodeURIComponent(id) + "/tags", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags }),
+  }).then(kbJson),
 });
 const fileContentUrl = (id, download) => "/api/v1/files/" + encodeURIComponent(id) + "/content"
   + (download ? "?download=true" : "");
@@ -30,12 +33,17 @@ const flel = {
   rename: document.getElementById("flRename"),
   del: document.getElementById("flDelete"),
   preview: document.getElementById("flPreview"),
+  tagBar: document.getElementById("flTagBar"),
+  tags: document.getElementById("flTags"),
 };
 let files = [];
 let flKind = "";
+const flTags = new Set();       // tags picked in the bar: a file must carry all of them
+let flTagsExpanded = false;
+const TAG_BAR_LIMIT = 12;       // more than this folds behind "more"
 let flOpen = null; // the WorkFileDto in the drawer
 
-const FILE_ICON = { document: "📄", image: "🖼", video: "🎬", other: "📎" };
+const FILE_ICON = { document: "📄", image: "🖼", video: "🎬", link: "🔗", other: "📎" };
 const fileIcon = f => FILE_ICON[f.kind] || FILE_ICON.other;
 // Where a file came from, in one short phrase: the agent, plus the task when a task made it.
 const fileSource = f => [f.agentName ? (f.agentAvatar ? f.agentAvatar + " " : "") + f.agentName : null,
@@ -60,8 +68,10 @@ function renderFileAgents() {
 function renderFileTable() {
   const q = flel.search.value.trim().toLowerCase();
   const agent = flel.agent.value;
-  const base = files.filter(f => (!agent || f.agentId === agent)
-    && (!q || [f.name, f.agentName, f.taskTitle].some(v => (v || "").toLowerCase().includes(q))));
+  const scoped = files.filter(f => (!agent || f.agentId === agent)
+    && (!q || [f.name, f.agentName, f.taskTitle, ...(f.tags || [])].some(v => (v || "").toLowerCase().includes(q))));
+  renderTagBar(scoped);
+  const base = scoped.filter(f => [...flTags].every(t => (f.tags || []).includes(t)));
   flel.tabs.querySelectorAll(".model-tab").forEach(t => {
     t.classList.toggle("is-active", t.dataset.kind === flKind);
     t.querySelector("b").textContent = base.filter(f => !t.dataset.kind || f.kind === t.dataset.kind).length || "";
@@ -70,6 +80,52 @@ function renderFileTable() {
   flel.rows.replaceChildren(...shown.map(fileRow));
   flel.empty.hidden = shown.length > 0;
   flel.empty.textContent = L(files.length ? "fl.noMatch" : "fl.empty");
+}
+
+// The tags on the files in view, most used first, each with its count; picked ones stay visible even at zero.
+function renderTagBar(scoped) {
+  const counts = new Map();
+  scoped.filter(f => !flKind || f.kind === flKind).forEach(f => (f.tags || []).forEach(t => counts.set(t, (counts.get(t) || 0) + 1)));
+  flTags.forEach(t => { if (!counts.has(t)) counts.set(t, 0); });
+  const all = [...counts].sort((a, b) => (flTags.has(b[0]) - flTags.has(a[0])) || b[1] - a[1] || a[0].localeCompare(b[0]));
+  flel.tagBar.hidden = all.length === 0;
+  const shown = flTagsExpanded ? all : all.slice(0, Math.max(TAG_BAR_LIMIT, flTags.size));
+  const chips = shown.map(([tag, n]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "fl-tag" + (flTags.has(tag) ? " is-active" : "");
+    b.setAttribute("aria-pressed", String(flTags.has(tag)));
+    b.textContent = tag;
+    const c = document.createElement("span");
+    c.className = "fl-tag__count";
+    c.textContent = n;
+    b.appendChild(c);
+    b.addEventListener("click", () => { if (!flTags.delete(tag)) flTags.add(tag); renderFileTable(); });
+    return b;
+  });
+  if (all.length > shown.length || flTagsExpanded && all.length > TAG_BAR_LIMIT) {
+    chips.push(linkBtn(flTagsExpanded ? L("fl.tagsLess") : L("fl.tagsMore", { n: all.length - shown.length }),
+      () => { flTagsExpanded = !flTagsExpanded; renderFileTable(); }, "link-btn--muted"));
+  }
+  if (flTags.size) {
+    chips.push(linkBtn(L("fl.tagsClear"), () => { flTags.clear(); renderFileTable(); }, "link-btn--muted"));
+  }
+  const label = document.createElement("span");
+  label.className = "fl-tagbar__label";
+  label.textContent = L("fl.tagsLabel");
+  flel.tagBar.replaceChildren(label, ...chips);
+}
+
+function tagChips(tags) {
+  const box = document.createElement("span");
+  box.className = "fl-row__tags";
+  (tags || []).forEach(t => {
+    const s = document.createElement("span");
+    s.className = "fl-chip";
+    s.textContent = t;
+    box.appendChild(s);
+  });
+  return box;
 }
 
 function fileRow(f) {
@@ -92,8 +148,9 @@ function fileRow(f) {
   label.textContent = f.name;
   name.title = f.name;
   name.append(icon, label);
+  if ((f.tags || []).length) name.appendChild(tagChips(f.tags));
   tr.append(name, cell(fileSource(f), "sk-row__meta"), cell(f.ownerName || f.owner || "—", "sk-row__meta"),
-    cell(kbFormatSize(f.size), "sk-row__meta"), cell(formatDateTime(f.updatedAt), "sk-row__meta"));
+    cell(f.kind === "link" ? "—" : kbFormatSize(f.size), "sk-row__meta"), cell(formatDateTime(f.updatedAt), "sk-row__meta"));
   tr.addEventListener("click", () => openFile(f));
   tr.addEventListener("keydown", e => { if (e.key === "Enter") openFile(f); });
   return tr;
@@ -115,10 +172,13 @@ async function openFile(fileOrId) {
   }
   flOpen = f;
   flel.title.textContent = fileIcon(f) + " " + f.name;
-  flel.meta.textContent = [fileSource(f), L("fl.askedBy", { name: f.ownerName || f.owner }),
-    kbFormatSize(f.size), formatDateTime(f.updatedAt)].join(" · ");
+  const link = f.kind === "link";
+  flel.meta.textContent = [fileSource(f), L(link ? "fl.sharedBy" : "fl.askedBy", { name: f.ownerName || f.owner }),
+    link ? null : kbFormatSize(f.size), formatDateTime(f.updatedAt)].filter(Boolean).join(" · ");
   flel.download.href = fileContentUrl(f.id, true);
+  flel.download.hidden = flel.toKb.hidden = link; // a link has no content of its own
   flel.rename.hidden = flel.del.hidden = !f.canManage;
+  renderDrawerTags(f);
   flel.drawer.hidden = false;
   renderFilePreview(f);
 }
@@ -128,7 +188,19 @@ async function renderFilePreview(f) {
   box.replaceChildren();
   const src = fileContentUrl(f.id, false);
   const ext = (f.name.split(".").pop() || "").toLowerCase();
-  if (f.kind === "image") {
+  if (f.kind === "link") {
+    // The address and a way to open it; nothing is fetched here (many links need the viewer's own login).
+    const url = document.createElement("p");
+    url.className = "fl-link";
+    url.textContent = f.url;
+    const open = document.createElement("a");
+    open.className = "btn btn--sm fl-open-tab";
+    open.href = /^https?:\/\//i.test(f.url || "") ? f.url : "#";
+    open.target = "_blank";
+    open.rel = "noopener noreferrer";
+    open.textContent = L("fl.openLink");
+    box.append(url, open);
+  } else if (f.kind === "image") {
     const img = document.createElement("img");
     img.className = "fl-media";
     img.src = src;
@@ -176,6 +248,56 @@ async function renderFilePreview(f) {
       box.appendChild(open);
     }
   }
+}
+
+// Tags in the drawer: those who may manage the file can remove one (×) or add one; a person's edit sticks.
+function renderDrawerTags(f) {
+  const box = flel.tags;
+  box.replaceChildren();
+  (f.tags || []).forEach(t => {
+    const chip = document.createElement("span");
+    chip.className = "fl-chip";
+    chip.textContent = t;
+    if (f.canManage) {
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "fl-chip__x";
+      x.textContent = "×";
+      x.title = L("fl.tagRemove");
+      x.addEventListener("click", () => saveFileTags(f, (f.tags || []).filter(o => o !== t)));
+      chip.appendChild(x);
+    }
+    box.appendChild(chip);
+  });
+  if (f.canManage && (f.tags || []).length < 5) {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "fl-tag-input";
+    input.maxLength = 20;
+    input.placeholder = L("fl.tagAdd");
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter" && input.value.trim()) {
+        e.preventDefault();
+        saveFileTags(f, [...(f.tags || []), input.value.trim()]);
+      }
+    });
+    box.appendChild(input);
+  } else if (!(f.tags || []).length) {
+    const none = document.createElement("span");
+    none.className = "fl-meta";
+    none.textContent = L(f.tagState ? "fl.tagsNone" : "fl.tagsPending");
+    box.appendChild(none);
+  }
+}
+
+async function saveFileTags(f, tags) {
+  let updated;
+  try { updated = await api.setFileTags(f.id, tags); } catch (e) { showToast(e.message, true); return; }
+  if (flOpen && flOpen.id === f.id) { flOpen = updated; renderDrawerTags(updated); }
+  files = files.map(x => x.id === updated.id ? Object.assign({}, x, { tags: updated.tags, tagState: updated.tagState }) : x);
+  if (!filesPane.hidden) renderFileTable();
+  const focus = flel.tags.querySelector(".fl-tag-input");
+  if (focus) focus.focus();
 }
 
 function closeFile() { flel.drawer.hidden = true; flOpen = null; }
@@ -259,7 +381,8 @@ async function attachFileCards(agent) {
   let list = [];
   try { list = (await api.listFiles(agent.id)) || []; } catch (e) { return; }
   if (activeAgent !== agent) return;
-  list.forEach(f => (f.messageIds || []).forEach(mid => {
+  // A link someone sent is already in their message's text; it's kept in Files, but needs no card there.
+  list.filter(f => !(f.kind === "link" && f.origin === "upload")).forEach(f => (f.messageIds || []).forEach(mid => {
     const msg = el.messages.querySelector('.msg[data-mid="' + CSS.escape(mid) + '"]');
     if (!msg || msg.querySelector('[data-fid="' + CSS.escape(f.id) + '"]')) return;
     // A picture someone sent shows as a thumbnail; everything else as a card.

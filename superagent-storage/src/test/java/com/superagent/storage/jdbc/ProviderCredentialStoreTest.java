@@ -14,7 +14,8 @@ class ProviderCredentialStoreTest {
     private static ProviderCredential cred(String id, String provider, int priority) {
         Instant now = Instant.now();
         return new ProviderCredential(id, provider, id, null, "v1:cipher", true, priority, true,
-                ProviderCredential.UNKNOWN, null, null, now, now);
+                ProviderCredential.UNKNOWN, null, null, now, now,
+                ProviderCredential.CONSOLE, "hash-" + id);
     }
 
     @Test
@@ -32,5 +33,6 @@ class ProviderCredentialStoreTest {
         store.delete("main");
         assertThat(store.list("claude")).extracting(ProviderCredential::id).containsExactly("backup");
         assertThat(store.find("main")).isEmpty();
+        assertThat(store.knownKeyHashes("claude")).containsExactlyInAnyOrder("hash-main", "hash-backup"); // deleted too
     }
 }

@@ -55,6 +55,7 @@
               <dt data-i18n="me.company">Company</dt><dd id="ucCompany"></dd>
             </dl>
           </div>
+          <button class="user-menu__item" id="accountBtn" type="button" data-i18n="account.open">Account settings</button>
           <div class="nav__sep"></div>
           <div class="user-menu__label" data-i18n="nav.language">Language</div>
           <div class="lang-switch" id="langSwitch">
@@ -267,6 +268,7 @@
         <button type="button" class="model-tab" data-kind="document"><span data-i18n="fl.kindDocument">Documents</span> <b></b></button>
         <button type="button" class="model-tab" data-kind="image"><span data-i18n="fl.kindImage">Images</span> <b></b></button>
         <button type="button" class="model-tab" data-kind="video"><span data-i18n="fl.kindVideo">Videos</span> <b></b></button>
+        <button type="button" class="model-tab" data-kind="link"><span data-i18n="fl.kindLink">Links</span> <b></b></button>
         <button type="button" class="model-tab" data-kind="other"><span data-i18n="fl.kindOther">Other</span> <b></b></button>
         <div class="sk-toolbar">
           <select id="flAgent" aria-label="Agent"></select>
@@ -274,6 +276,8 @@
         </div>
       </div>
       <div class="admin__body">
+        <!-- Topic tags across the files shown: pick one or more to see only files carrying all of them. -->
+        <div class="fl-tagbar" id="flTagBar" hidden></div>
         <table class="ctable fl-table"><thead><tr>
           <th data-i18n="fl.colName">Name</th><th class="fl-col-source" data-i18n="fl.colSource">From</th>
           <th class="fl-col-owner" data-i18n="fl.colOwner">Asked by</th><th class="fl-col-size" data-i18n="fl.colSize">Size</th>
@@ -733,6 +737,7 @@
         <div class="fl-head">
           <h3 class="drawer__title" id="flTitle"></h3>
           <p class="fl-meta" id="flMeta"></p>
+          <div class="fl-tags" id="flTags"></div>
         </div>
         <span class="agent-detail__actions">
           <a class="btn btn--sm" id="flDownload" href="#" data-i18n="fl.download">Download</a>
@@ -784,6 +789,41 @@
         <button type="submit" class="btn btn--primary" id="cfSubmit" data-i18n="common.save">Save</button>
       </div>
     </form>
+  </div>
+
+  <!-- The signed-in user's own account: avatar and password. -->
+  <div class="modal" id="accountModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <div class="modal__card account-modal">
+      <h3 class="modal__title" data-i18n="account.title">Account settings</h3>
+      <section class="account-section">
+        <h4 class="account-section__title" data-i18n="account.avatar">Avatar</h4>
+        <div class="account-avatar">
+          <span class="user__avatar account-avatar__pic" id="acAvatar" aria-hidden="true"></span>
+          <div class="account-avatar__actions">
+            <label class="btn"><span data-i18n="account.upload">Upload image</span>
+              <input type="file" id="acAvatarInput" accept="image/png,image/jpeg,image/gif,image/webp" hidden /></label>
+            <button class="link-btn link-btn--muted" type="button" id="acAvatarRemove" data-i18n="account.remove">Remove</button>
+            <p class="field-hint" data-i18n="account.avatarHint">PNG, JPEG, GIF or WebP. It's cropped to a square.</p>
+          </div>
+        </div>
+      </section>
+      <form class="account-section" id="acPasswordForm">
+        <h4 class="account-section__title" data-i18n="account.password">Password</h4>
+        <p class="field-hint" id="acPasswordNone" hidden></p>
+        <div id="acPasswordFields">
+          <label class="field"><span data-i18n="account.current">Current password</span>
+            <input type="password" id="acCurrent" autocomplete="current-password" /></label>
+          <label class="field"><span data-i18n="account.next">New password</span>
+            <input type="password" id="acNext" autocomplete="new-password" data-i18n-ph="account.nextPh" /></label>
+          <label class="field"><span data-i18n="account.confirm">Confirm new password</span>
+            <input type="password" id="acConfirm" autocomplete="new-password" /></label>
+          <p class="field-hint kb-modal__error" id="acError" hidden></p>
+          <div class="account-actions"><button type="submit" class="btn btn--primary" data-i18n="account.change">Change password</button></div>
+        </div>
+      </form>
+      <div class="modal__actions"><button type="button" class="btn" data-close data-i18n="common.close">Close</button></div>
+    </div>
   </div>
 
   <div class="modal" id="userModal" hidden>

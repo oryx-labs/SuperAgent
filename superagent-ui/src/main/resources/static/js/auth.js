@@ -28,6 +28,7 @@ async function initAuth() {
   currentUsername = me.username;
   currentMe = me;
   renderAccount();
+  loadAvatarVersions(); // other people's pictures, for member lists
   // Admin-only sections: hide for non-admins.
   const showAdmin = !!me.admin;
   isAdmin = showAdmin;
@@ -42,7 +43,7 @@ function renderAccount() {
   if (!me) return;
   const shown = me.displayName || me.username || "";
   document.getElementById("currentUser").textContent = shown;
-  document.getElementById("userAvatar").textContent = shown.trim().charAt(0).toUpperCase();
+  paintAvatar(document.getElementById("userAvatar"), me.username, shown, me.avatarVersion);
   const short = me.companyShortName || "";
   const shortEl = document.getElementById("currentCompanyShort");
   shortEl.textContent = short;
@@ -63,6 +64,133 @@ function renderAccount() {
   company.textContent = full || L("me.noCompany");
   company.classList.toggle("is-empty", !full);
 }
+
+// ---- avatars: anyone's picture, or their initial ----
+// username → version for everyone with an avatar; loaded once, so lists can show pictures without a request each.
+let avatarVersions = {};
+Object.assign(api, {
+  avatarVersions: () => fetch("/api/v1/avatars").then(r => r.json()),
+  setAvatar: data => fetch("/api/v1/account/avatar", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data }),
+  }).then(r => r.json()),
+  removeAvatar: () => fetch("/api/v1/account/avatar", { method: "DELETE" }).then(r => r.json()),
+  changePassword: (current, next) => fetch("/api/v1/account/password", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ current, next }),
+  }).then(r => r.json()),
+});
+
+async function loadAvatarVersions() {
+  try { const res = await api.avatarVersions(); avatarVersions = (res && res.data) || {}; } catch (e) { return; }
+  if (typeof activeAgent !== "undefined" && activeAgent) renderMembers(activeAgent); // drawn before they arrived
+}
+
+/** Puts {@code username}'s picture into {@code box}, or their initial when they have none. */
+function paintAvatar(box, username, label, version) {
+  const v = version !== undefined ? version : avatarVersions[username];
+  box.replaceChildren();
+  box.classList.toggle("has-image", !!v);
+  if (v) {
+    const img = document.createElement("img");
+    img.src = "/api/v1/avatars/" + encodeURIComponent(username) + "?v=" + v;
+    img.alt = "";
+    box.appendChild(img);
+  } else {
+    box.textContent = (label || username || "?").trim().charAt(0).toUpperCase();
+  }
+}
+
+// ---- account settings ----
+const acel = {
+  modal: document.getElementById("accountModal"),
+  avatar: document.getElementById("acAvatar"),
+  input: document.getElementById("acAvatarInput"),
+  remove: document.getElementById("acAvatarRemove"),
+  form: document.getElementById("acPasswordForm"),
+  none: document.getElementById("acPasswordNone"),
+  fields: document.getElementById("acPasswordFields"),
+  current: document.getElementById("acCurrent"),
+  next: document.getElementById("acNext"),
+  confirm: document.getElementById("acConfirm"),
+  error: document.getElementById("acError"),
+};
+
+function openAccount() {
+  const me = currentMe;
+  renderAccountAvatar();
+  acel.fields.hidden = !me.canChangePassword;
+  acel.none.hidden = me.canChangePassword;
+  acel.none.textContent = L(me.username && me.admin && !me.canChangePassword ? "account.passwordConfig" : "account.passwordNone");
+  [acel.current, acel.next, acel.confirm].forEach(i => { i.value = ""; });
+  acel.error.hidden = true;
+  acel.modal.hidden = false;
+}
+
+function renderAccountAvatar() {
+  const me = currentMe;
+  paintAvatar(acel.avatar, me.username, me.displayName || me.username, me.avatarVersion);
+  acel.remove.hidden = !me.avatarVersion;
+}
+
+function avatarChanged(version) {
+  currentMe.avatarVersion = version || null;
+  if (version) avatarVersions[currentMe.username] = version; else delete avatarVersions[currentMe.username];
+  renderAccount();
+  renderAccountAvatar();
+  if (activeAgent) renderMembers(activeAgent);
+}
+
+/** Center-crops to a square and scales to 256px, so any photo becomes a small avatar. */
+function squareAvatar(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const side = Math.min(img.naturalWidth, img.naturalHeight);
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 256;
+      canvas.getContext("2d").drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2,
+        side, side, 0, 0, 256, 256);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/png").split(",")[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(L("account.badImage"))); };
+    img.src = url;
+  });
+}
+
+document.getElementById("accountBtn").addEventListener("click", () => {
+  document.getElementById("userMenu").classList.remove("is-open");
+  document.activeElement.blur(); // the menu stays open while it holds focus
+  openAccount();
+});
+acel.modal.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", () => { acel.modal.hidden = true; }));
+acel.input.addEventListener("change", async () => {
+  const file = acel.input.files && acel.input.files[0];
+  acel.input.value = "";
+  if (!file) return;
+  try {
+    const res = await api.setAvatar(await squareAvatar(file));
+    if (!res || res.data == null) throw new Error((res && res.message) || L("account.avatarFailed"));
+    avatarChanged(res.data);
+    showToast(L("account.avatarSaved"), false);
+  } catch (e) { showToast(e.message, true); }
+});
+acel.remove.addEventListener("click", async () => {
+  const res = await api.removeAvatar().catch(() => null);
+  if (!res || res.code !== "ok") { showToast((res && res.message) || L("account.avatarFailed"), true); return; }
+  avatarChanged(null);
+});
+acel.form.addEventListener("submit", async e => {
+  e.preventDefault();
+  const fail = msg => { acel.error.textContent = msg; acel.error.hidden = false; };
+  acel.error.hidden = true;
+  if (acel.next.value.length < 8) return fail(L("account.tooShort"));
+  if (acel.next.value !== acel.confirm.value) return fail(L("account.mismatch"));
+  const res = await api.changePassword(acel.current.value, acel.next.value).catch(() => null);
+  if (!res || res.code !== "ok") return fail((res && res.message) || L("account.passwordFailed"));
+  [acel.current, acel.next, acel.confirm].forEach(i => { i.value = ""; });
+  showToast(L("account.passwordSaved"), false);
+});
 
 document.getElementById("logoutBtn").addEventListener("click", async () => {
   try { await api.logout(); } catch (e) { /* ignore */ }
@@ -224,7 +352,7 @@ function renderOrg() {
     const li = document.createElement("li");
     const initial = document.createElement("span");
     initial.className = "member-initial";
-    initial.textContent = userLabel(u).slice(0, 1).toUpperCase();
+    paintAvatar(initial, m.username, userLabel(u));
     const name = document.createElement("span");
     name.className = "org-members__name";
     name.textContent = userLabel(u);

@@ -10,10 +10,11 @@ public class ClickHouseWorkFileStore extends AbstractJdbcWorkFileStore {
                 CREATE TABLE IF NOT EXISTS work_file (
                   id String, name String, kind String, mime_type String, size Int64, storage String, location String,
                   owner String, agent_id String, task_id String, origin String, deleted UInt8,
-                  created_at DateTime64(3, 'UTC'), updated_at DateTime64(3, 'UTC')
+                  created_at DateTime64(3, 'UTC'), updated_at DateTime64(3, 'UTC'), tags String, tag_state String
                 ) ENGINE = ReplacingMergeTree(updated_at)
                 ORDER BY (id)
-                """, """
+                """, "ALTER TABLE work_file ADD COLUMN IF NOT EXISTS tags String",
+                "ALTER TABLE work_file ADD COLUMN IF NOT EXISTS tag_state String", """
                 CREATE TABLE IF NOT EXISTS work_file_ref (
                   file_id String, session_id String, message_id String, created_at DateTime64(3, 'UTC')
                 ) ENGINE = ReplacingMergeTree(created_at)

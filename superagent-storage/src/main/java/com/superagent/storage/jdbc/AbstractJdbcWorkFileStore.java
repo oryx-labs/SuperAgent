@@ -26,8 +26,8 @@ import java.util.Optional;
 abstract class AbstractJdbcWorkFileStore implements WorkFileStore {
 
     protected static final String COLUMNS = "(id, name, kind, mime_type, size, storage, location, owner, agent_id, "
-            + "task_id, origin, deleted, created_at, updated_at)";
-    protected static final String VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            + "task_id, origin, deleted, created_at, updated_at, tags, tag_state)";
+    protected static final String VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected final JdbcTemplate jdbc;
 
@@ -36,7 +36,8 @@ abstract class AbstractJdbcWorkFileStore implements WorkFileStore {
             emptyToNull(rs.getString("mime_type")), rs.getLong("size"), rs.getString("storage"),
             emptyToNull(rs.getString("location")), rs.getString("owner"), emptyToNull(rs.getString("agent_id")),
             emptyToNull(rs.getString("task_id")), rs.getString("origin"), rs.getInt("deleted") == 1,
-            instant(rs, "created_at"), instant(rs, "updated_at"));
+            instant(rs, "created_at"), instant(rs, "updated_at"), splitTags(rs.getString("tags")),
+            nz(rs.getString("tag_state")));
 
     protected AbstractJdbcWorkFileStore(JdbcTemplate jdbc, String... ddl) {
         this.jdbc = jdbc;
@@ -56,7 +57,18 @@ abstract class AbstractJdbcWorkFileStore implements WorkFileStore {
         jdbc.update(upsert() + " work_file " + COLUMNS + " VALUES " + VALUES,
                 f.id(), f.name(), f.kind().name().toLowerCase(), nz(f.mimeType()), f.size(), f.storage(),
                 nz(f.location()), f.owner(), nz(f.agentId()), nz(f.taskId()), f.origin(), f.deleted() ? 1 : 0,
-                utc(f.createdAt()), utc(f.updatedAt()));
+                utc(f.createdAt()), utc(f.updatedAt()), String.join("\n", f.tags()), f.tagState());
+    }
+
+    @Override
+    public List<WorkFile> untagged(int limit) {
+        return jdbc.query("SELECT * FROM work_file" + readFinal() + " WHERE deleted = 0 AND tag_state = '' "
+                + "ORDER BY created_at LIMIT " + Math.max(1, limit), mapper);
+    }
+
+    /** Tags are stored newline-separated (a tag never contains one). */
+    private static List<String> splitTags(String stored) {
+        return stored == null || stored.isEmpty() ? List.of() : List.of(stored.split("\n"));
     }
 
     @Override

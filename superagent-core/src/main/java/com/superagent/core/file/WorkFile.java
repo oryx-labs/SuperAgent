@@ -1,12 +1,13 @@
 package com.superagent.core.file;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * A work result an agent produced: a document, an image, a video — "everything is a file". Only the latest
  * content is kept (an agent revising a file overwrites it). {@code storage} says where the content lives
- * ({@link #INTERNAL} = on this server, at {@code location}); external stores (Feishu / DingTalk docs, image
- * hosts) come later as further storage kinds whose {@code location} is a link.
+ * ({@link #INTERNAL} = on this server, at {@code location}; {@link #LINK} = a web address, {@code location} is the
+ * URL). External stores (Feishu / DingTalk docs, image hosts) come later as further storage kinds.
  *
  * <p>Provenance: {@code owner} is who gave the instruction (the file is theirs), {@code agentId} the agent
  * that made it (its members can see it), {@code taskId} the task, if it came from one. {@code origin} is
@@ -27,9 +28,50 @@ public record WorkFile(
         String origin,
         boolean deleted,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        /** Topic tags for finding files again; who set them is {@code tagState}. */
+        List<String> tags,
+        /** "" = not tagged yet (the tagger picks it up), agent, auto (the tagger), user (a person's tags win). */
+        String tagState) {
+
+    public WorkFile {
+        tags = tags == null ? List.of() : List.copyOf(tags);
+        tagState = tagState == null ? TAGS_PENDING : tagState;
+    }
+
+    public static final String TAGS_PENDING = "";
+    public static final String TAGS_AGENT = "agent";
+    public static final String TAGS_AUTO = "auto";
+    public static final String TAGS_USER = "user";
+    public static final int MAX_TAGS = 5;
+    public static final int MAX_TAG_LENGTH = 20;
+
+    /** Tags as entered by anyone: trimmed, "#" dropped, deduplicated case-insensitively, capped in count and length. */
+    public static List<String> cleanTags(List<String> raw) {
+        java.util.LinkedHashMap<String, String> out = new java.util.LinkedHashMap<>();
+        for (String t : raw == null ? List.<String>of() : raw) {
+            String c = t == null ? "" : t.replace("#", "").replaceAll("[\\s,，;；]+", " ").strip();
+            if (c.length() > MAX_TAG_LENGTH) {
+                c = c.substring(0, MAX_TAG_LENGTH).strip();
+            }
+            if (!c.isEmpty()) {
+                out.putIfAbsent(c.toLowerCase(java.util.Locale.ROOT), c);
+            }
+            if (out.size() == MAX_TAGS) {
+                break;
+            }
+        }
+        return List.copyOf(out.values());
+    }
+
+    public WorkFile withTags(List<String> newTags, String newState) {
+        return new WorkFile(id, name, kind, mimeType, size, storage, location, owner, agentId, taskId, origin,
+                deleted, createdAt, updatedAt, cleanTags(newTags), newState);
+    }
 
     public static final String INTERNAL = "internal";
+    /** A web address someone shared: {@code location} is the URL; there's no content on this server. */
+    public static final String LINK = "link";
     public static final String ORIGIN_CHAT = "chat";
     public static final String ORIGIN_TASK = "task";
     public static final String ORIGIN_DELIVERY = "delivery";
@@ -38,11 +80,11 @@ public record WorkFile(
 
     public WorkFile withContent(String newName, WorkFileKind newKind, String newMime, long newSize) {
         return new WorkFile(id, newName, newKind, newMime, newSize, storage, location, owner, agentId, taskId, origin,
-                deleted, createdAt, Instant.now());
+                deleted, createdAt, Instant.now(), tags, tagState);
     }
 
     public WorkFile markDeleted() {
         return new WorkFile(id, name, kind, mimeType, size, storage, location, owner, agentId, taskId, origin,
-                true, createdAt, Instant.now());
+                true, createdAt, Instant.now(), tags, tagState);
     }
 }

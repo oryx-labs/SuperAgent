@@ -4,8 +4,8 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * A work file as the UI shows it. {@code kind} is document | image | video | other; {@code origin} chat | task |
- * delivery. Where it came from is resolved to names ({@code agentName}, {@code taskTitle}, {@code ownerName}).
+ * A work file as the UI shows it. {@code kind} is document | image | video | link | other; {@code origin} chat |
+ * task | delivery | upload (a person sent it). {@code url} is set for a link. Where it came from is resolved to names ({@code agentName}, {@code taskTitle}, {@code ownerName}).
  * {@code messageIds} are the chat replies that produced it, for the file cards in a conversation;
  * {@code canManage} whether the caller may rename or delete it.
  */
@@ -27,5 +27,9 @@ public record WorkFileDto(
         List<String> messageIds,
         boolean canManage,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        List<String> tags,
+        /** "" (not tagged yet), agent, auto or user. */
+        String tagState,
+        String url) {
 }

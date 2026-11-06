@@ -111,8 +111,17 @@ public class FileService {
     // --- producing files (agent tools, task delivery) ---
 
     public WorkFile writeText(Origin origin, String name, String content, String replaceId) {
+        return writeText(origin, name, content, replaceId, null);
+    }
+
+    /** {@code tags}: the agent's topic tags for the file (null = none given; the tagger fills them in later). */
+    public WorkFile writeText(Origin origin, String name, String content, String replaceId, List<String> tags) {
         byte[] bytes = (content == null ? "" : content).getBytes(StandardCharsets.UTF_8);
-        return store(origin, cleanName(name), replaceId, target -> Files.write(target, bytes));
+        return tagged(store(origin, cleanName(name), replaceId, target -> Files.write(target, bytes)), tags);
+    }
+
+    public WorkFile saveFrom(Origin origin, Path source, String name, String replaceId, List<String> tags) {
+        return tagged(saveFrom(origin, source, name, replaceId), tags);
     }
 
     public WorkFile saveFrom(Origin origin, Path source, String name, String replaceId) {
@@ -125,6 +134,66 @@ public class FileService {
                 Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
             }
         });
+    }
+
+    /** The agent's tags on a file it delivered — unless a person has set the file's tags, which then stay. */
+    private WorkFile tagged(WorkFile f, List<String> tags) {
+        List<String> clean = WorkFile.cleanTags(tags);
+        if (clean.isEmpty() || WorkFile.TAGS_USER.equals(f.tagState())) {
+            return f;
+        }
+        WorkFile t = f.withTags(clean, WorkFile.TAGS_AGENT);
+        store.save(t);
+        return t;
+    }
+
+    /** Every tag on the files {@code user} can see, most used first — the vocabulary agents should reuse. */
+    public List<String> tagsInUse(String user, String agentId) {
+        List<WorkFile> files = agentId != null ? store.listFor(user, List.of(agentId)) : store.listFor(user, accessibleAgents(user));
+        Map<String, Integer> counts = new java.util.HashMap<>();
+        files.forEach(f -> f.tags().forEach(t -> counts.merge(t, 1, Integer::sum)));
+        return counts.entrySet().stream().sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .map(Map.Entry::getKey).toList();
+    }
+
+    /** A person sets the tags: they win over the agent's and the tagger's from now on. */
+    public WorkFileDto setTags(String id, String user, List<String> tags) {
+        store.save(manageable(id, user).withTags(tags, WorkFile.TAGS_USER));
+        return get(id, user);
+    }
+
+    /** The tagger's result for a file it was given; skipped if someone tagged the file meanwhile. */
+    public void autoTag(String id, List<String> tags) {
+        store.find(id).filter(f -> WorkFile.TAGS_PENDING.equals(f.tagState()))
+                .ifPresent(f -> store.save(f.withTags(tags, WorkFile.TAGS_AUTO)));
+    }
+
+    /** Files waiting for the tagger, with what it needs to read: the start of a text file's content. */
+    public record Untagged(WorkFile file, String excerpt, List<String> vocabulary) {
+    }
+
+    public List<Untagged> untagged(int limit) {
+        List<Untagged> out = new ArrayList<>();
+        for (WorkFile f : store.untagged(limit)) {
+            out.add(new Untagged(f, excerpt(f), tagsInUse(f.owner(), f.agentId())));
+        }
+        return out;
+    }
+
+    private String excerpt(WorkFile f) {
+        if (WorkFile.LINK.equals(f.storage())) {
+            return f.location(); // the address says what it's about
+        }
+        if (f.kind() != WorkFileKind.DOCUMENT || f.size() > 2_000_000 || !(f.mimeType().startsWith("text/")
+                || f.name().toLowerCase(Locale.ROOT).matches(".*\\.(md|markdown|txt|csv|json|html?)$"))) {
+            return null;
+        }
+        try {
+            String text = Files.readString(contentPath(f), StandardCharsets.UTF_8);
+            return text.length() <= 1500 ? text : text.substring(0, 1500);
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
     }
 
     /** Task tools: the task's agent (if one set it off) is the file's agent, so its members see it too. */
@@ -173,7 +242,8 @@ public class FileService {
             WorkFile saved = existing != null
                     ? existing.withContent(name, WorkFileKind.of(name), mimeOf(name), size)
                     : new WorkFile(id, name, WorkFileKind.of(name), mimeOf(name), size, WorkFile.INTERNAL, id,
-                    origin.owner(), origin.agentId(), origin.taskId(), origin.origin(), false, Instant.now(), Instant.now());
+                    origin.owner(), origin.agentId(), origin.taskId(), origin.origin(), false, Instant.now(), Instant.now(),
+                    List.of(), WorkFile.TAGS_PENDING);
             store.save(saved);
             if (origin.messageId() != null) {
                 store.link(id, origin.sessionId(), origin.messageId());
@@ -257,6 +327,9 @@ public class FileService {
         List<Attachment> out = new ArrayList<>();
         for (String id : ids) {
             WorkFile f = visible(id, user);
+            if (WorkFile.LINK.equals(f.storage())) {
+                throw new IllegalArgumentException("链接随消息文字发送即可：" + f.location());
+            }
             store.link(id, sessionId, messageId);
             out.add(new Attachment(f.name(), f.mimeType(), contentPath(f)));
         }
@@ -312,12 +385,17 @@ public class FileService {
         throw new IllegalArgumentException("Say which agent or task the file is for");
     }
 
+    /** What was sent to the same agent before (or, without one, to the same task). */
+    private List<WorkFile> sentTo(Origin origin) {
+        return origin.agentId() != null ? store.listFor(null, List.of(origin.agentId()))
+                : store.listFor(origin.owner(), List.of()).stream().filter(f -> origin.taskId().equals(f.taskId())).toList();
+    }
+
     /** An earlier upload with the same content, to the same agent (or, without one, the same task). */
     private WorkFile sameUpload(Origin origin, long size, String hash) throws IOException {
-        List<WorkFile> candidates = origin.agentId() != null ? store.listFor(null, List.of(origin.agentId()))
-                : store.listFor(origin.owner(), List.of()).stream().filter(f -> origin.taskId().equals(f.taskId())).toList();
-        for (WorkFile f : candidates) {
-            if (!f.deleted() && WorkFile.ORIGIN_UPLOAD.equals(f.origin()) && f.size() == size) {
+        for (WorkFile f : sentTo(origin)) {
+            if (!f.deleted() && WorkFile.ORIGIN_UPLOAD.equals(f.origin()) && WorkFile.INTERNAL.equals(f.storage())
+                    && f.size() == size) {
                 Path path = contentPath(f);
                 try (InputStream in = Files.newInputStream(path)) {
                     if (hash.equals(copyHashed(in, null))) {
@@ -371,6 +449,39 @@ public class FileService {
         return path;
     }
 
+    // --- links people share in a message ---
+
+    /**
+     * Keeps the web addresses in a message the user sends to an agent (or a task) as link files under it, linked to
+     * the message. A link already kept for that agent is linked again rather than kept twice. Nothing is fetched:
+     * many links (intranet docs) need the user's own login anyway, and the agent reads them with its own tools.
+     */
+    public List<WorkFile> saveLinks(String user, String agentId, String taskId, String sessionId, String messageId,
+                                    String text) {
+        List<String> urls = Links.find(text);
+        if (urls.isEmpty() || user == null) {
+            return List.of();
+        }
+        Origin origin = new Origin(user, agentId, taskId, sessionId, messageId, WorkFile.ORIGIN_UPLOAD);
+        List<WorkFile> known = sentTo(origin).stream().filter(f -> WorkFile.LINK.equals(f.storage())).toList();
+        List<WorkFile> out = new ArrayList<>();
+        for (String url : urls) {
+            WorkFile f = known.stream().filter(k -> url.equals(k.location())).findFirst().orElse(null);
+            if (f == null) {
+                Instant now = Instant.now();
+                f = new WorkFile(UUID.randomUUID().toString(), Links.name(url), WorkFileKind.LINK, "text/uri-list", 0,
+                        WorkFile.LINK, url, user, agentId, taskId, WorkFile.ORIGIN_UPLOAD, false, now, now, List.of(),
+                        WorkFile.TAGS_PENDING);
+                store.save(f);
+            }
+            if (messageId != null) {
+                store.link(f.id(), sessionId, messageId);
+            }
+            out.add(f);
+        }
+        return out;
+    }
+
     // --- people using files ---
 
     /** Files the user can see; {@code agentId} narrows to one agent's (which the user must have access to). */
@@ -395,13 +506,18 @@ public class FileService {
 
     public Content content(String id, String user) {
         WorkFile f = visible(id, user);
+        if (WorkFile.LINK.equals(f.storage())) {
+            throw new IllegalArgumentException("这是一个链接，没有可下载的内容：" + f.location());
+        }
         return new Content(contentPath(f), f.name(), f.mimeType());
     }
 
     public WorkFileDto rename(String id, String user, String name) {
         WorkFile f = manageable(id, user);
         String clean = cleanName(name);
-        store.save(f.withContent(clean, WorkFileKind.of(clean), mimeOf(clean), f.size()));
+        boolean link = WorkFile.LINK.equals(f.storage()); // a link stays a link whatever it's called
+        store.save(f.withContent(clean, link ? f.kind() : WorkFileKind.of(clean), link ? f.mimeType() : mimeOf(clean),
+                f.size()));
         return get(id, user);
     }
 
@@ -455,7 +571,8 @@ public class FileService {
         return new WorkFileDto(f.id(), f.name(), f.kind().name().toLowerCase(Locale.ROOT), f.mimeType(), f.size(),
                 f.storage(), f.origin(), f.owner(), displayName(f.owner()), f.agentId(),
                 agent == null ? null : agent.name(), agent == null ? null : agent.avatar(), f.taskId(),
-                task == null ? null : task.title(), messageIds, canManage(f, user), f.createdAt(), f.updatedAt());
+                task == null ? null : task.title(), messageIds, canManage(f, user), f.createdAt(), f.updatedAt(),
+                f.tags(), f.tagState(), WorkFile.LINK.equals(f.storage()) ? f.location() : null);
     }
 
     private String displayName(String username) {

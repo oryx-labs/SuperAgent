@@ -60,6 +60,7 @@ public class McpGrants {
             + "必须用 mcp__superagent__file_write（文本内容）或 mcp__superagent__file_save（工作区里生成的文件）交付，"
             + "用户会在「文件」里看到它，对话里也会出现文件卡片。不要用内置的 Write 工具写成交付物，也不要只把全文贴在回复里——那样用户拿不到文件。"
             + "修改之前交付过的文件：先用 file_list 找到它，再带 replace_id 覆盖，不要另存一份。交付后回复里简要说明内容并提文件名，不要贴路径。"
+            + "交付时带上 tags（1~3 个内容主题标签，优先复用 file_list 里已在用的标签），方便用户按主题找文件。"
             + "只是闲聊、回答问题、给简短建议时直接回复即可，不必建文件。";
 
     private final Map<String, Grant> grants = new ConcurrentHashMap<>();

@@ -19,5 +19,7 @@ public record CredentialDto(
         String lastError,
         Instant checkedAt,
         boolean current,
-        boolean env) {
+        boolean env,
+        /** console (added on the page) or machine (found on the server and imported). */
+        String source) {
 }

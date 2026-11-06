@@ -20,7 +20,7 @@ import java.util.Optional;
 abstract class AbstractJdbcProviderCredentialStore implements ProviderCredentialStore {
 
     private static final String COLUMNS = "(id, provider_key, label, base_url, key_cipher, bearer, priority, enabled, "
-            + "status, last_error, checked_at, deleted, created_at, updated_at)";
+            + "status, last_error, checked_at, deleted, created_at, updated_at, source, key_hash)";
 
     protected final JdbcTemplate jdbc;
 
@@ -28,11 +28,15 @@ abstract class AbstractJdbcProviderCredentialStore implements ProviderCredential
             rs.getString("id"), rs.getString("provider_key"), rs.getString("label"), emptyToNull(rs.getString("base_url")),
             rs.getString("key_cipher"), rs.getInt("bearer") == 1, rs.getInt("priority"), rs.getInt("enabled") == 1,
             rs.getString("status"), emptyToNull(rs.getString("last_error")), instant(rs, "checked_at"),
-            instant(rs, "created_at"), instant(rs, "updated_at"));
+            instant(rs, "created_at"), instant(rs, "updated_at"),
+            rs.getString("source") == null || rs.getString("source").isEmpty() ? ProviderCredential.CONSOLE : rs.getString("source"),
+            emptyToNull(rs.getString("key_hash")));
 
-    protected AbstractJdbcProviderCredentialStore(JdbcTemplate jdbc, String ddl) {
+    protected AbstractJdbcProviderCredentialStore(JdbcTemplate jdbc, String... ddl) {
         this.jdbc = jdbc;
-        jdbc.execute(ddl);
+        for (String statement : ddl) {
+            jdbc.execute(statement);
+        }
     }
 
     /** "" for MySQL, " FINAL" for ClickHouse. */
@@ -54,6 +58,12 @@ abstract class AbstractJdbcProviderCredentialStore implements ProviderCredential
     }
 
     @Override
+    public java.util.Set<String> knownKeyHashes(String providerKey) {
+        return new java.util.HashSet<>(jdbc.queryForList("SELECT key_hash FROM provider_credential" + readFinal()
+                + " WHERE provider_key = ? AND key_hash <> ''", String.class, providerKey));
+    }
+
+    @Override
     public void save(ProviderCredential c) {
         write(c, false);
     }
@@ -64,10 +74,10 @@ abstract class AbstractJdbcProviderCredentialStore implements ProviderCredential
     }
 
     private void write(ProviderCredential c, boolean deleted) {
-        jdbc.update(upsert() + " provider_credential " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        jdbc.update(upsert() + " provider_credential " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 c.id(), c.providerKey(), c.label(), nz(c.baseUrl()), c.keyCipher(), c.bearer() ? 1 : 0, c.priority(),
                 c.enabled() ? 1 : 0, c.status(), nz(c.lastError()), utc(c.checkedAt()), deleted ? 1 : 0,
-                utc(c.createdAt()), utc(deleted ? Instant.now() : c.updatedAt()));
+                utc(c.createdAt()), utc(deleted ? Instant.now() : c.updatedAt()), c.source(), nz(c.keyHash()));
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

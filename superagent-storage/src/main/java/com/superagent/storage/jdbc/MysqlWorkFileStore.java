@@ -22,6 +22,8 @@ public class MysqlWorkFileStore extends AbstractJdbcWorkFileStore {
                   deleted    TINYINT      NOT NULL,
                   created_at DATETIME(3)  NOT NULL,
                   updated_at DATETIME(3)  NOT NULL,
+                  tags       VARCHAR(512) NOT NULL DEFAULT '',
+                  tag_state  VARCHAR(8)   NOT NULL DEFAULT '',
                   PRIMARY KEY (id),
                   KEY idx_work_file_owner (owner, deleted, updated_at),
                   KEY idx_work_file_agent (agent_id, deleted, updated_at),
@@ -36,6 +38,14 @@ public class MysqlWorkFileStore extends AbstractJdbcWorkFileStore {
                   PRIMARY KEY (file_id, message_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        // Tables from before tags: add the columns; existing files start untagged, so the tagger fills them in.
+        for (String[] col : new String[][]{{"tags", "VARCHAR(512) NOT NULL DEFAULT ''"}, {"tag_state", "VARCHAR(8) NOT NULL DEFAULT ''"}}) {
+            Integer present = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                    + "AND LOWER(table_name) = 'work_file' AND LOWER(column_name) = ?", Integer.class, col[0]);
+            if (present == null || present == 0) {
+                jdbc.execute("ALTER TABLE work_file ADD COLUMN " + col[0] + " " + col[1]);
+            }
+        }
     }
 
     @Override

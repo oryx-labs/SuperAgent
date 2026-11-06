@@ -11,10 +11,11 @@ public class ClickHouseProviderCredentialStore extends AbstractJdbcProviderCrede
                   id String, provider_key String, label String, base_url String, key_cipher String, bearer UInt8,
                   priority Int32, enabled UInt8, status String, last_error String,
                   checked_at Nullable(DateTime64(3, 'UTC')), deleted UInt8,
-                  created_at DateTime64(3, 'UTC'), updated_at DateTime64(3, 'UTC')
+                  created_at DateTime64(3, 'UTC'), updated_at DateTime64(3, 'UTC'), source String, key_hash String
                 ) ENGINE = ReplacingMergeTree(updated_at)
                 ORDER BY (id)
-                """);
+                """, "ALTER TABLE provider_credential ADD COLUMN IF NOT EXISTS source String",
+                "ALTER TABLE provider_credential ADD COLUMN IF NOT EXISTS key_hash String");
     }
 
     @Override

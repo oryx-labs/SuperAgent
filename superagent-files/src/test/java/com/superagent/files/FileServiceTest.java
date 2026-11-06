@@ -8,6 +8,7 @@ import com.superagent.core.agent.AgentMemberStore;
 import com.superagent.core.agent.AgentStatus;
 import com.superagent.core.agent.AgentStore;
 import com.superagent.core.file.WorkFile;
+import com.superagent.core.file.WorkFileKind;
 import com.superagent.core.file.WorkFileStore;
 import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.task.TaskAgentStore;
@@ -47,6 +48,9 @@ class FileServiceTest {
             return rows.values().stream().filter(f -> !f.deleted())
                     .filter(f -> (owner != null && owner.equals(f.owner())) || (f.agentId() != null && agentIds.contains(f.agentId())))
                     .sorted(Comparator.comparing(WorkFile::updatedAt).reversed()).toList();
+        }
+        @Override public List<WorkFile> untagged(int limit) {
+            return rows.values().stream().filter(f -> !f.deleted() && f.tagState().isEmpty()).limit(limit).toList();
         }
         @Override public Optional<WorkFile> delivery(String taskId) {
             return rows.values().stream().filter(f -> taskId.equals(f.taskId()) && WorkFile.ORIGIN_DELIVERY.equals(f.origin())).findFirst();
@@ -163,5 +167,51 @@ class FileServiceTest {
         assertThat(d.note()).contains("uploads/需求.docx", "uploads/图.png");
         assertThat(svc.get(first.id(), "bob").messageIds()).containsExactly("m1");
         assertThatThrownBy(() -> svc.attach(List.of(first.id()), "carl", "s1", "m2")).isInstanceOf(WorkFileNotFoundException.class);
+    }
+
+    @Test
+    void agentTagsAFileAPersonsTagsWinAndTheTaggerOnlyFillsUntaggedOnes() throws Exception {
+        InMemoryFiles store = new InMemoryFiles();
+        FileService svc = service(store);
+        WorkFile lesson = svc.writeText(chat("bob", "dev", "m1"), "讲义.md", "第一节", null, List.of("课程", "#讲义", "课程"));
+        assertThat(lesson.tags()).containsExactly("课程", "讲义");
+        assertThat(svc.tagsInUse("ada", null)).contains("课程", "讲义");
+
+        svc.setTags(lesson.id(), "ada", List.of("行动营"));
+        svc.writeText(chat("bob", "dev", "m2"), "讲义.md", "第一节·二稿", lesson.id(), List.of("草稿")); // agent revises
+        assertThat(store.rows.get(lesson.id()).tags()).containsExactly("行动营"); // the person's tags stay
+
+        WorkFile plain = svc.writeText(chat("bob", "dev", "m3"), "周报.md", "本周进展：完成讲义", null);
+        assertThat(svc.untagged(10)).singleElement().satisfies(u -> {
+            assertThat(u.file().id()).isEqualTo(plain.id());
+            assertThat(u.excerpt()).contains("本周进展");
+            assertThat(u.vocabulary()).contains("行动营");
+        });
+        svc.autoTag(plain.id(), List.of("周报"));
+        svc.autoTag(lesson.id(), List.of("不该覆盖"));
+        assertThat(store.rows.get(plain.id()).tags()).containsExactly("周报");
+        assertThat(store.rows.get(lesson.id()).tags()).containsExactly("行动营");
+        assertThat(svc.untagged(10)).isEmpty();
+    }
+
+    @Test
+    void linksInAMessageBecomeLinkFilesOncePerAgent() {
+        InMemoryFiles store = new InMemoryFiles();
+        FileService svc = service(store);
+        String text = "看下 https://github.com/acme/repo/pull/12。还有（https://example.com/a?b=1），以及 http://x";
+        List<WorkFile> saved = svc.saveLinks("bob", "dev", null, "s1", "m1", text);
+        assertThat(saved).extracting(WorkFile::location)
+                .containsExactly("https://github.com/acme/repo/pull/12", "https://example.com/a?b=1", "http://x");
+        assertThat(saved.get(0).name()).isEqualTo("github.com/acme/repo/pull/12");
+        assertThat(saved).allSatisfy(f -> assertThat(f.kind()).isEqualTo(WorkFileKind.LINK));
+
+        // The same link sent again is linked to the new message, not kept twice.
+        svc.saveLinks("bob", "dev", null, "s1", "m2", "再看 https://github.com/acme/repo/pull/12");
+        WorkFileDto link = svc.list("ada", "dev").stream().filter(f -> "link".equals(f.kind()))
+                .filter(f -> f.url().endsWith("/pull/12")).findFirst().orElseThrow();
+        assertThat(svc.list("ada", "dev")).filteredOn(f -> "link".equals(f.kind())).hasSize(3);
+        assertThat(link.messageIds()).containsExactly("m1", "m2");
+        assertThatThrownBy(() -> svc.content(link.id(), "bob")).isInstanceOf(IllegalArgumentException.class);
+        assertThat(svc.rename(link.id(), "bob", "PR 12").kind()).isEqualTo("link"); // stays a link
     }
 }

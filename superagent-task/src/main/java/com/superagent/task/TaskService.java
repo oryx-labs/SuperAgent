@@ -586,6 +586,10 @@ public class TaskService implements TaskRecovery {
             }
             runStore.appendMessage(new ChatMessage(messageId, id,
                     MessageRole.USER, text == null ? "" : text, Instant.now()));
+            if (files != null) {
+                String agentId = taskAgents == null ? null : taskAgents.agentOf(id).orElse(null);
+                files.saveLinks(owner, agentId, id, id, messageId, text); // links are resources too
+            }
             if (!attached.isEmpty()) {
                 nextTurnImages.put(id, attached);
             }

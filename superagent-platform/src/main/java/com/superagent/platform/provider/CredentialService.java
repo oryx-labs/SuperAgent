@@ -51,6 +51,7 @@ public class CredentialService {
     private final ModelProviderStore providers;
     private final SecretCipher cipher;
     private final ProviderInferenceProbe probe;
+    private final MachineCredentials machine; // null in tests: nothing to import
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
     private final ExecutorService checker = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "credential-check");
@@ -68,11 +69,71 @@ public class CredentialService {
     }
 
     public CredentialService(ProviderCredentialStore store, ModelProviderStore providers, SecretCipher cipher,
-                             ProviderInferenceProbe probe) {
+                             ProviderInferenceProbe probe, MachineCredentials machine) {
         this.store = store;
         this.providers = providers;
         this.cipher = cipher;
         this.probe = probe;
+        this.machine = machine;
+    }
+
+    /**
+     * Startup: bring what the machine already has into the console (so it's managed in one place), then tell the
+     * listeners — the CLI config writer among them — which entry each pool uses.
+     */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    void onReady() {
+        for (String key : POOLED) {
+            try {
+                importMachine(key);
+            } catch (RuntimeException e) {
+                log.warn("{}: could not import the machine's credentials: {}", key, e.getMessage());
+            }
+            notifySwitch(key);
+        }
+    }
+
+    /**
+     * Adds the machine's keys not in the pool yet — never one an admin deleted (deleted entries keep their hash).
+     * Into an empty pool they go first, so runs keep using what they used before; otherwise last.
+     */
+    public int importMachine(String providerKey) {
+        backfillHashes(providerKey);
+        java.util.Set<String> known = store.knownKeyHashes(providerKey);
+        int added = 0;
+        for (MachineCredentials.Found f : machine == null ? List.<MachineCredentials.Found>of() : machine.find(providerKey)) {
+            String hash = ProviderCredential.hash(f.apiKey());
+            if (!known.add(hash)) {
+                continue;
+            }
+            int next = store.list(providerKey).stream().mapToInt(ProviderCredential::priority).max().orElse(0) + 1;
+            Instant now = Instant.now();
+            store.save(new ProviderCredential(UUID.randomUUID().toString(), providerKey, label("本机：" + f.where(), next),
+                    f.baseUrl(), cipher.encrypt(f.apiKey()), f.bearer(), next, true, ProviderCredential.UNKNOWN, null,
+                    null, now, now, ProviderCredential.MACHINE, hash));
+            added++;
+            log.info("{}: imported the machine's key from {}", providerKey, f.where());
+        }
+        if (added > 0) {
+            store.list(providerKey).stream().filter(c -> ProviderCredential.MACHINE.equals(c.source()))
+                    .forEach(c -> checkSoon(c.id()));
+        }
+        return added;
+    }
+
+    /** Entries saved before hashes existed get one, so their key is recognised when found again on the machine. */
+    private void backfillHashes(String providerKey) {
+        for (ProviderCredential c : store.list(providerKey)) {
+            if (c.keyHash() == null) {
+                try {
+                    store.save(new ProviderCredential(c.id(), c.providerKey(), c.label(), c.baseUrl(), c.keyCipher(),
+                            c.bearer(), c.priority(), c.enabled(), c.status(), c.lastError(), c.checkedAt(),
+                            c.createdAt(), c.updatedAt(), c.source(), ProviderCredential.hash(cipher.decrypt(c.keyCipher()))));
+                } catch (IllegalStateException e) {
+                    // can't decrypt (secret key changed): leave it; the page already shows it as unreadable
+                }
+            }
+        }
     }
 
     void onSwitch(String listenerKey, Consumer<String> listener) {
@@ -204,8 +265,9 @@ public class CredentialService {
         requirePooled(providerKey);
         String current = current(providerKey).id();
         List<CredentialDto> out = new ArrayList<>(store.list(providerKey).stream().map(c -> toDto(c, current)).toList());
-        out.add(new CredentialDto(ENV_ID, null, envBaseUrl(providerKey), null, false, Integer.MAX_VALUE, true,
-                ProviderCredential.UNKNOWN, null, null, ENV_ID.equals(current), true));
+        // The machine's keys are entries above; what's left on the machine is the CLI's own login (a subscription).
+        out.add(new CredentialDto(ENV_ID, null, null, null, false, Integer.MAX_VALUE, true,
+                ProviderCredential.UNKNOWN, null, null, ENV_ID.equals(current), true, ProviderCredential.MACHINE));
         return out;
     }
 
@@ -215,12 +277,18 @@ public class CredentialService {
         if (key.isEmpty()) {
             throw new IllegalArgumentException("API Key 不能为空");
         }
+        String hash = ProviderCredential.hash(key);
+        if (store.list(providerKey).stream().anyMatch(c -> hash.equals(c.keyHash()))) {
+            throw new IllegalArgumentException("这个 API Key 已经在列表里了");
+        }
         int next = store.list(providerKey).stream().mapToInt(ProviderCredential::priority).max().orElse(0) + 1;
         Instant now = Instant.now();
         ProviderCredential c = new ProviderCredential(UUID.randomUUID().toString(), providerKey, label(req.label(), next),
                 baseUrl(req.baseUrl()), cipher.encrypt(key), bearer(providerKey, req.bearer()), next,
-                req.enabled() == null || req.enabled(), ProviderCredential.UNKNOWN, null, null, now, now);
+                req.enabled() == null || req.enabled(), ProviderCredential.UNKNOWN, null, null, now, now,
+                ProviderCredential.CONSOLE, hash);
         store.save(c);
+        notifySwitch(providerKey); // the CLI config follows if this is now the entry runs use
         checkSoon(c.id());
         return toDto(c, current(providerKey).id());
     }
@@ -234,8 +302,10 @@ public class CredentialService {
                 key.isEmpty() ? c.keyCipher() : cipher.encrypt(key),
                 req.bearer() == null ? c.bearer() : bearer(providerKey, req.bearer()), c.priority(),
                 req.enabled() == null ? c.enabled() : req.enabled(),
-                ProviderCredential.UNKNOWN, null, null, c.createdAt(), Instant.now());
+                ProviderCredential.UNKNOWN, null, null, c.createdAt(), Instant.now(), c.source(),
+                key.isEmpty() ? c.keyHash() : ProviderCredential.hash(key));
         store.save(updated);
+        notifySwitch(providerKey);
         checkSoon(id);
         return toDto(updated, current(providerKey).id());
     }
@@ -284,7 +354,7 @@ public class CredentialService {
             hint = "（无法解密）";
         }
         return new CredentialDto(c.id(), c.label(), c.baseUrl(), hint, c.bearer(), c.priority(), c.enabled(),
-                c.status(), c.lastError(), c.checkedAt(), c.id().equals(currentId), false);
+                c.status(), c.lastError(), c.checkedAt(), c.id().equals(currentId), false, c.source());
     }
 
     /** Enough to recognise a key, never enough to use it. */
@@ -293,11 +363,6 @@ public class CredentialService {
             return "••••";
         }
         return key.substring(0, 4) + "…" + key.substring(key.length() - 4);
-    }
-
-    private static String envBaseUrl(String providerKey) {
-        String url = "claude".equals(providerKey) ? System.getenv("ANTHROPIC_BASE_URL") : null;
-        return url == null || url.isBlank() ? null : url.strip();
     }
 
     private static String label(String label, int n) {

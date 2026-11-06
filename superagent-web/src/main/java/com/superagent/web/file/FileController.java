@@ -106,6 +106,13 @@ public class FileController {
         return ApiResponse.ok(files.rename(id, auth.getName(), request.name()));
     }
 
+    /** A person sets the file's tags; from then on they win over the agent's and the tagger's. */
+    @PutMapping(ApiPaths.FILES + "/{id}/tags")
+    public ApiResponse<WorkFileDto> setTags(@PathVariable String id, @RequestBody WorkFileRequests.Tags request,
+                                            Authentication auth) {
+        return ApiResponse.ok(files.setTags(id, auth.getName(), request.tags()));
+    }
+
     @DeleteMapping(ApiPaths.FILES + "/{id}")
     public ApiResponse<Void> delete(@PathVariable String id, Authentication auth) {
         files.delete(id, auth.getName());
