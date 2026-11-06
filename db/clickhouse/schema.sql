@@ -71,9 +71,6 @@ CREATE TABLE IF NOT EXISTS superagent.connector (
   transport   String,
   endpoint    String,
   token_env   String,
-  app_id      String,
-  status      String,
-  last_error  String,
   created_at  DateTime64(3, 'UTC'),
   updated_at  DateTime64(3, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)
@@ -85,7 +82,9 @@ CREATE TABLE IF NOT EXISTS superagent.connector_credential (
   owner         String,
   secret_cipher String,
   account_label String,
-  updated_at    DateTime64(3, 'UTC')
+  updated_at    DateTime64(3, 'UTC'),
+  refresh_cipher String,
+  expires_at    Nullable(DateTime64(3, 'UTC'))
 ) ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY (connector_id, owner);
 

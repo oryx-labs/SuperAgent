@@ -336,12 +336,7 @@ function markActiveThread() {
 
 async function selectAgent(agent) {
   if (streaming) return;
-  if (liveRunning) { // was watching another member's turn on the previous agent
-    liveRunning = false;
-    liveBubble = null;
-    el.input.disabled = false;
-    el.input.placeholder = L("chat.composer");
-  }
+  stopLiveWatch(); // was watching a turn on the previous agent
   activeAgentId = agent.id;
   activeAgent = agent;
   renderAgentPanel(agent);
@@ -366,8 +361,10 @@ function renderAgentPanel(agent) {
   if (agent.kind === "super") avatar.replaceChildren(liquidCore("liquid-core--sm"));
   else avatar.textContent = agent.avatar || "🙂";
   const ch = characterByKey(agent.character);
-  document.getElementById("agentInfoCharacter").textContent = agent.kind === "super" ? L("super.role")
+  const roleLine = agent.kind === "super" ? L("super.role")
     : ch ? ch.emoji + " " + characterName(ch) : L("agent.characterCustom");
+  document.getElementById("agentInfoCharacter").textContent = roleLine;
+  document.getElementById("agentInfoSub").textContent = roleLine;
   const editBtn = document.getElementById("agentEditBtn");
   if (editBtn) editBtn.hidden = agent.kind === "super" || !isOwner(agent);
   document.getElementById("agentLogBtn").hidden = !isOwner(agent); // the run log is the owner's only
@@ -375,11 +372,10 @@ function renderAgentPanel(agent) {
   composerModel.title = isOwner(agent) ? "" : L("co.modelOwnerOnly");
   renderMembers(agent);
   panel.classList.toggle("agent-info--super", agent.kind === "super");
-  document.getElementById("agentDetailBtn").hidden = agent.kind === "super";
-  // SuperAgent has no details drawer, so its run log stays in the header.
-  document.getElementById("superLogBtn").hidden = agent.kind !== "super" || !isOwner(agent);
+  // Every agent has a details drawer; the SuperAgent's holds only what it has (memory, run log, messages).
   document.getElementById("agentDetailTitle").textContent = agent.name || "Agent";
-  document.getElementById("superIntro").hidden = agent.kind !== "super";
+  document.getElementById("agentInfoDetails").classList.toggle("is-super", agent.kind === "super");
+  document.getElementById("superSources").hidden = agent.kind !== "super";
   if (agent.kind === "super") loadSuperSources();
   renderAgentWork(agent);
   const persona = document.getElementById("agentInfoPersona");

@@ -1,5 +1,6 @@
 package com.superagent.agent.chat;
 
+import com.superagent.agent.AgentCollabMcpTools;
 import com.superagent.agent.log.AgentLogService;
 import com.superagent.agent.memory.AgentMemoryService;
 import com.superagent.api.ApiPaths;
@@ -160,6 +161,7 @@ public class ChatService {
             this.mcpGrants = mcpGrants;
             tools.addAll(SUPERAGENT_MCP_TOOLS);
             tools.addAll(McpGrants.WORK_TOOLS);
+            tools.addAll(AgentCollabMcpTools.TOOLS);
         } else {
             this.mcpGrants = null;
         }
@@ -184,6 +186,14 @@ public class ChatService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setCredentials(CredentialService credentials) {
         this.credentials = credentials;
+    }
+
+    // Looked up per turn: the customizer (the SuperAgent's) itself depends on this service.
+    private org.springframework.beans.factory.ObjectProvider<AgentTurnCustomizer> customizers;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setCustomizers(org.springframework.beans.factory.ObjectProvider<AgentTurnCustomizer> customizers) {
+        this.customizers = customizers;
     }
 
     private com.superagent.platform.connector.ConnectorService connectors; // null in tests: no company connectors
@@ -235,6 +245,27 @@ public class ChatService {
             throw new SessionNotFoundException(agentId == null ? "(no agent)" : agentId);
         }
         return createSession(request);
+    }
+
+    /**
+     * A session that belongs to no agent's conversation (so it never shows in a chat history): the given id,
+     * created with its own workspace the first time it's asked for. The id must be a UUID (Claude Code uses it
+     * as its conversation id).
+     */
+    public ChatSession ensureDetachedSession(String id, String title) {
+        return store.findSession(id).orElseGet(() -> {
+            Path workspace = workspaceRoot.resolve(id);
+            try {
+                Files.createDirectories(workspace);
+            } catch (IOException e) {
+                throw new UncheckedIOException("Cannot create workspace for session " + id, e);
+            }
+            Instant now = Instant.now();
+            ChatSession session = new ChatSession(id, title, AgentType.CLAUDE, null, workspace.toString(), null,
+                    SessionStatus.ACTIVE, now, now);
+            store.createSession(session);
+            return session;
+        });
     }
 
     /** The agent's current session — the one its next turn continues — or null if it has none. */
@@ -407,9 +438,10 @@ public class ChatService {
         String sessionId = session.id();
         Agent agent = session.agentId() == null || session.agentId().isBlank() ? null
                 : agentStore.find(session.agentId()).orElse(null);
-        if (agent != null && agent.isSuper()) {
-            // The SuperAgent doesn't answer live: messages go to its inbox and are worked through in rounds.
-            throw new IllegalArgumentException("Send messages to SuperAgent through its inbox");
+        AgentTurnCustomizer special = agent == null || customizers == null ? null
+                : customizers.orderedStream().filter(c -> c.handles(agent)).findFirst().orElse(null);
+        if (agent != null && agent.isSuper() && special == null) {
+            throw new IllegalStateException("SuperAgent chat is not available");
         }
         // One turn at a time: in a shared agent, another member's turn may be running.
         String liveKey = agent != null ? agent.id() : sessionId;
@@ -431,10 +463,15 @@ public class ChatService {
             throw new IllegalStateException("No runner for agent type " + agentType);
         }
         // Character first, then the index of the agent's skills (their full text is read on demand).
-        String character = agent == null ? null : AgentCharacters.systemPrompt(agent);
-        String skillIndex = skills.install(session.workspaceDir(),
-                agent == null ? List.of() : skills.forAgent(agent.id(), agent.owner()), mcpGrants != null);
-        String systemPrompt = joinPrompt(joinPrompt(character, skillIndex), mcpGrants == null ? null : McpGrants.FILES_HINT);
+        String systemPrompt;
+        if (special != null) {
+            systemPrompt = special.systemPrompt(agent);
+        } else {
+            String character = agent == null ? null : AgentCharacters.systemPrompt(agent);
+            String skillIndex = skills.install(session.workspaceDir(),
+                    agent == null ? List.of() : skills.forAgent(agent.id(), agent.owner()), mcpGrants != null);
+            systemPrompt = joinPrompt(joinPrompt(character, skillIndex), mcpGrants == null ? null : McpGrants.FILES_HINT);
+        }
 
         // Images are stored under the user message's id before it's appended, so a bad upload stores nothing.
         String userMessageId = UUID.randomUUID().toString();
@@ -461,7 +498,7 @@ public class ChatService {
         SseEmitter emitter = new SseEmitter(sseTimeoutMs);
         String assistantMessageId = UUID.randomUUID().toString();
         Cancellation cancellation = new Cancellation();
-        LiveTurn live = new LiveTurn(user, displayName(user), Instant.now(), new StringBuilder(), new AtomicReference<>());
+        LiveTurn live = new LiveTurn(user, displayName(user), Instant.now());
         if (liveTurns.putIfAbsent(liveKey, live) != null) {
             throw new ChatBusyException("另一条消息刚刚触发了回复，请稍候");
         }
@@ -476,9 +513,10 @@ public class ChatService {
         executor.execute(() -> {
             try {
                 runTurn(agent, turn, agentType, runner, model, systemPrompt, agentMemory, turnPrompt, attached,
-                        user, userMessageId, assistantMessageId, emitter, cancellation);
+                        user, userMessageId, assistantMessageId, new TurnStream(emitter, live, agent, special), cancellation);
             } finally {
                 liveTurns.remove(liveKey, live);
+                live.end();
             }
         });
         return emitter;
@@ -528,7 +566,7 @@ public class ChatService {
      */
     private void runTurn(Agent agent, ChatSession session, AgentType agentType, AgentRunner runner, String model,
                          String systemPrompt, String agentMemory, String prompt, List<ImageAttachment> attached,
-                         String user, String userMessageId, String assistantMessageId, SseEmitter emitter,
+                         String user, String userMessageId, String assistantMessageId, TurnStream emitter,
                          Cancellation cancellation) {
         long startedAt = System.currentTimeMillis();
         boolean retried = false;
@@ -563,12 +601,12 @@ public class ChatService {
                 send(emitter, new StreamEventDto("stopped", -1, attempt.text()));
             }
             send(emitter, new StreamEventDto("done", -1, attempt.text()));
-            emitter.complete();
+            emitter.sender().complete();
         } catch (Exception e) {
             log.error("turn failed for session {}", session.id(), e);
             String detail = e.getMessage() != null ? e.getMessage() : "agent run failed";
             send(emitter, new StreamEventDto("error", -1, detail));
-            emitter.complete();
+            emitter.sender().complete();
         } finally {
             activeRuns.remove(session.id(), cancellation);
         }
@@ -577,7 +615,7 @@ public class ChatService {
     /** One run of the turn in {@code session}: output streams live, errors are only collected. */
     private Attempt attempt(ChatSession session, AgentType agentType, AgentRunner runner, String model,
                             String systemPrompt, String agentMemory, String prompt, List<ImageAttachment> attached,
-                            String user, String assistantMessageId, SseEmitter emitter, Cancellation cancellation) {
+                            String user, String assistantMessageId, TurnStream emitter, Cancellation cancellation) {
         StringBuilder textAccumulator = new StringBuilder();
         AtomicReference<String> resultText = new AtomicReference<>();
         AtomicReference<String> error = new AtomicReference<>();
@@ -598,23 +636,30 @@ public class ChatService {
                 }
                 default -> { /* thinking / tool use: forwarded below */ }
             }
-            liveTurn(session).ifPresent(live -> live.observe(event.type(), event.payload()));
             if (event.type() != AgentEventType.ERROR) {
                 send(emitter, new StreamEventDto(event.type().name().toLowerCase(), event.seq(), event.payload()));
             }
         };
 
-        McpGrants.Grant grant = mcpGrants == null ? null : mcpGrants.openChat(user, session.agentId(), session.id(), assistantMessageId, session.workspaceDir());
+        AgentTurnCustomizer special = emitter.special();
+        McpGrants.Grant grant = special != null ? special.openGrant(emitter.agent(), user, session)
+                : mcpGrants == null ? null : mcpGrants.openChat(user, session.agentId(), session.id(), assistantMessageId, session.workspaceDir());
         String cli = agentType.cliName();
         CredentialService.Choice choice = credentials == null ? new CredentialService.Choice(null) : credentials.current(cli);
         // The company's connectors, with the identity of whoever sent this message (their own authorizations).
         List<McpServerSpec> connected = connectors == null ? List.of() : connectors.mcpServersFor(user);
         List<String> tools = allowedTools;
+        if (special != null) {
+            // The built-in tools only: the chat MCP tools belong to a CHAT grant, not this agent's own.
+            tools = new ArrayList<>(allowedTools.stream().filter(t -> !t.startsWith("mcp__")).toList());
+            tools.addAll(special.tools(emitter.agent()));
+        }
         if (!connected.isEmpty()) {
-            tools = new ArrayList<>(allowedTools);
+            tools = new ArrayList<>(tools);
             tools.addAll(com.superagent.platform.connector.ConnectorService.toolPatterns(connected));
         }
-        AgentRunRequest request = new AgentRunRequest(session.id(), agentSessionId, session.workspaceDir(), prompt, model,
+        String sent = special == null ? prompt : special.prompt(emitter.agent(), session, prompt);
+        AgentRunRequest request = new AgentRunRequest(session.id(), agentSessionId, session.workspaceDir(), sent, model,
                 tools, skipPermissions, McpGrants.withServers(grant == null ? null : mcpGrants.mcpConfig(grant), connected),
                 systemPrompt, attached, agentMemory, choice.credential());
         try {
@@ -685,6 +730,18 @@ public class ChatService {
         return oneLine.length() <= 48 ? oneLine : oneLine.substring(0, 48) + "…";
     }
 
+    /**
+     * Where a turn's events go — the sender's own stream and every other viewer of the agent — plus the agent and,
+     * for a kind of agent another module runs differently (the SuperAgent), how its turns are set up.
+     */
+    record TurnStream(SseEmitter sender, LiveTurn live, Agent agent, AgentTurnCustomizer special) {
+    }
+
+    private void send(TurnStream stream, StreamEventDto event) {
+        send(stream.sender(), event);
+        stream.live().publish(event);
+    }
+
     private void send(SseEmitter emitter, StreamEventDto event) {
         try {
             emitter.send(SseEmitter.event().name(event.type()).data(event));
@@ -708,15 +765,82 @@ public class ChatService {
 
     // --- live view of a turn, for the other members of a shared agent ---
 
-    /** A turn in progress: who started it and what the agent has said so far. */
-    record LiveTurn(String by, String byName, Instant startedAt, StringBuilder text, AtomicReference<String> activity) {
-        void observe(AgentEventType type, String payload) {
-            if (type == AgentEventType.TEXT && payload != null) {
-                synchronized (text) {
-                    text.append(payload);
-                }
-            } else if (type == AgentEventType.TOOL_USE && payload != null) {
-                activity.set(payload.length() > 200 ? payload.substring(0, 200) + "…" : payload);
+    /**
+     * A turn in progress: who started it, and every event the sender's stream got, so each viewer of the agent
+     * sees the same thing (thinking, tool calls, text, task and file cards). A viewer who joins late gets the
+     * events so far, then the rest as they happen. Consecutive text / thinking deltas are merged to keep the
+     * replay short.
+     */
+    static final class LiveTurn {
+        private final String by;
+        private final String byName;
+        private final Instant startedAt;
+        private final StringBuilder text = new StringBuilder();
+        private final List<StreamEventDto> events = new ArrayList<>();
+        private final List<SseEmitter> watchers = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private String activity;
+        private boolean ended;
+
+        LiveTurn(String by, String byName, Instant startedAt) {
+            this.by = by;
+            this.byName = byName;
+            this.startedAt = startedAt;
+        }
+
+        String by() {
+            return by;
+        }
+
+        String byName() {
+            return byName;
+        }
+
+        synchronized void publish(StreamEventDto event) {
+            if ("text".equals(event.type()) && event.payload() != null) {
+                text.append(event.payload());
+            } else if ("tool_use".equals(event.type()) && event.payload() != null) {
+                activity = event.payload().length() > 200 ? event.payload().substring(0, 200) + "…" : event.payload();
+            }
+            StreamEventDto last = events.isEmpty() ? null : events.get(events.size() - 1);
+            if (last != null && last.type().equals(event.type()) && event.payload() != null
+                    && ("text".equals(event.type()) || "thinking".equals(event.type()))) {
+                events.set(events.size() - 1, new StreamEventDto(last.type(), event.seq(),
+                        (last.payload() == null ? "" : last.payload()) + event.payload()));
+            } else {
+                events.add(event);
+            }
+            watchers.forEach(w -> deliver(w, event));
+        }
+
+        /** Replays the turn so far to a new viewer, then keeps it posted until the turn ends. */
+        synchronized void watch(SseEmitter watcher) {
+            events.forEach(e -> deliver(watcher, e));
+            if (ended) {
+                watcher.complete();
+                return;
+            }
+            watchers.add(watcher);
+            Runnable drop = () -> watchers.remove(watcher);
+            watcher.onCompletion(drop);
+            watcher.onTimeout(drop);
+            watcher.onError(e -> drop.run());
+        }
+
+        synchronized void end() {
+            ended = true;
+            watchers.forEach(SseEmitter::complete);
+            watchers.clear();
+        }
+
+        synchronized LiveTurnDto toDto(String sessionId) {
+            return new LiveTurnDto(true, by, byName, startedAt, text.toString(), activity, sessionId);
+        }
+
+        private void deliver(SseEmitter watcher, StreamEventDto event) {
+            try {
+                watcher.send(SseEmitter.event().name(event.type()).data(event));
+            } catch (IOException | IllegalStateException e) {
+                watchers.remove(watcher); // that viewer left; the turn goes on
             }
         }
     }
@@ -729,15 +853,25 @@ public class ChatService {
     /** What every viewer of the session polls: is a turn running, whose, and its text so far. */
     public LiveTurnDto live(String sessionId) {
         ChatSession session = store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
-        return liveTurn(session).map(t -> {
-            String text;
-            synchronized (t.text()) {
-                text = t.text().toString();
-            }
-            return new LiveTurnDto(true, t.by(), t.byName(), t.startedAt(), text, t.activity().get(),
-                    currentSessionId(session.agentId()));
-        }).orElse(new LiveTurnDto(false, null, null, null, null, null,
+        return liveTurn(session).map(t -> t.toDto(currentSessionId(session.agentId()))).orElse(new LiveTurnDto(false, null, null, null, null, null,
                 session.agentId() == null || session.agentId().isBlank() ? session.id() : currentSessionId(session.agentId())));
+    }
+
+    /**
+     * A viewer's live feed of the running turn: the same events the sender's stream carries, from the start.
+     * With no turn running it ends at once with a single "idle" event.
+     */
+    public SseEmitter watchLive(String sessionId) {
+        ChatSession session = store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
+        SseEmitter watcher = new SseEmitter(sseTimeoutMs);
+        Optional<LiveTurn> live = liveTurn(session);
+        if (live.isEmpty()) {
+            send(watcher, new StreamEventDto("idle", -1, null));
+            watcher.complete();
+        } else {
+            live.get().watch(watcher);
+        }
+        return watcher;
     }
 
     private String displayName(String username) {

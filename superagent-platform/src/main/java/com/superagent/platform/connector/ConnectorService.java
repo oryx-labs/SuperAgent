@@ -4,20 +4,20 @@ import com.superagent.api.connector.ConnectorDto;
 import com.superagent.api.connector.SaveConnectorRequest;
 import com.superagent.core.connector.Connector;
 import com.superagent.core.connector.ConnectorAuthMethod;
-import com.superagent.core.connector.ConnectorChanged;
 import com.superagent.core.connector.ConnectorCredential;
 import com.superagent.core.connector.ConnectorCredentialStore;
 import com.superagent.core.connector.ConnectorKind;
 import com.superagent.core.connector.ConnectorStore;
 import com.superagent.core.connector.ConnectorTransport;
 import com.superagent.core.connector.McpServerSpec;
-import com.superagent.core.error.ConflictException;
+import com.superagent.core.error.ForbiddenException;
 import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.security.SecretCipher;
+import com.superagent.platform.integration.IntegrationService;
+import com.superagent.runtime.mcp.McpGrants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
@@ -35,10 +35,11 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * Connectors: how the company links to outside systems. An administrator adds them; employees authorize
- * the ones that act with a personal identity. MCP connectors give agents tools ({@link #mcpServersFor});
- * the Feishu connector brings messages to each employee's SuperAgent (run by the event module, which
- * follows {@link ConnectorChanged}). Secrets are encrypted and never leave this service.
+ * Connectors: how the company links to outside systems, as each employee sees them. Listed first is SuperAgent's
+ * own MCP, then Feishu when its integration is enabled (it brings messages to each employee's SuperAgent; the
+ * app itself is set up under System Settings), then the MCP servers an administrator added for agents
+ * ({@link #mcpServersFor}). Employees authorize the ones that act with a personal identity. Secrets are
+ * encrypted and never leave this service.
  */
 @Service
 public class ConnectorService {
@@ -48,45 +49,86 @@ public class ConnectorService {
     private static final Pattern SERVER_ID = Pattern.compile("[a-z0-9_-]{1,32}");
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final String DIGEST_TIME = "09:00";
+    /** SuperAgent's own MCP: always handed to agent runs, shown first on the list, never editable. */
+    public static final String BUILTIN_ID = "superagent";
+    /** The Feishu row: shown while the Feishu integration is enabled; configured only under System Settings. */
+    public static final String FEISHU_ID = "feishu";
 
     private final ConnectorStore store;
     private final ConnectorCredentialStore credentials;
     private final EventSourceStore links;
     private final ConnectorOAuthService oauth;
     private final SecretCipher cipher;
-    private final ApplicationEventPublisher publisher;
+    private final McpGrants grants;
+    private final IntegrationService integrations;
+    private final com.superagent.core.settings.SystemSettingStore settings;
     private final SecureRandom random = new SecureRandom();
 
     public ConnectorService(ConnectorStore store, ConnectorCredentialStore credentials, EventSourceStore links,
-                            ConnectorOAuthService oauth, SecretCipher cipher, ApplicationEventPublisher publisher) {
+                            ConnectorOAuthService oauth, SecretCipher cipher,
+                            McpGrants grants, IntegrationService integrations,
+                            com.superagent.core.settings.SystemSettingStore settings) {
         this.store = store;
         this.credentials = credentials;
         this.links = links;
         this.oauth = oauth;
         this.cipher = cipher;
-        this.publisher = publisher;
+        this.grants = grants;
+        this.integrations = integrations;
+        this.settings = settings;
         seedDefaults();
     }
 
     public List<ConnectorDto> list(String viewer, boolean admin) {
-        return store.listConnectors().stream().map(c -> toDto(c, viewer, admin)).toList();
+        List<ConnectorDto> out = new ArrayList<>();
+        out.add(builtin(admin));
+        if (integrations.ready(IntegrationService.FEISHU)) {
+            out.add(feishuRow(viewer, admin));
+        }
+        store.listConnectors().forEach(c -> out.add(toDto(c, viewer, admin)));
+        return out;
+    }
+
+    /**
+     * SuperAgent's own MCP (tasks, files, skills, automations, the team): found at startup from the port the
+     * server listens on and checked by calling it, then handed to every run with a per-turn token. Listed so
+     * people can see it is there and working; nothing about it can be changed.
+     */
+    private ConnectorDto builtin(boolean admin) {
+        McpGrants.SelfStatus st = grants.selfStatus();
+        String status = switch (st.state()) {
+            case "ok" -> "connected";
+            case "error" -> "error";
+            default -> "connecting";
+        };
+        return new ConnectorDto(BUILTIN_ID, "SuperAgent", null, "builtin", "none", true, "http", status,
+                admin ? st.error() : null, false, true, null, null, false, admin ? grants.selfUrl() : null, null,
+                false, 0, null, st.checkedAt());
+    }
+
+    /** Feishu as an employee sees it: whether they're linked, and the code to link if matching by phone didn't. */
+    private ConnectorDto feishuRow(String viewer, boolean admin) {
+        String appId = integrations.value(IntegrationService.FEISHU, "appId").orElse(null);
+        EventSource link = links.find(viewer, EventSource.FEISHU).orElse(null);
+        boolean linked = link != null && link.linkedTo(appId);
+        int count = admin ? (int) links.list().stream()
+                .filter(s -> EventSource.FEISHU.equals(s.type()) && s.linkedTo(appId)).count() : 0;
+        return new ConnectorDto(FEISHU_ID, "飞书", null, "feishu", "none", true, "http",
+                integrations.status(IntegrationService.FEISHU), admin ? integrations.lastError(IntegrationService.FEISHU) : null,
+                true, linked, null, linked || link == null ? null : link.bindCode(), false, null, null, false, count,
+                null, null);
     }
 
     // --- administration ---
 
     public ConnectorDto create(SaveConnectorRequest request, String viewer) {
-        ConnectorKind kind = parse(ConnectorKind.class, request.kind(), ConnectorKind.MCP);
-        if (kind == ConnectorKind.FEISHU && feishu().isPresent()) {
-            throw new ConflictException("The company already has a Feishu connector");
-        }
         Instant now = Instant.now();
-        Connector connector = validated(new Connector(UUID.randomUUID().toString(), null, null, kind, null,
-                true, null, null, null, null, null, null, now, now), request);
+        Connector connector = validated(new Connector(UUID.randomUUID().toString(), null, null, ConnectorKind.MCP, null,
+                true, null, null, null, now, now), request);
         requireSecret(connector, request);
         store.save(connector);
         saveCompanySecret(connector, request.secret());
-        log.info("created {} connector {} ({})", kind, connector.id(), connector.name());
-        publisher.publishEvent(new ConnectorChanged(connector.id()));
+        log.info("created connector {} ({})", connector.id(), connector.name());
         return toDto(connector, viewer, true);
     }
 
@@ -101,7 +143,6 @@ public class ConnectorService {
         }
         store.save(updated);
         saveCompanySecret(updated, request.secret());
-        publisher.publishEvent(new ConnectorChanged(id));
         return toDto(updated, viewer, true);
     }
 
@@ -109,7 +150,6 @@ public class ConnectorService {
         require(id);
         store.delete(id);
         credentials.deleteAll(id);
-        publisher.publishEvent(new ConnectorChanged(id));
     }
 
     // --- an employee's own authorization ---
@@ -138,15 +178,14 @@ public class ConnectorService {
 
     /** A fresh code the viewer sends the company Feishu bot ("绑定 XXXX") to link themselves when matching by phone didn't. */
     public ConnectorDto newBindCode(String id, String viewer, boolean admin) {
-        Connector c = require(id);
-        if (c.kind() != ConnectorKind.FEISHU || !c.enabled()) {
-            throw new IllegalArgumentException("Binding is only for an enabled Feishu connector");
+        if (!FEISHU_ID.equals(id) || !integrations.ready(IntegrationService.FEISHU)) {
+            throw new IllegalArgumentException("Binding is only for Feishu, once it is enabled in System Settings");
         }
         String code = bindCode();
         links.save(links.find(viewer, EventSource.FEISHU).map(s -> s.withBindCode(code))
                 .orElseGet(() -> EventSource.create(viewer, EventSource.FEISHU, null, null, code, DIGEST_TIME,
                         ZONE.getId(), LocalDate.now(ZONE))));
-        return toDto(c, viewer, admin);
+        return feishuRow(viewer, admin);
     }
 
     // --- what agent runs use ---
@@ -162,6 +201,9 @@ public class ConnectorService {
             if (c.kind() != ConnectorKind.MCP || !c.enabled() || c.endpoint() == null) {
                 continue;
             }
+            if (c.authMethod() == ConnectorAuthMethod.OAUTH && !oauth.isConfigured(oauth.providerFor(c.id()))) {
+                continue; // its app is switched off under System Settings
+            }
             String token = null;
             if (c.authMethod() != ConnectorAuthMethod.NONE) {
                 String who = c.authMethod().personal() ? owner : ConnectorCredential.COMPANY;
@@ -169,26 +211,31 @@ public class ConnectorService {
                 if (cred.isEmpty()) {
                     continue;
                 }
-                try {
-                    token = cipher.decrypt(cred.get().secretCipher());
-                } catch (IllegalStateException e) {
-                    log.warn("connector {}: stored token can't be decrypted, skipping it", c.id());
+                // OAuth tokens may expire (Gitee's after a day): the OAuth service renews them first.
+                Optional<String> usable = c.authMethod() == ConnectorAuthMethod.OAUTH ? oauth.accessToken(cred.get())
+                        : decrypt(c, cred.get());
+                if (usable.isEmpty()) {
                     continue;
                 }
+                token = usable.get();
             }
             out.add(spec(c, token));
         }
         return out;
     }
 
+    private Optional<String> decrypt(Connector c, ConnectorCredential cred) {
+        try {
+            return Optional.of(cipher.decrypt(cred.secretCipher()));
+        } catch (IllegalStateException e) {
+            log.warn("connector {}: stored token can't be decrypted, skipping it", c.id());
+            return Optional.empty();
+        }
+    }
+
     /** The tool allowlist entries that let an agent call every tool of these servers. */
     public static List<String> toolPatterns(List<McpServerSpec> servers) {
         return servers.stream().map(s -> "mcp__" + s.name()).toList();
-    }
-
-    /** The company's Feishu connector, if one has been added. */
-    public Optional<Connector> feishu() {
-        return store.listConnectors().stream().filter(c -> c.kind() == ConnectorKind.FEISHU).findFirst();
     }
 
     private static McpServerSpec spec(Connector c, String token) {
@@ -212,16 +259,6 @@ public class ConnectorService {
     private Connector validated(Connector base, SaveConnectorRequest r) {
         boolean enabled = r.enabled() == null ? base.enabled() : r.enabled();
         Instant now = Instant.now();
-        if (base.kind() == ConnectorKind.FEISHU) {
-            String appId = blank(r.appId());
-            if (appId == null) {
-                throw new IllegalArgumentException("App ID is required");
-            }
-            return new Connector(base.id(), cleanName(r.name(), "飞书"), blank(r.description()), ConnectorKind.FEISHU,
-                    ConnectorAuthMethod.NONE, enabled, ConnectorTransport.STDIO, null, null, appId,
-                    appId.equals(base.appId()) ? base.status() : null, appId.equals(base.appId()) ? base.lastError() : null,
-                    base.createdAt(), now);
-        }
         ConnectorAuthMethod method = parse(ConnectorAuthMethod.class, r.authMethod(), ConnectorAuthMethod.NONE);
         if (method == ConnectorAuthMethod.OAUTH && oauth.providerFor(base.id()) == null) {
             throw new IllegalArgumentException("OAuth is only available for built-in connectors");
@@ -243,15 +280,12 @@ public class ConnectorService {
             tokenEnv = null;
         }
         return new Connector(base.id(), cleanName(r.name(), "MCP"), blank(r.description()), ConnectorKind.MCP, method,
-                enabled, transport, endpoint, tokenEnv, null, null, null, base.createdAt(), now);
+                enabled, transport, endpoint, tokenEnv, base.createdAt(), now);
     }
 
     private void requireSecret(Connector c, SaveConnectorRequest r) {
         if (blank(r.secret()) != null) {
             return;
-        }
-        if (c.kind() == ConnectorKind.FEISHU) {
-            throw new IllegalArgumentException("App Secret is required");
         }
         if (c.authMethod() == ConnectorAuthMethod.SHARED_TOKEN) {
             throw new IllegalArgumentException("Token is required");
@@ -259,31 +293,51 @@ public class ConnectorService {
     }
 
     private void saveCompanySecret(Connector c, String secret) {
-        boolean takesOne = c.kind() == ConnectorKind.FEISHU || c.authMethod() == ConnectorAuthMethod.SHARED_TOKEN;
-        if (takesOne && blank(secret) != null) {
+        if (c.authMethod() == ConnectorAuthMethod.SHARED_TOKEN && blank(secret) != null) {
             credentials.save(new ConnectorCredential(c.id(), ConnectorCredential.COMPANY, cipher.encrypt(secret.strip()),
                     null, Instant.now()));
         }
     }
 
     Connector require(String id) {
+        if (BUILTIN_ID.equals(id)) {
+            throw new ForbiddenException("SuperAgent's own connector is built in and can't be changed");
+        }
+        if (FEISHU_ID.equals(id)) {
+            throw new ForbiddenException("Feishu is set up under System Settings → integrations");
+        }
         return store.findConnector(id).orElseThrow(() -> new ConnectorNotFoundException(id));
     }
 
     // --- seeding ---
 
-    /** A fresh install offers GitHub, authorized by each employee with their own account. */
+    /**
+     * A fresh install offers GitHub; every install gets Gitee once (its official remote MCP server). Both are
+     * authorized by each employee with their own account. A built-in an administrator deleted stays deleted.
+     */
     private void seedDefaults() {
-        if (!store.listConnectors().isEmpty()) {
-            return;
-        }
         Instant now = Instant.now();
-        store.save(new Connector(ConnectorOAuthService.GITHUB, "GitHub",
-                "Repositories, issues and pull requests via the official GitHub MCP server.", ConnectorKind.MCP,
-                ConnectorAuthMethod.OAUTH, true, ConnectorTransport.STDIO, "npx -y @modelcontextprotocol/server-github",
-                "GITHUB_PERSONAL_ACCESS_TOKEN", null, null, null, now, now));
-        log.info("seeded the GitHub connector");
+        if (store.listConnectors().isEmpty()) {
+            store.save(new Connector(ConnectorOAuthService.GITHUB, "GitHub",
+                    "Repositories, issues and pull requests via the official GitHub MCP server.", ConnectorKind.MCP,
+                    ConnectorAuthMethod.OAUTH, true, ConnectorTransport.STDIO, "npx -y @modelcontextprotocol/server-github",
+                    "GITHUB_PERSONAL_ACCESS_TOKEN", now, now));
+            log.info("seeded the GitHub connector");
+        }
+        String giteeSeeded = "connector.seeded." + ConnectorOAuthService.GITEE;
+        if (!"true".equals(settings.all().get(giteeSeeded))) {
+            if (store.findConnector(ConnectorOAuthService.GITEE).isEmpty()) {
+                store.save(new Connector(ConnectorOAuthService.GITEE, "Gitee（码云）",
+                        "仓库、Issue、Pull Request、发行版，通过 Gitee 官方的远程 MCP 服务。", ConnectorKind.MCP,
+                        ConnectorAuthMethod.OAUTH, true, ConnectorTransport.HTTP, GITEE_MCP_URL, null, now, now));
+                log.info("seeded the Gitee connector");
+            }
+            settings.put(giteeSeeded, "true");
+        }
     }
+
+    /** Gitee's hosted MCP server; it takes the employee's token as {@code Authorization: Bearer}. */
+    static final String GITEE_MCP_URL = "https://api.gitee.com/mcp";
 
     // --- mapping ---
 
@@ -291,18 +345,8 @@ public class ConnectorService {
         boolean needs;
         boolean authorized;
         String account = null;
-        String bindCode = null;
         int authorizedCount = 0;
-        if (c.kind() == ConnectorKind.FEISHU) {
-            needs = true;
-            EventSource link = links.find(viewer, EventSource.FEISHU).orElse(null);
-            authorized = link != null && link.linkedTo(c.appId());
-            bindCode = !authorized && link != null ? link.bindCode() : null;
-            if (admin) {
-                authorizedCount = (int) links.list().stream()
-                        .filter(s -> EventSource.FEISHU.equals(s.type()) && s.linkedTo(c.appId())).count();
-            }
-        } else if (c.authMethod().personal()) {
+        if (c.authMethod().personal()) {
             needs = true;
             Optional<ConnectorCredential> mine = credentials.find(c.id(), viewer);
             authorized = mine.isPresent();
@@ -318,9 +362,9 @@ public class ConnectorService {
         }
         boolean secretSet = admin && credentials.find(c.id(), ConnectorCredential.COMPANY).isPresent();
         return new ConnectorDto(c.id(), c.name(), c.description(), lower(c.kind()), lower(c.authMethod()), c.enabled(),
-                lower(c.transport()), c.status(), admin ? c.lastError() : null, needs, authorized, account, bindCode,
-                c.authMethod() == ConnectorAuthMethod.OAUTH && oauth.isConfigured(),
-                admin ? c.endpoint() : null, admin ? c.tokenEnv() : null, admin ? c.appId() : null, secretSet,
+                lower(c.transport()), null, null, needs, authorized, account, null,
+                c.authMethod() == ConnectorAuthMethod.OAUTH && oauth.isConfigured(oauth.providerFor(c.id())),
+                admin ? c.endpoint() : null, admin ? c.tokenEnv() : null, secretSet,
                 authorizedCount, c.createdAt(), c.updatedAt());
     }
 

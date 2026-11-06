@@ -94,6 +94,13 @@ public class ChatController {
         return ApiResponse.ok(chatService.live(id));
     }
 
+    /** The running turn as it happens, for every viewer: the same events the sender's stream carries, replayed from the start. */
+    @GetMapping(value = ApiPaths.SESSIONS + "/{id}/live/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter watchLive(@PathVariable String id, Authentication auth) {
+        chatService.requireAccess(id, auth.getName());
+        return chatService.watchLive(id);
+    }
+
     @PostMapping(ApiPaths.SESSIONS + "/{id}/stop")
     public ApiResponse<Void> stop(@PathVariable String id, Authentication auth) {
         chatService.requireAccess(id, auth.getName());

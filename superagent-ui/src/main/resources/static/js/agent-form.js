@@ -133,7 +133,6 @@ const chatImages = imageAttacher({
   tray: document.getElementById("chatImageTray"),
   pasteTarget: el.input,
   dropZone: el.composer,
-  imagesOnly: () => superMode,
 });
 
 el.composer.addEventListener("submit", async e => {
@@ -142,12 +141,6 @@ el.composer.addEventListener("submit", async e => {
   if (noChatModel) { showToast(L(isAdmin ? "chat.noModelAdmin" : "chat.noModelUser"), true); return; }
   const text = el.input.value.trim();
   if (!text && chatImages.count() === 0) return;
-  if (superMode) {
-    let images;
-    try { images = await chatImages.payload(); } catch (err) { showToast(L("img.readFailed"), true); return; }
-    submitToSuper(text, images);
-    return;
-  }
   // Attachments go to Files first (under this agent); the message then carries their ids.
   let fileIds = [];
   if (chatImages.count()) {

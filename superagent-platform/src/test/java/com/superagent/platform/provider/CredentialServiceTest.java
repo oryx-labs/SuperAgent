@@ -76,6 +76,8 @@ class CredentialServiceTest {
         String main = svc.add("claude", new CredentialRequests.Save("官方", "", "sk-ant-main-0000000001", false, null)).id();
         String relay = svc.add("claude", new CredentialRequests.Save("中转", "https://relay.example/", "relay-token-000000002", true, null)).id();
         assertThat(svc.current("claude").credential().apiKey()).isEqualTo("sk-ant-main-0000000001");
+        // No endpoint of its own: sent to the official address explicitly, never left to the server's CLI config.
+        assertThat(svc.current("claude").credential().baseUrl()).isEqualTo("https://api.anthropic.com");
 
         // The page sees a masked key and the env fallback as the last, read-only entry.
         List<CredentialDto> listed = svc.list("claude");

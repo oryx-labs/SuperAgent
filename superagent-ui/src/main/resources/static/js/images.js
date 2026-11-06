@@ -11,14 +11,8 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES = 10;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
-function formatBytes(n) {
-  if (n < 1024) return n + " B";
-  if (n < 1024 * 1024) return Math.round(n / 1024) + " KB";
-  return (n / 1024 / 1024).toFixed(1) + " MB";
-}
-
 // Pick (button), paste and drop files into a composer; shows them as removable thumbnails or chips.
-// {@code imagesOnly()}: true where only inline images are accepted (the SuperAgent inbox).
+// {@code imagesOnly()}: true where only inline images are accepted.
 function imageAttacher({ button, fileInput, tray, pasteTarget, dropZone, imagesOnly }) {
   let picked = []; // [{ file, url (images only) }]
   const onlyImages = () => !!(imagesOnly && imagesOnly());

@@ -5,7 +5,6 @@ import com.superagent.api.ApiResponse;
 import com.superagent.api.file.WorkFileDto;
 import com.superagent.api.file.WorkFileRequests;
 import com.superagent.files.FileService;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -83,7 +82,7 @@ public class FileController {
         if (!"pdf".equals(ext)) { // a sandboxed CSP would also block the browser's PDF viewer
             response.header("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'");
         }
-        return response.body(new FileSystemResource(c.path()));
+        return response.body(c.resource());
     }
 
     /** A file to attach to the next message to an agent ({@code agent}) or a task ({@code task}). */

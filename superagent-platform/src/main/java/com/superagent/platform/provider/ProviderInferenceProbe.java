@@ -131,7 +131,7 @@ public class ProviderInferenceProbe {
             throw new ProbeUnreachableException("请求 " + base + " 失败：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
         }
         if (resp.statusCode() != 200) {
-            throw new IOException("HTTP " + resp.statusCode() + errorDetail(resp.body()));
+            throw new IOException(cause(resp.statusCode()) + "（HTTP " + resp.statusCode() + errorDetail(resp.body()) + "）");
         }
         return resp;
     }
@@ -218,6 +218,18 @@ public class ProviderInferenceProbe {
     }
 
     /** The API's own error message when the body is an Anthropic-style error, else a short raw tail. */
+    /** What an HTTP failure most likely means, in words an administrator can act on. */
+    static String cause(int status) {
+        return switch (status) {
+            case 401 -> "API Key 无效或已失效";
+            case 403 -> "API Key 没有权限，或账号被限制";
+            case 402 -> "账户余额不足";
+            case 404 -> "地址或模型不存在，请检查 Endpoint";
+            case 429 -> "额度用完或请求过于频繁";
+            default -> status >= 500 ? "服务端出错，稍后再试" : "请求被拒绝";
+        };
+    }
+
     private String errorDetail(String body) {
         if (blank(body)) {
             return "";

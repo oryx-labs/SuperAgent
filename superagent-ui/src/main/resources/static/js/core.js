@@ -30,9 +30,7 @@ const api = {
   listAgents: () => fetch("/api/v1/agents").then(r => r.json()),
   agentHistory: id => fetch("/api/v1/agents/" + id + "/history").then(r => r.json()),
   superState: () => fetch("/api/v1/superagent").then(r => r.json()),
-  superSubmit: body => fetch("/api/v1/superagent/messages", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  }).then(r => r.json()),
+  superBackground: () => fetch("/api/v1/superagent/background?limit=300").then(kbJson),
   superWork: (status, memberId, limit) => fetch("/api/v1/superagent/work?status=" + encodeURIComponent(status)
     + (memberId ? "&memberId=" + encodeURIComponent(memberId) : "") + "&limit=" + limit).then(r => r.json()),
   superWorkEvents: taskId => fetch("/api/v1/superagent/work/" + encodeURIComponent(taskId) + "/events")

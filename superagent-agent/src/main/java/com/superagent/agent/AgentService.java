@@ -22,6 +22,7 @@ import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
+import com.superagent.platform.user.PeopleDirectory;
 import com.superagent.skills.SkillService;
 
 import org.slf4j.Logger;
@@ -72,17 +73,19 @@ public class AgentService {
     private final AgentMemberStore members;
     private final ApplicationEventPublisher events;
     private final UserStore users;
+    private final PeopleDirectory people;
     private final EventSourceStore sources;
     private final String adminUsername;
     private final Object superLock = new Object();
 
     public AgentService(AgentStore store, ChatService chatService, SkillService skills, AgentMemoryService memory,
                         AgentMemberStore members, UserStore users, EventSourceStore sources,
-                        ApplicationEventPublisher events,
+                        ApplicationEventPublisher events, PeopleDirectory people,
                         @Value("${superagent.auth.admin.username:admin}") String adminUsername) {
         this.events = events;
         this.members = members;
         this.users = users;
+        this.people = people;
         this.sources = sources;
         this.store = store;
         this.chatService = chatService;
@@ -323,13 +326,23 @@ public class AgentService {
             if (username.isEmpty() || username.equals(owner) || isMember(id, username)) {
                 continue;
             }
-            User user = users.findByUsername(username).filter(User::enabled)
+            User user = people.find(username).filter(User::enabled)
                     .orElseThrow(() -> new IllegalArgumentException("No such user: " + username));
             members.save(new AgentMember(id, user.username(), owner, true, now, now));
             events.publishEvent(new NoticeEvents.AgentShared(id, agent.name(), user.username(), displayName(owner)));
             log.info("agent {} shared by {} with {}", id, owner, username);
         }
         return toDto(agent, chatService.currentSessionId(id), owner);
+    }
+
+    /** Usernames of the agent's active collaborators (the owner isn't one). */
+    public List<String> memberUsernames(String id) {
+        return members.members(id).stream().map(AgentMember::username).toList();
+    }
+
+    /** Whether the owner may share this agent at all (the SuperAgent and its hires can't be). */
+    public boolean canShare(String id, String owner) {
+        return shareable(require(id, owner));
     }
 
     /** The owner removes someone, or a collaborator leaves (username = themselves). */
@@ -347,7 +360,7 @@ public class AgentService {
         if (username == null) {
             return null;
         }
-        return users.findByUsername(username).map(u -> u.displayName() == null || u.displayName().isBlank()
+        return people.find(username).map(u -> u.displayName() == null || u.displayName().isBlank()
                 ? u.username() : u.displayName()).orElse(username);
     }
 }

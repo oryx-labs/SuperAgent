@@ -102,7 +102,8 @@ document.getElementById("agentEditBtn").addEventListener("click", closeAgentDeta
 awel.drawer.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", closeAgentDetail));
 document.addEventListener("keydown", e => {
   // The run log opens on top: Escape closes that first.
-  if (e.key === "Escape" && !awel.drawer.hidden && document.getElementById("agentLogDrawer").hidden) closeAgentDetail();
+  if (e.key === "Escape" && !awel.drawer.hidden && document.getElementById("agentLogDrawer").hidden
+    && document.getElementById("memDrawer").hidden) closeAgentDetail();
 });
 
 // Tasks move on their own: keep the list current while the agent's chat is open.

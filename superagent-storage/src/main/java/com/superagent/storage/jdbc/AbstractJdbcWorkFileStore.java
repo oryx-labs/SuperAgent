@@ -61,6 +61,14 @@ abstract class AbstractJdbcWorkFileStore implements WorkFileStore {
     }
 
     @Override
+    public Map<String, Long> countByStorage() {
+        Map<String, Long> out = new java.util.LinkedHashMap<>();
+        jdbc.query("SELECT storage, COUNT(*) AS n FROM work_file" + readFinal() + " WHERE deleted = 0 GROUP BY storage",
+                rs -> { out.put(rs.getString("storage"), rs.getLong("n")); });
+        return out;
+    }
+
+    @Override
     public List<WorkFile> untagged(int limit) {
         return jdbc.query("SELECT * FROM work_file" + readFinal() + " WHERE deleted = 0 AND tag_state = '' "
                 + "ORDER BY created_at LIMIT " + Math.max(1, limit), mapper);

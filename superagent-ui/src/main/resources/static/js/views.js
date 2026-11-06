@@ -10,6 +10,8 @@ const tasksPane = document.querySelector('[data-pane="tasks"]');
 const usersPane = document.querySelector('[data-pane="users"]');
 const modelsPane = document.querySelector('[data-pane="models"]');
 const settingsPane = document.querySelector('[data-pane="settings"]');
+const integrationsPane = document.querySelector('[data-pane="integrations"]');
+const fileStoragePane = document.querySelector('[data-pane="file-storage"]');
 const placeholderPane = document.querySelector('[data-pane="placeholder"]');
 const automationPane = document.querySelector('[data-pane="automation"]');
 const analyticsPane = document.querySelector('[data-pane="analytics"]');
@@ -26,10 +28,10 @@ let modelDetailId = null;
 // back/forward restores the same view. Admin-only views fall back to the default
 // for non-admins. See initialView().
 const KNOWN_VIEWS = new Set(["todo", "chat", "files", "tasks", "messages", "skills", "automation", "connectors", "models",
-  "users", "settings", "analytics"]);
+  "users", "settings", "integrations", "file-storage", "analytics"]);
 // The "Workspace" dropdown's pages, and the admin pages (shown with the admin sidebar).
 const WORKSPACE_VIEWS = new Set(["skills", "connectors"]);
-const ADMIN_VIEWS = new Set(["settings", "analytics", "models", "users"]);
+const ADMIN_VIEWS = new Set(["settings", "integrations", "file-storage", "analytics", "models", "users"]);
 const DEFAULT_VIEW = "todo"; // the to-do list is home: the first thing to look at each day
 let isAdmin = false;
 
@@ -63,6 +65,8 @@ function setView(view) {
   const isUsers = view === "users";
   const isModels = view === "models";
   const isSettings = view === "settings";
+  const isIntegrations = view === "integrations";
+  const isFileStorage = view === "file-storage";
   const isAutomation = view === "automation";
   const isSkills = view === "skills";
   const isInbox = view === "messages"; // the message stream, opened from the SuperAgent panel
@@ -80,15 +84,19 @@ function setView(view) {
   usersPane.hidden = !isUsers;
   modelsPane.hidden = !isModels;
   settingsPane.hidden = !isSettings;
+  integrationsPane.hidden = !isIntegrations;
+  fileStoragePane.hidden = !isFileStorage;
   skPane.hidden = !isSkills;
   if (!isSkills && !skel.drawer.hidden) closeSkillDrawer();
   ibPane.hidden = !isInbox;
-  placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isSettings
-    || isAutomation || isSkills || isInbox || isAnalytics || isTodo || isFiles;
+  placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isSettings || isIntegrations
+    || isFileStorage || isAutomation || isSkills || isInbox || isAnalytics || isTodo || isFiles;
   if (!placeholderPane.hidden) placeholderText.textContent = L(placeholderLabels[view] || "placeholder.default");
   if (isConnectors) loadConnectors();
   if (isUsers) loadUsers();
   if (isSettings) loadSettingsForm();
+  if (isIntegrations) loadIntegrations();
+  if (isFileStorage) loadFileStorage();
   if (isSkills) loadSkills();
   if (isInbox) loadInbox();
   if (isAnalytics) loadAnalytics();

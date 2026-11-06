@@ -7,10 +7,14 @@ import com.superagent.core.agent.AgentMember;
 import com.superagent.core.agent.AgentMemberStore;
 import com.superagent.core.agent.AgentStatus;
 import com.superagent.core.agent.AgentStore;
+import com.superagent.core.file.FileStore;
+import com.superagent.core.file.FileStoreProvider;
 import com.superagent.core.file.WorkFile;
 import com.superagent.core.file.WorkFileKind;
 import com.superagent.core.file.WorkFileStore;
 import com.superagent.core.notice.NoticeEvents;
+import com.superagent.core.security.SecretCipher;
+import com.superagent.core.settings.SystemSettingStore;
 import com.superagent.core.task.TaskAgentStore;
 import com.superagent.core.task.TaskStore;
 import com.superagent.core.user.UserStore;
@@ -58,6 +62,11 @@ class FileServiceTest {
         @Override public void link(String fileId, String sessionId, String messageId) {
             refs.computeIfAbsent(fileId, k -> new LinkedHashSet<>()).add(messageId);
         }
+        @Override public Map<String, Long> countByStorage() {
+            Map<String, Long> out = new LinkedHashMap<>();
+            rows.values().stream().filter(f -> !f.deleted()).forEach(f -> out.merge(f.storage(), 1L, Long::sum));
+            return out;
+        }
         @Override public Map<String, List<String>> messages(Collection<String> fileIds) {
             Map<String, List<String>> out = new LinkedHashMap<>();
             fileIds.stream().filter(refs::containsKey).forEach(id -> out.put(id, new ArrayList<>(refs.get(id))));
@@ -88,7 +97,42 @@ class FileServiceTest {
         when(tasks.findTask(any())).thenReturn(Optional.empty());
         UserStore users = mock(UserStore.class);
         when(users.findByUsername(any())).thenReturn(Optional.empty());
-        return new FileService(store, agents, members, tasks, taskAgents, users, tmp.resolve("files").toString(), 1);
+        return new FileService(store, agents, members, tasks, taskAgents, users, localStorage(store),
+                tmp.resolve("files").toString(), 1);
+    }
+
+    private final Map<String, String> settingRows = new LinkedHashMap<>();
+    private FileStorageService storage;
+    /** An in-memory "cloud" store, to see files go there once it's chosen; keys are bucket/id. */
+    private final Map<String, byte[]> cloud = new LinkedHashMap<>();
+
+    /** Settings say nothing: new files go to the local disk until the "mem" store is chosen. */
+    private FileStorageService localStorage(WorkFileStore files) {
+        SystemSettingStore settings = new SystemSettingStore() {
+            @Override public Map<String, String> all() { return new LinkedHashMap<>(settingRows); }
+            @Override public void put(String key, String value) { settingRows.put(key, value); }
+        };
+        FileStoreProvider mem = new FileStoreProvider() {
+            @Override public String type() { return "mem"; }
+            @Override public String label() { return "memory"; }
+            @Override public List<Field> fields() { return List.of(new Field("bucket", "Bucket", false, true, "", true),
+                    new Field("secret", "Secret", true, true, "", false)); }
+            @Override public FileStore open(Map<String, String> config) {
+                String bucket = config.get("bucket") + "/";
+                return new FileStore() {
+                    @Override public void put(String id, Path source, String type) throws java.io.IOException {
+                        cloud.put(bucket + id, Files.readAllBytes(source)); }
+                    @Override public java.io.InputStream open(String id) throws java.io.IOException {
+                        byte[] b = cloud.get(bucket + id);
+                        if (b == null) throw new java.nio.file.NoSuchFileException(id);
+                        return new java.io.ByteArrayInputStream(b); }
+                    @Override public void delete(String id) { cloud.remove(bucket + id); }
+                };
+            }
+        };
+        storage = new FileStorageService(List.of(new LocalFileStoreProvider(tmp.resolve("files").toString()), mem), settings,
+                new SecretCipher("", tmp.resolve("secret.key").toString()), files);
+        return storage;
     }
 
     private static FileService.Origin chat(String owner, String agent, String message) {
@@ -104,7 +148,7 @@ class FileServiceTest {
 
         WorkFile revised = svc.writeText(chat("bob", "dev", "m2"), "第01节讲义.md", "二稿", draft.id());
         assertThat(revised.id()).isEqualTo(draft.id());
-        assertThat(Files.readString(svc.content(draft.id(), "ada").path())).isEqualTo("二稿"); // latest only
+        assertThat(new String(svc.content(draft.id(), "ada").resource().getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("二稿"); // latest only
         assertThatThrownBy(() -> svc.writeText(chat("carl", "ops", "m3"), "x.md", "覆盖", draft.id()))
                 .isInstanceOf(IllegalArgumentException.class); // another agent's file
 
@@ -135,7 +179,7 @@ class FileServiceTest {
         WorkFile delivery = store.rows.values().iterator().next();
         assertThat(delivery.name()).isEqualTo("写周报.md");
         assertThat(delivery.agentId()).isEqualTo("dev"); // so the agent's panel shows it
-        assertThat(Files.readString(svc.content(delivery.id(), "ada").path())).isEqualTo("第二版");
+        assertThat(new String(svc.content(delivery.id(), "ada").resource().getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("第二版");
 
         svc.delete(delivery.id(), "bob");
         svc.onTaskStatus(new NoticeEvents.TaskStatusChanged("t1", "bob", "写周报", "web_chat", "done", null, null, "第三版"));
@@ -214,4 +258,66 @@ class FileServiceTest {
         assertThatThrownBy(() -> svc.content(link.id(), "bob")).isInstanceOf(IllegalArgumentException.class);
         assertThat(svc.rename(link.id(), "bob", "PR 12").kind()).isEqualTo("link"); // stays a link
     }
+
+    @Test
+    void filesRememberTheirChannelSoMovingTheStorageLosesNothing() throws Exception {
+        InMemoryFiles store = new InMemoryFiles();
+        FileService svc = service(store);
+        WorkFile local = svc.writeText(chat("bob", "dev", "m1"), "旧.md", "本地内容", null);
+        assertThat(local.storage()).isEqualTo(WorkFile.INTERNAL);
+
+        // The admin picks the "mem" store: the settings are checked (a probe round-trip) and the secret kept encrypted.
+        assertThatThrownBy(() -> storage.save("mem", Map.of("bucket", "a"))).hasMessageContaining("Secret");
+        String channelA = storage.save("mem", Map.of("bucket", "a", "secret", "s3cr3t")).active();
+        assertThat(settingRows.get("files.storage.channel." + channelA + ".secret")).startsWith("v1:").doesNotContain("s3cr3t");
+        assertThat(storage.view().providers()).filteredOn(p -> p.type().equals("mem")).singleElement()
+                .satisfies(p -> assertThat(p.fields()).filteredOn(f -> f.secret()).singleElement()
+                        .satisfies(f -> { assertThat(f.value()).isNull(); assertThat(f.set()).isTrue(); }));
+        assertThat(cloud).isEmpty(); // the probe cleaned up after itself
+        WorkFile inA = svc.writeText(chat("bob", "dev", "m2"), "a.md", "桶 A", null);
+        assertThat(inA.storage()).isEqualTo(channelA);
+        assertThat(cloud).containsKey("a/" + inA.id());
+
+        // A rotated key is the same place: same channel, and a blank secret keeps the saved one.
+        assertThat(storage.save("mem", Map.of("bucket", "a", "secret", "rotated")).active()).isEqualTo(channelA);
+        assertThat(storage.save("mem", Map.of("bucket", "a")).active()).isEqualTo(channelA);
+
+        // Another bucket is another channel: new files go there, earlier ones are still read from where they are.
+        var moved = storage.save("mem", Map.of("bucket", "b"));
+        assertThat(moved.active()).isNotEqualTo(channelA);
+        WorkFile inB = svc.writeText(chat("bob", "dev", "m3"), "b.md", "桶 B", null);
+        assertThat(inB.storage()).isEqualTo(moved.active());
+        assertThat(cloud).containsKey("b/" + inB.id());
+        assertThat(read(svc, local.id())).isEqualTo("本地内容");
+        assertThat(read(svc, inA.id())).isEqualTo("桶 A");
+        assertThat(read(svc, inB.id())).isEqualTo("桶 B");
+        assertThat(storage.view().channels()).extracting(c -> c.id() + ":" + c.files() + ":" + c.active()).containsExactly(
+                "internal:1:false", channelA + ":1:false", moved.active() + ":1:true");
+
+        // Going back to a place reuses its channel; deleting removes content from the file's own channel.
+        assertThat(storage.save("mem", Map.of("bucket", "a")).active()).isEqualTo(channelA);
+        svc.delete(inB.id(), "bob");
+        assertThat(cloud).doesNotContainKey("b/" + inB.id());
+    }
+
+    @Test
+    void settingsSavedBeforeChannelsBecomeAChannelFilesStillFind() throws Exception {
+        settingRows.put("files.storage.type", "mem");
+        settingRows.put("files.storage.mem.bucket", "old");
+        settingRows.put("files.storage.mem.secret", new SecretCipher("", tmp.resolve("secret.key").toString()).encrypt("s"));
+        InMemoryFiles store = new InMemoryFiles();
+        FileService svc = service(store);
+        assertThat(storage.activeChannel()).isEqualTo("mem"); // existing files say storage = "mem"
+        WorkFile f = svc.writeText(chat("bob", "dev", "m1"), "x.md", "老配置", null);
+        assertThat(f.storage()).isEqualTo("mem");
+        assertThat(cloud).containsKey("old/" + f.id());
+        assertThat(read(svc, f.id())).isEqualTo("老配置");
+    }
+
+    private static String read(FileService svc, String id) throws Exception {
+        try (var in = svc.content(id, "ada").resource().getInputStream()) {
+            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+    }
 }
+

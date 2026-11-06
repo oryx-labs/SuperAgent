@@ -24,8 +24,8 @@ import java.util.Optional;
 abstract class AbstractJdbcConnectorStore implements ConnectorStore {
 
     protected static final String COLUMNS = "(id, name, description, kind, auth_method, enabled, transport, endpoint, "
-            + "token_env, app_id, status, last_error, created_at, updated_at)";
-    protected static final String VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            + "token_env, created_at, updated_at)";
+    protected static final String VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected final JdbcTemplate jdbc;
 
@@ -49,9 +49,6 @@ abstract class AbstractJdbcConnectorStore implements ConnectorStore {
             ConnectorTransport.valueOf(rs.getString("transport")),
             emptyToNull(rs.getString("endpoint")),
             emptyToNull(rs.getString("token_env")),
-            emptyToNull(rs.getString("app_id")),
-            emptyToNull(rs.getString("status")),
-            emptyToNull(rs.getString("last_error")),
             instant(rs, "created_at"),
             instant(rs, "updated_at"));
 
@@ -68,8 +65,8 @@ abstract class AbstractJdbcConnectorStore implements ConnectorStore {
 
     protected Object[] params(Connector c) {
         return new Object[]{c.id(), c.name(), nn(c.description()), c.kind().name(), c.authMethod().name(),
-                c.enabled() ? 1 : 0, c.transport().name(), nn(c.endpoint()), nn(c.tokenEnv()), nn(c.appId()),
-                nn(c.status()), nn(c.lastError()), utc(c.createdAt()), utc(c.updatedAt())};
+                c.enabled() ? 1 : 0, c.transport().name(), nn(c.endpoint()), nn(c.tokenEnv()),
+                utc(c.createdAt()), utc(c.updatedAt())};
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

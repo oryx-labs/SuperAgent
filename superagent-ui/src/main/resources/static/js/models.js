@@ -591,7 +591,9 @@ function credRow(c, index, poolSize) {
     name.appendChild(sub);
   }
 
-  const url = cell(c.baseUrl || L("cred.defaultUrl"), "cred-url");
+  // No endpoint of its own = the vendor's official one, named so nobody has to guess where calls go.
+  const url = c.env ? cell(L("cred.defaultUrl"), "cred-url")
+    : cell(c.baseUrl || (c.defaultBaseUrl || "") + " · " + L("cred.official"), "cred-url");
   const key = cell(c.env ? "—" : c.keyHint + (credProviderKey === "claude" ? " · " + L(c.bearer ? "cred.bearer" : "cred.apiKey") : ""), "cred-key");
 
   const status = document.createElement("td");
@@ -604,7 +606,13 @@ function credRow(c, index, poolSize) {
     b.className = "status-badge is-cred-" + st;
     b.textContent = L("cred.status." + st);
     status.appendChild(b);
-    if (c.lastError) b.title = c.lastError;
+    if (c.lastError && c.enabled) {
+      // Why it failed (or why it couldn't be checked), right there: not only on hover.
+      const why = document.createElement("small");
+      why.className = "cred-reason" + (c.status === "error" ? " is-error" : "");
+      why.textContent = c.lastError;
+      status.appendChild(why);
+    }
     if (c.checkedAt) {
       const when = document.createElement("small");
       when.className = "cred-when";
@@ -620,7 +628,11 @@ function credRow(c, index, poolSize) {
     wrap.className = "cell-actions";
     wrap.append(
       linkBtn(L("cred.check"), async () => {
-        try { await api.checkCredential(modelDetailId, c.id); } catch (e) { showToast(e.message, true); }
+        try {
+          const r = await api.checkCredential(modelDetailId, c.id);
+          if (r && r.status === "ok") showToast(L("cred.checkOk"), false);
+          else if (r) showToast(L("cred.checkFailed", { reason: r.lastError || L("cred.status." + r.status) }), true);
+        } catch (e) { showToast(e.message, true); }
         loadCredentials();
       }, "link-btn--muted"),
       linkBtn(L("common.edit"), () => openCredentialForm(c), "link-btn--muted"),
@@ -653,6 +665,8 @@ function openCredentialForm(c) {
   credEditing = c ? c.id : "new";
   cel2.label.value = c ? c.label : "";
   cel2.url.value = c ? c.baseUrl || "" : "";
+  const official = (credList.find(x => x.defaultBaseUrl) || {}).defaultBaseUrl;
+  cel2.url.placeholder = official ? L("cred.fUrlPhDefault", { url: official }) : L("cred.fUrlPh");
   cel2.key.value = "";
   cel2.key.placeholder = c ? L("cred.keepKey", { hint: c.keyHint }) : "";
   cel2.key.required = !c;

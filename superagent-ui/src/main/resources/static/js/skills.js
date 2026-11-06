@@ -20,11 +20,14 @@ const skillImageUrl = (id, name) => "/api/v1/skills/" + id + "/images/" + encode
 
 const skPane = document.querySelector('[data-pane="skills"]');
 const skel = {
-  tabs: document.getElementById("skTabs"),
-  rows: document.getElementById("skRows"),
+  grid: document.getElementById("skGrid"),
+  count: document.getElementById("skCount"),
   empty: document.getElementById("skEmpty"),
-  hint: document.getElementById("skHint"),
   search: document.getElementById("skSearch"),
+  source: document.getElementById("skSource"),
+  owner: document.getElementById("skOwner"),
+  state: document.getElementById("skState"),
+  mine: document.getElementById("skMineBtn"),
   newBtn: document.getElementById("skNewBtn"),
   drawer: document.getElementById("skDrawer"),
   heading: document.getElementById("skHeading"),
@@ -47,7 +50,8 @@ const skel = {
   cancel: document.getElementById("sfCancel"),
 };
 let skills = [];             // SkillDto[] from the server
-let skLayer = "personal";    // the tab: personal | company
+let skMineOnly = false;      // "My skills": only the ones I created
+let skPeople = {};           // username → display name, for the cards
 let skSelectedId = null;     // the skill open in the drawer (set before setView("skills") to open one)
 let skEditing = null;        // null = viewing; "new" or a skill id = editing
 
@@ -59,65 +63,116 @@ async function loadSkillList() {
 }
 
 async function loadSkills() {
-  await loadSkillList();
+  await Promise.all([loadSkillList(), loadSkillPeople()]);
   const open = skills.find(s => s.id === skSelectedId);
-  if (open) { skLayer = skLayerOf(open); openSkillDrawer(open.id); } else closeSkillDrawer();
-  renderSkillTable();
+  if (open) openSkillDrawer(open.id); else closeSkillDrawer();
+  renderSkillGrid();
 }
 
-function renderSkillTable() {
+async function loadSkillPeople() {
+  try {
+    const people = (await fetch("/api/v1/directory/users").then(kbJson)) || [];
+    skPeople = Object.fromEntries(people.map(p => [p.username, p.displayName || p.username]));
+  } catch (e) { /* names fall back to usernames */ }
+}
+
+const skPerson = username => skPeople[username] || username || "—";
+
+/** The layer a new skill starts in: the one the source filter shows, else the user's own. */
+const skNewLayer = () => skel.source.value === "company" ? "company" : "personal";
+
+function renderSkillGrid() {
+  renderSkillOwners();
   const q = skel.search.value.trim().toLowerCase();
-  const matches = s => !q || [s.name, s.description, s.category].some(v => (v || "").toLowerCase().includes(q));
-  skel.tabs.querySelectorAll(".model-tab").forEach(t => {
-    t.classList.toggle("is-active", t.dataset.layer === skLayer);
-    t.querySelector("b").textContent = skills.filter(s => skLayerOf(s) === t.dataset.layer && matches(s)).length || "";
-  });
-  skel.hint.textContent = L("sk.hint." + skLayer);
-  // By category, then name.
-  const shown = skills.filter(s => skLayerOf(s) === skLayer && matches(s)).sort((a, b) =>
-    (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name));
-  skel.rows.replaceChildren(...shown.map(skillRow));
+  const source = skel.source.value, owner = skel.owner.value, state = skel.state.value;
+  const shown = skills.filter(s =>
+    (!q || [s.name, s.description, s.category].some(v => (v || "").toLowerCase().includes(q)))
+    && (!source || skLayerOf(s) === source)
+    && (!owner || s.createdBy === owner)
+    && (!state || (state === "on") === s.enabled)
+    && (!skMineOnly || s.createdBy === currentUsername))
+    // Most recently updated first: what people are working on now.
+    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  skel.mine.classList.toggle("is-active", skMineOnly);
+  skel.mine.setAttribute("aria-pressed", String(skMineOnly));
+  skel.grid.replaceChildren(...shown.map(skillCard));
+  const filtered = q || source || owner || state || skMineOnly;
+  skel.count.textContent = L("sk.count", { n: shown.length });
+  skel.count.hidden = !skills.length;
   skel.empty.hidden = shown.length > 0;
-  skel.empty.textContent = L(q ? "sk.noMatch" : "sk.empty." + skLayer);
+  skel.empty.textContent = L(filtered ? "sk.noMatch" : "sk.empty");
 }
 
-function skillRow(s) {
-  const tr = document.createElement("tr");
-  tr.className = "sk-row" + (s.enabled ? "" : " is-off");
-  tr.tabIndex = 0;
-  const cell = (text, cls) => {
-    const td = document.createElement("td");
-    if (cls) td.className = cls;
-    td.textContent = text;
-    td.title = text;
-    return td;
+/** The owner filter lists whoever created a skill the user can see, keeping the current choice. */
+function renderSkillOwners() {
+  const current = skel.owner.value;
+  const owners = [...new Set(skills.map(s => s.createdBy).filter(Boolean))]
+    .sort((a, b) => skPerson(a).localeCompare(skPerson(b)));
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = L("sk.fOwnerAll");
+  skel.owner.replaceChildren(all, ...owners.map(u => {
+    const o = document.createElement("option");
+    o.value = u;
+    o.textContent = skPerson(u);
+    return o;
+  }));
+  skel.owner.value = owners.includes(current) ? current : "";
+}
+
+function skillCard(s) {
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "sk-card" + (s.enabled ? "" : " is-off");
+  const name = document.createElement("h3");
+  name.className = "sk-card__name";
+  name.textContent = s.name;
+  name.title = s.name;
+  const tags = document.createElement("div");
+  tags.className = "sk-card__tags";
+  const tag = (text, cls) => {
+    const t = document.createElement("span");
+    t.className = "sk-tag" + (cls ? " " + cls : "");
+    t.textContent = text;
+    tags.appendChild(t);
   };
-  const name = cell(s.name, "sk-row__name");
-  const owner = s.createdBy || "—";
-  const state = document.createElement("td");
-  state.className = "sk-row__state";
-  const badge = document.createElement("span");
-  badge.className = "status-badge " + (s.enabled ? "is-done" : "is-stopped");
-  badge.textContent = L(s.enabled ? "sk.enabled" : "sk.disabled");
-  state.appendChild(badge);
-  if (!s.canWrite) {
-    const ro = document.createElement("span");
-    ro.className = "kb-readonly";
-    ro.textContent = L("sk.readOnly");
-    state.appendChild(ro);
-  }
-  tr.append(name, cell(s.category || "—", "sk-row__meta"), cell(s.description || "", "sk-row__desc"),
-    cell(owner, "sk-row__meta"), cell(formatDateTime(s.updatedAt), "sk-row__meta"), state);
-  tr.addEventListener("click", () => openSkillDrawer(s.id));
-  tr.addEventListener("keydown", e => { if (e.key === "Enter") openSkillDrawer(s.id); });
-  return tr;
+  tag(skLayerLabel(s.space));
+  if (s.category) tag(s.category);
+  tag(L(s.enabled ? "sk.stateOn" : "sk.stateOff"), s.enabled ? "is-on" : "is-off");
+  if (!s.canWrite) tag(L("sk.readOnly"), "is-muted");
+  const desc = document.createElement("p");
+  desc.className = "sk-card__desc";
+  desc.textContent = s.description || L("sk.noDescription");
+  desc.classList.toggle("is-empty", !s.description);
+  const foot = document.createElement("div");
+  foot.className = "sk-card__foot";
+  const when = document.createElement("span");
+  when.className = "sk-card__when";
+  when.textContent = L("sk.updatedOn", { date: skDate(s.updatedAt) });
+  when.title = formatDateTime(s.updatedAt);
+  const who = document.createElement("span");
+  who.className = "sk-card__who";
+  const face = document.createElement("span");
+  face.className = "sk-card__face";
+  paintAvatar(face, s.createdBy || "?", skPerson(s.createdBy));
+  const label = document.createElement("span");
+  label.textContent = skPerson(s.createdBy);
+  who.append(face, label);
+  foot.append(when, who);
+  card.append(name, tags, desc, foot);
+  card.addEventListener("click", () => openSkillDrawer(s.id));
+  return card;
 }
 
-skel.search.addEventListener("input", renderSkillTable);
-skel.tabs.addEventListener("click", e => {
-  const t = e.target.closest(".model-tab");
-  if (t) { skLayer = t.dataset.layer; renderSkillTable(); }
-});
+/** 2026.10.28 — the date alone; the exact time is on hover. */
+function skDate(iso) {
+  const d = new Date(iso);
+  return d.getFullYear() + "." + String(d.getMonth() + 1).padStart(2, "0") + "." + String(d.getDate()).padStart(2, "0");
+}
+
+skel.search.addEventListener("input", renderSkillGrid);
+[skel.source, skel.owner, skel.state].forEach(x => x.addEventListener("change", renderSkillGrid));
+skel.mine.addEventListener("click", () => { skMineOnly = !skMineOnly; renderSkillGrid(); });
 
 function skLayerLabel(space) {
   return L(space === "personal" ? "sk.layerPersonal" : "sk.layerCompany");
@@ -196,7 +251,7 @@ function openSkillForm(skill) {
   });
   skel.imagesField.hidden = !skill; // images attach to a saved skill
   if (skill) renderSkillImages(skill);
-  renderSkillSpaces(skill ? skill.space : "personal", skill ? null : skLayer);
+  renderSkillSpaces(skill ? skill.space : "personal", skill ? null : skNewLayer());
   renderSkill();
   skel.name.focus();
 }

@@ -99,5 +99,7 @@ async function loadSuperSources() {
   if (!res) { link.hidden = true; return; }
   link.hidden = false;
   link.href = res.linked ? "#messages" : "#connectors";
-  link.textContent = res.linked ? L("ib.superLine", { today: res.today, handled: res.handled }) : L("ib.superNone");
+  // The link lives in SuperAgent's details drawer: a title, and this line under it.
+  document.getElementById("superSourcesHint").textContent = res.linked
+    ? L("ib.superLine", { today: res.today, handled: res.handled }) : L("ib.superNone");
 }

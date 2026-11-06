@@ -1,10 +1,9 @@
 package com.superagent.core.connector;
 
 /**
- * What a connector links the company to. An MCP server gives agents tools (outward); Feishu delivers
- * messages to each employee's SuperAgent and lets it message them back (inward).
+ * What a connector is. Today every stored connector is an MCP server that gives agents tools; Feishu, which
+ * brings messages in, is set up under System Settings → integrations and listed alongside them.
  */
 public enum ConnectorKind {
-    MCP,
-    FEISHU
+    MCP
 }

@@ -5,13 +5,25 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.superagent.core.connector.ConnectorTransport;
 import com.superagent.core.connector.McpServerSpec;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.boot.web.context.WebServerInitializedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -66,18 +78,94 @@ public class McpGrants {
             + "交付时带上 tags（1~3 个内容主题标签，优先复用 file_list 里已在用的标签），方便用户按主题找文件。"
             + "只是闲聊、回答问题、给简短建议时直接回复即可，不必建文件。";
 
+    /** Whether agents can reach {@link #selfUrl()}: unchecked until startup's self-check, then ok or error. */
+    public record SelfStatus(String state, String error, Instant checkedAt) {
+    }
+
+    private static final Logger log = LoggerFactory.getLogger(McpGrants.class);
+
     private final Map<String, Grant> grants = new ConcurrentHashMap<>();
     private final SecureRandom random = new SecureRandom();
     private final ObjectMapper mapper = new ObjectMapper();
-    private final String selfUrl;
+    /** Set explicitly (a proxy, another host); otherwise found from the port the server actually listens on. */
+    private final boolean configured;
+    private volatile String selfUrl;
+    private volatile SelfStatus status = new SelfStatus("unchecked", null, null);
 
-    public McpGrants(@Value("${superagent.mcp.self-url:http://127.0.0.1:18080/mcp}") String selfUrl) {
+    public McpGrants(String selfUrl) {
+        this.configured = true;
         this.selfUrl = selfUrl == null ? "" : selfUrl.trim();
     }
 
-    /** False when no self URL is configured, i.e. agents can't reach this server's MCP at all. */
+    @Autowired
+    public McpGrants(@Value("${superagent.mcp.self-url:}") String selfUrl, @Value("${server.port:18080}") int port) {
+        this.configured = selfUrl != null && !selfUrl.isBlank();
+        this.selfUrl = configured ? selfUrl.trim() : local(port);
+    }
+
+    private static String local(int port) {
+        return "http://127.0.0.1:" + port + "/mcp";
+    }
+
+    /** Agents always get SuperAgent's own MCP; there is no way to turn it off. */
     public boolean available() {
         return !selfUrl.isEmpty();
+    }
+
+    public String selfUrl() {
+        return selfUrl;
+    }
+
+    public SelfStatus selfStatus() {
+        return status;
+    }
+
+    /** The port the server really listens on (it may differ from server.port, e.g. a command-line override). */
+    @EventListener
+    public void onWebServer(WebServerInitializedEvent event) {
+        if (!configured && event.getWebServer().getPort() > 0) {
+            selfUrl = local(event.getWebServer().getPort());
+        }
+    }
+
+    /**
+     * Once the app is up, calls its own MCP the way an agent would (a real grant, a ping), so a wrong URL shows
+     * as an error at startup and on the Connectors page instead of agents quietly missing their tools.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void selfCheck() {
+        Thread t = new Thread(() -> {
+            Grant probe = open(Kind.CHAT, "__selfcheck__", null, null, null, null, null);
+            try {
+                HttpRequest req = HttpRequest.newBuilder(URI.create(selfUrl)).timeout(Duration.ofSeconds(10))
+                        .header("Content-Type", "application/json").header("Authorization", "Bearer " + probe.token())
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"))
+                        .build();
+                HttpResponse<String> resp = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+                        .send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() == 200 && resp.body().contains("\"result\"")) {
+                    status = new SelfStatus("ok", null, Instant.now());
+                    log.info("SuperAgent MCP reachable at {}", selfUrl);
+                } else {
+                    fail("HTTP " + resp.statusCode() + " — " + selfUrl + " 不是本服务的 MCP（请检查 superagent.mcp.self-url）");
+                }
+            } catch (Exception e) {
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
+                fail("连不上 " + selfUrl + "（" + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName())
+                        + "），请检查 superagent.mcp.self-url");
+            } finally {
+                close(probe);
+            }
+        }, "mcp-selfcheck");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void fail(String error) {
+        status = new SelfStatus("error", error, Instant.now());
+        log.error("SuperAgent MCP self-check failed: {} — agents won't get tasks, files, skills or team tools", error);
     }
 
     public Grant openChat(String owner, String agentId, String sessionId, String messageId, String workspaceDir) {

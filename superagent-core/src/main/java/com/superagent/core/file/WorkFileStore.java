@@ -33,4 +33,7 @@ public interface WorkFileStore {
 
     /** fileId → the chat replies that produced it. */
     Map<String, List<String>> messages(Collection<String> fileIds);
+
+    /** Live files per {@link WorkFile#storage()} (the storage channel their content is in). */
+    Map<String, Long> countByStorage();
 }

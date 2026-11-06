@@ -44,12 +44,18 @@ public final class ApiPaths {
 
     /** The organisation: managers and teams (admin). */
     public static final String ORG = V1 + "/admin/org";
+    /** Where Files keeps content: the store new files go to, and each store's settings (admin). */
+    public static final String FILE_STORAGE = V1 + "/admin/file-storage";
 
     /** Model-vendor CLIs (claude, codex, ...) the runtime can call. */
     public static final String PROVIDERS = V1 + "/providers";
 
     /** Platform-wide default configuration (e.g. the Agent chat model). */
     public static final String SETTINGS = V1 + "/settings";
+    /** Company-wide settings for outside systems (GitHub, Feishu); administrators only. */
+    public static final String INTEGRATIONS = V1 + "/admin/integrations";
+    /** The company logo; public, since the sign-in page shows it. */
+    public static final String BRANDING_LOGO = V1 + "/branding/logo";
 
     /** OAuth authorize/callback endpoints for connectors that use a provider handshake. */
     public static final String OAUTH = V1 + "/oauth";

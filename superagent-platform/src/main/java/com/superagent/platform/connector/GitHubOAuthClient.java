@@ -19,7 +19,10 @@ import java.time.Duration;
  * logged.
  */
 @Component
-public class GitHubOAuthClient {
+public class GitHubOAuthClient implements OAuthProvider {
+
+    public static final String KEY = "github";
+    private static final String SCOPE = "repo read:user";
 
     private static final String AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
     private static final String TOKEN_URL = "https://github.com/login/oauth/access_token";
@@ -30,17 +33,24 @@ public class GitHubOAuthClient {
             .build();
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public String authorizeUrl(String clientId, String redirectUri, String scope, String state) {
+    @Override
+    public String key() {
+        return KEY;
+    }
+
+    @Override
+    public String authorizeUrl(String clientId, String redirectUri, String state) {
         return AUTHORIZE_URL
                 + "?client_id=" + enc(clientId)
                 + "&redirect_uri=" + enc(redirectUri)
-                + "&scope=" + enc(scope)
+                + "&scope=" + enc(SCOPE)
                 + "&state=" + enc(state)
                 + "&allow_signup=false";
     }
 
-    /** Exchanges an authorization code for an access token. */
-    public String exchangeCodeForToken(String clientId, String clientSecret, String code, String redirectUri)
+    /** Exchanges an authorization code for an access token; GitHub's OAuth app tokens don't expire. */
+    @Override
+    public Tokens exchange(String clientId, String clientSecret, String code, String redirectUri)
             throws IOException, InterruptedException {
         String body = "client_id=" + enc(clientId)
                 + "&client_secret=" + enc(clientSecret)
@@ -60,10 +70,11 @@ public class GitHubOAuthClient {
                     ? node.get("error_description").asText() : "no access_token in response";
             throw new IOException("GitHub token exchange failed: " + detail);
         }
-        return token.asText();
+        return new Tokens(token.asText(), null, null);
     }
 
     /** Returns the login (username) of the token's owner. */
+    @Override
     public String fetchLogin(String accessToken) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create(USER_URL))
                 .timeout(Duration.ofSeconds(15))

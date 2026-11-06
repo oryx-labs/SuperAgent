@@ -16,12 +16,22 @@ public class MysqlConnectorCredentialStore extends AbstractJdbcConnectorCredenti
               secret_cipher VARCHAR(4096) NOT NULL,
               account_label VARCHAR(255),
               updated_at    DATETIME(3)   NOT NULL,
+              refresh_cipher VARCHAR(4096),
+              expires_at    DATETIME(3),
               PRIMARY KEY (connector_id, owner)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 
     public MysqlConnectorCredentialStore(JdbcTemplate jdbc) {
         super(dropOld(jdbc), SCHEMA);
+        // Tables from before expiring tokens (Gitee): add the columns.
+        for (String[] col : new String[][]{{"refresh_cipher", "VARCHAR(4096)"}, {"expires_at", "DATETIME(3)"}}) {
+            Integer present = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                    + "AND LOWER(table_name) = 'connector_credential' AND LOWER(column_name) = ?", Integer.class, col[0]);
+            if (present == null || present == 0) {
+                jdbc.execute("ALTER TABLE connector_credential ADD COLUMN " + col[0] + " " + col[1]);
+            }
+        }
     }
 
     private static JdbcTemplate dropOld(JdbcTemplate jdbc) {

@@ -74,7 +74,7 @@ superagent-<version>/
 
 ### Configure
 
-- `config/superagent.env`: secrets and deployment values, sourced by the start script. It includes the admin password, MySQL connection, GitHub OAuth, `SERVER_PORT` and `JAVA_OPTS`. Every entry ships commented out. Keep the file at mode `600`.
+- `config/superagent.env`: secrets and deployment values, sourced by the start script. It includes the admin password, MySQL connection, `SERVER_PORT` and `JAVA_OPTS`. Outside systems (the GitHub OAuth app, the Feishu app) are set up by an administrator under **Admin → System Settings → Integrations**, not in this file. Every entry ships commented out. Keep the file at mode `600`.
 - `config/application.yml`: overrides the defaults built into the jar. Changes take effect on restart, with no repackaging.
 
 At minimum, set these before the first start:

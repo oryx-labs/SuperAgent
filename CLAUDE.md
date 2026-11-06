@@ -35,7 +35,7 @@ superagent-server's pom), so front-end edits show on a browser refresh. Java cha
 
 ## Module architecture
 
-Fourteen Maven modules, layered; a module may only depend on modules below it (Maven enforces this — a
+Fifteen Maven modules, layered; a module may only depend on modules below it (Maven enforces this — a
 module only sees what its pom declares):
 
 ```text
@@ -48,6 +48,7 @@ L3  superagent-agent         conversations: agents, chat turns, memory, characte
 L3  superagent-task          execution: tasks, session pool, watchdog, the coding flow, automations
 L2  superagent-skills        skills: the working standards agents follow (personal or company-wide)
 L2  superagent-files         work files: what agents produce (documents, images, videos), their storage and agent tools
+L1  superagent-files-s3      file store plugin: S3-compatible object storage (a FileStoreProvider; the server includes it)
 L2  superagent-platform      administration: users, system settings, model providers, connectors (and the MCP servers runs get)
 L1  superagent-runtime       driving the coding-agent CLIs (Claude Code, Codex, DeepSeek, Kimi, Qwen; GLM via Claude Code), per-turn MCP grants, image attachments
 L1  superagent-storage       JDBC implementations of the core store interfaces (MySQL, ClickHouse)

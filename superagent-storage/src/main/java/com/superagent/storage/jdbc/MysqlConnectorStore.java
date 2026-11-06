@@ -20,9 +20,6 @@ public class MysqlConnectorStore extends AbstractJdbcConnectorStore {
               transport   VARCHAR(16)   NOT NULL,
               endpoint    VARCHAR(2048),
               token_env   VARCHAR(128),
-              app_id      VARCHAR(128),
-              status      VARCHAR(32),
-              last_error  VARCHAR(1024),
               created_at  DATETIME(3)   NOT NULL,
               updated_at  DATETIME(3)   NOT NULL,
               PRIMARY KEY (id)

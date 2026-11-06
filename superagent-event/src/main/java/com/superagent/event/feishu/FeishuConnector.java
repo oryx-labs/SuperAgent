@@ -20,20 +20,15 @@ import com.lark.oapi.service.im.v1.model.GetChatReq;
 import com.lark.oapi.service.im.v1.model.GetChatResp;
 import com.lark.oapi.service.im.v1.model.MentionEvent;
 import com.lark.oapi.service.im.v1.model.P2MessageReceiveV1;
-import com.superagent.core.connector.Connector;
-import com.superagent.core.connector.ConnectorChanged;
-import com.superagent.core.connector.ConnectorCredential;
-import com.superagent.core.connector.ConnectorCredentialStore;
-import com.superagent.core.connector.ConnectorKind;
-import com.superagent.core.connector.ConnectorStore;
 import com.superagent.core.inbox.EventPriority;
+import com.superagent.core.integration.IntegrationChanged;
 import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.inbox.InboxEvent;
-import com.superagent.core.security.SecretCipher;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
 import com.superagent.event.InboxService;
+import com.superagent.platform.integration.IntegrationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
@@ -66,13 +61,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The company's Feishu app, connected over Feishu's long connection (the server dials out, so no public
+ * The company's Feishu app (set up under System Settings → integrations), connected over Feishu's long connection (the server dials out, so no public
  * callback URL is needed). One app serves everyone: each received message goes to the inbox of the employees
  * it concerns, and SuperAgent's alerts go back to each employee's own Feishu DM. The handler returns at once
  * because Feishu redelivers events not acknowledged within seconds.
  *
  * <p>Who is who: employees are matched to their Feishu account by phone number (contact API, on connect and
  * hourly); anyone it can't match DMs the bot "绑定 &lt;code&gt;" with the code shown on the Connectors page.
+ * Its connection state is reported to {@link IntegrationService}, which shows it to administrators.
  * Routing: a DM to the bot belongs to its sender; a group message goes to every linked member of the chat
  * (triage decides how much it matters to each of them).
  */
@@ -90,12 +86,10 @@ public class FeishuConnector implements SmartLifecycle {
     private static final String DIGEST_TIME = "09:00";
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private final ConnectorStore connectors;
-    private final ConnectorCredentialStore credentials;
+    private final IntegrationService integrations;
     private final EventSourceStore links;
     private final UserStore users;
     private final InboxService inbox;
-    private final SecretCipher cipher;
     private final Map<String, Integer> bindFailures = new ConcurrentHashMap<>();
     private final Map<String, Instant> hinted = new ConcurrentHashMap<>();
     private final ExecutorService work = Executors.newFixedThreadPool(4, r -> {
@@ -129,55 +123,47 @@ public class FeishuConnector implements SmartLifecycle {
     private record Members(Set<String> openIds, Instant fetchedAt) {
     }
 
-    public FeishuConnector(ConnectorStore connectors, ConnectorCredentialStore credentials, EventSourceStore links,
-                           UserStore users, InboxService inbox, SecretCipher cipher) {
-        this.connectors = connectors;
-        this.credentials = credentials;
+    public FeishuConnector(IntegrationService integrations, EventSourceStore links, UserStore users, InboxService inbox) {
+        this.integrations = integrations;
         this.links = links;
         this.users = users;
         this.inbox = inbox;
-        this.cipher = cipher;
         inbox.registerNotifier(EventSource.FEISHU, this::notifyOwner);
     }
 
     @EventListener
-    public void onChanged(ConnectorChanged changed) {
-        if (running) {
+    public void onChanged(IntegrationChanged changed) {
+        if (IntegrationService.FEISHU.equals(changed.key()) && running) {
             work.execute(this::reconnect);
         }
     }
 
     private synchronized void reconnect() {
         disconnect();
-        connectors.listConnectors().stream().filter(c -> c.kind() == ConnectorKind.FEISHU && c.enabled())
-                .findFirst().ifPresent(this::connect);
+        if (integrations.ready(IntegrationService.FEISHU)) {
+            connect();
+        }
     }
 
     /** Verifies the credentials (fetching the bot's own id), then opens the long connection on its own thread. */
-    private void connect(Connector app) {
-        String secret;
-        try {
-            secret = credentials.find(app.id(), ConnectorCredential.COMPANY).map(c -> cipher.decrypt(c.secretCipher()))
-                    .orElse(null);
-        } catch (IllegalStateException e) {
-            setStatus(app.id(), "error", "App Secret 无法解密，请重新填写");
+    private void connect() {
+        String appId = integrations.value(IntegrationService.FEISHU, "appId").orElse(null);
+        String secret = integrations.value(IntegrationService.FEISHU, "appSecret").orElse(null);
+        if (appId == null || secret == null) {
+            setStatus("error", "App Secret 无法读取，请在系统设置里重新填写");
             return;
         }
-        if (app.appId() == null || secret == null) {
-            setStatus(app.id(), "error", "App ID 或 App Secret 未填写");
-            return;
-        }
-        setStatus(app.id(), "connecting", null);
+        setStatus("connecting", null);
         // Bounded, so an unreachable Feishu shows up as an error instead of a check that never returns.
-        Client api = Client.newBuilder(app.appId(), secret).requestTimeout(15, TimeUnit.SECONDS).build();
+        Client api = Client.newBuilder(appId, secret).requestTimeout(15, TimeUnit.SECONDS).build();
         String botOpenId;
         try {
             botOpenId = botOpenId(api);
         } catch (Exception e) {
-            setStatus(app.id(), "error", describe(e));
+            setStatus("error", describe(e));
             return;
         }
-        Connection conn = new Connection(app.appId(), api);
+        Connection conn = new Connection(appId, api);
         EventDispatcher dispatcher = EventDispatcher.newBuilder("", "")
                 .onP2MessageReceiveV1(new ImService.P2MessageReceiveV1Handler() {
                     @Override
@@ -186,19 +172,19 @@ public class FeishuConnector implements SmartLifecycle {
                     }
                 })
                 .build();
-        conn.ws = new com.lark.oapi.ws.Client.Builder(app.appId(), secret)
+        conn.ws = new com.lark.oapi.ws.Client.Builder(appId, secret)
                 .eventHandler(dispatcher).autoReconnect(true).build();
         current = conn;
         Thread t = new Thread(() -> {
             try {
                 conn.ws.start(); // connects (retrying itself on failure), then pings on its own executor
                 if (current == conn) {
-                    setStatus(app.id(), "connected", null);
-                    log.info("feishu app {} connected (bot {})", app.appId(), botOpenId);
+                    setStatus("connected", null);
+                    log.info("feishu app {} connected (bot {})", appId, botOpenId);
                     syncIdentities(conn);
                 }
             } catch (RuntimeException e) {
-                setStatus(app.id(), "error", "长连接启动失败：" + e.getMessage());
+                setStatus("error", "长连接启动失败：" + e.getMessage());
             }
         }, "feishu-ws");
         t.setDaemon(true);
@@ -492,8 +478,8 @@ public class FeishuConnector implements SmartLifecycle {
         return s.matches("\\+?\\d{5,20}") ? s : null;
     }
 
-    private void setStatus(String connectorId, String status, String error) {
-        connectors.findConnector(connectorId).ifPresent(c -> connectors.save(c.withStatus(status, error)));
+    private void setStatus(String status, String error) {
+        integrations.setStatus(IntegrationService.FEISHU, status, error);
         if (error != null) {
             log.warn("feishu: {}", error);
         }

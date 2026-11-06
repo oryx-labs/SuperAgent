@@ -65,7 +65,7 @@ public final class ProviderCatalog {
                     List.of("~/.claude/.credentials.json", "~/.claude.json"),
                     new Access(ANTHROPIC, "https://api.anthropic.com", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL")),
             npmEntry("codex", "OpenAI Codex", "codex", true, "@openai/codex", "16.0.0", false,
-                    List.of("~/.codex/auth.json"), new Access(OPENAI, null, "OPENAI_API_KEY", null)),
+                    List.of("~/.codex/auth.json"), new Access(OPENAI, "https://api.openai.com/v1", "OPENAI_API_KEY", null)),
             // DeepSeek Harness: an agent harness; still a release candidate. Speaks Anthropic's protocol.
             npmEntry("deepseek", "DeepSeek Harness", "dsh", true, "@deepseek-ai/dsh", "24.9.0", true, List.of(),
                     new Access(ANTHROPIC, "https://api.deepseek.com/anthropic", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL")),

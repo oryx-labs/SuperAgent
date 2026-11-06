@@ -54,10 +54,5 @@ superagent:
     allowed-tools: ${SUPERAGENT_TASK_ALLOWED_TOOLS:Read,Glob,Grep,LS,Edit,Write,Bash}
     skip-permissions: ${SUPERAGENT_TASK_SKIP_PERMISSIONS:false}
     max-parallel: ${SUPERAGENT_TASK_MAX_PARALLEL:50}
-  oauth:
-    github:
-      client-id: ${GITHUB_OAUTH_CLIENT_ID:}
-      client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:}
-      redirect-uri: ${GITHUB_OAUTH_REDIRECT_URI:http://localhost:18080/api/v1/oauth/github/callback}
   app:
     base-url: ${SUPERAGENT_BASE_URL:}

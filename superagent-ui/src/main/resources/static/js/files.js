@@ -126,9 +126,10 @@ function tagChips(tags) {
   return box;
 }
 
+// A row: the file's kind as a coloured tile, its name with its tags under it, then where it came from.
 function fileRow(f) {
   const tr = document.createElement("tr");
-  tr.className = "sk-row";
+  tr.className = "sk-row fl-row";
   tr.tabIndex = 0;
   const cell = (text, cls) => {
     const td = document.createElement("td");
@@ -138,17 +139,24 @@ function fileRow(f) {
     return td;
   };
   const name = document.createElement("td");
-  name.className = "sk-row__name fl-row__name";
+  const wrap = document.createElement("div");
+  wrap.className = "fl-row__name";
   const icon = document.createElement("span");
-  icon.className = "fl-icon";
+  icon.className = "fl-tile fl-tile--" + (FILE_ICON[f.kind] ? f.kind : "other");
   icon.textContent = fileIcon(f);
+  const text = document.createElement("div");
+  text.className = "fl-row__text";
   const label = document.createElement("span");
+  label.className = "fl-row__label";
   label.textContent = f.name;
+  text.appendChild(label);
+  if ((f.tags || []).length) text.appendChild(tagChips(f.tags));
   name.title = f.name;
-  name.append(icon, label);
-  if ((f.tags || []).length) name.appendChild(tagChips(f.tags));
+  wrap.append(icon, text);
+  name.appendChild(wrap);
   tr.append(name, cell(fileSource(f), "sk-row__meta"), cell(f.ownerName || f.owner || "—", "sk-row__meta"),
-    cell(f.kind === "link" ? "—" : kbFormatSize(f.size), "sk-row__meta"), cell(formatDateTime(f.updatedAt), "sk-row__meta"));
+    cell(f.kind === "link" ? "—" : kbFormatSize(f.size), "sk-row__meta fl-num"),
+    cell(formatDateTime(f.updatedAt), "sk-row__meta fl-num"));
   tr.addEventListener("click", () => openFile(f));
   tr.addEventListener("keydown", e => { if (e.key === "Enter") openFile(f); });
   return tr;

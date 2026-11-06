@@ -21,5 +21,7 @@ public record CredentialDto(
         boolean current,
         boolean env,
         /** console (added on the page) or machine (found on the server and imported). */
-        String source) {
+        String source,
+        /** The vendor's official endpoint, which an entry without its own {@code baseUrl} uses. */
+        String defaultBaseUrl) {
 }

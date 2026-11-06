@@ -4,7 +4,7 @@ import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.user.DirectoryUserDto;
 import com.superagent.core.user.User;
-import com.superagent.core.user.UserStore;
+import com.superagent.platform.user.PeopleDirectory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -18,15 +18,15 @@ import java.util.List;
 @RestController
 public class DirectoryController {
 
-    private final UserStore users;
+    private final PeopleDirectory people;
 
-    public DirectoryController(UserStore users) {
-        this.users = users;
+    public DirectoryController(PeopleDirectory people) {
+        this.people = people;
     }
 
     @GetMapping(ApiPaths.V1 + "/directory/users")
     public ApiResponse<List<DirectoryUserDto>> users() {
-        return ApiResponse.ok(users.listUsers().stream().filter(User::enabled)
+        return ApiResponse.ok(people.enabled().stream()
                 .map(u -> new DirectoryUserDto(u.username(),
                         u.displayName() == null || u.displayName().isBlank() ? u.username() : u.displayName()))
                 .sorted(Comparator.comparing(DirectoryUserDto::displayName, String.CASE_INSENSITIVE_ORDER))

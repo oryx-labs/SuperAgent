@@ -5,9 +5,6 @@ import com.superagent.api.inbox.InboxSummaryDto;
 import com.superagent.api.inbox.InboxTodoDto;
 import com.superagent.api.task.CreateTaskRequest;
 import com.superagent.api.task.TaskDto;
-import com.superagent.core.connector.Connector;
-import com.superagent.core.connector.ConnectorKind;
-import com.superagent.core.connector.ConnectorStore;
 import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.inbox.InboxEvent;
@@ -16,6 +13,7 @@ import com.superagent.core.inbox.InboxNotifyRequested;
 import com.superagent.core.inbox.InboxTodo;
 import com.superagent.core.inbox.InboxTodoStore;
 import com.superagent.core.notice.NoticeEvents;
+import com.superagent.platform.integration.IntegrationService;
 import com.superagent.task.TaskService;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
@@ -40,7 +38,7 @@ import java.util.stream.Stream;
 public class UserInboxService {
 
     private final EventSourceStore sources;
-    private final ConnectorStore connectors;
+    private final IntegrationService integrations;
     private final InboxEventStore events;
     private final InboxTodoStore todos;
     private final TaskService tasks;
@@ -50,10 +48,10 @@ public class UserInboxService {
     private static final int RECENT = 2000;
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
-    public UserInboxService(EventSourceStore sources, ConnectorStore connectors, InboxEventStore events,
+    public UserInboxService(EventSourceStore sources, IntegrationService integrations, InboxEventStore events,
                             InboxTodoStore todos, TaskService tasks, ApplicationEventPublisher publisher) {
         this.sources = sources;
-        this.connectors = connectors;
+        this.integrations = integrations;
         this.events = events;
         this.todos = todos;
         this.tasks = tasks;
@@ -62,9 +60,7 @@ public class UserInboxService {
 
     /** Whether the owner is linked to the company's Feishu app, and what arrived for them today. */
     public InboxSummaryDto summary(String owner) {
-        String appId = connectors.listConnectors().stream()
-                .filter(c -> c.kind() == ConnectorKind.FEISHU && c.enabled()).map(Connector::appId)
-                .findFirst().orElse(null);
+        String appId = integrations.value(IntegrationService.FEISHU, "appId").orElse(null);
         boolean linked = sources.find(owner, EventSource.FEISHU).filter(s -> s.linkedTo(appId)).isPresent();
         List<InboxEvent> today = recentOf(owner).stream().filter(e -> !e.receivedAt().isBefore(startOfToday())).toList();
         return new InboxSummaryDto(linked, today.size(), (int) today.stream().filter(InboxEvent::processed).count());

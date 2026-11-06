@@ -191,9 +191,12 @@ public class CredentialService {
         return new Choice(toRun(pool.get(0)));
     }
 
-    /** Claude and Codex know their own default; the vendors' endpoints come from the catalogue. */
+    /**
+     * The vendor's official endpoint, from the catalogue. An entry without its own endpoint is always sent there
+     * explicitly: left unset, a CLI would fall back to whatever the server's own CLI config points at (a relay, say).
+     */
     private static String defaultBaseUrl(String providerKey) {
-        return "claude".equals(providerKey) ? null : com.superagent.core.provider.ProviderCatalog.find(providerKey)
+        return com.superagent.core.provider.ProviderCatalog.find(providerKey)
                 .map(e -> e.access().defaultBaseUrl()).orElse(null);
     }
 
@@ -281,7 +284,8 @@ public class CredentialService {
         List<CredentialDto> out = new ArrayList<>(store.list(providerKey).stream().map(c -> toDto(c, current)).toList());
         // The machine's keys are entries above; what's left on the machine is the CLI's own login (a subscription).
         out.add(new CredentialDto(ENV_ID, null, null, null, false, Integer.MAX_VALUE, true,
-                ProviderCredential.UNKNOWN, null, null, ENV_ID.equals(current), true, ProviderCredential.MACHINE));
+                ProviderCredential.UNKNOWN, null, null, ENV_ID.equals(current), true, ProviderCredential.MACHINE,
+                defaultBaseUrl(providerKey)));
         return out;
     }
 
@@ -368,7 +372,8 @@ public class CredentialService {
             hint = "（无法解密）";
         }
         return new CredentialDto(c.id(), c.label(), c.baseUrl(), hint, c.bearer(), c.priority(), c.enabled(),
-                c.status(), c.lastError(), c.checkedAt(), c.id().equals(currentId), false, c.source());
+                c.status(), c.lastError(), c.checkedAt(), c.id().equals(currentId), false, c.source(),
+                defaultBaseUrl(c.providerKey()));
     }
 
     /** Enough to recognise a key, never enough to use it. */

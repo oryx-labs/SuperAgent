@@ -2,20 +2,27 @@ package com.superagent.platform.connector;
 
 import com.superagent.api.connector.ConnectorDto;
 import com.superagent.api.connector.SaveConnectorRequest;
+import com.superagent.api.integration.IntegrationDto;
+import com.superagent.api.integration.SaveIntegrationRequest;
 import com.superagent.core.connector.Connector;
 import com.superagent.core.connector.ConnectorCredential;
 import com.superagent.core.connector.ConnectorCredentialStore;
 import com.superagent.core.connector.ConnectorStore;
 import com.superagent.core.connector.McpServerSpec;
-import com.superagent.core.error.ConflictException;
+import com.superagent.core.error.ForbiddenException;
 import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.security.SecretCipher;
+import com.superagent.core.settings.SystemSettingStore;
+import com.superagent.platform.integration.IntegrationService;
+import com.superagent.runtime.mcp.McpGrants;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,8 +40,30 @@ class ConnectorServiceTest {
     private final Map<String, Connector> connectors = new LinkedHashMap<>();
     private final Map<String, ConnectorCredential> credentials = new LinkedHashMap<>();
     private final Map<String, EventSource> links = new LinkedHashMap<>();
+    private final Map<String, String> settings = new LinkedHashMap<>();
     private final List<Object> published = new ArrayList<>();
+    private IntegrationService integrations;
     private ConnectorService service;
+    private final FakeGitee gitee = new FakeGitee();
+    private SecretCipher cipher;
+
+    /** Gitee as far as the refresh goes: hands out a new token, or refuses, or can't be reached. */
+    private static final class FakeGitee implements OAuthProvider {
+        String outcome = "ok";
+        int refreshes;
+        @Override public String key() { return "gitee"; }
+        @Override public String authorizeUrl(String clientId, String redirectUri, String state) { return "https://gitee.test/oauth"; }
+        @Override public Tokens exchange(String id, String secret, String code, String redirect) { return new Tokens("t0", "r0", Instant.now().plusSeconds(86400)); }
+        @Override public Tokens refresh(String id, String secret, String refreshToken) throws IOException {
+            refreshes++;
+            return switch (outcome) {
+                case "rejected" -> throw new TokenRejectedException("invalid_grant");
+                case "offline" -> throw new IOException("connect timed out");
+                default -> new Tokens("fresh-token", "r-" + refreshes, Instant.now().plusSeconds(86400));
+            };
+        }
+        @Override public String fetchLogin(String accessToken) { return "ada-gitee"; }
+    }
 
     @BeforeEach
     void setUp() {
@@ -64,22 +93,73 @@ class ConnectorServiceTest {
             @Override public List<EventSource> list() { return new ArrayList<>(links.values()); }
             @Override public void save(EventSource s) { links.put(s.owner(), s); }
         };
-        SecretCipher cipher = new SecretCipher("", tmp.resolve("secret.key").toString());
-        // Blank client id/secret: GitHub OAuth stays unconfigured, which these tests never go through.
-        ConnectorOAuthService oauth = new ConnectorOAuthService(store, creds, new GitHubOAuthClient(), cipher, "", "",
-                "http://localhost/cb");
-        service = new ConnectorService(store, creds, sources, oauth, cipher, published::add);
+        SystemSettingStore settingStore = new SystemSettingStore() {
+            @Override public Map<String, String> all() { return new LinkedHashMap<>(settings); }
+            @Override public void put(String key, String value) { settings.put(key, value); }
+        };
+        cipher = new SecretCipher("", tmp.resolve("secret.key").toString());
+        integrations = new IntegrationService(settingStore, cipher, published::add);
+        ConnectorOAuthService oauth = new ConnectorOAuthService(store, creds, List.of(new GitHubOAuthClient(), gitee),
+                cipher, integrations);
+        service = new ConnectorService(store, creds, sources, oauth, cipher,
+                new McpGrants("http://127.0.0.1:18080/mcp"), integrations, settingStore);
     }
 
     @Test
-    void seedsGitHubOnceAsAPersonallyAuthorizedConnector() {
-        assertThat(service.list("ada", false)).singleElement().satisfies(c -> {
-            assertThat(c.id()).isEqualTo("github");
+    void listsSuperAgentsOwnMcpFirstAsReadOnly() {
+        assertThat(service.list("ada", false).get(0)).satisfies(c -> {
+            assertThat(c.id()).isEqualTo(ConnectorService.BUILTIN_ID);
+            assertThat(c.kind()).isEqualTo("builtin");
+            assertThat(c.needsAuthorization()).isFalse();
+            assertThat(c.endpoint()).isNull(); // the URL is for administrators
+        });
+        assertThat(service.list("root", true).get(0).endpoint()).isEqualTo("http://127.0.0.1:18080/mcp");
+        assertThatThrownBy(() -> service.delete(ConnectorService.BUILTIN_ID)).isInstanceOf(ForbiddenException.class);
+        assertThatThrownBy(() -> service.update(ConnectorService.BUILTIN_ID, mcp("x", "none", "http", "https://x", null, null), "root"))
+                .isInstanceOf(ForbiddenException.class);
+    }
+
+    @Test
+    void seedsGitHubAndGiteeAsPersonallyAuthorizedConnectors() {
+        assertThat(service.list("ada", false)).filteredOn(c -> c.kind().equals("mcp")).extracting(ConnectorDto::id)
+                .containsExactly("github", "gitee");
+        assertThat(service.list("ada", false)).filteredOn(c -> c.kind().equals("mcp")).allSatisfy(c -> {
             assertThat(c.needsAuthorization()).isTrue();
             assertThat(c.authorized()).isFalse();
             assertThat(c.endpoint()).isNull(); // configuration is for administrators
         });
         assertThat(service.mcpServersFor("ada")).isEmpty(); // not authorized: agents don't get it
+
+        // An administrator who removes Gitee doesn't get it back on the next start.
+        service.delete("gitee");
+        setUp();
+        assertThat(connectors).doesNotContainKey("gitee");
+    }
+
+    @Test
+    void giteeTokenIsRenewedBeforeItExpiresAndDroppedWhenGiteeRefusesIt() {
+        integrations.update("gitee", new SaveIntegrationRequest(true, Map.of("clientId", "cid", "clientSecret", "csecret")), "http://sa");
+        credentials.put("gitee/ada", new ConnectorCredential("gitee", "ada", cipher.encrypt("old-token"), "ada-gitee",
+                Instant.now(), cipher.encrypt("r0"), Instant.now().plusSeconds(60))); // about to expire
+
+        assertThat(service.mcpServersFor("ada")).singleElement().satisfies(s -> {
+            assertThat(s.url()).isEqualTo("https://api.gitee.com/mcp");
+            assertThat(s.headers()).containsEntry("Authorization", "Bearer fresh-token");
+        });
+        assertThat(cipher.decrypt(credentials.get("gitee/ada").refreshCipher())).isEqualTo("r-1"); // the new refresh token is kept
+        service.mcpServersFor("ada");
+        assertThat(gitee.refreshes).isEqualTo(1); // still fresh: not renewed again
+
+        // Gitee unreachable while the token is still good: use it, try again next time.
+        ConnectorCredential renewed = credentials.get("gitee/ada");
+        credentials.put("gitee/ada", new ConnectorCredential("gitee", "ada", renewed.secretCipher(), renewed.accountLabel(),
+                Instant.now(), renewed.refreshCipher(), Instant.now().plusSeconds(60)));
+        gitee.outcome = "offline";
+        assertThat(service.mcpServersFor("ada")).singleElement();
+        // Gitee refuses the refresh token: the employee has to authorize again.
+        gitee.outcome = "rejected";
+        assertThat(service.mcpServersFor("ada")).isEmpty();
+        assertThat(credentials).doesNotContainKey("gitee/ada");
     }
 
     @Test
@@ -122,31 +202,55 @@ class ConnectorServiceTest {
     }
 
     @Test
-    void feishuIsOneCompanyAppAndEmployeesLinkByCode() {
-        ConnectorDto feishu = service.create(feishu("cli_a", "app-secret"), "root");
-        assertThatThrownBy(() -> service.create(feishu("cli_b", "x"), "root")).isInstanceOf(ConflictException.class);
-        assertThat(published).isNotEmpty(); // the event module reconnects on this
+    void integrationsLiveInSettingsWithSecretsEncryptedAndNeverShown() {
+        assertThatThrownBy(() -> integrations.update("github", new SaveIntegrationRequest(true, Map.of("clientId", "Iv1")), "https://sa.example"))
+                .hasMessageContaining("Client Secret");
 
-        ConnectorDto mine = service.newBindCode(feishu.id(), "ada", false);
+        IntegrationDto gh = integrations.update("github",
+                new SaveIntegrationRequest(true, Map.of("clientId", "Iv1", "clientSecret", "gh-s3cret")), "https://sa.example/");
+        assertThat(gh.callbackUrl()).isEqualTo("https://sa.example/api/v1/oauth/github/callback");
+        assertThat(gh.fields()).filteredOn(IntegrationDto.Field::secret).singleElement().satisfies(f -> {
+            assertThat(f.value()).isNull();
+            assertThat(f.set()).isTrue();
+        });
+        assertThat(settings.values()).noneMatch(v -> v != null && v.contains("gh-s3cret"));
+
+        // A blank secret on save keeps the stored one; the browser never has it to send back.
+        integrations.update("github", new SaveIntegrationRequest(true, Map.of("clientId", "Iv2", "clientSecret", "")), "x");
+        assertThat(integrations.value("github", "clientSecret")).hasValue("gh-s3cret");
+        assertThat(integrations.value("github", "clientId")).hasValue("Iv2");
+        assertThat(published).isNotEmpty(); // what runs on an integration reconnects on this
+
+        integrations.update("github", new SaveIntegrationRequest(false, Map.of("clientId", "Iv2")), "x");
+        assertThat(integrations.value("github", "clientSecret")).isEmpty(); // disabled: nothing uses it
+    }
+
+    @Test
+    void githubNeedsItsIntegrationAndFeishuAppearsOnceEnabled() {
+        credentials.put("github/ada", new ConnectorCredential("github", "ada",
+                new SecretCipher("", tmp.resolve("secret.key").toString()).encrypt("gho_ada"), "ada", null));
+        assertThat(service.mcpServersFor("ada")).isEmpty(); // authorized, but the GitHub app is switched off
+        integrations.update("github", new SaveIntegrationRequest(true, Map.of("clientId", "Iv1", "clientSecret", "s")), "x");
+        assertThat(service.mcpServersFor("ada")).singleElement().satisfies(s -> assertThat(s.name()).isEqualTo("github"));
+
+        assertThat(service.list("ada", false)).noneMatch(c -> c.kind().equals("feishu"));
+        integrations.update("feishu", new SaveIntegrationRequest(true, Map.of("appId", "cli_a", "appSecret", "s")), "x");
+        ConnectorDto mine = service.newBindCode(ConnectorService.FEISHU_ID, "ada", false);
         assertThat(mine.authorized()).isFalse();
         assertThat(mine.bindCode()).hasSize(8);
 
         links.put("ada", links.get("ada").withBinding("cli_a", "ou_ada")); // the bot received "绑定 <code>"
         assertThat(service.list("ada", false)).filteredOn(c -> c.kind().equals("feishu"))
                 .singleElement().satisfies(c -> assertThat(c.authorized()).isTrue());
+        assertThatThrownBy(() -> service.delete(ConnectorService.FEISHU_ID)).isInstanceOf(ForbiddenException.class);
 
-        service.update(feishu.id(), feishu("cli_new", null), "root"); // another app: ids there differ
+        integrations.update("feishu", new SaveIntegrationRequest(true, Map.of("appId", "cli_new")), "x"); // ids differ per app
         assertThat(service.list("ada", false)).filteredOn(c -> c.kind().equals("feishu"))
                 .singleElement().satisfies(c -> assertThat(c.authorized()).isFalse());
-        assertThat(service.mcpServersFor("ada")).isEmpty(); // Feishu gives no agent tools
     }
 
     private static SaveConnectorRequest mcp(String name, String auth, String transport, String endpoint, String tokenEnv,
                                             String secret) {
-        return new SaveConnectorRequest(name, null, "mcp", auth, transport, endpoint, tokenEnv, null, secret, true);
-    }
-
-    private static SaveConnectorRequest feishu(String appId, String secret) {
-        return new SaveConnectorRequest(null, null, "feishu", null, null, null, null, appId, secret, true);
+        return new SaveConnectorRequest(name, null, auth, transport, endpoint, tokenEnv, secret, true);
     }
 }

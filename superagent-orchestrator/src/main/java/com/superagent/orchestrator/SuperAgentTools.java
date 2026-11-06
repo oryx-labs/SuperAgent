@@ -35,7 +35,11 @@ public class SuperAgentTools implements McpToolProvider {
 
     /** Every tool name, in the order they're listed; the round's CLI allowlist is built from this. */
     static final List<String> NAMES = List.of("list_team", "list_skills", "propose_plan", "hire_member",
-            "update_member", "assign_task", "list_assigned_tasks", "get_task", "reply_task", "get_current_time");
+            "update_member", "assign_task", "list_assigned_tasks", "get_task", "reply_task", "get_current_time",
+            SuperAgentTools.TELL_USER);
+
+    /** Background rounds only: posts into the chat. */
+    static final String TELL_USER = "tell_user";
 
     /** A tool's outcome; {@code error} results are shown to the agent as tool errors. */
     public record Result(String text, boolean error) {
@@ -110,12 +114,18 @@ public class SuperAgentTools implements McpToolProvider {
                 props(field("task_id", "string", "任务 id"), field("content", "string", "回复内容")),
                 "task_id", "content"));
         tools.add(tool("get_current_time", "返回当前时间。", props()));
+        tools.add(tool(TELL_USER, "（仅后台处理时可用）把用户需要知道的事发到你和用户的聊天里：任务完成或失败的汇报、需要用户拍板的事、紧急的事。"
+                        + "每条写清楚是什么事、结果或建议，用户不用再追问就能明白。不重要的事不要发。",
+                props(field("text", "string", "发给用户的话（Markdown）")), "text"));
         return tools;
     }
 
     public Result run(McpGrants.Grant grant, String name, JsonNode args) {
         String owner = grant.owner();
         try {
+            if (SuperAgentService.ACTING_TOOLS.contains(name)) {
+                service.requireOwnInput(grant);
+            }
             return new Result(switch (name) {
                 case "list_team" -> {
                     List<SuperAgentService.TeamMember> team = service.team(owner);
@@ -186,6 +196,10 @@ public class SuperAgentTools implements McpToolProvider {
                 case "reply_task" -> {
                     service.replyToTask(owner, required(args, "task_id"), required(args, "content"));
                     yield "已回复，任务将继续执行。";
+                }
+                case TELL_USER -> {
+                    service.tellUser(grant, required(args, "text"));
+                    yield "已发到聊天。";
                 }
                 case "get_current_time" -> "当前时间：" + WHEN.format(Instant.now().atZone(ZoneId.of("Asia/Shanghai")))
                         + " Asia/Shanghai";

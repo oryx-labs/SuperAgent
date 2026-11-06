@@ -53,7 +53,7 @@ body {
 
 /* ---------- Brand ---------- */
 .brand { display: flex; align-items: center; justify-content: center; margin-bottom: 30px; }
-.brand__logo { height: 100px; width: auto; display: block; }
+.brand__logo { height: 100px; width: auto; max-width: 320px; object-fit: contain; display: block; }
 
 /* ---------- Form ---------- */
 .form { display: flex; flex-direction: column; gap: 16px; }

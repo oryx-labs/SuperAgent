@@ -6,6 +6,7 @@ import com.superagent.core.agent.AgentMemberStore;
 import com.superagent.core.agent.AgentStatus;
 import com.superagent.core.agent.AgentStore;
 import com.superagent.core.chat.ImageAttachment;
+import com.superagent.core.file.FileStore;
 import com.superagent.core.file.WorkFile;
 import com.superagent.core.file.WorkFileKind;
 import com.superagent.core.file.WorkFileStore;
@@ -19,6 +20,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.io.AbstractResource;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -66,6 +70,8 @@ public class FileService {
     private final TaskStore tasks;
     private final TaskAgentStore taskAgents;
     private final UserStore users;
+    private final FileStorageService storage;
+    /** Staging for uploads, and a cache of cloud-stored content an agent or the model needs as a local file. */
     private final Path root;
     private final long maxBytes;
 
@@ -77,7 +83,8 @@ public class FileService {
                          String origin) {
     }
 
-    public record Content(Path path, String name, String mimeType) {
+    /** A file's content for serving: a re-openable {@link Resource}, so ranges (video seeking) work from any store. */
+    public record Content(Resource resource, String name, String mimeType) {
     }
 
     /** A file attached to a message, as a run needs it. */
@@ -95,10 +102,11 @@ public class FileService {
     private static final Set<String> MODEL_IMAGES = Set.of("image/png", "image/jpeg", "image/gif", "image/webp");
 
     public FileService(WorkFileStore store, AgentStore agents, AgentMemberStore members, TaskStore tasks,
-                       TaskAgentStore taskAgents, UserStore users,
+                       TaskAgentStore taskAgents, UserStore users, FileStorageService storage,
                        @Value("${superagent.files.dir:./data/files}") String dir,
                        @Value("${superagent.files.max-mb:200}") long maxMb) {
         this.store = store;
+        this.storage = storage;
         this.agents = agents;
         this.members = members;
         this.tasks = tasks;
@@ -189,7 +197,10 @@ public class FileService {
             return null;
         }
         try {
-            String text = Files.readString(contentPath(f), StandardCharsets.UTF_8);
+            String text;
+            try (InputStream in = openContent(f)) {
+                text = new String(in.readNBytes(6000), StandardCharsets.UTF_8);
+            }
             return text.length() <= 1500 ? text : text.substring(0, 1500);
         } catch (IOException | RuntimeException e) {
             return null;
@@ -227,32 +238,34 @@ public class FileService {
     private WorkFile store(Origin origin, String name, String replaceId, Writer writer) {
         WorkFile existing = replaceId == null || replaceId.isBlank() ? null : replaceable(replaceId.strip(), origin);
         String id = existing != null ? existing.id() : UUID.randomUUID().toString();
-        Path dir = root.resolve(id);
-        Path target = dir.resolve("content");
+        String type = storage.activeChannel();
+        Path staging = root.resolve(".staging");
+        Path tmp = null;
         try {
-            Files.createDirectories(dir);
-            Path tmp = Files.createTempFile(dir, "upload-", ".tmp");
-            try {
-                writer.write(tmp);
-                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } finally {
-                Files.deleteIfExists(tmp);
+            Files.createDirectories(staging);
+            tmp = Files.createTempFile(staging, "content-", ".tmp");
+            writer.write(tmp);
+            long size = Files.size(tmp);
+            storage.store(type).put(id, tmp, mimeOf(name));
+            if (existing != null && !type.equals(existing.storage())) {
+                storage.store(existing.storage()).delete(id); // a revision moves to where new files go now
             }
-            long size = Files.size(target);
             WorkFile saved = existing != null
-                    ? existing.withContent(name, WorkFileKind.of(name), mimeOf(name), size)
-                    : new WorkFile(id, name, WorkFileKind.of(name), mimeOf(name), size, WorkFile.INTERNAL, id,
+                    ? existing.withContent(name, WorkFileKind.of(name), mimeOf(name), size).withStorage(type)
+                    : new WorkFile(id, name, WorkFileKind.of(name), mimeOf(name), size, type, id,
                     origin.owner(), origin.agentId(), origin.taskId(), origin.origin(), false, Instant.now(), Instant.now(),
                     List.of(), WorkFile.TAGS_PENDING);
             store.save(saved);
             if (origin.messageId() != null) {
                 store.link(id, origin.sessionId(), origin.messageId());
             }
-            log.info("{} file {} ({}, {} bytes) for {} via agent {} / task {}", existing != null ? "revised" : "new",
-                    id, name, size, origin.owner(), origin.agentId(), origin.taskId());
+            log.info("{} file {} ({}, {} bytes, {}) for {} via agent {} / task {}", existing != null ? "revised" : "new",
+                    id, name, size, type, origin.owner(), origin.agentId(), origin.taskId());
             return saved;
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot store file " + name, e);
+        } finally {
+            deleteQuietly(tmp);
         }
     }
 
@@ -331,7 +344,7 @@ public class FileService {
                 throw new IllegalArgumentException("链接随消息文字发送即可：" + f.location());
             }
             store.link(id, sessionId, messageId);
-            out.add(new Attachment(f.name(), f.mimeType(), contentPath(f)));
+            out.add(new Attachment(f.name(), f.mimeType(), localCopy(f)));
         }
         return out;
     }
@@ -394,10 +407,9 @@ public class FileService {
     /** An earlier upload with the same content, to the same agent (or, without one, the same task). */
     private WorkFile sameUpload(Origin origin, long size, String hash) throws IOException {
         for (WorkFile f : sentTo(origin)) {
-            if (!f.deleted() && WorkFile.ORIGIN_UPLOAD.equals(f.origin()) && WorkFile.INTERNAL.equals(f.storage())
+            if (!f.deleted() && WorkFile.ORIGIN_UPLOAD.equals(f.origin()) && !WorkFile.LINK.equals(f.storage())
                     && f.size() == size) {
-                Path path = contentPath(f);
-                try (InputStream in = Files.newInputStream(path)) {
+                try (InputStream in = openContent(f)) {
                     if (hash.equals(copyHashed(in, null))) {
                         return f;
                     }
@@ -441,12 +453,52 @@ public class FileService {
         return target;
     }
 
-    private Path contentPath(WorkFile f) {
-        Path path = root.resolve(f.location()).resolve("content").normalize();
-        if (!path.startsWith(root) || !Files.isRegularFile(path)) {
+    private InputStream openContent(WorkFile f) throws IOException {
+        try {
+            return storage.store(f.storage()).open(f.location());
+        } catch (java.nio.file.NoSuchFileException e) {
             throw new WorkFileNotFoundException(f.id());
         }
-        return path;
+    }
+
+    /**
+     * The content as a file on this machine — for an agent's workspace or the model's image input. Local content is
+     * used in place; content kept elsewhere is fetched once into a cache (a new version gets a new cache entry).
+     */
+    private Path localCopy(WorkFile f) {
+        FileStore s = storage.store(f.storage());
+        Optional<Path> local = s.localPath(f.location());
+        if (local.isPresent()) {
+            return local.get();
+        }
+        Path cached = root.resolve(".cache").resolve(f.id() + "-" + f.updatedAt().toEpochMilli());
+        if (Files.isRegularFile(cached)) {
+            return cached;
+        }
+        try {
+            Files.createDirectories(cached.getParent());
+            Path tmp = Files.createTempFile(cached.getParent(), "fetch-", ".tmp");
+            try (InputStream in = openContent(f)) {
+                Files.copy(in, tmp, StandardCopyOption.REPLACE_EXISTING);
+                Files.move(tmp, cached, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } finally {
+                deleteQuietly(tmp);
+            }
+            return cached;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot fetch file " + f.id(), e);
+        }
+    }
+
+    private static void deleteQuietly(Path p) {
+        if (p == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(p);
+        } catch (IOException ignored) {
+            // a stray staging file is harmless
+        }
     }
 
     // --- links people share in a message ---
@@ -509,7 +561,10 @@ public class FileService {
         if (WorkFile.LINK.equals(f.storage())) {
             throw new IllegalArgumentException("这是一个链接，没有可下载的内容：" + f.location());
         }
-        return new Content(contentPath(f), f.name(), f.mimeType());
+        FileStore s = storage.store(f.storage());
+        Resource resource = s.localPath(f.location()).<Resource>map(FileSystemResource::new)
+                .orElseGet(() -> new StoredResource(s, f));
+        return new Content(resource, f.name(), f.mimeType());
     }
 
     public WorkFileDto rename(String id, String user, String name) {
@@ -521,9 +576,49 @@ public class FileService {
         return get(id, user);
     }
 
-    /** Soft delete: the file drops out of every list; its content stays on disk. */
+    /** The file drops out of every list and its content is removed from its store (a link has none). */
     public void delete(String id, String user) {
-        store.save(manageable(id, user).markDeleted());
+        WorkFile f = manageable(id, user);
+        if (!WorkFile.LINK.equals(f.storage())) {
+            try {
+                storage.store(f.storage()).delete(f.location());
+            } catch (IOException e) {
+                throw new UncheckedIOException("Cannot delete the content of file " + id, e);
+            }
+        }
+        store.save(f.markDeleted());
+    }
+
+    /** Content kept in a remote store, served through us: each read opens a fresh stream. */
+    private static final class StoredResource extends AbstractResource {
+
+        private final FileStore store;
+        private final WorkFile file;
+
+        StoredResource(FileStore store, WorkFile file) {
+            this.store = store;
+            this.file = file;
+        }
+
+        @Override
+        public InputStream getInputStream() throws IOException {
+            return store.open(file.location());
+        }
+
+        @Override
+        public long contentLength() {
+            return file.size();
+        }
+
+        @Override
+        public String getFilename() {
+            return file.name();
+        }
+
+        @Override
+        public String getDescription() {
+            return "file " + file.id() + " in the " + file.storage() + " store";
+        }
     }
 
     private WorkFile visible(String id, String user) {

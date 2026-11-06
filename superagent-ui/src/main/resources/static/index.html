@@ -10,7 +10,7 @@
   <header class="topbar">
     <div class="brand">
       <a class="brand__home" href="#todo" id="brandHome" data-i18n-title="brand.home" aria-label="Home">
-        <img class="brand__logo" src="/superagent-logo.png" alt="SuperAgent" />
+        <img class="brand__logo" id="brandLogo" src="/api/v1/branding/logo" alt="Logo" />
       </a>
     </div>
     <!-- Main menu: the everyday areas, the workspace tools in a dropdown, and administration for admins. -->
@@ -99,35 +99,48 @@
 
     <aside class="panel" data-pane="chat" aria-label="Agent">
       <section class="panel__block" id="agentInfoPanel" hidden>
-        <div class="agent-info__head">
-          <h3 class="panel__title agent-info__title"><span class="agent-avatar" id="agentInfoAvatar" aria-hidden="true"></span><span id="agentInfoName">Agent</span></h3>
-          <span class="agent-info__actions">
-            <button class="link-btn link-btn--muted" id="agentMemoryBtn" type="button" data-i18n="mem.open">Memory</button>
-            <button class="link-btn link-btn--muted" id="agentDetailBtn" type="button" data-i18n="agent.details">Details</button>
-            <button class="link-btn link-btn--muted" id="superLogBtn" type="button" data-i18n="log.open" hidden>Run log</button>
-          </span>
+        <!-- Who this is, who's in it, and the two things you do from here: invite people, open the details. -->
+        <div class="agent-card">
+          <div class="agent-card__who">
+            <span class="agent-avatar agent-card__avatar" id="agentInfoAvatar" aria-hidden="true"></span>
+            <div class="agent-card__text">
+              <h3 class="agent-card__name" id="agentInfoName">Agent</h3>
+              <p class="agent-card__sub" id="agentInfoSub"></p>
+            </div>
+          </div>
+          <div class="agent-card__people" id="agentPeople" hidden>
+            <div class="agent-card__faces" id="agentFaces"></div>
+            <span class="agent-card__count" id="agentPeopleCount"></span>
+          </div>
+          <div class="agent-card__actions">
+            <button class="btn btn--sm btn--primary agent-card__invite" id="agentPanelInviteBtn" type="button" hidden>
+              <span aria-hidden="true">＋</span> <span data-i18n="co.inviteShort">Invite</span></button>
+            <button class="btn btn--sm" id="agentDetailBtn" type="button" data-i18n="agent.details">Details</button>
+          </div>
         </div>
         <!-- Regular agent: the work it set off, newest first; a click opens the task. -->
         <div class="agent-work" id="agentWorkWrap" hidden>
-          <span class="panel__subhead" data-i18n="work.agentTasks">Tasks</span>
-          <ul class="super-work__list" id="agentWorkList"></ul>
-          <p class="super-work__empty" id="agentWorkEmpty" data-i18n="work.agentEmpty" hidden>No tasks yet. Ask it to take something on.</p>
-          <span class="panel__subhead agent-work__files-head" data-i18n="work.agentFiles">Files</span>
-          <ul class="super-work__list" id="agentFileList"></ul>
-          <p class="super-work__empty" id="agentFileEmpty" data-i18n="work.agentFilesEmpty" hidden>No files yet.</p>
-        </div>
-        <!-- The SuperAgent has no character, skills or model to show: just what it is and how it works. -->
-        <div class="super-intro" id="superIntro" hidden>
-          <a class="super-sources" id="superSources" href="#messages"></a>
-          <p class="super-intro__lead" data-i18n="super.introLead">Your super-self — it can help you get anything done.</p>
-          <ol class="super-intro__steps">
-            <li><b data-i18n="super.introStep1Title">Drop it in</b><span data-i18n="super.introStep1">Send your thoughts any time, as many as you like — no need to wait for a reply.</span></li>
-            <li><b data-i18n="super.introStep2Title">Plan, then go</b><span data-i18n="super.introStep2">It works out what you want and proposes a plan; nothing starts until you approve.</span></li>
-            <li><b data-i18n="super.introStep3Title">Team delivers</b><span data-i18n="super.introStep3">It puts together a small team, hands out the work and reports back here.</span></li>
-          </ol>
+          <div class="panel-card">
+            <span class="panel-card__title" data-i18n="work.agentTasks">Tasks</span>
+            <ul class="super-work__list" id="agentWorkList"></ul>
+            <p class="super-work__empty" id="agentWorkEmpty" data-i18n="work.agentEmpty" hidden>No tasks yet. Ask it to take something on.</p>
+          </div>
+          <div class="panel-card">
+            <span class="panel-card__title" data-i18n="work.agentFiles">Files</span>
+            <ul class="super-work__list" id="agentFileList"></ul>
+            <p class="super-work__empty" id="agentFileEmpty" data-i18n="work.agentFilesEmpty" hidden>No files yet.</p>
+          </div>
         </div>
       </section>
       <section class="panel__block super-work" id="superWorkPanel" hidden>
+        <!-- The background: works through task results and received messages on its own. -->
+        <div class="super-bg">
+          <div class="super-work__head">
+            <span class="panel__subhead" data-i18n="super.bgTitle">Background</span>
+            <button class="super-work__all" type="button" id="superBgBtn" data-i18n="super.bgRecord">Record</button>
+          </div>
+          <p class="super-bg__state" id="superBgState"></p>
+        </div>
         <div class="super-work__head">
           <span class="panel__subhead" data-i18n="work.recent">Recently finished</span>
           <button class="super-work__all" type="button" id="superWorkAllBtn" data-i18n="work.viewAll">View all</button>
@@ -178,47 +191,65 @@
     </section>
 
     <section class="admin" data-pane="skills" aria-label="Skills" hidden>
-      <div class="model-tabs page-tabs sk-tabs" id="skTabs" role="tablist">
-        <button type="button" class="model-tab is-active" data-layer="personal"><span data-i18n="sk.layerPersonal">Personal</span> <b></b></button>
-        <button type="button" class="model-tab" data-layer="company"><span data-i18n="sk.layerCompany">Company</span> <b></b></button>
-        <div class="sk-toolbar">
-          <input type="search" id="skSearch" data-i18n-ph="sk.search" aria-label="Search skills" />
-          <button class="btn btn--primary btn--sm" type="button" id="skNewBtn" data-i18n="sk.new">+ New skill</button>
+      <!-- Skills as a card grid: search and filters on the left, mine / new on the right. -->
+      <div class="admin__body sk-page">
+        <div class="sk-bar">
+          <label class="sk-search">
+            <input type="search" id="skSearch" data-i18n-ph="sk.search" aria-label="Search skills" />
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </label>
+          <select id="skSource" aria-label="Source">
+            <option value="" data-i18n="sk.fSourceAll">Source: All</option>
+            <option value="company" data-i18n="sk.layerCompany">Company</option>
+            <option value="personal" data-i18n="sk.layerPersonal">Personal</option>
+          </select>
+          <select id="skOwner" aria-label="Owner"></select>
+          <select id="skState" aria-label="Status">
+            <option value="" data-i18n="sk.fStateAll">Status: All</option>
+            <option value="on" data-i18n="sk.stateOn">Enabled</option>
+            <option value="off" data-i18n="sk.stateOff">Disabled</option>
+          </select>
+          <span class="sk-bar__spacer"></span>
+          <button class="btn sk-mine" type="button" id="skMineBtn" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+            <span data-i18n="sk.mine">My skills</span>
+          </button>
+          <button class="btn btn--primary" type="button" id="skNewBtn" data-i18n="sk.new">+ New skill</button>
         </div>
-      </div>
-      <div class="admin__body">
-        <p class="sk-hint" id="skHint"></p>
-        <table class="ctable sk-table"><thead><tr>
-          <th data-i18n="sk.fName">Name</th><th data-i18n="sk.fCategory">Category</th>
-          <th data-i18n="sk.fDescription">When to use</th><th class="sk-col-owner" data-i18n="sk.colOwner">Belongs to</th>
-          <th class="sk-col-time" data-i18n="sk.colUpdated">Updated</th><th class="sk-col-state" data-i18n="sk.colState">Status</th>
-        </tr></thead><tbody id="skRows"></tbody></table>
+        <p class="sk-count" id="skCount"></p>
+        <div class="sk-grid" id="skGrid"></div>
         <p class="kb-empty" id="skEmpty" hidden></p>
       </div>
     </section>
 
-    <section class="admin" data-pane="files" aria-label="Files" hidden>
-      <div class="model-tabs page-tabs sk-tabs" id="flTabs" role="tablist">
-        <button type="button" class="model-tab is-active" data-kind=""><span data-i18n="fl.kindAll">All</span> <b></b></button>
-        <button type="button" class="model-tab" data-kind="document"><span data-i18n="fl.kindDocument">Documents</span> <b></b></button>
-        <button type="button" class="model-tab" data-kind="image"><span data-i18n="fl.kindImage">Images</span> <b></b></button>
-        <button type="button" class="model-tab" data-kind="video"><span data-i18n="fl.kindVideo">Videos</span> <b></b></button>
-        <button type="button" class="model-tab" data-kind="link"><span data-i18n="fl.kindLink">Links</span> <b></b></button>
-        <button type="button" class="model-tab" data-kind="other"><span data-i18n="fl.kindOther">Other</span> <b></b></button>
-        <div class="sk-toolbar">
+    <section class="admin fl-page" data-pane="files" aria-label="Files" hidden>
+      <!-- Kinds on the left, filters (agent, search) on the right. -->
+      <div class="fl-header">
+        <!-- Kinds as one segmented control; the counts follow the other filters. -->
+        <div class="fl-kinds" id="flTabs" role="tablist">
+          <button type="button" class="model-tab is-active" data-kind=""><span data-i18n="fl.kindAll">All</span> <b></b></button>
+          <button type="button" class="model-tab" data-kind="document"><span data-i18n="fl.kindDocument">Documents</span> <b></b></button>
+          <button type="button" class="model-tab" data-kind="image"><span data-i18n="fl.kindImage">Images</span> <b></b></button>
+          <button type="button" class="model-tab" data-kind="video"><span data-i18n="fl.kindVideo">Videos</span> <b></b></button>
+          <button type="button" class="model-tab" data-kind="link"><span data-i18n="fl.kindLink">Links</span> <b></b></button>
+          <button type="button" class="model-tab" data-kind="other"><span data-i18n="fl.kindOther">Other</span> <b></b></button>
+        </div>
+        <div class="fl-toolbar">
           <select id="flAgent" aria-label="Agent"></select>
           <input type="search" id="flSearch" data-i18n-ph="fl.search" aria-label="Search files" />
         </div>
       </div>
-      <div class="admin__body">
+      <div class="admin__body fl-body">
         <!-- Topic tags across the files shown: pick one or more to see only files carrying all of them. -->
         <div class="fl-tagbar" id="flTagBar" hidden></div>
-        <table class="ctable fl-table"><thead><tr>
-          <th data-i18n="fl.colName">Name</th><th class="fl-col-source" data-i18n="fl.colSource">From</th>
-          <th class="fl-col-owner" data-i18n="fl.colOwner">Asked by</th><th class="fl-col-size" data-i18n="fl.colSize">Size</th>
-          <th class="fl-col-time" data-i18n="fl.colUpdated">Updated</th>
-        </tr></thead><tbody id="flRows"></tbody></table>
-        <p class="kb-empty" id="flEmpty" hidden></p>
+        <div class="fl-card">
+          <table class="ctable fl-table"><thead><tr>
+            <th data-i18n="fl.colName">Name</th><th class="fl-col-source" data-i18n="fl.colSource">From</th>
+            <th class="fl-col-owner" data-i18n="fl.colOwner">Asked by</th><th class="fl-col-size" data-i18n="fl.colSize">Size</th>
+            <th class="fl-col-time" data-i18n="fl.colUpdated">Updated</th>
+          </tr></thead><tbody id="flRows"></tbody></table>
+          <p class="kb-empty fl-empty" id="flEmpty" hidden></p>
+        </div>
       </div>
     </section>
 
@@ -338,6 +369,8 @@
         <!-- System settings is a group: each settings page is a sub-item. -->
         <div class="nav__group-label"><span class="nav__dot"></span><span data-i18n="nav.settings">System Settings</span></div>
         <a class="nav__item nav__item--sub" href="#settings" data-view="settings"><span data-i18n="nav.settingsBasic">Basic</span></a>
+        <a class="nav__item nav__item--sub" href="#integrations" data-view="integrations"><span data-i18n="nav.settingsIntegrations">Integrations</span></a>
+        <a class="nav__item nav__item--sub" href="#file-storage" data-view="file-storage"><span data-i18n="nav.settingsFileStorage">File storage</span></a>
       </nav>
     </aside>
 
@@ -508,6 +541,52 @@
       </div>
     </section>
 
+    <!-- Company-wide settings for outside systems (the GitHub OAuth app, the Feishu app). -->
+    <!-- Where Files keeps content: pick a store, fill in its settings, test, save. -->
+    <section class="admin" data-pane="file-storage" aria-label="File storage" hidden>
+      <div class="admin__head">
+        <div>
+          <h2 class="admin__title" data-i18n="fs.title">File storage</h2>
+          <p class="admin__sub" data-i18n="fs.sub">Where Files keeps content. Every file remembers its channel, so moving only affects new files; existing ones stay readable where they are.</p>
+        </div>
+      </div>
+      <div class="admin__body fs-body">
+        <div class="fs-types" id="fsTypes" role="radiogroup"></div>
+        <form class="fs-form" id="fsForm">
+          <div class="fs-fields" id="fsFields"></div>
+          <p class="fs-none" id="fsNone" data-i18n="fs.noSettings" hidden>Nothing to set up: files are kept on this server's disk.</p>
+          <p class="fs-result" id="fsResult" hidden></p>
+          <div class="fs-actions">
+            <button type="button" class="btn" id="fsTest" data-i18n="fs.test">Test connection</button>
+            <button type="submit" class="btn btn--primary" id="fsSave" data-i18n="fs.save">Save and use</button>
+          </div>
+        </form>
+        <div class="fs-channels" id="fsChannels" hidden>
+          <h3 class="fs-channels__title" data-i18n="fs.channels">Storage channels</h3>
+          <p class="fs-channels__sub" data-i18n="fs.channelsSub">A channel is a store at one location. Changing the location opens a new channel; changing only the keys updates the current one.</p>
+          <ul class="fs-channel-list" id="fsChannelList"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="integrations" aria-label="Integrations" hidden>
+      <div class="admin__head">
+        <div>
+          <h2 class="admin__title" data-i18n="int.title">Integrations</h2>
+          <p class="admin__sub" data-i18n="int.sub">The company's own apps on outside systems.</p>
+        </div>
+      </div>
+      <div class="admin__body">
+        <table class="ctable">
+          <thead>
+            <tr><th data-i18n="int.colSystem">System</th><th data-i18n="int.colStatus">Status</th>
+              <th data-i18n="int.colConfig">Settings</th><th class="ctable__actions-col"></th></tr>
+          </thead>
+          <tbody id="intRows"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="admin" data-pane="settings" aria-label="System Settings" hidden>
       <div class="admin__head">
         <div>
@@ -523,6 +602,17 @@
               <input type="text" id="sfCompanyName" maxlength="100" data-i18n-ph="settings.companyNamePh" /></label>
             <label class="field"><span data-i18n="settings.companyShortName">Short name</span>
               <input type="text" id="sfCompanyShortName" maxlength="20" data-i18n-ph="settings.companyShortNamePh" /></label>
+          </div>
+          <div class="field"><span data-i18n="settings.logo">Logo</span>
+            <div class="logo-setting">
+              <div class="logo-setting__preview"><img id="sfLogoPreview" src="/api/v1/branding/logo" alt="" /></div>
+              <div class="logo-setting__actions">
+                <label class="btn btn--sm"><span data-i18n="settings.logoUpload">Upload logo</span>
+                  <input type="file" id="sfLogoInput" accept="image/png,image/jpeg,image/gif,image/webp" hidden /></label>
+                <button type="button" class="link-btn link-btn--muted" id="sfLogoReset" data-i18n="settings.logoReset" hidden>Use SuperAgent's logo</button>
+              </div>
+            </div>
+            <p class="field-hint" data-i18n="settings.logoHint">Shown on the sign-in page and at the top left. PNG, JPEG, GIF or WebP, up to 1 MB; a wide image with a transparent background works best.</p>
           </div>
           <h3 class="settings-form__section" data-i18n="settings.sectionAgent">Agent</h3>
           <label class="field"><span data-i18n="settings.agentModel">Default chat model</span>
@@ -703,21 +793,34 @@
     </div>
   </div>
 
+  <!-- Editing one integration: enable it and fill in what that system needs. -->
+  <div class="modal" id="intModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="intForm">
+      <h3 class="modal__title" id="intModalTitle"></h3>
+      <p class="field-hint" id="intHint"></p>
+      <label class="field" id="intCallbackField"><span data-i18n="int.callback">Callback URL</span>
+        <input type="text" id="intCallback" readonly />
+        <small class="field-hint" data-i18n="int.callbackHint"></small></label>
+      <div class="conn-section" id="intFields"></div>
+      <label class="check-field"><input type="checkbox" id="intEnabled" /><span data-i18n="int.enabled">Enabled</span></label>
+      <p class="field-hint kb-modal__error" id="intError" hidden></p>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="intSubmit" data-i18n="common.save">Save</button>
+      </div>
+    </form>
+  </div>
+
   <div class="modal" id="connectorModal" hidden>
     <div class="modal__backdrop" data-close></div>
     <form class="modal__card" id="connectorForm">
       <h3 class="modal__title" id="connectorModalTitle" data-i18n="conn.modalAdd">Add connector</h3>
-      <label class="field"><span data-i18n="conn.fKind">Kind</span>
-        <select id="cfKind">
-          <option value="mcp" data-i18n="conn.kind.mcp">MCP server (agent tools)</option>
-          <option value="feishu" data-i18n="conn.kind.feishu">Feishu (messages)</option>
-        </select>
-      </label>
       <label class="field"><span data-i18n="conn.fName">Name</span><input type="text" id="cfName" /></label>
       <label class="field"><span data-i18n="conn.fDescription">Description</span>
         <input type="text" id="cfDescription" data-i18n-ph="common.optional" /></label>
       <!-- An MCP server: how agents reach it and whose identity it acts with. -->
-      <div class="conn-section" data-conn-kind="mcp">
+      <div class="conn-section">
         <div class="field-row">
           <label class="field"><span data-i18n="conn.fTransport">Transport</span>
             <select id="cfTransport">
@@ -743,15 +846,6 @@
         <label class="field" id="cfTokenEnvField"><span data-i18n="conn.fTokenEnv">Token environment variable</span>
           <input type="text" id="cfTokenEnv" autocomplete="off" />
           <small class="field-hint" data-i18n="conn.fTokenEnvHint"></small></label>
-      </div>
-      <!-- The company's Feishu app: one for everyone. -->
-      <div class="conn-section" data-conn-kind="feishu" hidden>
-        <p class="field-hint" data-i18n="conn.feishuHint"></p>
-        <div class="field-row">
-          <label class="field"><span data-i18n="conn.fAppId">App ID</span><input type="text" id="cfAppId" autocomplete="off" /></label>
-          <label class="field"><span data-i18n="conn.fAppSecret">App Secret</span>
-            <input type="password" id="cfAppSecret" autocomplete="new-password" /></label>
-        </div>
       </div>
       <p class="field-hint" id="cfSecretKept" data-i18n="conn.secretKept" hidden></p>
       <label class="check-field"><input type="checkbox" id="cfEnabled" checked /><span data-i18n="conn.fEnabled">Enabled</span></label>
@@ -918,11 +1012,25 @@
         <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
         <h3 class="drawer__title" id="agentDetailTitle">Agent</h3>
         <span class="agent-detail__actions">
-          <button class="btn btn--sm" id="agentLogBtn" type="button" data-i18n="log.open">Run log</button>
           <button class="btn btn--sm" id="agentEditBtn" type="button" data-i18n="agent.edit">Edit</button>
         </span>
       </div>
       <div class="drawer__body" id="agentInfoDetails">
+        <!-- What's beneath the conversation: what it remembers, and what it did. -->
+        <div class="agent-links">
+          <button class="agent-link" id="agentMemoryBtn" type="button">
+            <span class="agent-link__icon" aria-hidden="true">◎</span>
+            <span class="agent-link__text"><b data-i18n="mem.open">Memory</b><small data-i18n="mem.linkHint">What it carries into every new conversation</small></span>
+          </button>
+          <button class="agent-link" id="agentLogBtn" type="button">
+            <span class="agent-link__icon" aria-hidden="true">≡</span>
+            <span class="agent-link__text"><b data-i18n="log.open">Run log</b><small data-i18n="log.linkHint">Sessions, turns and what it did in the background</small></span>
+          </button>
+          <a class="agent-link" id="superSources" href="#messages" hidden>
+            <span class="agent-link__icon" aria-hidden="true">✉</span>
+            <span class="agent-link__text"><b data-i18n="super.messagesLink">Message stream</b><small id="superSourcesHint"></small></span>
+          </a>
+        </div>
         <div class="agent-field agent-members" id="agentMembersBlock" hidden>
           <div class="agent-field__head">
             <span class="agent-field__label" data-i18n="co.members">Members</span>
@@ -931,7 +1039,7 @@
           <ul class="agent-members__list" id="agentMembers"></ul>
           <button class="link-btn link-btn--muted" type="button" id="agentLeaveBtn" data-i18n="co.leave" hidden>Leave</button>
         </div>
-        <div class="agent-field">
+        <div class="agent-field agent-field--not-super">
           <span class="agent-field__label" data-i18n="agent.fCharacter">Character</span>
           <p class="agent-info__character" id="agentInfoCharacter"></p>
           <div class="agent-persona" id="agentPersonaWrap" hidden>
@@ -939,7 +1047,7 @@
             <button class="agent-persona__more" type="button" id="agentPersonaMore" hidden></button>
           </div>
         </div>
-        <div class="agent-field">
+        <div class="agent-field agent-field--not-super">
           <span class="agent-field__label" data-i18n="sk.agentSkills">Skills</span>
           <div class="skill-chips" id="agentInfoSkills"></div>
         </div>
@@ -1001,6 +1109,22 @@
         <ol class="log-list" id="agentLogList"></ol>
         <p class="admin__empty" id="agentLogEmpty" data-i18n="log.empty" hidden>Nothing logged yet.</p>
         <p class="log-note" data-i18n="log.retention">Kept for 30 days, up to 5000 lines per agent.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- The SuperAgent background record: what reached its queue and how each round handled it. -->
+  <div class="drawer" id="superBgDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <div class="drawer__panel drawer__panel--wide">
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <h3 class="drawer__title" data-i18n="super.bgRecordTitle">Background record</h3>
+      </div>
+      <div class="drawer__body">
+        <p class="super-bg__hint" data-i18n="super.bgHint"></p>
+        <ol class="bg-rounds" id="superBgList"></ol>
+        <p class="super-work__empty" id="superBgEmpty" data-i18n="super.bgEmpty" hidden>Nothing yet.</p>
       </div>
     </div>
   </div>
@@ -1121,6 +1245,8 @@
   <script src="/js/auth.js"></script>
   <script src="/js/models.js"></script>
   <script src="/js/settings.js"></script>
+  <script src="/js/integrations.js"></script>
+  <script src="/js/file-storage.js"></script>
   <script src="/js/analytics.js"></script>
   <script src="/js/todo.js"></script>
   <script src="/js/automations.js"></script>

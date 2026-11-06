@@ -20,7 +20,8 @@ import java.util.Optional;
  */
 abstract class AbstractJdbcConnectorCredentialStore implements ConnectorCredentialStore {
 
-    protected static final String INSERT = "(connector_id, owner, secret_cipher, account_label, updated_at) VALUES (?, ?, ?, ?, ?)";
+    protected static final String INSERT = "(connector_id, owner, secret_cipher, account_label, updated_at, refresh_cipher, expires_at)"
+            + " VALUES (?, ?, ?, ?, ?, ?, ?)";
 
     protected final JdbcTemplate jdbc;
 
@@ -39,7 +40,9 @@ abstract class AbstractJdbcConnectorCredentialStore implements ConnectorCredenti
             rs.getString("owner"),
             emptyToNull(rs.getString("secret_cipher")),
             emptyToNull(rs.getString("account_label")),
-            instant(rs, "updated_at"));
+            instant(rs, "updated_at"),
+            emptyToNull(rs.getString("refresh_cipher")),
+            instant(rs, "expires_at"));
 
     @Override
     public Optional<ConnectorCredential> find(String connectorId, String owner) {
@@ -54,7 +57,8 @@ abstract class AbstractJdbcConnectorCredentialStore implements ConnectorCredenti
     }
 
     protected Object[] params(ConnectorCredential c) {
-        return new Object[]{c.connectorId(), c.owner(), nn(c.secretCipher()), nn(c.accountLabel()), utc(c.updatedAt())};
+        return new Object[]{c.connectorId(), c.owner(), nn(c.secretCipher()), nn(c.accountLabel()), utc(c.updatedAt()),
+                nn(c.refreshCipher()), c.expiresAt() == null ? null : utc(c.expiresAt())};
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

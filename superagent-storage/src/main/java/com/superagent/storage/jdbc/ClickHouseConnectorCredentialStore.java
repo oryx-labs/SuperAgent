@@ -13,7 +13,8 @@ import java.util.List;
 public class ClickHouseConnectorCredentialStore extends AbstractJdbcConnectorCredentialStore {
 
     public ClickHouseConnectorCredentialStore(JdbcTemplate jdbc) {
-        super(jdbc, List.of());
+        super(jdbc, List.of("ALTER TABLE connector_credential ADD COLUMN IF NOT EXISTS refresh_cipher String",
+                "ALTER TABLE connector_credential ADD COLUMN IF NOT EXISTS expires_at Nullable(DateTime64(3, 'UTC'))"));
     }
 
     @Override

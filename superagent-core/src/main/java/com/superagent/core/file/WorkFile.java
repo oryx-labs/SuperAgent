@@ -6,8 +6,9 @@ import java.util.List;
 /**
  * A work result an agent produced: a document, an image, a video — "everything is a file". Only the latest
  * content is kept (an agent revising a file overwrites it). {@code storage} says where the content lives
- * ({@link #INTERNAL} = on this server, at {@code location}; {@link #LINK} = a web address, {@code location} is the
- * URL). External stores (Feishu / DingTalk docs, image hosts) come later as further storage kinds.
+ * ({@link #INTERNAL} = on this server's disk; another {@link FileStoreProvider#type()} = that store, e.g. "s3";
+ * {@link #LINK} = a web address, {@code location} is the URL). For stored content {@code location} is the id the
+ * store knows it by.
  *
  * <p>Provenance: {@code owner} is who gave the instruction (the file is theirs), {@code agentId} the agent
  * that made it (its members can see it), {@code taskId} the task, if it came from one. {@code origin} is
@@ -80,6 +81,12 @@ public record WorkFile(
 
     public WorkFile withContent(String newName, WorkFileKind newKind, String newMime, long newSize) {
         return new WorkFile(id, newName, newKind, newMime, newSize, storage, location, owner, agentId, taskId, origin,
+                deleted, createdAt, Instant.now(), tags, tagState);
+    }
+
+    /** The same file, its content now kept in another store. */
+    public WorkFile withStorage(String newStorage) {
+        return new WorkFile(id, name, kind, mimeType, size, newStorage, location, owner, agentId, taskId, origin,
                 deleted, createdAt, Instant.now(), tags, tagState);
     }
 

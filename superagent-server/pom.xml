@@ -47,6 +47,13 @@
       <version>${project.version}</version>
     </dependency>
 
+    <!-- File store plugins: leave one out to keep its cloud SDK out of the build. -->
+    <dependency>
+      <groupId>com.superagent</groupId>
+      <artifactId>superagent-files-s3</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
     <dependency>
       <groupId>io.micrometer</groupId>
       <artifactId>micrometer-registry-prometheus</artifactId>

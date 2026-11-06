@@ -4,14 +4,14 @@ import java.time.Instant;
 
 /**
  * A connector as the viewer sees it. Enum fields are lowercase strings. The "my…" fields are the viewer's own
- * authorization; the admin-only fields ({@code endpoint}, {@code tokenEnv}, {@code appId},
- * {@code companySecretSet}, {@code authorizedCount}) are null / false / 0 for everyone else.
+ * authorization; the admin-only fields ({@code endpoint}, {@code tokenEnv}, {@code companySecretSet},
+ * {@code authorizedCount}) are null / false / 0 for everyone else.
  */
 public record ConnectorDto(
         String id,
         String name,
         String description,
-        /** mcp | feishu */
+        /** builtin (SuperAgent's own) | mcp | feishu (from System Settings → integrations) */
         String kind,
         /** none | shared_token | personal_token | oauth */
         String authMethod,
@@ -28,11 +28,10 @@ public record ConnectorDto(
         String account,
         /** Feishu: the code the viewer sends the company bot to link themselves, while not linked. */
         String bindCode,
-        /** OAuth: whether the provider's app credentials are configured, so authorizing can proceed. */
+        /** OAuth: whether the provider's app is set up under System Settings, so authorizing can proceed. */
         boolean oauthConfigured,
         String endpoint,
         String tokenEnv,
-        String appId,
         /** A shared token / app secret is stored. */
         boolean companySecretSet,
         /** How many employees have authorized (or are linked, for Feishu). */
