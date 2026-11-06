@@ -69,7 +69,7 @@ public class ProviderModelFetcher {
     public Result fetch(String providerKey, com.superagent.core.chat.RunCredential credential)
             throws IOException, InterruptedException {
         return switch (providerKey) {
-            case "codex" -> fetchCodex();
+            case "codex" -> fetchCodex(credential);
             case "claude" -> fetchClaude(credential);
             case "deepseek", "glm", "kimi", "qwen" -> fetchVendor(providerKey, credential);
             default -> throw new IOException("Model listing is not available for " + providerKey + " yet");
@@ -101,9 +101,14 @@ public class ProviderModelFetcher {
 
     // --- codex ---
 
-    private Result fetchCodex() throws IOException, InterruptedException {
+    private Result fetchCodex(com.superagent.core.chat.RunCredential credential) throws IOException, InterruptedException {
         Path codex = probe.findBinary("codex").orElseThrow(() -> new IOException("codex is not installed"));
-        JsonNode root = mapper.readTree(run(List.of(codex.toString(), "debug", "models"), 60));
+        List<String> argv = new ArrayList<>(List.of(codex.toString(), "debug", "models"));
+        if (credential != null) {
+            // Like a run: a hand-set provider in the machine's config.toml (or a broken one) mustn't decide the list.
+            argv.addAll(List.of("-c", "model_provider=\"openai\""));
+        }
+        JsonNode root = mapper.readTree(run(argv, 60));
         List<ProviderModelDto> out = new ArrayList<>();
         for (JsonNode m : root.path("models")) {
             if ("hide".equals(m.path("visibility").asText())) {
