@@ -17,7 +17,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,8 +33,9 @@ import java.util.concurrent.Executors;
  * <ul>
  *   <li>Claude Code: the {@code env} block of {@code settings.json} ({@code ANTHROPIC_BASE_URL} plus
  *       {@code ANTHROPIC_API_KEY} or {@code ANTHROPIC_AUTH_TOKEN}); the file's other settings are left alone.</li>
- *   <li>Codex: {@code auth.json} in API-key mode (the same file {@code codex login --with-api-key} writes) and the
- *       top-level {@code openai_base_url} of {@code config.toml}.</li>
+ *   <li>Codex: {@code auth.json} in API-key mode (the same file {@code codex login --with-api-key} writes), and in
+ *       {@code config.toml} the built-in provider at the entry's endpoint ({@code model_provider},
+ *       {@code openai_base_url}) with no {@code profile} — a hand-set relay provider would otherwise win.</li>
  * </ul>
  *
  * Before the first change to a file its original is kept beside it ({@code .superagent-backup}); when no console
@@ -125,16 +128,27 @@ public class CliConfigWriter {
         log.info("claude: settings.json now uses {}", c == null ? "the original settings" : c);
     }
 
-    // --- Codex: auth.json + config.toml openai_base_url ---
+    // --- Codex: auth.json + config.toml (provider, base URL, profile) ---
+
+    /**
+     * The top-level config.toml settings that decide where Codex sends its key. A machine set up by hand often picks
+     * a provider of its own ({@code model_provider = "x"} with {@code [model_providers.x]}: a relay) or a
+     * {@code profile} that does; either would ignore the console's key. While a console entry is in use they point
+     * at the built-in provider and the entry's endpoint; the hand-made tables stay in the file, just unselected.
+     */
+    private static final List<String> CODEX_KEYS = List.of("model_provider", "openai_base_url", "profile");
 
     void writeCodex(Path home, RunCredential c) throws IOException {
         Path auth = home.resolve("auth.json");
         Path config = home.resolve("config.toml");
         if (c == null) {
             boolean restored = restoreWhole(auth);
-            String original = Files.exists(backupOf(config)) ? MachineCredentials.openaiBaseUrl(backupOf(config)) : null;
             if (Files.exists(backupOf(config)) || Files.exists(absentOf(config))) {
-                restored |= setBaseUrl(config, original);
+                // Each managed setting back to what the original file said (or gone); later hand edits elsewhere stay.
+                for (String key : CODEX_KEYS) {
+                    String original = Files.exists(backupOf(config)) ? topLevel(backupOf(config), key) : null;
+                    restored |= setTopLevel(config, key, original);
+                }
             }
             if (restored) {
                 log.info("codex: config restored to the original settings");
@@ -148,17 +162,40 @@ public class CliConfigWriter {
             writeOwnerOnly(auth, mapper.writeValueAsString(wanted) + "\n");
             changed = true;
         }
-        if (!Objects.equals(MachineCredentials.openaiBaseUrl(config), c.baseUrl())) {
-            keepOriginal(config);
-            changed |= setBaseUrl(config, c.baseUrl());
+        Map<String, String> settings = new LinkedHashMap<>();
+        settings.put("model_provider", "\"openai\"");
+        settings.put("openai_base_url", c.baseUrl() == null ? null : mapper.writeValueAsString(c.baseUrl()));
+        settings.put("profile", null);
+        for (Map.Entry<String, String> e : settings.entrySet()) {
+            if (!Objects.equals(topLevel(config, e.getKey()), e.getValue())) {
+                keepOriginal(config);
+                changed |= setTopLevel(config, e.getKey(), e.getValue());
+            }
         }
         if (changed) {
             log.info("codex: auth.json / config.toml now use {}", c);
         }
     }
 
-    /** Sets (or, with null, removes) the top-level {@code openai_base_url}, leaving the rest of the file as it is. */
-    static boolean setBaseUrl(Path config, String url) throws IOException {
+    /** The raw TOML value of a top-level key (before any [table]), or null. */
+    static String topLevel(Path config, String key) throws IOException {
+        if (!Files.isRegularFile(config)) {
+            return null;
+        }
+        for (String line : Files.readAllLines(config, StandardCharsets.UTF_8)) {
+            String t = line.strip();
+            if (t.startsWith("[")) {
+                return null;
+            }
+            if (isKey(t, key)) {
+                return t.substring(t.indexOf('=') + 1).strip();
+            }
+        }
+        return null;
+    }
+
+    /** Sets a top-level key to a raw TOML value (or, with null, removes it), leaving the rest of the file as it is. */
+    static boolean setTopLevel(Path config, String key, String value) throws IOException {
         List<String> lines = Files.exists(config) ? new ArrayList<>(Files.readAllLines(config, StandardCharsets.UTF_8))
                 : new ArrayList<>();
         int existing = -1;
@@ -167,12 +204,12 @@ public class CliConfigWriter {
             if (t.startsWith("[")) {
                 break; // only top-level keys; tables start here
             }
-            if (t.startsWith("openai_base_url")) {
+            if (isKey(t, key)) {
                 existing = i;
                 break;
             }
         }
-        String line = url == null ? null : "openai_base_url = " + new ObjectMapper().writeValueAsString(url);
+        String line = value == null ? null : key + " = " + value;
         if (existing >= 0 && line != null && lines.get(existing).strip().equals(line)) {
             return false;
         }
@@ -189,6 +226,10 @@ public class CliConfigWriter {
         }
         writeOwnerOnly(config, String.join("\n", lines) + "\n");
         return true;
+    }
+
+    private static boolean isKey(String trimmedLine, String key) {
+        return trimmedLine.startsWith(key) && trimmedLine.substring(key.length()).stripLeading().startsWith("=");
     }
 
     // --- .env files (Qwen, Gemini) ---

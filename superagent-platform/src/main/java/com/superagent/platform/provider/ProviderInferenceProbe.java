@@ -156,6 +156,8 @@ public class ProviderInferenceProbe {
         java.util.Map<String, String> env = new java.util.HashMap<>();
         if (credential != null) {
             env.put("CODEX_API_KEY", credential.apiKey()); // env, never argv
+            // Like a run: the machine's config.toml may pick a relay provider, which would check its key, not this one.
+            argv.addAll(List.of("-c", "model_provider=\"openai\""));
             if (credential.baseUrl() != null) {
                 argv.addAll(List.of("-c", "openai_base_url=" + mapper.writeValueAsString(credential.baseUrl())));
             }

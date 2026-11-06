@@ -42,23 +42,46 @@ class CliConfigWriterTest {
     }
 
     @Test
-    void codexGetsAnApiKeyLoginAndABaseUrlAndLosesThemWhenNothingIsUsable() throws Exception {
+    void codexMovesOffAHandSetRelayWhileAConsoleKeyIsInUseAndGoesBackAfter() throws Exception {
         Path config = tmp.resolve("config.toml");
-        Files.writeString(config, "model = \"gpt-6\"\n\n[mcp_servers.x]\nurl = \"http://x\"\n");
+        String original = """
+                model_provider = "OpenAI"
+                model = "gpt-6"
+                profile = "relay"
 
-        writer.writeCodex(tmp, new RunCredential("c1", "https://relay.example/v1", "sk-relay", false));
+                [model_providers.OpenAI]
+                name = "OpenAI"
+                base_url = "https://api.relay.example"
+                wire_api = "responses"
+                requires_openai_auth = true
+
+                [profiles.relay]
+                model_provider = "OpenAI"
+                """;
+        Files.writeString(config, original);
+
+        writer.writeCodex(tmp, new RunCredential("c1", "https://api.openai.com/v1", "sk-console", false));
         JsonNode auth = json.readTree(tmp.resolve("auth.json").toFile());
         assertThat(auth.path("auth_mode").asText()).isEqualTo("apikey");
-        assertThat(auth.path("OPENAI_API_KEY").asText()).isEqualTo("sk-relay");
-        assertThat(MachineCredentials.openaiBaseUrl(config)).isEqualTo("https://relay.example/v1");
-        assertThat(Files.readString(config)).contains("[mcp_servers.x]").contains("model = \"gpt-6\"");
+        assertThat(auth.path("OPENAI_API_KEY").asText()).isEqualTo("sk-console");
+        assertThat(CliConfigWriter.topLevel(config, "model_provider")).isEqualTo("\"openai\"");
+        assertThat(CliConfigWriter.topLevel(config, "openai_base_url")).isEqualTo("\"https://api.openai.com/v1\"");
+        assertThat(CliConfigWriter.topLevel(config, "profile")).isNull();
+        // The hand-made relay is still there, just not selected.
+        assertThat(Files.readString(config)).contains("[model_providers.OpenAI]").contains("model = \"gpt-6\"");
 
-        writer.writeCodex(tmp, new RunCredential("c2", null, "sk-official", false)); // default endpoint
-        assertThat(MachineCredentials.openaiBaseUrl(config)).isNull();
+        // A failover to another entry: the config follows.
+        writer.writeCodex(tmp, new RunCredential("c2", "https://backup.example/v1", "sk-backup", false));
+        assertThat(CliConfigWriter.topLevel(config, "openai_base_url")).isEqualTo("\"https://backup.example/v1\"");
+        assertThat(json.readTree(tmp.resolve("auth.json").toFile()).path("OPENAI_API_KEY").asText()).isEqualTo("sk-backup");
 
+        // Nothing usable any more: the machine's own setup comes back as it was.
         writer.writeCodex(tmp, null);
         assertThat(tmp.resolve("auth.json")).doesNotExist(); // there was none before SuperAgent
-        assertThat(Files.readString(config)).isEqualTo("model = \"gpt-6\"\n\n[mcp_servers.x]\nurl = \"http://x\"\n");
+        assertThat(CliConfigWriter.topLevel(config, "model_provider")).isEqualTo("\"OpenAI\"");
+        assertThat(CliConfigWriter.topLevel(config, "profile")).isEqualTo("\"relay\"");
+        assertThat(CliConfigWriter.topLevel(config, "openai_base_url")).isNull();
+        assertThat(Files.readString(config)).contains("[profiles.relay]").contains("requires_openai_auth = true");
     }
 
     @Test

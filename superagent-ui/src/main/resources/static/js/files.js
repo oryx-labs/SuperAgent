@@ -189,11 +189,40 @@ async function openFile(fileOrId) {
   renderFilePreview(f);
 }
 
+/**
+ * A markdown file read as a document, not a chat reply: line breaks in the source don't break lines, front matter
+ * shows as a code block instead of a stray rule and heading, wide tables scroll on their own, code is coloured
+ * (only when the block names a language: guessing colours prose) and links leave the app in a new tab.
+ */
+function markdownDocument(text) {
+  const doc = document.createElement("div");
+  doc.className = "markdown fl-markdown";
+  const source = text.replace(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/, "```yaml\n$1\n```\n\n");
+  doc.innerHTML = window.DOMPurify && window.marked
+    ? window.DOMPurify.sanitize(window.marked.parse(source, { gfm: true, breaks: false })) : renderMarkdown(text);
+  doc.querySelectorAll("table").forEach(table => {
+    const scroll = document.createElement("div");
+    scroll.className = "fl-md-table";
+    table.replaceWith(scroll);
+    scroll.appendChild(table);
+  });
+  doc.querySelectorAll("a[href]").forEach(a => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+  if (window.hljs) {
+    doc.querySelectorAll('pre code[class*="language-"]').forEach(code => {
+      const lang = code.className.match(/language-([\w+#.-]+)/);
+      if (lang && window.hljs.getLanguage(lang[1])) window.hljs.highlightElement(code);
+    });
+  }
+  return doc;
+}
+
 async function renderFilePreview(f) {
   const box = flel.preview;
   box.replaceChildren();
   const src = fileContentUrl(f.id, false);
   const ext = (f.name.split(".").pop() || "").toLowerCase();
+  // Documents read better wider than the drawer's usual width.
+  flel.drawer.querySelector(".drawer__panel").classList.toggle("fl-panel-doc", ext === "md" || ext === "markdown");
   if (f.kind === "link") {
     // The address and a way to open it; nothing is fetched here (many links need the viewer's own login).
     const url = document.createElement("p");
@@ -228,10 +257,7 @@ async function renderFilePreview(f) {
     } catch (e) { box.textContent = L("fl.loadFailed", { msg: e.message }); return; }
     if (flOpen !== f) return; // another file was opened meanwhile
     if (ext === "md" || ext === "markdown") {
-      const md = document.createElement("div");
-      md.className = "markdown fl-markdown";
-      md.innerHTML = renderMarkdown(text);
-      box.appendChild(md);
+      box.appendChild(markdownDocument(text));
     } else {
       const pre = document.createElement("pre");
       pre.className = "fl-text";
