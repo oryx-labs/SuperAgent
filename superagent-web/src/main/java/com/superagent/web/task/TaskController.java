@@ -132,7 +132,7 @@ public class TaskController {
     @PostMapping(ApiPaths.TASKS + "/{id}/messages")
     public ApiResponse<Void> sendMessage(@PathVariable String id, @RequestBody SendMessageRequest request,
                                          Authentication auth) {
-        taskService.sendMessage(id, auth.getName(), request.content(), request.images());
+        taskService.sendMessage(id, auth.getName(), request.content(), request.images(), request.fileIds());
         return ApiResponse.empty();
     }
 

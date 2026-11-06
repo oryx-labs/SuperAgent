@@ -1,0 +1,103 @@
+package com.superagent.platform.provider;
+
+import com.superagent.api.provider.CredentialDto;
+import com.superagent.api.provider.CredentialRequests;
+import com.superagent.core.chat.RunCredential;
+import com.superagent.core.provider.ModelProvider;
+import com.superagent.core.provider.ModelProviderStore;
+import com.superagent.core.provider.ProviderCredential;
+import com.superagent.core.provider.ProviderCredentialStore;
+import com.superagent.core.security.SecretCipher;
+import com.superagent.runtime.cli.CliPaths;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+class CredentialServiceTest {
+
+    private static final class InMemoryPool implements ProviderCredentialStore {
+        final Map<String, ProviderCredential> rows = new LinkedHashMap<>();
+        @Override public List<ProviderCredential> list(String key) {
+            return rows.values().stream().filter(c -> c.providerKey().equals(key))
+                    .sorted(Comparator.comparingInt(ProviderCredential::priority)).toList();
+        }
+        @Override public Optional<ProviderCredential> find(String id) { return Optional.ofNullable(rows.get(id)); }
+        @Override public void save(ProviderCredential c) { rows.put(c.id(), c); }
+        @Override public void delete(String id) { rows.remove(id); }
+    }
+
+    /** Keys listed in {@code down} fail their check (e.g. quota exhausted); the rest answer. */
+    private static final class FakeProbe extends ProviderInferenceProbe {
+        final Set<String> down = new HashSet<>();
+        FakeProbe(Path tmp) { super(new ProviderProbe(new CliPaths(tmp.resolve("node").toString()))); }
+        @Override public void check(String key, String model, RunCredential c) throws IOException {
+            if (c != null && down.contains(c.apiKey())) {
+                throw new IOException("HTTP 429: quota exceeded");
+            }
+        }
+    }
+
+    @TempDir
+    Path tmp;
+
+    @Test
+    void runsUseTheBestHealthyKeyFailOverOnAnEndpointErrorAndReturnOnceItRecovers() {
+        InMemoryPool pool = new InMemoryPool();
+        ModelProviderStore providers = mock(ModelProviderStore.class);
+        when(providers.findByKey(anyString())).thenReturn(Optional.of(new ModelProvider("p", "claude", true, true,
+                null, null, "ok", null, "[{\"id\":\"claude-x\",\"inferStatus\":\"ok\"}]", null, null, Instant.now(), Instant.now())));
+        FakeProbe probe = new FakeProbe(tmp);
+        CredentialService svc = new CredentialService(pool, providers,
+                new SecretCipher("", tmp.resolve("secret.key").toString()), probe);
+
+        assertThat(svc.current("claude").id()).isEqualTo(CredentialService.ENV_ID); // nothing configured yet
+        String main = svc.add("claude", new CredentialRequests.Save("官方", "", "sk-ant-main-0000000001", false, null)).id();
+        String relay = svc.add("claude", new CredentialRequests.Save("中转", "https://relay.example/", "relay-token-000000002", true, null)).id();
+        assertThat(svc.current("claude").credential().apiKey()).isEqualTo("sk-ant-main-0000000001");
+
+        // The page sees a masked key and the env fallback as the last, read-only entry.
+        List<CredentialDto> listed = svc.list("claude");
+        assertThat(listed).extracting(CredentialDto::keyHint).first().isEqualTo("sk-a…0001");
+        assertThat(listed.get(1).baseUrl()).isEqualTo("https://relay.example");
+        assertThat(listed.get(2).env()).isTrue();
+
+        // A quota error is the key's fault: mark it, retry on the relay. A bad request is not: no switch.
+        assertThat(svc.failover("claude", svc.current("claude"), "API Error: 400 prompt is too long")).isEmpty();
+        CredentialService.Choice next = svc.failover("claude", svc.current("claude"), "API Error: 429 rate_limit_error").orElseThrow();
+        assertThat(next.id()).isEqualTo(relay);
+        assertThat(svc.current("claude").id()).isEqualTo(relay);
+
+        // The relay fails too: the server environment is the last resort.
+        assertThat(svc.failover("claude", next, "connect ECONNREFUSED").orElseThrow().id()).isEqualTo(CredentialService.ENV_ID);
+
+        // The periodic check sees the main key answer again (and the relay still down): back to priority order.
+        probe.down.add("relay-token-000000002");
+        svc.checkAll();
+        assertThat(svc.current("claude").id()).isEqualTo(main);
+        assertThat(pool.find(relay).orElseThrow().status()).isEqualTo(ProviderCredential.ERROR);
+    }
+
+    @Test
+    void onlyErrorsAnotherKeyCouldFixCountAsEndpointFailures() {
+        assertThat(EndpointFailures.isEndpointFailure("Failed to authenticate: OAuth session expired and could not be refreshed")).isTrue();
+        assertThat(EndpointFailures.isEndpointFailure("API Error: 529 {\"type\":\"overloaded_error\"}")).isTrue();
+        assertThat(EndpointFailures.isEndpointFailure("unexpected status 401 Unauthorized")).isTrue();
+        assertThat(EndpointFailures.isEndpointFailure("API Error: 404 model: claude-nope not found")).isFalse();
+        assertThat(EndpointFailures.isEndpointFailure("Bash failed: line 500 of build.log")).isFalse();
+    }
+}

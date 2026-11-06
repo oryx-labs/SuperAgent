@@ -67,7 +67,8 @@ const features = computed(() => [
     eyebrow: t('三级资产', 'Three levels of assets'),
     title: t('个人、团队、公司,各有积累', 'For each person, team, and the company'),
     bullets: [
-      { text: t('Skills 和知识库分三级', 'Skills and knowledge at three levels') },
+      { text: t('知识库分个人、团队、公司三级', 'Knowledge at personal, team, and company levels') },
+      { text: t('Skills 分个人和公司两级', 'Skills at personal and company levels') },
       { text: t('新人入职直接继承', 'New hires inherit it all') },
     ],
     panel: 'tiers',

@@ -24,15 +24,15 @@ Collaboration between employees happens inside one AI system.
 
 ## 3. Assets for each person, team, and the company
 
-Skills and knowledge bases exist at three levels, holding what everyday work needs:
+Knowledge bases and skills hold what everyday work needs:
 
-| Level | Who can use it |
-| --- | --- |
-| **Company** | Everyone in the company |
-| **Team** | Members of the team |
-| **Personal** | Just the employee |
+| Level | Who can use it | Knowledge base | Skills |
+| --- | --- | --- | --- |
+| **Company** | Everyone in the company | ✓ | ✓ |
+| **Team** | Members of the team | ✓ | |
+| **Personal** | Just the employee | ✓ | ✓ |
 
-Skills are reusable instruction sets that agents and tasks load as needed. A new hire starts with what the team and company already know.
+Skills are reusable instruction sets that agents and tasks load as needed. Team membership comes from the company's directory. A new hire starts with what the team and company already know.
 
 ## 4. Cost, models, and governance
 

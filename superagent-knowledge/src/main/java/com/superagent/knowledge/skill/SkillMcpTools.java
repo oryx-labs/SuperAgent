@@ -46,13 +46,13 @@ public class SkillMcpTools implements McpToolProvider {
     @Override
     public List<ObjectNode> tools() {
         return List.of(
-                tool("skill_list", "列出用户能看到的 skill（工作规范）：id、所在层（personal 个人 / team:团队 / company 公司）、名称、分类、适用场景。", props(), (String[]) null),
+                tool("skill_list", "列出用户能看到的 skill（工作规范）：id、所在层（personal 个人 / company 公司）、名称、分类、适用场景。", props(), (String[]) null),
                 tool("skill_get", "查看一个 skill 的完整内容和图片列表。", props(req("id", "string", "skill id")), "id"),
                 tool("skill_create", "新建一个 skill，默认放在用户的个人层。description 要写清楚什么时候使用它，Agent 靠它判断是否适用。",
                         props(req("name", "string", "名称，如 写作规范"), req("description", "string", "适用场景，一句话"),
                                 opt("category", "string", "分类，如 写作 / 设计 / 运营"),
                                 req("content", "string", "正文（Markdown）：规范、步骤、示例；图片用 images/文件名 引用"),
-                                opt("space", "string", "放在哪一层：personal（默认）、team:<团队路径>、company；仅在用户明确要求时放到团队或公司")),
+                                opt("space", "string", "放在哪一层：personal（默认）或 company；仅在用户明确要求时放到公司")),
                         "name", "description", "content"),
                 tool("skill_update", "修改一个 skill，只传要改的字段。修改会影响所有用这个 skill 的 Agent，仅在用户要求时使用。",
                         props(req("id", "string", "skill id"), opt("name", "string", "新名称"),

@@ -1,6 +1,9 @@
 package com.superagent.platform.provider;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.superagent.core.provider.ProviderCatalog;
+import com.superagent.runtime.cli.CliPaths;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
@@ -9,10 +12,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -26,19 +27,45 @@ import java.util.regex.Pattern;
 public class ProviderProbe {
 
     private static final Pattern SEMVER = Pattern.compile("(\\d+)\\.(\\d+)\\.(\\d+)");
-    /** Common install locations that a service process's PATH often lacks (npm/Homebrew globals). */
-    private static final List<String> EXTRA_BIN_DIRS = List.of("/opt/homebrew/bin", "/usr/local/bin",
-            System.getProperty("user.home") + "/.npm-global/bin", System.getProperty("user.home") + "/.local/bin");
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    private final CliPaths paths;
+
+    public ProviderProbe(CliPaths paths) {
+        this.paths = paths;
+    }
 
     public Optional<Path> findBinary(String cli) {
-        if (cli == null || cli.isBlank()) {
-            return Optional.empty();
-        }
-        for (String dir : searchPath()) {
-            Path candidate = Path.of(dir, cli);
-            if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
-                return Optional.of(candidate);
+        return paths.find(cli);
+    }
+
+    /**
+     * An npm CLI's version from its own package.json (the binary is a symlink into the package), so the status
+     * check needn't run a CLI that may not support {@code --version}; falls back to running it.
+     */
+    public Optional<String> version(Path binary, ProviderCatalog.Entry entry) {
+        if (entry.npmPackage() != null) {
+            Optional<String> fromPackage = packageVersion(binary, entry.npmPackage());
+            if (fromPackage.isPresent()) {
+                return fromPackage;
             }
+        }
+        return version(binary, entry.versionArgs());
+    }
+
+    static Optional<String> packageVersion(Path binary, String npmPackage) {
+        try {
+            for (Path dir = binary.toRealPath().getParent(); dir != null; dir = dir.getParent()) {
+                Path pkg = dir.resolve("package.json");
+                if (Files.isRegularFile(pkg)) {
+                    JsonNode json = JSON.readTree(pkg.toFile());
+                    if (npmPackage.equals(json.path("name").asText())) {
+                        return semver(json.path("version").asText(""));
+                    }
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            // not an npm install, or unreadable: fall back to asking the binary
         }
         return Optional.empty();
     }
@@ -131,19 +158,9 @@ public class ProviderProbe {
         return false;
     }
 
-    /** The search path for CLIs: the process PATH plus common global-install dirs. */
+    /** The search path for CLIs (private Node first, then PATH, then common global-install dirs). */
     List<String> searchPath() {
-        Set<String> dirs = new LinkedHashSet<>();
-        String path = System.getenv("PATH");
-        if (path != null) {
-            for (String d : path.split(File.pathSeparator)) {
-                if (!d.isBlank()) {
-                    dirs.add(d);
-                }
-            }
-        }
-        dirs.addAll(EXTRA_BIN_DIRS);
-        return List.copyOf(dirs);
+        return paths.searchPath();
     }
 
     static Optional<String> semver(String text) {

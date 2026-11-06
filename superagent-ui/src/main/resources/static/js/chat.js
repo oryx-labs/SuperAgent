@@ -85,11 +85,12 @@ function beginEdit(msgEl, mid) {
 }
 
 // ---------- streaming bubbles ----------
-function addUserBubble(text, imageUrls) {
+function addUserBubble(text, imageUrls, fileNames) {
   clearEmptyState();
   const msg = document.createElement("div");
   msg.className = "msg msg--user";
   if (imageUrls && imageUrls.length) msg.appendChild(imageStrip(imageUrls));
+  if (fileNames && fileNames.length) msg.appendChild(fileNameChips(fileNames));
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   bubble.textContent = text;
@@ -374,9 +375,13 @@ function renderAgentPanel(agent) {
   composerModel.title = isOwner(agent) ? "" : L("co.modelOwnerOnly");
   renderMembers(agent);
   panel.classList.toggle("agent-info--super", agent.kind === "super");
-  document.getElementById("agentInfoDetails").hidden = agent.kind === "super";
+  document.getElementById("agentDetailBtn").hidden = agent.kind === "super";
+  // SuperAgent has no details drawer, so its run log stays in the header.
+  document.getElementById("superLogBtn").hidden = agent.kind !== "super" || !isOwner(agent);
+  document.getElementById("agentDetailTitle").textContent = agent.name || "Agent";
   document.getElementById("superIntro").hidden = agent.kind !== "super";
   if (agent.kind === "super") loadSuperSources();
+  renderAgentWork(agent);
   const persona = document.getElementById("agentInfoPersona");
   persona.textContent = agent.persona || "";
   document.getElementById("agentPersonaWrap").hidden = !agent.persona;
@@ -410,10 +415,22 @@ function setupPersonaClamp() {
 // Composer model picker: the agent's model override, limited to Claude models the background probe saw answer.
 const composerModel = document.getElementById("statusHint");
 
+// No model has passed its probe: chatting can't work, so say so instead of offering a "Default" that would fail.
+let noChatModel = false;
+
 async function renderComposerModel(agent) {
-  const { groups } = await loadChatModels();
+  const { groups, failed } = await loadChatModels();
   if (activeAgent !== agent) return; // switched agents while loading
   composerModel.innerHTML = "";
+  setNoChatModel(!failed && !groups.length);
+  if (noChatModel) {
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = L("chat.noModel");
+    composerModel.appendChild(none);
+    composerModel.disabled = true;
+    return;
+  }
   const def = document.createElement("option");
   def.value = "";
   def.textContent = L("chat.modelDefault", { model: systemSettings.agentDefaultModel || L("settings.modelCliDefault") });
@@ -426,19 +443,28 @@ async function renderComposerModel(agent) {
   composerModel.value = agent.model || "";
 }
 
+function setNoChatModel(on) {
+  noChatModel = on;
+  el.composer.classList.toggle("composer--nomodel", on);
+  el.sendBtn.disabled = on;
+  el.input.setAttribute("placeholder", on ? L(isAdmin ? "chat.noModelAdmin" : "chat.noModelUser")
+    : superMode ? L("super.placeholder") : L("chat.composer"));
+}
+
 // Chat models across every runnable CLI (the backend runs a turn under the CLI that owns the chosen
 // model), keeping only those the background probe saw answer: being listed isn't enough.
 const CLI_LABELS = { claude: "Claude Code", codex: "Codex" };
 async function loadChatModels() {
   let options = [];
-  try { const res = await api.taskAgents(); options = (res && res.data) || []; } catch (e) { /* keep empty */ }
+  let failed = false; // couldn't ask: don't conclude there are no models
+  try { const res = await api.taskAgents(); options = (res && res.data) || []; } catch (e) { failed = true; }
   let listed = 0;
   const groups = options.map(o => {
     const models = o.models || [];
     listed += models.length;
     return { label: CLI_LABELS[o.key] || o.name || o.key, models: models.filter(m => m.inferStatus === "ok") };
   }).filter(g => g.models.length);
-  return { groups, listed };
+  return { groups, listed, failed };
 }
 
 function fillModelGroups(select, groups, label) {

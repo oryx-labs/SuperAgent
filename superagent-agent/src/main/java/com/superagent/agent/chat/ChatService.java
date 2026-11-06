@@ -30,7 +30,9 @@ import com.superagent.core.chat.ImageAttachment;
 import com.superagent.core.chat.MessageRole;
 import com.superagent.core.chat.SessionStatus;
 import com.superagent.core.user.UserStore;
+import com.superagent.files.FileService;
 import com.superagent.knowledge.skill.SkillService;
+import com.superagent.platform.provider.CredentialService;
 import com.superagent.platform.provider.ProviderService;
 import com.superagent.platform.settings.SettingsService;
 import com.superagent.runtime.attachment.ImageAttachmentStore;
@@ -92,7 +94,9 @@ public class ChatService {
     private final Path workspaceRoot;
     private final SettingsService settingsService;
     private final ProviderService providerService;
+    private CredentialService credentials; // null in tests: runs use the server's environment
     private final ImageAttachmentStore images;
+    private final FileService files;
     private final String defaultModel;
     private final List<String> allowedTools;
     private final boolean skipPermissions;
@@ -117,6 +121,7 @@ public class ChatService {
             SettingsService settingsService,
             ProviderService providerService,
             ImageAttachmentStore images,
+            FileService files,
             SkillService skills,
             AgentMemoryService memory,
             AgentLogService runLog,
@@ -126,7 +131,7 @@ public class ChatService {
             UserStore users,
             @Value("${superagent.agent.workspace-dir:./data/workspaces}") String workspaceDir,
             @Value("${superagent.agent.default-model:}") String defaultModel,
-            @Value("${superagent.agent.allowed-tools:Read,Glob,Grep,LS}") String allowedTools,
+            @Value("${superagent.agent.allowed-tools:Read,Glob,Grep,LS,Bash}") String allowedTools,
             @Value("${superagent.agent.skip-permissions:false}") boolean skipPermissions,
             @Value("${superagent.chat.sse-timeout-ms:600000}") long sseTimeoutMs,
             @Value("${superagent.mcp.enabled-in-chat:true}") boolean mcpInChat) {
@@ -137,6 +142,7 @@ public class ChatService {
         this.settingsService = settingsService;
         this.providerService = providerService;
         this.images = images;
+        this.files = files;
         this.skills = skills;
         this.memory = memory;
         this.runLog = runLog;
@@ -152,7 +158,7 @@ public class ChatService {
             // Expose SuperAgent's own MCP so the chat agent can create/steer tasks as tools.
             this.mcpGrants = mcpGrants;
             tools.addAll(SUPERAGENT_MCP_TOOLS);
-            tools.addAll(McpGrants.KNOWLEDGE_TOOLS);
+            tools.addAll(McpGrants.WORK_TOOLS);
         } else {
             this.mcpGrants = null;
         }
@@ -172,6 +178,11 @@ public class ChatService {
             }
         }
         return List.copyOf(out);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setCredentials(CredentialService credentials) {
+        this.credentials = credentials;
     }
 
     // --- session management ---
@@ -376,11 +387,13 @@ public class ChatService {
     // --- sending a message (streamed) ---
 
     public SseEmitter sendMessage(String sessionId, String content) {
-        return sendMessage(sessionId, content, List.of(), null);
+        return sendMessage(sessionId, content, List.of(), List.of(), null);
     }
 
     /** {@code user} is who is chatting: tasks the agent creates through MCP belong to them (null = default owner). */
-    public SseEmitter sendMessage(String requestedSessionId, String content, List<ImageUploadDto> uploads, String user) {
+    /** {@code fileIds}: files the user uploaded for this message (see FileService#upload); they go into the workspace. */
+    public SseEmitter sendMessage(String requestedSessionId, String content, List<ImageUploadDto> uploads,
+                                  List<String> fileIds, String user) {
         ChatSession session = store.findSession(requestedSessionId)
                 .orElseThrow(() -> new SessionNotFoundException(requestedSessionId));
         String sessionId = session.id();
@@ -413,15 +426,22 @@ public class ChatService {
         String character = agent == null ? null : AgentCharacters.systemPrompt(agent);
         String skillIndex = skills.install(session.workspaceDir(),
                 agent == null ? List.of() : skills.forAgent(agent.id(), agent.owner()), mcpGrants != null);
-        String systemPrompt = character == null ? skillIndex
-                : skillIndex == null ? character : character + "\n\n" + skillIndex;
+        String systemPrompt = joinPrompt(joinPrompt(character, skillIndex), mcpGrants == null ? null : McpGrants.FILES_HINT);
 
         // Images are stored under the user message's id before it's appended, so a bad upload stores nothing.
         String userMessageId = UUID.randomUUID().toString();
-        List<ImageAttachment> attached = images.save(sessionId, userMessageId, uploads);
+        List<ImageAttachment> attached = new ArrayList<>(images.save(sessionId, userMessageId, uploads));
+        FileService.Delivered delivered = fileIds == null || fileIds.isEmpty() ? null
+                : FileService.deliver(files.attach(fileIds, user, sessionId, userMessageId), session.workspaceDir());
+        if (delivered != null) {
+            attached.addAll(delivered.images());
+        }
         String text = content == null ? "" : content;
         store.appendMessage(new ChatMessage(userMessageId, sessionId, MessageRole.USER, text, Instant.now(), user));
         String prompt = text.isBlank() && !attached.isEmpty() ? ImageAttachmentStore.IMAGE_ONLY_PROMPT : text;
+        if (delivered != null) {
+            prompt = (text.isBlank() && attached.isEmpty() ? "" : prompt + "\n\n") + delivered.note();
+        }
         // In a shared agent the model must know who is asking, so it can tell the members' requests apart.
         if (agent != null && !members.members(agent.id()).isEmpty()) {
             prompt = "[" + displayName(user) + "]：" + prompt;
@@ -451,6 +471,10 @@ public class ChatService {
             }
         });
         return emitter;
+    }
+
+    private static String joinPrompt(String a, String b) {
+        return a == null ? b : b == null ? a : a + "\n\n" + b;
     }
 
     /** Model precedence: the agent's own override > admin's system default > deployment config. */
@@ -569,15 +593,25 @@ public class ChatService {
             }
         };
 
-        McpGrants.Grant grant = mcpGrants == null ? null : mcpGrants.openChat(user, session.agentId(), session.workspaceDir());
+        McpGrants.Grant grant = mcpGrants == null ? null : mcpGrants.openChat(user, session.agentId(), session.id(), assistantMessageId, session.workspaceDir());
+        String cli = agentType.cliName();
+        CredentialService.Choice choice = credentials == null ? new CredentialService.Choice(null) : credentials.current(cli);
+        AgentRunRequest request = new AgentRunRequest(session.id(), agentSessionId, session.workspaceDir(), prompt, model,
+                allowedTools, skipPermissions, grant == null ? null : mcpGrants.mcpConfig(grant), systemPrompt,
+                attached, agentMemory, choice.credential());
         try {
-            runner.run(new AgentRunRequest(session.id(), agentSessionId, session.workspaceDir(), prompt, model,
-                    allowedTools, skipPermissions, grant == null ? null : mcpGrants.mcpConfig(grant), systemPrompt,
-                    attached, agentMemory), sink, cancellation);
-        } catch (RuntimeException e) {
-            // A runner that blows up is a failed attempt like any other: it may count against the session.
-            log.warn("turn attempt failed in session {}: {}", session.id(), e.getMessage());
-            error.set(e.getMessage() != null ? e.getMessage() : "agent run failed");
+            runOnce(runner, request, sink, cancellation, error, session);
+            // The endpoint or key failed (auth, quota, server down) before anything was said: switch to the
+            // next key in the pool and try the same turn once more, so the user rarely sees the failure.
+            boolean nothingSaid = textAccumulator.isEmpty() && resultText.get() == null;
+            if (credentials != null && nothingSaid && error.get() != null && !cancellation.isCancelled()) {
+                Optional<CredentialService.Choice> next = credentials.failover(cli, choice, error.get());
+                if (next.isPresent()) {
+                    log.info("session {}: retrying the turn on endpoint {}", session.id(), next.get().id());
+                    error.set(null);
+                    runOnce(runner, request.withCredential(next.get().credential()), sink, cancellation, error, session);
+                }
+            }
         } finally {
             if (grant != null) {
                 mcpGrants.close(grant);
@@ -585,6 +619,17 @@ public class ChatService {
         }
         String text = resultText.get() != null ? resultText.get() : textAccumulator.toString();
         return new Attempt(session, text == null ? "" : text, error.get(), capturedAgentSessionId.get());
+    }
+
+    private void runOnce(AgentRunner runner, AgentRunRequest request, AgentEventSink sink, Cancellation cancellation,
+                         AtomicReference<String> error, ChatSession session) {
+        try {
+            runner.run(request, sink, cancellation);
+        } catch (RuntimeException e) {
+            // A runner that blows up is a failed attempt like any other: it may count against the session.
+            log.warn("turn attempt failed in session {}: {}", session.id(), e.getMessage());
+            error.set(e.getMessage() != null ? e.getMessage() : "agent run failed");
+        }
     }
 
     /**

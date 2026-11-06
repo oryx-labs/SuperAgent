@@ -62,9 +62,15 @@ public class ProviderModelFetcher {
 
     /** Fetches the model list for a catalogue key; throws with a readable message on failure. */
     public Result fetch(String providerKey) throws IOException, InterruptedException {
+        return fetch(providerKey, null);
+    }
+
+    /** The list as seen through {@code credential} (a relay may offer other models); null = the server's environment. */
+    public Result fetch(String providerKey, com.superagent.core.chat.RunCredential credential)
+            throws IOException, InterruptedException {
         return switch (providerKey) {
             case "codex" -> fetchCodex();
-            case "claude" -> fetchClaude();
+            case "claude" -> fetchClaude(credential);
             default -> throw new IOException("Model listing is not available for " + providerKey + " yet");
         };
     }
@@ -100,15 +106,11 @@ public class ProviderModelFetcher {
 
     // --- claude ---
 
-    private Result fetchClaude() throws IOException, InterruptedException {
-        String apiKey = System.getenv("ANTHROPIC_API_KEY");
-        String authToken = System.getenv("ANTHROPIC_AUTH_TOKEN");
-        String base = System.getenv("ANTHROPIC_BASE_URL");
-        boolean viaGateway = base != null && !base.isBlank();
-        base = viaGateway ? base.replaceAll("/+$", "") : "https://api.anthropic.com";
+    private Result fetchClaude(com.superagent.core.chat.RunCredential credential) throws IOException, InterruptedException {
+        java.util.Optional<ApiAccess> access = ApiAccess.anthropic(credential);
         List<String> cliEfforts = claudeCliEfforts();
 
-        if (blank(apiKey) && blank(authToken)) {
+        if (access.isEmpty()) {
             // Subscription (OAuth) login: no key to list the account's models with. The CLI's
             // documented aliases still work; say so rather than inventing a list.
             List<ProviderModelDto> aliases = new ArrayList<>();
@@ -119,6 +121,8 @@ public class ProviderModelFetcher {
             return new Result(aliases, "claude --help aliases (no API key in the server environment)");
         }
 
+        String base = access.get().base();
+        boolean viaGateway = access.get().viaGateway();
         List<ProviderModelDto> out = new ArrayList<>();
         String afterId = null;
         for (int page = 0; page < MAX_PAGES; page++) {
@@ -128,11 +132,7 @@ public class ProviderModelFetcher {
                     .timeout(Duration.ofSeconds(20))
                     .header("anthropic-version", "2023-06-01")
                     .GET();
-            if (!blank(apiKey)) {
-                req.header("x-api-key", apiKey);
-            } else {
-                req.header("Authorization", "Bearer " + authToken);
-            }
+            access.get().authorize(req);
             HttpResponse<String> resp = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
                 throw new IOException("GET /v1/models returned HTTP " + resp.statusCode());

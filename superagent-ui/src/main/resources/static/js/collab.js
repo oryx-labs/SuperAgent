@@ -187,6 +187,7 @@ async function selectSession(id) {
   }
   messages.forEach(renderHistoryItem);
   scrollToBottom();
+  if (activeAgent) attachFileCards(activeAgent); // each reply's files, under it
 }
 
 // An agent has many sessions over time (a new model, or a session that kept failing, starts a fresh

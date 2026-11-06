@@ -5,6 +5,8 @@ import com.superagent.api.provider.ProviderModelDto;
 import com.superagent.core.provider.ModelProvider;
 import com.superagent.core.provider.ModelProviderStore;
 import com.superagent.core.provider.ProviderCatalog;
+import com.superagent.core.chat.RunCredential;
+import com.superagent.runtime.cli.CliPaths;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -37,7 +39,11 @@ class ProviderServiceTest {
     private static final class FakeProbe extends ProviderProbe {
         private final boolean installed;
         private final boolean authed;
-        FakeProbe(boolean installed, boolean authed) { this.installed = installed; this.authed = authed; }
+        FakeProbe(boolean installed, boolean authed) {
+            super(new CliPaths(System.getProperty("java.io.tmpdir") + "/sa-test-node"));
+            this.installed = installed;
+            this.authed = authed;
+        }
         @Override public Optional<Path> findBinary(String cli) {
             return installed ? Optional.of(Path.of("/bin/" + cli)) : Optional.empty();
         }
@@ -52,7 +58,7 @@ class ProviderServiceTest {
                 new ProviderModelDto("gpt-6-sol", "GPT-6 Sol", List.of("low", "medium", "high"), "medium", "model", 400000, true));
         String error;
         FakeFetcher() { super(new FakeProbe(true, true)); }
-        @Override public Result fetch(String key) throws IOException {
+        @Override public Result fetch(String key, RunCredential credential) throws IOException {
             if (error != null) {
                 throw new IOException(error);
             }
@@ -60,11 +66,27 @@ class ProviderServiceTest {
         }
     }
 
+    /** Node double: a fixed version on this "machine" (null = none). */
+    private static final class FakeNode extends NodeRuntimeService {
+        final String version;
+        FakeNode(ProviderProbe probe, String version) {
+            super(new CliPaths(System.getProperty("java.io.tmpdir") + "/sa-test-node"), probe);
+            this.version = version;
+        }
+        @Override public Optional<String> version() { return Optional.ofNullable(version).map(v -> v.replace("v", "")); }
+        /** The automatic dependency install, as if the server can't reach nodejs.org. */
+        @Override public String ensure(String minNode) { return "自动安装 Node.js 失败：无法连接 nodejs.org"; }
+    }
+
     /** Inference double: every model answers except those listed in {@code failing}. */
     private static final class FakeInference extends ProviderInferenceProbe {
         final Set<String> failing = new HashSet<>();
+        boolean offline;
         FakeInference() { super(new FakeProbe(true, true)); }
-        @Override public void check(String key, String modelId) throws IOException {
+        @Override public void check(String key, String modelId, RunCredential credential) throws IOException {
+            if (offline) {
+                throw new ProbeUnreachableException("无法连接 https://gateway（ConnectException）");
+            }
             if (failing.contains(modelId)) {
                 throw new IOException("HTTP 404: model not found");
             }
@@ -77,7 +99,7 @@ class ProviderServiceTest {
 
     private static ProviderService service(ModelProviderStore store, ProviderProbe probe, FakeFetcher fetcher,
                                            FakeInference inference) {
-        return new ProviderService(store, probe, fetcher, inference);
+        return new ProviderService(store, probe, fetcher, inference, new FakeNode(probe, "v24.11.0"), null);
     }
 
     @Test
@@ -164,15 +186,48 @@ class ProviderServiceTest {
         // Re-listing models must not wipe the probe results until the next sweep.
         service.refreshModelsNow(id);
         assertThat(service.canInfer("claude", "claude-good")).isTrue();
+
+        // A sweep that can't reach the gateway is no verdict on the models: they keep their status, and the
+        // caller is told to retry soon.
+        inference.offline = true;
+        assertThat(service.refreshInference(store.findById(id).orElseThrow())).isFalse();
+        assertThat(service.canInfer("claude", "claude-good")).isTrue();
+        assertThat(service.canInfer("claude", "claude-listed-only")).isFalse();
+        inference.offline = false;
+        assertThat(service.refreshInference(store.findById(id).orElseThrow())).isTrue();
     }
 
     @Test
     void displayOnlyEntriesCannotInstall() {
         ProviderService service = service(new InMemoryStore(), new FakeProbe(false, false), new FakeFetcher());
-        ProviderDto glm = service.add("glm");
-        assertThat(glm.supported()).isFalse();
-        assertThat(glm.status()).isEqualTo("unsupported");
-        assertThat(glm.models()).isEmpty();
-        assertThatThrownBy(() -> service.install(glm.id())).isInstanceOf(IllegalArgumentException.class);
+        ProviderDto gemini = service.add("gemini");
+        assertThat(gemini.installable()).isFalse();
+        assertThat(gemini.status()).isEqualTo("unsupported");
+        assertThatThrownBy(() -> service.install(gemini.id())).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void installOnlyClisTrackInstallAndVersionButNeedARecentEnoughNode() throws InterruptedException {
+        InMemoryStore store = new InMemoryStore();
+        FakeProbe probe = new FakeProbe(true, false);
+        ProviderService service = new ProviderService(store, probe, new FakeFetcher(), new FakeInference(),
+                new FakeNode(probe, "v20.11.0"), null);
+        ProviderDto kimi = service.add("kimi");
+        assertThat(kimi.installable()).isTrue();
+        assertThat(kimi.supported()).isFalse();
+        assertThat(kimi.status()).isEqualTo("installed"); // no auth to check: nothing runs on it
+        assertThat(kimi.models()).isEmpty();
+
+        // Kimi Code needs Node ≥ 22.19: its install first installs Node; when that fails the row says why
+        // and the CLI install isn't attempted.
+        assertThat(service.install(kimi.id()).status()).isEqualTo("installing");
+        ProviderDto after = service.detail(kimi.id());
+        for (int i = 0; i < 100 && "installing".equals(after.status()); i++) {
+            Thread.sleep(20);
+            after = service.detail(kimi.id());
+        }
+        assertThat(after.status()).isNotEqualTo("installing");
+        assertThat(after.message()).contains("Node.js").contains("nodejs.org");
+        assertThat(after.installCommand()).isEqualTo("npm install -g @moonshot-ai/kimi-code@latest --no-fund --no-audit");
     }
 }

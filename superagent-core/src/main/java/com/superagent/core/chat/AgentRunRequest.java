@@ -26,11 +26,32 @@ public record AgentRunRequest(
         String mcpConfig,
         String systemPrompt,
         List<ImageAttachment> images,
-        String memory) {
+        String memory,
+        /** The endpoint and key for this run; null = whatever the server's environment / CLI login provides. */
+        RunCredential credential) {
 
     public AgentRunRequest {
         images = images == null ? List.of() : List.copyOf(images);
         memory = memory == null || memory.isBlank() ? null : memory.strip();
+    }
+
+    public AgentRunRequest(String sessionId, String agentSessionId, String workspaceDir, String prompt, String model,
+                           List<String> allowedTools, boolean skipPermissions, String mcpConfig, String systemPrompt,
+                           List<ImageAttachment> images, String memory) {
+        this(sessionId, agentSessionId, workspaceDir, prompt, model, allowedTools, skipPermissions, mcpConfig,
+                systemPrompt, images, memory, null);
+    }
+
+    /** The same run continuing (or, with null, starting fresh) another CLI conversation; nothing else changes. */
+    public AgentRunRequest withAgentSessionId(String other) {
+        return new AgentRunRequest(sessionId, other, workspaceDir, prompt, model, allowedTools, skipPermissions,
+                mcpConfig, systemPrompt, images, memory, credential);
+    }
+
+    /** The same run on another endpoint/key (used to retry after the first one failed). */
+    public AgentRunRequest withCredential(RunCredential other) {
+        return new AgentRunRequest(sessionId, agentSessionId, workspaceDir, prompt, model, allowedTools, skipPermissions,
+                mcpConfig, systemPrompt, images, memory, other);
     }
 
     /** A turn without long-term memory. */

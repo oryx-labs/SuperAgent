@@ -17,6 +17,7 @@
     <nav class="topnav" aria-label="Main">
       <a class="nav__item" href="#todo" data-view="todo"><span data-i18n="nav.todo">To-do</span><span class="nav__badge" id="todoBadge" hidden></span></a>
       <a class="nav__item is-active" href="#chat" data-view="chat"><span data-i18n="nav.agents">Agents</span></a>
+      <a class="nav__item" href="#files" data-view="files"><span data-i18n="nav.files">Files</span></a>
       <a class="nav__item" href="#tasks" data-view="tasks"><span data-i18n="nav.tasks">Tasks</span></a>
       <div class="topmenu" id="workspaceMenu">
         <button class="topmenu__btn" type="button" id="workspaceBtn" aria-haspopup="menu" aria-expanded="false">
@@ -32,7 +33,7 @@
           </nav>
         </div>
       </div>
-      <a class="topnav__admin" href="#settings" id="adminTopNav" hidden><span data-i18n="nav.admin">Admin</span></a>
+      <a class="topnav__admin" href="#users" id="adminTopNav" hidden><span data-i18n="nav.admin">Admin</span></a>
     </nav>
     <div class="topbar__right">
       <!-- The account menu: who you are, the interface language, signing out. -->
@@ -87,8 +88,8 @@
         <textarea class="composer__input" id="composerInput" rows="1"
                   data-i18n-ph="chat.composer" aria-label="Message"></textarea>
         <div class="composer__row">
-          <button class="attach-btn" type="button" id="chatAttachBtn" data-i18n-title="img.attach" aria-label="Attach image"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-          <input type="file" id="chatImageInput" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+          <button class="attach-btn" type="button" id="chatAttachBtn" data-i18n-title="img.attach" aria-label="Attach files"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+          <input type="file" id="chatImageInput" multiple hidden />
           <div class="composer__actions">
             <select class="composer__model" id="statusHint" aria-label="Model"></select>
             <button class="send" type="submit" id="sendBtn" aria-label="Send">↑</button>
@@ -102,35 +103,18 @@
         <div class="agent-info__head">
           <h3 class="panel__title agent-info__title"><span class="agent-avatar" id="agentInfoAvatar" aria-hidden="true"></span><span id="agentInfoName">Agent</span></h3>
           <span class="agent-info__actions">
-            <button class="link-btn link-btn--muted" id="agentLogBtn" type="button" data-i18n="log.open">Run log</button>
-            <button class="link-btn link-btn--muted" id="agentEditBtn" type="button" data-i18n="agent.edit">Edit</button>
+            <button class="link-btn link-btn--muted" id="agentDetailBtn" type="button" data-i18n="agent.details">Details</button>
+            <button class="link-btn link-btn--muted" id="superLogBtn" type="button" data-i18n="log.open" hidden>Run log</button>
           </span>
         </div>
-        <div id="agentInfoDetails">
-          <div class="agent-field agent-members" id="agentMembersBlock" hidden>
-            <div class="agent-field__head">
-              <span class="agent-field__label" data-i18n="co.members">Members</span>
-              <button class="link-btn" type="button" id="agentInviteBtn" data-i18n="co.invite">+ Invite</button>
-            </div>
-            <ul class="agent-members__list" id="agentMembers"></ul>
-            <button class="link-btn link-btn--muted" type="button" id="agentLeaveBtn" data-i18n="co.leave" hidden>Leave</button>
-          </div>
-          <div class="agent-field">
-            <span class="agent-field__label" data-i18n="agent.fCharacter">Character</span>
-            <p class="agent-info__character" id="agentInfoCharacter"></p>
-            <div class="agent-persona" id="agentPersonaWrap" hidden>
-              <p class="agent-info__persona" id="agentInfoPersona"></p>
-              <button class="agent-persona__more" type="button" id="agentPersonaMore" hidden></button>
-            </div>
-          </div>
-          <div class="agent-field">
-            <span class="agent-field__label" data-i18n="sk.agentSkills">Skills</span>
-            <div class="skill-chips" id="agentInfoSkills"></div>
-          </div>
-          <div class="agent-field">
-            <span class="agent-field__label" data-i18n="agent.fModel">Default model</span>
-            <p class="agent-info__model" id="agentInfoModel"></p>
-          </div>
+        <!-- Regular agent: the work it set off, newest first; a click opens the task. -->
+        <div class="agent-work" id="agentWorkWrap" hidden>
+          <span class="panel__subhead" data-i18n="work.agentTasks">Tasks</span>
+          <ul class="super-work__list" id="agentWorkList"></ul>
+          <p class="super-work__empty" id="agentWorkEmpty" data-i18n="work.agentEmpty" hidden>No tasks yet. Ask it to take something on.</p>
+          <span class="panel__subhead agent-work__files-head" data-i18n="work.agentFiles">Files</span>
+          <ul class="super-work__list" id="agentFileList"></ul>
+          <p class="super-work__empty" id="agentFileEmpty" data-i18n="work.agentFilesEmpty" hidden>No files yet.</p>
         </div>
         <!-- The SuperAgent has no character, skills or model to show: just what it is and how it works. -->
         <div class="super-intro" id="superIntro" hidden>
@@ -181,13 +165,12 @@
         <button type="button" class="model-tab" data-filter="action"><span data-i18n="todo.tabAction">To do</span> <b></b></button>
         <button type="button" class="model-tab" data-filter="done"><span data-i18n="todo.tabDone">Done</span> <b></b></button>
         <button type="button" class="model-tab" data-filter="notice"><span data-i18n="todo.tabNotice">Notices</span> <b></b></button>
+        <button type="button" class="model-tab" data-filter="ignored"><span data-i18n="todo.tabIgnored">Ignored</span> <b></b></button>
         <button class="link-btn todo-read-all" type="button" id="todoReadAll" data-i18n="todo.readAll">Mark all read</button>
       </div>
       <div class="admin__body">
         <table class="ctable todo-table"><thead><tr><th class="todo-col-kind" data-i18n="todo.colKind">Type</th><th data-i18n="todo.colItem">Item</th><th class="todo-col-from" data-i18n="todo.colFrom">From</th><th class="todo-col-time" data-i18n="todo.colTime">Updated</th><th class="ctable__actions-col"></th></tr></thead><tbody id="todoList"></tbody></table>
         <p class="kb-empty" id="todoEmpty" hidden></p>
-        <button class="link-btn todo-history-toggle" type="button" id="todoHistoryToggle" hidden></button>
-        <table class="ctable todo-table todo-table--history" id="todoHistoryTable" hidden><tbody id="todoHistory"></tbody></table>
       </div>
     </section>
 
@@ -261,7 +244,6 @@
     <section class="admin" data-pane="skills" aria-label="Skills" hidden>
       <div class="model-tabs page-tabs sk-tabs" id="skTabs" role="tablist">
         <button type="button" class="model-tab is-active" data-layer="personal"><span data-i18n="sk.layerPersonal">Personal</span> <b></b></button>
-        <button type="button" class="model-tab" data-layer="team"><span data-i18n="sk.layerTeam">Team</span> <b></b></button>
         <button type="button" class="model-tab" data-layer="company"><span data-i18n="sk.layerCompany">Company</span> <b></b></button>
         <div class="sk-toolbar">
           <input type="search" id="skSearch" data-i18n-ph="sk.search" aria-label="Search skills" />
@@ -276,6 +258,28 @@
           <th class="sk-col-time" data-i18n="sk.colUpdated">Updated</th><th class="sk-col-state" data-i18n="sk.colState">Status</th>
         </tr></thead><tbody id="skRows"></tbody></table>
         <p class="kb-empty" id="skEmpty" hidden></p>
+      </div>
+    </section>
+
+    <section class="admin" data-pane="files" aria-label="Files" hidden>
+      <div class="model-tabs page-tabs sk-tabs" id="flTabs" role="tablist">
+        <button type="button" class="model-tab is-active" data-kind=""><span data-i18n="fl.kindAll">All</span> <b></b></button>
+        <button type="button" class="model-tab" data-kind="document"><span data-i18n="fl.kindDocument">Documents</span> <b></b></button>
+        <button type="button" class="model-tab" data-kind="image"><span data-i18n="fl.kindImage">Images</span> <b></b></button>
+        <button type="button" class="model-tab" data-kind="video"><span data-i18n="fl.kindVideo">Videos</span> <b></b></button>
+        <button type="button" class="model-tab" data-kind="other"><span data-i18n="fl.kindOther">Other</span> <b></b></button>
+        <div class="sk-toolbar">
+          <select id="flAgent" aria-label="Agent"></select>
+          <input type="search" id="flSearch" data-i18n-ph="fl.search" aria-label="Search files" />
+        </div>
+      </div>
+      <div class="admin__body">
+        <table class="ctable fl-table"><thead><tr>
+          <th data-i18n="fl.colName">Name</th><th class="fl-col-source" data-i18n="fl.colSource">From</th>
+          <th class="fl-col-owner" data-i18n="fl.colOwner">Asked by</th><th class="fl-col-size" data-i18n="fl.colSize">Size</th>
+          <th class="fl-col-time" data-i18n="fl.colUpdated">Updated</th>
+        </tr></thead><tbody id="flRows"></tbody></table>
+        <p class="kb-empty" id="flEmpty" hidden></p>
       </div>
     </section>
 
@@ -378,8 +382,8 @@
         </div>
         <div class="image-tray image-tray--steer" id="taskImageTray" hidden></div>
         <form class="task-steer" id="taskSteerForm">
-          <button class="attach-btn" type="button" id="taskAttachBtn" data-i18n-title="img.attach" aria-label="Attach image"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-          <input type="file" id="taskImageInput" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+          <button class="attach-btn" type="button" id="taskAttachBtn" data-i18n-title="img.attach" aria-label="Attach files"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+          <input type="file" id="taskImageInput" multiple hidden />
           <textarea class="task-steer__input" id="taskSteerInput" rows="1" data-i18n-ph="tasks.steer"></textarea>
           <button class="send" type="submit" id="taskSteerBtn" aria-label="Send">↑</button>
         </form>
@@ -388,12 +392,13 @@
 
     <!-- Administration: one sidebar for every admin page, current and future. -->
     <aside class="admin-side" id="adminSide" hidden>
-      <div class="admin-side__title" data-i18n="nav.admin">Admin</div>
       <nav class="nav" aria-label="Administration">
-        <a class="nav__item" href="#settings" data-view="settings"><span class="nav__dot"></span><span data-i18n="nav.settings">System Settings</span></a>
-        <a class="nav__item" href="#analytics" data-view="analytics"><span class="nav__dot"></span><span data-i18n="nav.analytics">Analytics</span></a>
-        <a class="nav__item" href="#models" data-view="models"><span class="nav__dot"></span><span data-i18n="nav.models">Models</span></a>
         <a class="nav__item" href="#users" data-view="users"><span class="nav__dot"></span><span data-i18n="nav.users">Users</span></a>
+        <a class="nav__item" href="#models" data-view="models"><span class="nav__dot"></span><span data-i18n="nav.models">Models</span></a>
+        <a class="nav__item" href="#analytics" data-view="analytics"><span class="nav__dot"></span><span data-i18n="nav.analytics">Analytics</span></a>
+        <!-- System settings is a group: each settings page is a sub-item. -->
+        <div class="nav__group-label"><span class="nav__dot"></span><span data-i18n="nav.settings">System Settings</span></div>
+        <a class="nav__item nav__item--sub" href="#settings" data-view="settings"><span data-i18n="nav.settingsBasic">Basic</span></a>
       </nav>
     </aside>
 
@@ -423,28 +428,37 @@
 
     <section class="admin" data-pane="users" aria-label="Users" hidden>
       <div class="admin__head">
-        <div>
-          <h2 class="admin__title" data-i18n="users.title">Users</h2>
-          <p class="admin__sub" data-i18n="users.sub">Provision who may sign in.</p>
-        </div>
+        <h2 class="admin__title" data-i18n="users.title">Users</h2>
         <button class="btn btn--primary" id="addUserBtn" type="button" data-i18n="users.add">+ Add User</button>
       </div>
+      <div class="model-tabs" id="usersTabs">
+        <button type="button" class="model-tab is-active" data-tab="users" data-i18n="users.tabUsers">Users</button>
+        <button type="button" class="model-tab" data-tab="org" data-i18n="users.tabOrg">Organisation</button>
+      </div>
       <div class="admin__body">
-        <table class="ctable">
-          <thead>
-            <tr>
-              <th data-i18n="users.colUser">User</th><th data-i18n="users.colRoles">Roles</th>
-              <th data-i18n="users.colManager">Manager</th><th data-i18n="users.colTeams">Teams</th>
-              <th data-i18n="users.colSource">Source</th><th data-i18n="users.colStatus">Status</th>
-              <th class="ctable__actions-col" data-i18n="users.colActions">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="userRows"></tbody>
-        </table>
-        <p class="admin__empty" id="usersEmpty" data-i18n="users.empty" hidden>No provisioned users yet.</p>
-        <h3 class="panel__title panel__title--spaced" data-i18n="org.teamsTitle">Teams</h3>
-        <p class="field-hint" data-i18n="org.teamsHint">Teams exist through their members: add a team to a user and it appears here.</p>
-        <ul class="org-teams" id="orgTeams"></ul>
+        <div data-users-tab="users">
+          <input class="users-search" type="search" id="userSearch" data-i18n-ph="users.search" aria-label="Search users" />
+          <table class="ctable users-table">
+            <thead>
+              <tr>
+                <th data-i18n="users.colUser">User</th><th data-i18n="users.colLogin">Sign-in</th>
+                <th data-i18n="users.colRoles">Role</th><th data-i18n="users.colStatus">Status</th>
+                <th class="ctable__actions-col"></th>
+              </tr>
+            </thead>
+            <tbody id="userRows"></tbody>
+          </table>
+          <p class="admin__empty" id="usersEmpty" hidden></p>
+        </div>
+        <!-- Read-only: the organisation is kept by an external directory and recorded on the users. -->
+        <div class="org-view" data-users-tab="org" hidden>
+          <div class="org-tree" id="orgTree"></div>
+          <div class="org-members">
+            <h3 class="org-members__title" id="orgTeamTitle"></h3>
+            <ul class="org-members__list" id="orgMembers"></ul>
+          </div>
+          <p class="org-empty" id="orgEmpty" data-i18n="org.empty" hidden></p>
+        </div>
       </div>
     </section>
 
@@ -461,12 +475,22 @@
           </div>
         </div>
         <div class="admin__body">
+          <!-- The Node.js the npm-based CLIs need; a private copy can be installed when the server has none. -->
+          <div class="node-card" id="nodeCard">
+            <div class="node-card__main">
+              <span class="node-card__title" data-i18n="node.title">Node.js runtime</span>
+              <span class="node-card__state" id="nodeState"></span>
+            </div>
+            <p class="node-card__hint" id="nodeHint"></p>
+            <button class="btn btn--sm" type="button" id="nodeInstallBtn" hidden></button>
+          </div>
           <table class="ctable">
             <thead>
               <tr>
                 <th data-i18n="models.colName">CLI</th><th data-i18n="models.colInstalled">Installed</th>
                 <th data-i18n="models.colInfer">Can infer</th><th data-i18n="models.colVersion">Version</th>
-                <th data-i18n="models.colLatest">Latest</th><th data-i18n="models.colStatus">Status</th>
+                <th data-i18n="models.colLatest">Latest</th><th data-i18n="models.colCount">Models</th>
+                <th data-i18n="models.colStatus">Status</th>
                 <th class="ctable__actions-col" data-i18n="models.colActions">Actions</th>
               </tr>
             </thead>
@@ -488,6 +512,7 @@
         <div class="model-tabs" id="modelTabs">
           <button type="button" class="model-tab is-active" data-tab="info" data-i18n="models.tabInfo">Basic info</button>
           <button type="button" class="model-tab" data-tab="models" data-i18n="models.tabModels">Models</button>
+          <button type="button" class="model-tab" data-tab="keys" id="modelKeysTab" data-i18n="cred.tab" hidden>API Key</button>
         </div>
         <div class="admin__body">
           <dl class="task-facts model-facts" id="modelInfo" data-panel="info"></dl>
@@ -508,6 +533,36 @@
               <tbody id="modelModels"></tbody>
             </table>
             <p class="admin__empty" id="modelModelsEmpty" data-i18n="models.noModels" hidden>No models.</p>
+          </div>
+          <!-- Claude Code / Codex: endpoints + keys in priority order; runs use the best healthy one. -->
+          <div class="model-panel" id="modelKeysPanel" data-panel="keys" hidden>
+            <div class="model-panel__head">
+              <span class="model-panel__meta" id="credHint" data-i18n="cred.hint"></span>
+              <button class="btn btn--primary" id="credAddBtn" type="button" data-i18n="cred.add">+ Add key</button>
+            </div>
+            <form class="cred-form" id="credForm" hidden>
+              <div class="field-row">
+                <label class="field"><span data-i18n="cred.fLabel">Name</span><input type="text" id="credLabel" maxlength="100" data-i18n-ph="cred.fLabelPh" /></label>
+                <label class="field cred-form__url"><span data-i18n="cred.fUrl">Endpoint</span><input type="url" id="credUrl" data-i18n-ph="cred.fUrlPh" /></label>
+              </div>
+              <label class="field"><span data-i18n="cred.fKey">API key</span><input type="password" id="credKey" autocomplete="off" /></label>
+              <label class="check-field" id="credBearerField"><input type="checkbox" id="credBearer" checked /><span data-i18n="cred.fBearer">Send as Bearer token (relays / gateways)</span></label>
+              <p class="field-hint kb-modal__error" id="credError" hidden></p>
+              <div class="modal__actions">
+                <button type="button" class="btn" id="credCancel" data-i18n="common.cancel">Cancel</button>
+                <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
+              </div>
+            </form>
+            <table class="ctable cred-table">
+              <thead>
+                <tr>
+                  <th class="cred-col-order" data-i18n="cred.colOrder">Priority</th><th data-i18n="cred.colLabel">Name</th>
+                  <th data-i18n="cred.colUrl">Endpoint</th><th data-i18n="cred.colKey">Key</th>
+                  <th data-i18n="cred.colStatus">Status</th><th class="ctable__actions-col" data-i18n="models.colActions">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="credRows"></tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -669,6 +724,27 @@
     </div>
   </div>
 
+  <!-- A work file, previewed: from the Files page, a chat card or an agent's panel. -->
+  <div class="drawer" id="flDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <div class="drawer__panel drawer__panel--wide">
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <div class="fl-head">
+          <h3 class="drawer__title" id="flTitle"></h3>
+          <p class="fl-meta" id="flMeta"></p>
+        </div>
+        <span class="agent-detail__actions">
+          <a class="btn btn--sm" id="flDownload" href="#" data-i18n="fl.download">Download</a>
+          <button class="btn btn--sm" type="button" id="flToKb" data-i18n="fl.toKb">Save to knowledge base</button>
+          <button class="link-btn" type="button" id="flRename" data-i18n="fl.rename">Rename</button>
+          <button class="link-btn link-btn--danger" type="button" id="flDelete" data-i18n="kb.delete">Delete</button>
+        </span>
+      </div>
+      <div class="drawer__body fl-preview" id="flPreview"></div>
+    </div>
+  </div>
+
   <div class="modal" id="connectorModal" hidden>
     <div class="modal__backdrop" data-close></div>
     <form class="modal__card" id="connectorForm">
@@ -712,49 +788,26 @@
 
   <div class="modal" id="userModal" hidden>
     <div class="modal__backdrop" data-close></div>
-    <form class="modal__card" id="userForm">
+    <form class="modal__card user-modal" id="userForm">
       <h3 class="modal__title" id="userModalTitle" data-i18n="users.modalAdd">Add User</h3>
-      <label class="field"><span data-i18n="users.fUsername">Username (login name)</span>
-        <input type="text" id="ufUsername" required data-i18n-ph="users.fUsernamePh" />
-      </label>
-      <label class="field"><span data-i18n="users.fDisplay">Display name</span>
-        <input type="text" id="ufDisplayName" data-i18n-ph="common.optional" />
-      </label>
-      <div class="field-row">
-        <label class="field"><span data-i18n="users.fSource">Source</span>
-          <select id="ufSource">
-            <option value="local" data-i18n="src.local">Username / Password</option>
-            <option value="phone" data-i18n="src.phone">Phone code</option>
-            <option value="sso" data-i18n="src.sso">SSO</option>
-            <option value="wechat" data-i18n="src.wechat">WeChat</option>
-          </select>
-        </label>
-        <label class="field"><span data-i18n="users.fRole">Role</span>
-          <select id="ufRole">
-            <option value="USER">USER</option>
-            <option value="ADMIN">ADMIN</option>
-          </select>
-        </label>
+      <div class="seg" id="ufKind" role="radiogroup">
+        <button type="button" class="seg__btn is-active" data-kind="local" data-i18n="users.kindLocal">Username &amp; password</button>
+        <button type="button" class="seg__btn" data-kind="phone" data-i18n="users.kindPhone">Phone number</button>
       </div>
-      <label class="field" id="ufPasswordField"><span data-i18n="users.fPassword">Password</span>
-        <input type="password" id="ufPassword" data-i18n-ph="users.fPasswordPh" />
+      <label class="field" data-for="local"><span data-i18n="users.fUsername">Username</span>
+        <input type="text" id="ufUsername" autocomplete="off" data-i18n-ph="users.fUsernamePh" />
       </label>
-      <div class="field-row">
-        <label class="field"><span data-i18n="users.fPhone">Phone</span><input type="text" id="ufPhone" data-i18n-ph="users.fPhonePh" /></label>
-        <label class="field"><span data-i18n="users.fExternal">External ID</span><input type="text" id="ufExternalId" data-i18n-ph="users.fExternalPh" /></label>
-      </div>
-      <label class="field"><span data-i18n="users.fManager">Manager</span>
-        <select id="ufManager"></select>
+      <label class="field"><span id="ufDisplayLabel" data-i18n="users.fDisplay">Display name</span>
+        <input type="text" id="ufDisplayName" autocomplete="off" />
       </label>
-      <div class="field"><span data-i18n="users.fTeams">Teams</span>
-        <div class="team-chips" id="ufTeams"></div>
-        <div class="team-add">
-          <input type="text" id="ufTeamInput" list="ufTeamOptions" data-i18n-ph="users.fTeamPh" />
-          <button type="button" class="btn" id="ufTeamAdd" data-i18n="users.teamAdd">Add</button>
-        </div>
-        <datalist id="ufTeamOptions"></datalist>
-      </div>
-      <label class="checkbox-row"><input type="checkbox" id="ufEnabled" checked /> <span data-i18n="users.fEnabled">Enabled (allow sign-in)</span></label>
+      <label class="field" data-for="phone"><span data-i18n="users.fPhone">Phone</span>
+        <input type="tel" id="ufPhone" autocomplete="off" data-i18n-ph="users.fPhonePh" />
+      </label>
+      <label class="field" data-for="local"><span id="ufPasswordLabel" data-i18n="users.fPassword">Password</span>
+        <input type="password" id="ufPassword" autocomplete="new-password" />
+      </label>
+      <label class="checkbox-row" id="ufAdminRow" hidden><input type="checkbox" id="ufAdmin" /> <span data-i18n="users.fAdmin">Administrator</span></label>
+      <p class="field-hint" id="ufHint"></p>
       <div class="modal__actions">
         <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
         <button type="submit" class="btn btn--primary" id="ufSubmit" data-i18n="common.save">Save</button>
@@ -823,6 +876,47 @@
         <button type="submit" class="btn btn--primary" id="afSubmit" data-i18n="common.save">Save</button>
       </div>
     </form>
+  </div>
+
+  <!-- Agent details: who it is and how it's set up; the run log opens on top of it. -->
+  <div class="drawer" id="agentDetailDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <div class="drawer__panel">
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <h3 class="drawer__title" id="agentDetailTitle">Agent</h3>
+        <span class="agent-detail__actions">
+          <button class="btn btn--sm" id="agentLogBtn" type="button" data-i18n="log.open">Run log</button>
+          <button class="btn btn--sm" id="agentEditBtn" type="button" data-i18n="agent.edit">Edit</button>
+        </span>
+      </div>
+      <div class="drawer__body" id="agentInfoDetails">
+        <div class="agent-field agent-members" id="agentMembersBlock" hidden>
+          <div class="agent-field__head">
+            <span class="agent-field__label" data-i18n="co.members">Members</span>
+            <button class="link-btn" type="button" id="agentInviteBtn" data-i18n="co.invite">+ Invite</button>
+          </div>
+          <ul class="agent-members__list" id="agentMembers"></ul>
+          <button class="link-btn link-btn--muted" type="button" id="agentLeaveBtn" data-i18n="co.leave" hidden>Leave</button>
+        </div>
+        <div class="agent-field">
+          <span class="agent-field__label" data-i18n="agent.fCharacter">Character</span>
+          <p class="agent-info__character" id="agentInfoCharacter"></p>
+          <div class="agent-persona" id="agentPersonaWrap" hidden>
+            <p class="agent-info__persona" id="agentInfoPersona"></p>
+            <button class="agent-persona__more" type="button" id="agentPersonaMore" hidden></button>
+          </div>
+        </div>
+        <div class="agent-field">
+          <span class="agent-field__label" data-i18n="sk.agentSkills">Skills</span>
+          <div class="skill-chips" id="agentInfoSkills"></div>
+        </div>
+        <div class="agent-field">
+          <span class="agent-field__label" data-i18n="agent.fModel">Default model</span>
+          <p class="agent-info__model" id="agentInfoModel"></p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="drawer" id="agentLogDrawer" hidden>
@@ -955,6 +1049,8 @@
   <script src="/js/agent-form.js"></script>
   <script src="/js/superagent.js"></script>
   <script src="/js/agent-log.js"></script>
+  <script src="/js/files.js"></script>
+  <script src="/js/agent-work.js"></script>
   <script src="/js/views.js"></script>
   <script src="/js/inbox.js"></script>
   <script src="/js/skills.js"></script>

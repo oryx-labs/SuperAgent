@@ -466,7 +466,7 @@ let modelDetailId = null;
 // View state lives in the URL hash (#tasks, #connectors, …) so a refresh or
 // back/forward restores the same view. Admin-only views fall back to the default
 // for non-admins. See initialView().
-const KNOWN_VIEWS = new Set(["todo", "chat", "tasks", "inbox", "knowledge", "skills", "automation", "connectors", "models",
+const KNOWN_VIEWS = new Set(["todo", "chat", "files", "tasks", "inbox", "knowledge", "skills", "automation", "connectors", "models",
   "users", "settings", "analytics"]);
 // The "Workspace" dropdown's pages, and the admin pages (shown with the admin sidebar).
 const WORKSPACE_VIEWS = new Set(["inbox", "knowledge", "skills", "connectors"]);
@@ -510,7 +510,10 @@ function setView(view) {
   const isInbox = view === "inbox";
   const isAnalytics = view === "analytics";
   const isTodo = view === "todo";
+  const isFiles = view === "files";
   todoPane.hidden = !isTodo;
+  filesPane.hidden = !isFiles;
+  if (!flel.drawer.hidden) closeFile(); // a preview belongs to the page it was opened from
   chatPanes.forEach(p => { p.hidden = !isChat; });
   analyticsPane.hidden = !isAnalytics;
   automationPane.hidden = !isAutomation;
@@ -524,7 +527,7 @@ function setView(view) {
   if (!isSkills && !skel.drawer.hidden) closeSkillDrawer();
   ibPane.hidden = !isInbox;
   placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isSettings || isKnowledge
-    || isAutomation || isSkills || isInbox || isAnalytics || isTodo;
+    || isAutomation || isSkills || isInbox || isAnalytics || isTodo || isFiles;
   if (!placeholderPane.hidden) placeholderText.textContent = L(placeholderLabels[view] || "placeholder.default");
   if (isConnectors) loadConnectors();
   if (isUsers) loadUsers();
@@ -534,6 +537,7 @@ function setView(view) {
   if (isInbox) loadInbox();
   if (isAnalytics) loadAnalytics();
   if (isTodo) loadTodos();
+  if (isFiles) loadFiles();
   if (isAutomation) { showAutoList(); loadAutomations(); }
   if (isTasks) { showTaskList(); loadTasks(); } else { stopTaskPolling(); }
   if (isModels) { showModelList(); startModelPolling(); } else { stopModelPolling(); }
@@ -581,7 +585,7 @@ workspaceBtn.addEventListener("click", e => {
 });
 
 // "Admin" opens the first admin page; the admin sidebar takes it from there.
-document.getElementById("adminTopNav").addEventListener("click", e => { e.preventDefault(); setView("settings"); });
+document.getElementById("adminTopNav").addEventListener("click", e => { e.preventDefault(); setView("users"); });
 
 // The logo goes home: the Agent page with the user's SuperAgent open.
 document.getElementById("brandHome").addEventListener("click", e => {

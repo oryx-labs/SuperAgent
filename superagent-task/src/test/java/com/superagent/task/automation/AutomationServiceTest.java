@@ -66,7 +66,7 @@ class AutomationServiceTest {
 
     /** Only "claude-good" passed the inference check. */
     private static final class FakeProviders extends ProviderService {
-        FakeProviders() { super(null, null, null, null); }
+        FakeProviders() { super(null, null, null, null, null, null); }
         @Override public Optional<String> cliFor(String modelId) {
             return "claude-good".equals(modelId) ? Optional.of("claude") : Optional.empty();
         }

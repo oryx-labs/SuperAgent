@@ -19,7 +19,7 @@ AI is no longer optional for companies. What they need is AI that **actually get
 
 - **One system for everyone.** All work happens in the company's system, so it becomes company assets, and the system distills it into knowledge.
 - **Collaboration and continuity.** People share agents on the same job; when someone leaves, their agents and context are handed over.
-- **Assets at every level.** Skills and knowledge for each employee, each team, and the whole company.
+- **Assets at every level.** Knowledge for each employee, each team, and the whole company, plus personal and company skills.
 - **AI on day one, paid by usage.** No personal subscriptions; the system bills by usage and routes each task to a model that fits its difficulty.
 - **Visible and safe.** Built-in audit and security, with office tools and approvals connected.
 

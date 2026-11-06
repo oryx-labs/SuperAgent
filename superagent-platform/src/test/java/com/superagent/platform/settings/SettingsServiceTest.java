@@ -24,7 +24,7 @@ class SettingsServiceTest {
     /** Provider double: only the given models passed the inference check, under codex if prefixed "gpt". */
     private static final class FakeProviders extends ProviderService {
         private final Set<String> healthy;
-        FakeProviders(String... healthy) { super(null, null, null, null); this.healthy = Set.of(healthy); }
+        FakeProviders(String... healthy) { super(null, null, null, null, null, null); this.healthy = Set.of(healthy); }
         @Override public Optional<String> cliFor(String modelId) {
             return healthy.contains(modelId)
                     ? Optional.of(modelId.startsWith("gpt") ? "codex" : "claude") : Optional.empty();

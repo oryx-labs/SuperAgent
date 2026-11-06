@@ -24,6 +24,11 @@
 
     <dependency>
       <groupId>com.superagent</groupId>
+      <artifactId>superagent-files</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.superagent</groupId>
       <artifactId>superagent-platform</artifactId>
     </dependency>
     <!-- A chat turn streams to the browser as an SseEmitter (just Spring MVC, no servlet container). -->

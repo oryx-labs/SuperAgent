@@ -1,5 +1,6 @@
 package com.superagent.orchestrator;
 
+import com.superagent.platform.provider.CredentialService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -138,6 +139,13 @@ public class SuperAgentService {
     private final ApplicationEventPublisher events;
     private final SkillService skills;
     private final Map<AgentType, AgentRunner> runners = new EnumMap<>(AgentType.class);
+
+    private CredentialService credentials; // null in tests: runs use the server's environment
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setCredentials(CredentialService credentials) {
+        this.credentials = credentials;
+    }
     private final Duration quiet;
     private final Duration maxWait;
     private final int teamLimit;
@@ -405,7 +413,8 @@ public class SuperAgentService {
             }
             runner.run(new AgentRunRequest(session.id(), agentSessionId, session.workspaceDir(), roundPrompt(owner, batch),
                     model, external(batch.get(0)) ? EXTERNAL_ROUND_TOOLS : ROUND_TOOLS, false, grant == null ? null : grants.mcpConfig(grant),
-                    SuperAgentPrompts.system(teamLimit), attached, context), sink, new Cancellation());
+                    SuperAgentPrompts.system(teamLimit), attached, context,
+                    credentials == null ? null : credentials.current(type.cliName()).credential()), sink, new Cancellation());
         } catch (RuntimeException e) {
             log.warn("superagent round attempt failed for {}: {}", owner, e.getMessage());
             error.set(e.getMessage() != null ? e.getMessage() : "round failed");

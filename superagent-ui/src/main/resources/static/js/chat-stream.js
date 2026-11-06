@@ -3,16 +3,16 @@
 "use strict";
 
 // ---------- send / stream / stop ----------
-async function sendMessage(text, images, imageUrls) {
+async function sendMessage(text, images, imageUrls, fileIds, fileNames) {
   if (!activeSessionId) { openAgentModal(); return; }
-  const userMsg = addUserBubble(text, imageUrls);
+  const userMsg = addUserBubble(text, imageUrls, fileNames);
   const handles = addAssistantBubble();
   setStreaming(true);
   try {
     const resp = await fetch("/api/v1/sessions/" + activeSessionId + "/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: text, images: images || [] }),
+      body: JSON.stringify({ content: text, images: images || [], fileIds: fileIds || [] }),
     });
     if (resp.status === 409) {
       // Another member's turn is running: nothing was sent, so give the text back.
@@ -36,6 +36,7 @@ async function sendMessage(text, images, imageUrls) {
     setStreaming(false);
     await selectSession(activeSessionId); // refresh with ids so messages become editable
     loadAgents();
+    if (activeAgent) renderAgentWork(activeAgent); // a turn may have set off a task
   }
 }
 
@@ -93,6 +94,8 @@ function handleFrame(frame, handles) {
     case "tool_result": {
       const created = parseCreatedTask(ev.payload);
       if (created) appendTaskLink(handles, created);
+      const saved = parseSavedFile(ev.payload);
+      if (saved) fileCardsBox(handles.text.closest(".msg")).appendChild(fileCard(saved));
       break;
     }
     case "result":

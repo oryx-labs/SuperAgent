@@ -310,30 +310,6 @@ public class KnowledgeService {
         return String.join(" › ", teamPath.split("/"));
     }
 
-    /**
-     * Follows a team rename: the team's folder and every sub-team's folder move to their new names. A target
-     * that already has content is left alone rather than merged over.
-     */
-    public void renameTeamSpaces(String from, String to) {
-        Path teams = teamsRoot();
-        if (!Files.isDirectory(teams)) {
-            return;
-        }
-        try (Stream<Path> dirs = Files.list(teams)) {
-            for (Path dir : dirs.filter(p -> Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)).toList()) {
-                String team = String.join("/", dir.getFileName().toString().split(" › "));
-                if (team.equals(from) || team.startsWith(from + "/")) {
-                    Path target = teams.resolve(teamDirName(to + team.substring(from.length())));
-                    if (!Files.exists(target)) {
-                        Files.move(dir, target);
-                    }
-                }
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
     Path ownerRoot(String owner) {
         if (owner == null || owner.isBlank()) {
             throw new IllegalArgumentException("No owner");

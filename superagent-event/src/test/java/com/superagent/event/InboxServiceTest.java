@@ -59,7 +59,6 @@ class InboxServiceTest {
         @Override public List<String> teams(String u) { return List.of(); }
         @Override public Map<String, List<String>> memberships() { return Map.of(); }
         @Override public void setTeams(String u, List<String> t) { }
-        @Override public void renameTeam(String from, String to) { }
     }
 
     private static final class Users implements UserStore {

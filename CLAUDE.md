@@ -24,15 +24,18 @@ mvn -pl superagent-core test -Dtest=SomeClassTest#method # single test method
 Run the application (superagent-server is the one executable Spring Boot jar):
 
 ```bash
-mvn install -DskipTests && mvn -pl superagent-server spring-boot:run   # everything on :8080
+mvn install -DskipTests && mvn -pl superagent-server spring-boot:run   # everything on :18080
 mvn clean package -PreleaseTgz                                         # release tarball (see README)
 ```
 
-Smoke-check web wiring: `curl localhost:8080/api/v1/meta`.
+Smoke-check web wiring: `curl localhost:18080/api/v1/meta`.
+
+Under `spring-boot:run` the UI is served straight from `superagent-ui/src/main/resources/static` (configured in
+superagent-server's pom), so front-end edits show on a browser refresh. Java changes still need `mvn install` + restart.
 
 ## Module architecture
 
-Thirteen Maven modules, layered; a module may only depend on modules below it (Maven enforces this — a
+Fourteen Maven modules, layered; a module may only depend on modules below it (Maven enforces this — a
 module only sees what its pom declares):
 
 ```text
@@ -44,6 +47,7 @@ L4  superagent-event         the inbox: Feishu bot connector, triage + batch sch
 L3  superagent-agent         conversations: agents, chat turns, memory, characters, collaboration, run log
 L3  superagent-task          execution: tasks, session pool, watchdog, the coding flow, automations
 L2  superagent-knowledge     organizational knowledge: the file knowledge base and shared skills
+L2  superagent-files         work files: what agents produce (documents, images, videos), their storage and agent tools
 L2  superagent-platform      administration: users, system settings, model providers, connectors
 L1  superagent-runtime       driving the coding-agent CLIs (Claude Code, Codex), per-turn MCP grants, image attachments
 L1  superagent-storage       JDBC implementations of the core store interfaces (MySQL, ClickHouse)

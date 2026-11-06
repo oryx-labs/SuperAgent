@@ -33,7 +33,7 @@ In priority order. Items marked *(coming soon)* are still being built.
 
 1. **Work becomes company assets.** Everyone works in one system, so conversations, tasks, and deliverables stay with the company. Agents distill what they learn into memory, and the system summarizes and consolidates work into company knowledge *(company-wide consolidation: coming soon)*.
 2. **Collaboration and handoff.** Collaboration happens inside one AI system: several people can work with the same agent on the same job. When someone leaves, their agents and context go to the next person, who continues from there *(handoff: coming soon)*.
-3. **Assets for each person, team, and the company.** Skills and knowledge bases at the employee, team, and company levels hold what everyday work needs, so a new hire starts with what the team already knows.
+3. **Assets for each person, team, and the company.** Knowledge bases at the employee, team, and company levels, plus personal and company skills, hold what everyday work needs, so a new hire starts with what the team already knows.
 4. **Cost and models.** Employees get AI on day one, with no personal subscriptions and no wasted tokens. The company pays by usage, sees spend per task and per model, works with any model provider, and routes each task to a model that fits its difficulty *(routing by difficulty: coming soon)*.
 5. **Audit and security.** Built-in audit and security: human confirmation for key decisions, identity and permissions, per-agent run logs, and office tools such as Feishu, with enterprise approvals connected *(approvals: coming soon)*.
 
@@ -101,14 +101,16 @@ bin/superagent-stop.sh           # stop
 - **force:** stops the running process with SIGTERM. The server shuts down gracefully; if it is still running after 35 seconds (`STOP_TIMEOUT`), it is killed. The server then starts again.
 - **Working directory:** the scripts can be run from any directory. Relative paths in the config, such as `./data`, resolve against the install directory.
 
-Once started, open `http://<host>:8080` and sign in as the admin user.
+Once started, open `http://<host>:18080` and sign in as the admin user.
 
 ### Development
 
 ```bash
 mvn clean install                                  # build and test all modules
-mvn -pl superagent-server spring-boot:run          # run locally on :8080
+mvn -pl superagent-server spring-boot:run          # run locally on :18080
 ```
+
+Under `spring-boot:run`, the UI is served straight from `superagent-ui/src/main/resources/static`, so front-end edits show up on a browser refresh with no rebuild or restart. Back-end (Java) changes still need `mvn install` and a restart.
 
 ## Status
 

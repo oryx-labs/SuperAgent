@@ -59,7 +59,7 @@ public class ConnectorOAuthService {
             GitHubOAuthClient github,
             @Value("${superagent.oauth.github.client-id:}") String clientId,
             @Value("${superagent.oauth.github.client-secret:}") String clientSecret,
-            @Value("${superagent.oauth.github.redirect-uri:http://localhost:8080/api/v1/oauth/github/callback}")
+            @Value("${superagent.oauth.github.redirect-uri:http://localhost:18080/api/v1/oauth/github/callback}")
             String redirectUri) {
         this.connectors = connectors;
         this.credentials = credentials;

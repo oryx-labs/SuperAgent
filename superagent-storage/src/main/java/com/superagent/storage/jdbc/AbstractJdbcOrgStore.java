@@ -82,17 +82,4 @@ abstract class AbstractJdbcOrgStore implements OrgStore {
             jdbc.update("INSERT INTO user_team (username, team_path) VALUES (?, ?)", username, team);
         }
     }
-
-    @Override
-    public void renameTeam(String from, String to) {
-        Map<String, List<String>> all = memberships();
-        all.forEach((user, teams) -> {
-            List<String> renamed = teams.stream()
-                    .map(t -> t.equals(from) ? to : t.startsWith(from + "/") ? to + t.substring(from.length()) : t)
-                    .distinct().toList();
-            if (!renamed.equals(teams)) {
-                setTeams(user, renamed);
-            }
-        });
-    }
 }

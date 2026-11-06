@@ -25,7 +25,7 @@ SuperAgent starts from the company and its employees instead. Companies need AI 
 
 1. **Work becomes assets.** Everyone works in one system, and the system distills, summarizes, and consolidates that work into company knowledge.
 2. **Collaboration and handoff.** Several people can work on the same agent, and when someone leaves, their agents and context go to the next person.
-3. **Three levels of assets.** Skills and knowledge bases at the employee, team, and company levels.
+3. **Three levels of assets.** Knowledge bases at the employee, team, and company levels, plus personal and company skills.
 4. **Cost and models.** No personal subscriptions, usage-based billing, any model, and routing by task difficulty.
 5. **Audit and security.** Built-in audit and security, connected to office tools and approvals.
 

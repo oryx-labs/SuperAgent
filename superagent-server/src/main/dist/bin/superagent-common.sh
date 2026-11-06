@@ -18,7 +18,7 @@ if [ -f "$APP_HOME/config/superagent.env" ]; then
   set +a
 fi
 
-SERVER_PORT="${SERVER_PORT:-8080}"
+SERVER_PORT="${SERVER_PORT:-18080}"
 STOP_TIMEOUT="${STOP_TIMEOUT:-35}"   # server.shutdown=graceful waits up to 30s for in-flight requests
 
 # PID of the running server, or empty. Trusts the pid file only if that pid is still our jar

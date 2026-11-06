@@ -2,18 +2,16 @@ package com.superagent.knowledge.skill;
 
 import com.superagent.api.skill.SkillDto;
 import com.superagent.api.skill.SkillRequest;
-import com.superagent.core.org.TeamRenamed;
 import com.superagent.core.settings.SystemSettingStore;
-import com.superagent.core.org.TeamAdminStore;
 import com.superagent.core.skill.Skill;
 import com.superagent.core.skill.SkillStore;
-import com.superagent.knowledge.KnowledgeService;
 import com.superagent.knowledge.TestOrg;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -45,17 +43,10 @@ class SkillServiceTest {
     @TempDir
     Path tmp;
 
-    /** dan administers 技术中心 (bob's 后端组 sits under it). */
-    private final TeamAdminStore teamAdmins = new TeamAdminStore() {
-        @Override public Map<String, List<String>> all() { return Map.of("技术中心", List.of("dan")); }
-        @Override public void set(String team, List<String> usernames) { }
-    };
-
     private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0};
 
     private SkillService service(InMemorySkills store, InMemorySettings settings, Path dir) {
-        return new SkillService(store, settings, TestOrg.spaces(new KnowledgeService(tmp.resolve("kb").toString())),
-                teamAdmins, dir.toString());
+        return new SkillService(store, settings, TestOrg.spaces(), dir.toString());
     }
 
     private static SkillRequest req(String name, String space) {
@@ -78,35 +69,31 @@ class SkillServiceTest {
     }
 
     @Test
-    void personalAndTeamSkillsFollowTheKnowledgeLayers() {
+    void personalSkillsAreTheOwnersAndTeamSkillsAreRetired() {
         InMemorySkills store = new InMemorySkills();
-        SkillService svc = service(store, new InMemorySettings(), tmp.resolve("skills"));
+        InMemorySettings settings = new InMemorySettings();
+        SkillService svc = service(store, settings, tmp.resolve("skills"));
         svc.list("root").forEach(s -> svc.delete(s.id(), "root"));
         String mine = svc.create(req("周报", null), "bob").id();
-        String backend = svc.create(req("接口", "team:技术中心/后端组"), "bob").id();
-        String center = svc.create(req("评审", "team:技术中心"), "dan").id();
+        String company = svc.create(req("制度", "company"), "root").id();
 
-        // bob: own + own team (he made it) + the team above (read only). dan administers 技术中心, so he also sees
-        // and manages the sub-team's skills — never bob's personal ones. root (system admin) manages any team's.
-        assertThat(svc.list("bob")).extracting(SkillDto::id).containsExactly(mine, center, backend);
-        assertThat(svc.list("bob")).extracting(SkillDto::canWrite).containsExactly(true, false, true);
-        assertThat(svc.list("dan")).extracting(SkillDto::id).containsExactly(center, backend);
-        assertThat(svc.list("dan")).extracting(SkillDto::canWrite).containsExactly(true, true);
-        svc.update(backend, req("接口规范", null), "dan");
-        svc.update(backend, req("接口规范", null), "root");
+        assertThat(svc.list("bob")).extracting(SkillDto::id).containsExactly(mine, company);
+        assertThat(svc.list("bob")).extracting(SkillDto::canWrite).containsExactly(true, false);
+        assertThat(svc.list("dan")).extracting(SkillDto::id).containsExactly(company);
         assertThatThrownBy(() -> svc.get(mine, "dan")).isInstanceOf(SkillNotFoundException.class);
-        assertThatThrownBy(() -> svc.update(center, req("评审", null), "bob")).isInstanceOf(SkillForbiddenException.class);
-        assertThatThrownBy(() -> svc.create(req("x", "team:技术中心"), "bob")).isInstanceOf(SkillForbiddenException.class);
+        assertThatThrownBy(() -> svc.create(req("x", "team:技术中心"), "bob")).isInstanceOf(IllegalArgumentException.class);
 
-        // An agent's owner attaches what they can see; a page task sees everything its owner can.
+        // An agent's owner attaches what they can see.
         assertThatThrownBy(() -> svc.setAgentSkills("agent-d", List.of(mine), "dan")).isInstanceOf(SkillNotFoundException.class);
-        svc.setAgentSkills("agent-b", List.of(backend, center), "bob");
-        assertThat(svc.forAgent("agent-b", "bob")).extracting(Skill::id).containsExactly(backend, center);
-        assertThat(svc.forTask("page-task", "dan")).extracting(Skill::id).containsExactly(center); // using ≠ managing
+        svc.setAgentSkills("agent-b", List.of(mine, company), "bob");
+        assertThat(svc.forAgent("agent-b", "bob")).extracting(Skill::id).containsExactly(mine, company);
 
-        svc.onTeamRenamed(new TeamRenamed("技术中心", "研发中心"));
-        assertThat(store.rows.get(backend).space()).isEqualTo("team:研发中心/后端组"); // sub-teams move along
-        assertThat(store.rows.get(center).space()).isEqualTo("team:研发中心");
+        // A team skill from before becomes its creator's own on the next start.
+        Instant now = Instant.now();
+        store.save(new Skill("00000000-0000-0000-0000-000000000001", "接口", null, null, "x", "team:技术中心", true,
+                false, "dan", "dan", now, now));
+        service(store, settings, tmp.resolve("skills"));
+        assertThat(store.rows.get("00000000-0000-0000-0000-000000000001").space()).isEqualTo("personal:dan");
     }
 
     @Test

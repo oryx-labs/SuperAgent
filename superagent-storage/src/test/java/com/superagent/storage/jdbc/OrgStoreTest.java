@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OrgStoreTest {
 
     @Test
-    void keepsManagersAndTeamsAndRenamesATeamWithEverythingUnderIt() {
+    void keepsManagersAndTeams() {
         MysqlOrgStore store = new MysqlOrgStore(new JdbcTemplate(new DriverManagerDataSource(
                 "jdbc:h2:mem:org-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         store.setManager("bob", "alice");
@@ -23,9 +23,9 @@ class OrgStoreTest {
 
         store.setTeams("bob", List.of("技术中心/后端组", "市场部"));
         store.setTeams("dan", List.of("技术中心"));
-        store.renameTeam("技术中心", "研发中心");
-        assertThat(store.teams("bob")).containsExactly("市场部", "研发中心/后端组");
-        assertThat(store.teams("dan")).containsExactly("研发中心");
+        store.setTeams("bob", List.of("市场部"));
+        assertThat(store.teams("bob")).containsExactly("市场部");
+        assertThat(store.teams("dan")).containsExactly("技术中心");
         assertThat(store.memberships()).containsOnlyKeys("bob", "dan");
     }
 }

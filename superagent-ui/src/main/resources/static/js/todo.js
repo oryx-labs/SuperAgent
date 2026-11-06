@@ -17,16 +17,12 @@ const tdel = {
   tabs: document.getElementById("todoTabs"),
   list: document.getElementById("todoList"),
   empty: document.getElementById("todoEmpty"),
-  history: document.getElementById("todoHistory"),
-  historyTable: document.getElementById("todoHistoryTable"),
-  historyToggle: document.getElementById("todoHistoryToggle"),
   readAll: document.getElementById("todoReadAll"),
   badge: document.getElementById("todoBadge"),
   stats: document.getElementById("todoStats"),
 };
 let notices = [];
 let todoFilter = "all";
-let todoHistoryOpen = false;
 
 const TODO_KIND = {
   confirm: { icon: "⚠️", label: "todo.kindConfirm" },
@@ -42,26 +38,30 @@ async function loadTodos() {
 
 /** Open = still needs the user (or not yet read); the rest is history, kept for good. */
 const isOpenNotice = n => n.state === "open";
+const isIgnored = n => n.state === "ignored";
+
+// One list per tab. "All" is what needs the user now; a kind tab also keeps that kind's handled items,
+// dimmed below the open ones; "Ignored" is the only place ignored items show (and can be restored).
+function todoTabItems(filter) {
+  if (filter === "ignored") return notices.filter(isIgnored);
+  if (filter === "all") return notices.filter(isOpenNotice);
+  return notices.filter(n => n.kind === filter && !isIgnored(n));
+}
 
 function renderTodos() {
-  const matches = n => todoFilter === "all" || n.kind === todoFilter;
   tdel.tabs.querySelectorAll(".model-tab").forEach(t => {
-    t.classList.toggle("is-active", t.dataset.filter === todoFilter);
     const f = t.dataset.filter;
-    t.querySelector("b").textContent = notices.filter(n => isOpenNotice(n) && (f === "all" || n.kind === f)).length || "";
+    t.classList.toggle("is-active", f === todoFilter);
+    const items = todoTabItems(f);
+    t.querySelector("b").textContent = (f === "ignored" ? items : items.filter(isOpenNotice)).length || "";
   });
-  // Decisions first, then things to do, then finished work and notices; newest first within each.
+  // Open before handled; decisions first, then things to do, then finished work and notices; newest first.
   const order = { confirm: 0, action: 1, done: 2, notice: 3 };
-  const open = notices.filter(n => isOpenNotice(n) && matches(n))
-    .sort((a, b) => order[a.kind] - order[b.kind] || new Date(b.updatedAt) - new Date(a.updatedAt));
-  const closed = notices.filter(n => !isOpenNotice(n) && matches(n));
-  tdel.list.replaceChildren(...open.map(todoItem));
-  tdel.empty.hidden = open.length > 0;
+  const items = todoTabItems(todoFilter).sort((a, b) =>
+    isOpenNotice(b) - isOpenNotice(a) || order[a.kind] - order[b.kind] || new Date(b.updatedAt) - new Date(a.updatedAt));
+  tdel.list.replaceChildren(...items.map(todoItem));
+  tdel.empty.hidden = items.length > 0;
   tdel.empty.textContent = L(todoFilter === "all" ? "todo.emptyAll" : "todo.empty");
-  tdel.historyToggle.hidden = !closed.length;
-  tdel.historyToggle.textContent = L(todoHistoryOpen ? "todo.hideHistory" : "todo.showHistory", { n: closed.length });
-  tdel.historyTable.hidden = !todoHistoryOpen || !closed.length;
-  tdel.history.replaceChildren(...(todoHistoryOpen ? closed.map(todoItem) : []));
   tdel.readAll.hidden = !notices.some(n => isOpenNotice(n) && (n.kind === "done" || n.kind === "notice"));
   renderTodoStats();
   updateTodoBadge();
@@ -131,7 +131,7 @@ function todoItem(n) {
   const tdKind = document.createElement("td");
   const badge = document.createElement("span");
   badge.className = "todo-kind todo-kind--" + n.kind;
-  badge.textContent = L(n.state === "ignored" ? "todo.ignored" : kind.label);
+  badge.textContent = L(kind.label);
   tdKind.appendChild(badge);
   const main = document.createElement("td");
   const title = document.createElement("div");
@@ -214,7 +214,6 @@ tdel.tabs.addEventListener("click", e => {
   const t = e.target.closest(".model-tab");
   if (t) { todoFilter = t.dataset.filter; renderTodos(); }
 });
-tdel.historyToggle.addEventListener("click", () => { todoHistoryOpen = !todoHistoryOpen; renderTodos(); });
 tdel.readAll.addEventListener("click", async () => {
   try { await api.noticesReadAll(); } catch (e) { showToast(e.message, true); }
   loadTodos();

@@ -1,5 +1,6 @@
 package com.superagent.agent.memory;
 
+import com.superagent.platform.provider.CredentialService;
 import com.superagent.agent.log.AgentLogService;
 import com.superagent.api.knowledge.KnowledgeEntryDto;
 import com.superagent.core.agent.Agent;
@@ -72,6 +73,13 @@ public class AgentMemoryService {
     private final SettingsService settings;
     private final AgentLogService runLog;
     private final Map<AgentType, AgentRunner> runners = new EnumMap<>(AgentType.class);
+
+    private CredentialService credentials; // null in tests: runs use the server's environment
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setCredentials(CredentialService credentials) {
+        this.credentials = credentials;
+    }
     private final int minMessages;
     private final Duration settle;
     private final Duration idle;
@@ -333,7 +341,8 @@ public class AgentMemoryService {
         };
         try {
             runner.run(new AgentRunRequest(UUID.randomUUID().toString(), null, scratch.toString(), prompt, model,
-                    List.of(), false, null, null), sink, new Cancellation());
+                    List.of(), false, null, null, List.of(), null,
+                    credentials == null ? null : credentials.current(type.cliName()).credential()), sink, new Cancellation());
         } finally {
             deleteQuietly(scratch);
         }

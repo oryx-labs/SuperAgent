@@ -26,6 +26,7 @@
     <module>superagent-runtime</module>
     <module>superagent-platform</module>
     <module>superagent-knowledge</module>
+    <module>superagent-files</module>
     <module>superagent-agent</module>
     <module>superagent-task</module>
     <module>superagent-orchestrator</module>
@@ -77,6 +78,11 @@
       <dependency>
         <groupId>com.superagent</groupId>
         <artifactId>superagent-knowledge</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-files</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

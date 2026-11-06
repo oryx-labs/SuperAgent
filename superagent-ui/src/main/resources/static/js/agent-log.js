@@ -70,6 +70,7 @@ function logLine(e) {
 }
 
 document.getElementById("agentLogBtn").addEventListener("click", openAgentLog);
+document.getElementById("superLogBtn").addEventListener("click", openAgentLog);
 document.getElementById("agentLogRefresh").addEventListener("click", loadAgentLog);
 lel.tabs.addEventListener("click", e => {
   const t = e.target.closest(".auto-tab");

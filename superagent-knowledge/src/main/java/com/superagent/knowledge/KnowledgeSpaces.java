@@ -3,9 +3,7 @@ package com.superagent.knowledge;
 import com.superagent.api.knowledge.KnowledgeSpaceDto;
 import com.superagent.core.org.OrgStore;
 import com.superagent.core.org.TeamPaths;
-import com.superagent.core.org.TeamRenamed;
 import com.superagent.core.user.UserStore;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -15,7 +13,7 @@ import java.util.Set;
 import java.util.function.Predicate;
 
 /**
- * Who may use which knowledge base (and which skills: they follow the same layers). Three layers:
+ * Who may use which knowledge base (skills use the personal and company rules). Three layers:
  * <ul>
  *   <li><b>personal</b>: the user's own; only they read and write it;</li>
  *   <li><b>team</b>: members of a team read and write it; members of a sub-team may read (not write) the
@@ -29,12 +27,10 @@ public class KnowledgeSpaces {
 
     private final OrgStore org;
     private final UserStore users;
-    private final KnowledgeService knowledge;
 
-    public KnowledgeSpaces(OrgStore org, UserStore users, KnowledgeService knowledge) {
+    public KnowledgeSpaces(OrgStore org, UserStore users) {
         this.org = org;
         this.users = users;
-        this.knowledge = knowledge;
     }
 
     /** The spaces the user can open, in sidebar order: personal, their teams (and the teams above), company. */
@@ -110,10 +106,5 @@ public class KnowledgeSpaces {
 
     public boolean isAdmin(String user) {
         return users.findByUsername(user).map(u -> u.roles().contains("ADMIN")).orElse(false);
-    }
-
-    @EventListener
-    void onTeamRenamed(TeamRenamed event) {
-        knowledge.renameTeamSpaces(event.from(), event.to());
     }
 }

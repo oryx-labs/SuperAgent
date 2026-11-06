@@ -56,7 +56,7 @@ bin/superagent-start.sh force    # 重启:先停掉运行中的进程,再启动
 bin/superagent-stop.sh           # 停止
 ```
 
-启动脚本会检查 Java 21+,并在 `/actuator/health` 响应后才报告成功。启动后,打开 `http://<host>:8080` 并以管理员身份登录。
+启动脚本会检查 Java 21+,并在 `/actuator/health` 响应后才报告成功。启动后,打开 `http://<host>:18080` 并以管理员身份登录。
 
 ## 把第一项工作跑通
 
@@ -69,7 +69,7 @@ bin/superagent-stop.sh           # 停止
 
 ```bash
 mvn clean install                           # 构建并测试所有模块
-mvn -pl superagent-server spring-boot:run   # 在 :8080 上运行全部
+mvn -pl superagent-server spring-boot:run   # 在 :18080 上运行全部
 ```
 
-冒烟检查 web 装配:`curl localhost:8080/api/v1/meta`。
+冒烟检查 web 装配:`curl localhost:18080/api/v1/meta`。

@@ -18,11 +18,11 @@ public final class TestOrg {
     private TestOrg() {
     }
 
-    public static KnowledgeSpaces spaces(KnowledgeService knowledge) {
+    public static KnowledgeSpaces spaces() {
         Org org = new Org();
         org.setTeams("bob", List.of("技术中心/后端组"));
         org.setTeams("dan", List.of("技术中心"));
-        return new KnowledgeSpaces(org, new Users(), knowledge);
+        return new KnowledgeSpaces(org, new Users());
     }
 
     private static final class Org implements OrgStore {
@@ -33,7 +33,6 @@ public final class TestOrg {
         @Override public List<String> teams(String u) { return teams.getOrDefault(u, List.of()); }
         @Override public Map<String, List<String>> memberships() { return teams; }
         @Override public void setTeams(String u, List<String> t) { teams.put(u, t); }
-        @Override public void renameTeam(String from, String to) { }
     }
 
     private static final class Users implements UserStore {

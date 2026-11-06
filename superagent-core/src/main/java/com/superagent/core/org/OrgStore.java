@@ -27,7 +27,4 @@ public interface OrgStore {
 
     /** Replaces the user's teams. */
     void setTeams(String username, List<String> teams);
-
-    /** Renames a team and everything under it ({@code from} itself and {@code from/...}). */
-    void renameTeam(String from, String to);
 }

@@ -70,175 +70,109 @@ document.getElementById("logoutBtn").addEventListener("click", async () => {
 });
 
 // --- users admin ---
-const ROLE_LABEL = { ADMIN: "Admin", USER: "User" };
+// Two tabs: everyone who can sign in, and the organisation (read-only — it's kept by an external directory and
+// recorded on the users). Adding someone is just a username + password, or a pre-registered phone number.
+const ROLE_LABEL = { ADMIN: "users.roleAdmin", USER: "users.roleUser" };
 const uel = {
   rows: document.getElementById("userRows"),
   empty: document.getElementById("usersEmpty"),
+  search: document.getElementById("userSearch"),
+  tabs: document.getElementById("usersTabs"),
   addBtn: document.getElementById("addUserBtn"),
   modal: document.getElementById("userModal"),
   form: document.getElementById("userForm"),
   title: document.getElementById("userModalTitle"),
+  kind: document.getElementById("ufKind"),
   username: document.getElementById("ufUsername"),
   displayName: document.getElementById("ufDisplayName"),
-  source: document.getElementById("ufSource"),
-  role: document.getElementById("ufRole"),
-  password: document.getElementById("ufPassword"),
+  displayLabel: document.getElementById("ufDisplayLabel"),
   phone: document.getElementById("ufPhone"),
-  externalId: document.getElementById("ufExternalId"),
-  enabled: document.getElementById("ufEnabled"),
+  password: document.getElementById("ufPassword"),
+  passwordLabel: document.getElementById("ufPasswordLabel"),
+  adminRow: document.getElementById("ufAdminRow"),
+  admin: document.getElementById("ufAdmin"),
+  hint: document.getElementById("ufHint"),
   submit: document.getElementById("ufSubmit"),
-  manager: document.getElementById("ufManager"),
-  teams: document.getElementById("ufTeams"),
-  teamInput: document.getElementById("ufTeamInput"),
-  teamAdd: document.getElementById("ufTeamAdd"),
-  teamOptions: document.getElementById("ufTeamOptions"),
-  orgTeams: document.getElementById("orgTeams"),
+  orgTree: document.getElementById("orgTree"),
+  orgTitle: document.getElementById("orgTeamTitle"),
+  orgMembers: document.getElementById("orgMembers"),
+  orgEmpty: document.getElementById("orgEmpty"),
 };
-let editingUserId = null;
-// The organisation, maintained one user at a time: each user's manager and teams (team = "a/b" path).
 let allUsers = [];
 let org = { members: [], teams: [] };
-let teamAdmins = {};         // team path → usernames who manage its skills (and its sub-teams')
-let editingTeams = [];
-const orgMember = username => org.members.find(m => m.username === username) || { manager: null, teams: [] };
+let usersTab = "users";
+let orgTeam = null;          // the team picked in the organisation tab
+let editingUser = null;      // null = adding
+let userKind = "local";      // what's being added: local (username + password) or phone
 
 Object.assign(api, {
   orgOverview: () => fetch("/api/v1/admin/org").then(r => r.json()),
-  saveUserOrg: (id, body) => fetch("/api/v1/users/" + encodeURIComponent(id) + "/org", {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  }).then(r => r.json()),
-  teamAdmins: () => fetch("/api/v1/admin/org/team-admins").then(r => r.json()),
-  saveTeamAdmins: (team, usernames) => fetch("/api/v1/admin/org/team-admins", {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ team, usernames }),
-  }).then(r => r.json()),
-  renameTeam: (from, to) => fetch("/api/v1/admin/org/teams/rename", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from, to }),
-  }).then(r => r.json()),
 });
 
 async function loadUsers() {
-  const [usersRes, orgRes, adminsRes] = await Promise.all([api.listUsers().catch(() => null),
-    api.orgOverview().catch(() => null), api.teamAdmins().catch(() => null)]);
+  const [usersRes, orgRes] = await Promise.all([api.listUsers().catch(() => null), api.orgOverview().catch(() => null)]);
   allUsers = (usersRes && usersRes.data) || [];
   org = (orgRes && orgRes.data) || { members: [], teams: [] };
-  teamAdmins = (adminsRes && adminsRes.data) || {};
-  uel.rows.innerHTML = "";
-  uel.empty.hidden = allUsers.length > 0;
-  allUsers.forEach(u => uel.rows.appendChild(userRow(u)));
-  renderOrgTeams();
+  renderUsers();
+  renderOrg();
 }
 
-// Every team, indented by depth; a team (with everything under it) can be renamed — its knowledge base moves along —
-// and given admins, who manage its skills and those of the teams under it.
-function renderOrgTeams() {
-  uel.orgTeams.replaceChildren(...org.teams.map(team => {
-    const li = document.createElement("li");
-    const depth = team.split("/").length - 1;
-    li.style.paddingLeft = (10 + depth * 18) + "px";
-    const name = document.createElement("span");
-    name.className = "org-teams__name";
-    name.textContent = team.slice(team.lastIndexOf("/") + 1);
-    const count = document.createElement("span");
-    count.className = "org-teams__count";
-    count.textContent = L("org.memberCount", { n: org.members.filter(m => m.teams.includes(team)).length });
-    const admins = teamAdmins[team] || [];
-    const adminsEl = document.createElement("span");
-    adminsEl.className = "org-teams__admins";
-    adminsEl.textContent = admins.length ? L("org.admins", { users: admins.join(", ") }) : "";
-    li.append(name, count, adminsEl, linkBtn(L("org.setAdmins"), async () => {
-      const input = window.prompt(L("org.adminsPrompt", { team }), admins.join(", "));
-      if (input === null) return;
-      const usernames = input.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
-      const res = await api.saveTeamAdmins(team, usernames).catch(() => null);
-      if (!res || res.code !== "ok") { showToast((res && res.message) || L("org.adminsFailed"), true); return; }
-      await loadUsers();
-    }, "link-btn--muted"), linkBtn(L("org.rename"), async () => {
-      const to = window.prompt(L("org.renamePrompt", { team }), team);
-      if (!to || to.trim() === team) return;
-      const res = await api.renameTeam(team, to.trim()).catch(() => null);
-      if (!res || res.code !== "ok") { showToast((res && res.message) || L("org.renameFailed"), true); return; }
-      await loadUsers();
-    }, "link-btn--muted"));
-    return li;
-  }));
-  if (!org.teams.length) {
-    const li = document.createElement("li");
-    li.className = "org-teams__empty";
-    li.textContent = L("org.noTeams");
-    uel.orgTeams.appendChild(li);
-  }
+function showUsersTab(tab) {
+  usersTab = tab;
+  uel.tabs.querySelectorAll(".model-tab").forEach(b => b.classList.toggle("is-active", b.dataset.tab === tab));
+  document.querySelectorAll("[data-users-tab]").forEach(p => { p.hidden = p.dataset.usersTab !== tab; });
+  uel.addBtn.hidden = tab !== "users";
 }
+uel.tabs.querySelectorAll(".model-tab").forEach(b => b.addEventListener("click", () => showUsersTab(b.dataset.tab)));
 
-function renderTeamChips() {
-  uel.teams.replaceChildren(...editingTeams.map(team => {
-    const chip = document.createElement("span");
-    chip.className = "team-chip";
-    chip.textContent = team;
-    const x = document.createElement("button");
-    x.type = "button";
-    x.textContent = "×";
-    x.title = L("common.delete");
-    x.addEventListener("click", () => { editingTeams = editingTeams.filter(t => t !== team); renderTeamChips(); });
-    chip.appendChild(x);
-    return chip;
-  }));
-}
+const userLabel = u => u.displayName || u.username;
 
-function addTeamFromInput() {
-  const team = uel.teamInput.value.split("/").map(s => s.trim()).filter(Boolean).join("/");
-  if (team && !editingTeams.includes(team)) editingTeams.push(team);
-  uel.teamInput.value = "";
-  renderTeamChips();
+function renderUsers() {
+  const q = uel.search.value.trim().toLowerCase();
+  const shown = allUsers.filter(u => !q || [u.username, u.displayName, u.phone].some(v => (v || "").toLowerCase().includes(q)));
+  uel.rows.replaceChildren(...shown.map(userRow));
+  uel.empty.hidden = shown.length > 0;
+  uel.empty.textContent = L(allUsers.length ? "users.noMatch" : "users.empty");
 }
-uel.teamAdd.addEventListener("click", addTeamFromInput);
-uel.teamInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addTeamFromInput(); } });
+uel.search.addEventListener("input", renderUsers);
 
 function userRow(u) {
   const tr = document.createElement("tr");
+  const builtIn = u.source === "CONFIG";
 
   const tdUser = document.createElement("td");
   tdUser.className = "c-name";
-  tdUser.textContent = u.username;
-  if (u.displayName) { const d = document.createElement("small"); d.textContent = u.displayName; tdUser.appendChild(d); }
+  tdUser.textContent = userLabel(u);
+  const sub = u.source === "PHONE" ? u.phone : u.displayName ? u.username : null;
+  if (sub) { const d = document.createElement("small"); d.textContent = sub; tdUser.appendChild(d); }
 
-  const tdRoles = document.createElement("td");
-  tdRoles.textContent = (u.roles || []).map(r => ROLE_LABEL[r] || r).join(", ");
+  const tdLogin = document.createElement("td");
+  tdLogin.className = "kb-list__meta";
+  tdLogin.textContent = L(builtIn ? "users.loginConfig" : u.source === "PHONE" ? "users.loginPhone" : "users.loginLocal");
 
-  const member = orgMember(u.username);
-  const tdManager = document.createElement("td");
-  const boss = member.manager && allUsers.find(x => x.username === member.manager);
-  tdManager.textContent = member.manager ? (boss && boss.displayName ? boss.displayName : member.manager) : "—";
-  const tdTeams = document.createElement("td");
-  if (member.teams.length) {
-    member.teams.forEach(t => { const c = document.createElement("span"); c.className = "team-chip team-chip--static"; c.textContent = t; tdTeams.appendChild(c); });
-  } else {
-    tdTeams.textContent = "—";
-  }
-
-  const tdSource = document.createElement("td");
-  const pill = document.createElement("span");
-  pill.className = "pill pill--method";
-  pill.textContent = L("src." + u.source);
-  tdSource.appendChild(pill);
+  const tdRole = document.createElement("td");
+  tdRole.textContent = L((u.roles || []).includes("ADMIN") ? ROLE_LABEL.ADMIN : ROLE_LABEL.USER);
 
   const tdStatus = document.createElement("td");
   const st = document.createElement("span");
-  st.className = "status" + (u.enabled ? " is-connected" : "");
+  const pending = u.source === "PHONE"; // phone sign-in isn't open yet: registered, can't log in
+  st.className = "status" + (u.enabled && !pending ? " is-connected" : "");
   const dot = document.createElement("span"); dot.className = "status__dot";
-  st.append(dot, document.createTextNode(u.enabled ? L("users.enabled") : L("users.disabled")));
+  st.append(dot, document.createTextNode(L(!u.enabled ? "users.disabled" : pending ? "users.preRegistered" : "users.enabled")));
   tdStatus.appendChild(st);
 
   const tdActions = document.createElement("td");
   const cell = document.createElement("div");
   cell.className = "cell-actions";
-  cell.append(
-    linkBtn(u.enabled ? L("users.disable") : L("users.enable"), () => toggleUser(u), "link-btn--muted"),
-    linkBtn("✎", () => openUserModal(u), "link-btn--muted"),
-    linkBtn("×", () => deleteUser(u), "link-btn--danger"));
-  cell.children[1].title = L("common.edit"); cell.children[2].title = L("common.delete");
+  if (!builtIn) {
+    cell.append(
+      linkBtn(L("common.edit"), () => openUserModal(u), "link-btn--muted"),
+      linkBtn(u.enabled ? L("users.disable") : L("users.enable"), () => toggleUser(u), "link-btn--muted"),
+      linkBtn(L("common.delete"), () => deleteUser(u), "link-btn--danger"));
+  }
   tdActions.appendChild(cell);
 
-  tr.append(tdUser, tdRoles, tdManager, tdTeams, tdSource, tdStatus, tdActions);
+  tr.append(tdUser, tdLogin, tdRole, tdStatus, tdActions);
   return tr;
 }
 
@@ -247,67 +181,120 @@ async function toggleUser(u) {
   await loadUsers();
 }
 async function deleteUser(u) {
-  if (!window.confirm(L("users.deleteConfirm", { name: u.username }))) return;
+  if (!window.confirm(L("users.deleteConfirm", { name: userLabel(u) }))) return;
   try { await api.deleteUser(u.id); } catch (e) { /* ignore */ }
   await loadUsers();
 }
 
+// ---- organisation (read-only) ----
+
+function renderOrg() {
+  const empty = !org.teams.length && !org.members.some(m => m.manager);
+  uel.orgEmpty.hidden = !empty;
+  uel.orgTree.hidden = empty;
+  uel.orgTree.parentElement.querySelector(".org-members").hidden = empty;
+  if (empty) return;
+  if (orgTeam && !org.teams.includes(orgTeam)) orgTeam = null;
+  if (!orgTeam) orgTeam = org.teams[0] || "";
+  const item = (label, team, depth, count) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "org-tree__item" + (team === orgTeam ? " is-selected" : "");
+    b.style.paddingLeft = (10 + depth * 16) + "px";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const n = document.createElement("span");
+    n.className = "org-tree__count";
+    n.textContent = count;
+    b.append(name, n);
+    b.addEventListener("click", () => { orgTeam = team; renderOrg(); });
+    return b;
+  };
+  const members = team => org.members.filter(m => m.teams.some(t => t === team || t.startsWith(team + "/")));
+  const rows = org.teams.map(t => item(t.slice(t.lastIndexOf("/") + 1), t, t.split("/").length - 1, members(t).length));
+  const loose = org.members.filter(m => !m.teams.length);
+  if (loose.length) rows.push(item(L("org.noTeam"), "", 0, loose.length));
+  uel.orgTree.replaceChildren(...rows);
+
+  const shown = orgTeam ? members(orgTeam) : loose;
+  uel.orgTitle.textContent = orgTeam || L("org.noTeam");
+  uel.orgMembers.replaceChildren(...shown.map(m => {
+    const u = allUsers.find(x => x.username === m.username) || { username: m.username };
+    const boss = m.manager && allUsers.find(x => x.username === m.manager);
+    const li = document.createElement("li");
+    const initial = document.createElement("span");
+    initial.className = "member-initial";
+    initial.textContent = userLabel(u).slice(0, 1).toUpperCase();
+    const name = document.createElement("span");
+    name.className = "org-members__name";
+    name.textContent = userLabel(u);
+    const meta = document.createElement("span");
+    meta.className = "org-members__meta";
+    const sub = m.teams.filter(t => t !== orgTeam && orgTeam && t.startsWith(orgTeam + "/"));
+    meta.textContent = [m.manager ? L("org.reportsTo", { name: boss ? userLabel(boss) : m.manager }) : null,
+      sub.length ? sub.join("、") : null].filter(Boolean).join(" · ");
+    li.append(initial, name, meta);
+    return li;
+  }));
+}
+
+// ---- add / edit ----
+
+function setUserKind(kind) {
+  userKind = kind;
+  uel.kind.querySelectorAll(".seg__btn").forEach(b => b.classList.toggle("is-active", b.dataset.kind === kind));
+  uel.form.querySelectorAll("[data-for]").forEach(f => { f.hidden = f.dataset.for !== kind; });
+  uel.displayLabel.textContent = L(kind === "phone" ? "users.fName" : "users.fDisplay");
+  uel.displayName.placeholder = kind === "phone" ? "" : L("common.optional");
+  uel.hint.textContent = kind === "phone" ? L("users.phoneHint") : "";
+  uel.hint.hidden = kind !== "phone";
+}
+uel.kind.querySelectorAll(".seg__btn").forEach(b => b.addEventListener("click", () => { if (!editingUser) setUserKind(b.dataset.kind); }));
+
 function openUserModal(u) {
-  editingUserId = u ? u.id : null;
-  uel.title.textContent = u ? L("users.modalEdit") : L("users.modalAdd");
+  editingUser = u;
+  uel.title.textContent = L(u ? "users.modalEdit" : "users.modalAdd");
+  uel.kind.hidden = !!u; // how someone signs in is chosen when they're added
+  setUserKind(u && u.source === "PHONE" ? "phone" : "local");
   uel.username.value = u ? u.username : "";
+  uel.username.disabled = !!u;
   uel.displayName.value = u && u.displayName ? u.displayName : "";
-  uel.source.value = u ? u.source : "local";
-  uel.role.value = u && (u.roles || []).includes("ADMIN") ? "ADMIN" : "USER";
-  uel.password.value = "";
   uel.phone.value = u && u.phone ? u.phone : "";
-  uel.externalId.value = u && u.externalId ? u.externalId : "";
-  uel.enabled.checked = u ? u.enabled : true;
-  // Manager: anyone but the user themselves; teams: free paths, suggested from the teams that exist.
-  const member = u ? orgMember(u.username) : { manager: null, teams: [] };
-  uel.manager.replaceChildren();
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = L("users.noManager");
-  uel.manager.appendChild(none);
-  allUsers.filter(x => !u || x.username !== u.username).forEach(x => {
-    const o = document.createElement("option");
-    o.value = x.username;
-    o.textContent = x.displayName ? x.displayName + " (" + x.username + ")" : x.username;
-    uel.manager.appendChild(o);
-  });
-  uel.manager.value = member.manager || "";
-  editingTeams = member.teams.slice();
-  renderTeamChips();
-  uel.teamInput.value = "";
-  uel.teamOptions.replaceChildren(...org.teams.map(t => { const o = document.createElement("option"); o.value = t; return o; }));
+  uel.phone.disabled = !!u;
+  uel.password.value = "";
+  uel.passwordLabel.textContent = L(u ? "users.fNewPassword" : "users.fPassword");
+  uel.password.placeholder = u ? L("users.fNewPasswordPh") : "";
+  uel.adminRow.hidden = !u;
+  uel.admin.checked = !!u && (u.roles || []).includes("ADMIN");
   uel.modal.hidden = false;
-  uel.username.focus();
+  (u ? uel.displayName : userKind === "phone" ? uel.displayName : uel.username).focus();
 }
 function closeUserModal() { uel.modal.hidden = true; }
 uel.addBtn.addEventListener("click", () => openUserModal(null));
 uel.modal.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", closeUserModal));
+
 uel.form.addEventListener("submit", async e => {
   e.preventDefault();
-  const body = {
-    username: uel.username.value.trim(),
-    displayName: uel.displayName.value.trim(),
-    source: uel.source.value,
-    roles: [uel.role.value],
-    password: uel.password.value,
-    phone: uel.phone.value.trim() || null,
-    externalId: uel.externalId.value.trim() || null,
-    enabled: uel.enabled.checked,
-  };
-  if (!body.username) return;
+  let body;
+  if (editingUser) {
+    body = { displayName: uel.displayName.value.trim(), roles: [uel.admin.checked ? "ADMIN" : "USER"] };
+    if (uel.password.value) body.password = uel.password.value;
+  } else if (userKind === "phone") {
+    const phone = uel.phone.value.replace(/[\s-]/g, "");
+    const name = uel.displayName.value.trim();
+    if (!/^\+?\d{6,15}$/.test(phone)) { showToast(L("users.phoneInvalid"), true); return; }
+    if (!name) { showToast(L("users.nameRequired"), true); return; }
+    body = { username: phone, displayName: name, phone, source: "phone", roles: ["USER"] };
+  } else {
+    const username = uel.username.value.trim();
+    if (!username) { showToast(L("users.usernameRequired"), true); return; }
+    if (!uel.password.value) { showToast(L("users.passwordRequired"), true); return; }
+    body = { username, displayName: uel.displayName.value.trim(), password: uel.password.value, source: "local", roles: ["USER"] };
+  }
   uel.submit.disabled = true;
-  if (uel.teamInput.value.trim()) addTeamFromInput(); // a typed-but-not-added team still counts
   try {
-    const saved = editingUserId ? await api.updateUser(editingUserId, body) : await api.createUser(body);
-    const id = editingUserId || (saved && saved.data && saved.data.id);
-    if (!id) { showToast((saved && saved.message) || L("users.saveFailed"), true); return; }
-    const orgRes = await api.saveUserOrg(id, { manager: uel.manager.value || null, teams: editingTeams });
-    if (!orgRes || orgRes.code !== "ok") { showToast((orgRes && orgRes.message) || L("users.saveFailed"), true); return; }
+    const res = editingUser ? await api.updateUser(editingUser.id, body) : await api.createUser(body);
+    if (!res || !res.data) { showToast((res && res.message) || L("users.saveFailed"), true); return; }
     closeUserModal();
     await loadUsers();
   } catch (err) { showToast(L("users.saveFailed"), true); } finally { uel.submit.disabled = false; }

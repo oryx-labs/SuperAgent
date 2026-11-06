@@ -7,10 +7,12 @@ import com.superagent.core.user.UserSource;
 import com.superagent.core.user.UserStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -25,16 +27,29 @@ public class UserService {
 
     private static final Logger log = LoggerFactory.getLogger(UserService.class);
 
+    /** The built-in administrator from configuration; listed, but not stored, so it can't be edited here. */
+    public static final String CONFIG_SOURCE = "CONFIG";
+
     private final UserStore users;
     private final PasswordEncoder encoder;
+    private final String adminUsername;
 
-    public UserService(UserStore users, PasswordEncoder encoder) {
+    public UserService(UserStore users, PasswordEncoder encoder,
+                       @Value("${superagent.auth.admin.username:admin}") String adminUsername) {
         this.users = users;
         this.encoder = encoder;
+        this.adminUsername = adminUsername;
     }
 
+    /** Everyone who can sign in: the configured administrator first, then the provisioned users. */
     public List<UserDto> list() {
-        return users.listUsers().stream().map(UserService::toDto).toList();
+        List<UserDto> out = new ArrayList<>();
+        if (users.findByUsername(adminUsername).isEmpty()) {
+            out.add(new UserDto("config:" + adminUsername, adminUsername, null, List.of("ADMIN"), true, null, null,
+                    CONFIG_SOURCE, null));
+        }
+        users.listUsers().stream().map(UserService::toDto).forEach(out::add);
+        return out;
     }
 
     public UserDto create(SaveUserRequest request) {
@@ -42,10 +57,13 @@ public class UserService {
         if (username.isEmpty()) {
             throw new IllegalArgumentException("username is required");
         }
-        if (users.findByUsername(username).isPresent()) {
+        if (users.findByUsername(username).isPresent() || username.equals(adminUsername)) {
             throw new UsernameTakenException(username);
         }
         UserSource source = parseSource(request.source());
+        if (source == UserSource.PHONE && blankToNull(request.phone()) == null) {
+            throw new IllegalArgumentException("phone is required");
+        }
         Instant now = Instant.now();
         User user = new User(
                 UUID.randomUUID().toString(),

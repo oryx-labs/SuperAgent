@@ -3,10 +3,7 @@ package com.superagent.knowledge.skill;
 import com.superagent.api.skill.SkillDto;
 import com.superagent.api.skill.SkillImageUpload;
 import com.superagent.api.skill.SkillRequest;
-import com.superagent.core.org.TeamPaths;
-import com.superagent.core.org.TeamRenamed;
 import com.superagent.core.settings.SystemSettingStore;
-import com.superagent.core.org.TeamAdminStore;
 import com.superagent.core.skill.Skill;
 import com.superagent.core.skill.SkillStore;
 import com.superagent.knowledge.KnowledgeSpace;
@@ -15,7 +12,6 @@ import com.superagent.runtime.attachment.ImageAttachmentStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -41,8 +37,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Skills: working standards agents follow. Like the knowledge base they live in a layer — the user's own,
- * a team's, or the company's — with the same rules (see {@link KnowledgeSpaces}). Skill text lives in the DB; images on disk
+ * Skills: working standards agents follow. Each is either the user's own (only they see and change it) or the
+ * company's (everyone sees it, only administrators change it). Skill text lives in the DB; images on disk
  * under {@code superagent.skill.dir/<skillId>/images/}.
  *
  * <p>At run time skills are offered by <em>progressive disclosure</em>: {@link #install} copies the
@@ -61,28 +57,26 @@ public class SkillService {
     private final SkillStore store;
     private final SystemSettingStore settings;
     private final KnowledgeSpaces spaces;
-    private final TeamAdminStore teamAdmins;
     private final Path root;
 
-    public SkillService(SkillStore store, SystemSettingStore settings, KnowledgeSpaces spaces, TeamAdminStore teamAdmins,
+    public SkillService(SkillStore store, SystemSettingStore settings, KnowledgeSpaces spaces,
                         @Value("${superagent.skill.dir:./data/skills}") String dir) {
-        this.teamAdmins = teamAdmins;
         this.store = store;
         this.settings = settings;
         this.spaces = spaces;
         this.root = Path.of(dir).toAbsolutePath().normalize();
         seedOnce();
+        retireTeamSkills();
     }
 
     // --- CRUD ---
 
-    /** What the user can see: their own skills, their teams' (and the teams above), the company's. */
+    /** What the user can see: their own skills and the company's. */
     public List<SkillDto> list(String user) {
         Predicate<Skill> visible = visibleTo(user);
         Predicate<Skill> writable = editableBy(user);
         return live().filter(visible)
                 .sorted(Comparator.comparingInt((Skill s) -> spaceOf(s).kind().ordinal())
-                        .thenComparing(s -> spaceOf(s).key())
                         .thenComparing(s -> s.category() == null ? "￿" : s.category())
                         .thenComparing(Skill::name, String.CASE_INSENSITIVE_ORDER))
                 .map(s -> toDto(s, writable)).toList();
@@ -207,7 +201,7 @@ public class SkillService {
         store.bind(SkillStore.TASK, taskId, agentSkillIds(agentId));
     }
 
-    /** The agent's enabled skills that its owner can still see (one who left a team loses that team's skills). */
+    /** The agent's enabled skills that its owner can still see. */
     public List<Skill> forAgent(String agentId, String owner) {
         return enabled(agentSkillIds(agentId), owner);
     }
@@ -223,19 +217,6 @@ public class SkillService {
         Predicate<KnowledgeSpace> readable = spaces.readableBy(owner);
         return ids.stream().map(store::find).flatMap(Optional::stream)
                 .filter(s -> s.enabled() && !s.deleted() && readable.test(spaceOf(s))).toList();
-    }
-
-    @EventListener
-    void onTeamRenamed(TeamRenamed event) {
-        for (Skill s : store.list()) {
-            KnowledgeSpace space = spaceOf(s);
-            if (space.kind() == KnowledgeSpace.Kind.TEAM && TeamPaths.within(space.key(), event.from())) {
-                String team = event.to() + space.key().substring(event.from().length());
-                store.save(new Skill(s.id(), s.name(), s.description(), s.category(), s.content(),
-                        stored(KnowledgeSpace.team(team)), s.enabled(), s.deleted(), s.createdBy(), s.updatedBy(),
-                        s.createdAt(), Instant.now()));
-            }
-        }
     }
 
     // --- run-time install ---
@@ -313,15 +294,9 @@ public class SkillService {
         return s;
     }
 
-    /** The knowledge layers' read rule, plus: whoever manages a team's skills (system or team admin) sees them. */
     private Predicate<Skill> visibleTo(String user) {
         Predicate<KnowledgeSpace> readable = spaces.readableBy(user);
-        boolean admin = spaces.isAdmin(user);
-        return s -> {
-            KnowledgeSpace space = spaceOf(s);
-            return readable.test(space) || space.kind() == KnowledgeSpace.Kind.TEAM
-                    && (admin || teamAdmins.manages(user, space.key()));
-        };
+        return s -> readable.test(spaceOf(s));
     }
 
     private Skill writable(String id, String user) {
@@ -332,27 +307,17 @@ public class SkillService {
         return s;
     }
 
-    /**
-     * Who may edit or delete a skill: personal — its owner; company — system administrators; team — whoever
-     * created it (while still in the team), an admin of that team or a team above it, or a system administrator.
-     * Adding a skill to a team stays open to its members (see {@link #target}).
-     */
+    /** Personal skills: their owner; company skills: administrators. */
     private Predicate<Skill> editableBy(String user) {
-        boolean admin = spaces.isAdmin(user);
-        Predicate<KnowledgeSpace> member = spaces.writableBy(user);
-        return s -> {
-            KnowledgeSpace space = spaceOf(s);
-            return switch (space.kind()) {
-                case PERSONAL -> space.key().equals(user);
-                case COMPANY -> admin;
-                case TEAM -> admin || teamAdmins.manages(user, space.key())
-                        || (user != null && user.equals(s.createdBy()) && member.test(space));
-            };
-        };
+        Predicate<KnowledgeSpace> writable = spaces.writableBy(user);
+        return s -> writable.test(spaceOf(s));
     }
 
     /** The layer a new or moved skill goes to; blank = the user's own. */
     private KnowledgeSpace target(String spaceId, String user) {
+        if (spaceId != null && spaceId.startsWith("team:")) {
+            throw new IllegalArgumentException("Skills are personal or company-wide; there are no team skills");
+        }
         KnowledgeSpace space = spaces.resolve(user, spaceId, false);
         if (!spaces.writableBy(user).test(space)) {
             throw new SkillForbiddenException("You can't add skills to " + space.id());
@@ -369,14 +334,11 @@ public class SkillService {
         return s;
     }
 
-    /** Stored as {@code personal:<user>}, {@code team:<path>} or {@code company}; blank is a pre-layers skill = company. */
+    /** Stored as {@code personal:<user>} or {@code company}; blank is a pre-layers skill = company. */
     static KnowledgeSpace spaceOf(Skill s) {
         String v = s.space();
         if (v != null && v.startsWith("personal:")) {
             return KnowledgeSpace.personal(v.substring("personal:".length()));
-        }
-        if (v != null && v.startsWith("team:")) {
-            return KnowledgeSpace.team(v.substring("team:".length()));
         }
         return KnowledgeSpace.company();
     }
@@ -475,6 +437,18 @@ public class SkillService {
         KnowledgeSpace space = spaceOf(s);
         return new SkillDto(s.id(), s.name(), s.description(), s.category(), s.content(), s.enabled(), space.id(),
                 writable.test(s), images(s.id()), s.createdBy(), s.updatedBy(), s.createdAt(), s.updatedAt());
+    }
+
+    /** Team skills were dropped: each one left over becomes its creator's own, so nothing is lost or widened. */
+    private void retireTeamSkills() {
+        for (Skill s : store.list()) {
+            if (s.space() != null && s.space().startsWith("team:")) {
+                String owner = s.createdBy() == null || s.createdBy().isBlank() ? "system" : s.createdBy();
+                store.save(new Skill(s.id(), s.name(), s.description(), s.category(), s.content(), "personal:" + owner,
+                        s.enabled(), s.deleted(), s.createdBy(), s.updatedBy(), s.createdAt(), Instant.now()));
+                log.info("team skill {} ({}) moved to {}'s personal skills", s.id(), s.name(), owner);
+            }
+        }
     }
 
     /** Examples on first start only; deleting them later doesn't bring them back. */

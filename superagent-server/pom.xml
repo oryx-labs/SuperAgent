@@ -64,6 +64,13 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <!-- spring-boot:run only: serve the UI straight from its source folder (jar copy as fallback), so a
+               front-end edit shows on browser refresh without mvn install or a restart. The packaged jar is unaffected. -->
+          <arguments>
+            <argument>--spring.web.resources.static-locations=file:${project.basedir}/../superagent-ui/src/main/resources/static/,classpath:/static/</argument>
+          </arguments>
+        </configuration>
       </plugin>
     </plugins>
   </build>

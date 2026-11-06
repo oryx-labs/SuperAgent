@@ -13,7 +13,14 @@ public record ProviderDto(
         String key,
         String name,
         String cli,
+        /** Tasks and chat run on it (model list, inference checks). */
         boolean supported,
+        /** The Models page can install and upgrade it (supported ones, plus install-only CLIs). */
+        boolean installable,
+        /** The vendor's release isn't stable yet. */
+        boolean preview,
+        /** Lowest Node.js the CLI accepts, or null when it doesn't need Node. */
+        String minNode,
         boolean installed,
         boolean canInfer,
         String currentVersion,

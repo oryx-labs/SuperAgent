@@ -1,0 +1,496 @@
+package com.superagent.files;
+
+import com.superagent.api.file.WorkFileDto;
+import com.superagent.core.agent.Agent;
+import com.superagent.core.agent.AgentMemberStore;
+import com.superagent.core.agent.AgentStatus;
+import com.superagent.core.agent.AgentStore;
+import com.superagent.core.chat.ImageAttachment;
+import com.superagent.core.file.WorkFile;
+import com.superagent.core.file.WorkFileKind;
+import com.superagent.core.file.WorkFileStore;
+import com.superagent.core.notice.NoticeEvents;
+import com.superagent.core.task.Task;
+import com.superagent.core.task.TaskAgentStore;
+import com.superagent.core.task.TaskStore;
+import com.superagent.core.user.User;
+import com.superagent.core.user.UserStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * Work files: what agents produce, kept apart from the knowledge base (which people curate). Content lives on
+ * this server under {@code <dir>/<id>/content}; only the latest version is kept, so an agent revising a file
+ * overwrites it in place — and only when it names that file explicitly, so two pieces of work that happen to
+ * share a name never clobber each other.
+ *
+ * <p>Files people attach to a message live here too ({@link #upload}, origin {@code upload}), filed under the agent
+ * (or task) they were sent to, so everything a conversation touched can be found again with that agent.
+ *
+ * <p>Who sees a file: whoever gave the instruction (its owner) and the members of the agent that made it.
+ * Who may rename or delete it: the owner and the agent's owner.
+ */
+@Service
+public class FileService {
+
+    private static final Logger log = LoggerFactory.getLogger(FileService.class);
+
+    private final WorkFileStore store;
+    private final AgentStore agents;
+    private final AgentMemberStore members;
+    private final TaskStore tasks;
+    private final TaskAgentStore taskAgents;
+    private final UserStore users;
+    private final Path root;
+    private final long maxBytes;
+
+    /**
+     * Who is producing a file, and where: {@code owner} gave the instruction; {@code sessionId}/{@code messageId}
+     * are set for a chat reply, {@code taskId} for a task run.
+     */
+    public record Origin(String owner, String agentId, String taskId, String sessionId, String messageId,
+                         String origin) {
+    }
+
+    public record Content(Path path, String name, String mimeType) {
+    }
+
+    /** A file attached to a message, as a run needs it. */
+    public record Attachment(String name, String mimeType, Path content) {
+    }
+
+    /** What a run gets from its message's attachments: images for the model to see, and a note for the prompt. */
+    public record Delivered(List<ImageAttachment> images, String note) {
+    }
+
+    public static final long UPLOAD_MAX_BYTES = 50L * 1024 * 1024;
+    public static final int UPLOAD_MAX_FILES = 10;
+    /** Where attachments land in a run's workspace, for the agent to read with its own tools. */
+    public static final String UPLOADS_DIR = "uploads";
+    private static final Set<String> MODEL_IMAGES = Set.of("image/png", "image/jpeg", "image/gif", "image/webp");
+
+    public FileService(WorkFileStore store, AgentStore agents, AgentMemberStore members, TaskStore tasks,
+                       TaskAgentStore taskAgents, UserStore users,
+                       @Value("${superagent.files.dir:./data/files}") String dir,
+                       @Value("${superagent.files.max-mb:200}") long maxMb) {
+        this.store = store;
+        this.agents = agents;
+        this.members = members;
+        this.tasks = tasks;
+        this.taskAgents = taskAgents;
+        this.users = users;
+        this.root = Path.of(dir).toAbsolutePath().normalize();
+        this.maxBytes = Math.max(1, maxMb) * 1024 * 1024;
+    }
+
+    // --- producing files (agent tools, task delivery) ---
+
+    public WorkFile writeText(Origin origin, String name, String content, String replaceId) {
+        byte[] bytes = (content == null ? "" : content).getBytes(StandardCharsets.UTF_8);
+        return store(origin, cleanName(name), replaceId, target -> Files.write(target, bytes));
+    }
+
+    public WorkFile saveFrom(Origin origin, Path source, String name, String replaceId) {
+        String fileName = cleanName(name == null || name.isBlank() ? source.getFileName().toString() : name);
+        return store(origin, fileName, replaceId, target -> {
+            if (Files.size(source) > maxBytes) {
+                throw new IllegalArgumentException("文件超过 " + maxBytes / 1024 / 1024 + " MB 上限");
+            }
+            try (InputStream in = Files.newInputStream(source)) {
+                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        });
+    }
+
+    /** Task tools: the task's agent (if one set it off) is the file's agent, so its members see it too. */
+    public Origin forTask(String owner, String taskId) {
+        return new Origin(owner, taskAgents.agentOf(taskId).orElse(null), taskId, null, null, WorkFile.ORIGIN_TASK);
+    }
+
+    /** A finished task's final result becomes a file automatically, named after the task; a re-run overwrites it. */
+    @EventListener
+    public void onTaskStatus(NoticeEvents.TaskStatusChanged e) {
+        if (!"done".equals(e.status()) || e.result() == null || e.result().isBlank()) {
+            return;
+        }
+        Optional<WorkFile> existing = store.delivery(e.taskId());
+        if (existing.isPresent() && existing.get().deleted()) {
+            return; // the user deleted it; a re-run shouldn't bring it back
+        }
+        Origin origin = new Origin(e.owner(), taskAgents.agentOf(e.taskId()).orElse(null), e.taskId(), null, null,
+                WorkFile.ORIGIN_DELIVERY);
+        try {
+            writeText(origin, cleanName(e.title()) + ".md", e.result(), existing.map(WorkFile::id).orElse(null));
+        } catch (RuntimeException ex) {
+            log.warn("could not keep the delivery of task {} as a file: {}", e.taskId(), ex.getMessage());
+        }
+    }
+
+    private interface Writer {
+        void write(Path target) throws IOException;
+    }
+
+    private WorkFile store(Origin origin, String name, String replaceId, Writer writer) {
+        WorkFile existing = replaceId == null || replaceId.isBlank() ? null : replaceable(replaceId.strip(), origin);
+        String id = existing != null ? existing.id() : UUID.randomUUID().toString();
+        Path dir = root.resolve(id);
+        Path target = dir.resolve("content");
+        try {
+            Files.createDirectories(dir);
+            Path tmp = Files.createTempFile(dir, "upload-", ".tmp");
+            try {
+                writer.write(tmp);
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } finally {
+                Files.deleteIfExists(tmp);
+            }
+            long size = Files.size(target);
+            WorkFile saved = existing != null
+                    ? existing.withContent(name, WorkFileKind.of(name), mimeOf(name), size)
+                    : new WorkFile(id, name, WorkFileKind.of(name), mimeOf(name), size, WorkFile.INTERNAL, id,
+                    origin.owner(), origin.agentId(), origin.taskId(), origin.origin(), false, Instant.now(), Instant.now());
+            store.save(saved);
+            if (origin.messageId() != null) {
+                store.link(id, origin.sessionId(), origin.messageId());
+            }
+            log.info("{} file {} ({}, {} bytes) for {} via agent {} / task {}", existing != null ? "revised" : "new",
+                    id, name, size, origin.owner(), origin.agentId(), origin.taskId());
+            return saved;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot store file " + name, e);
+        }
+    }
+
+    /** A run may overwrite only a file of its own: same agent, same task, or (agent-less) the same owner. */
+    private WorkFile replaceable(String id, Origin origin) {
+        WorkFile f = store.find(id).filter(x -> !x.deleted())
+                .orElseThrow(() -> new IllegalArgumentException("没有这个文件：" + id + "（先用 file_list 查看）"));
+        boolean mine = origin.agentId() != null ? origin.agentId().equals(f.agentId())
+                : origin.taskId() != null ? origin.taskId().equals(f.taskId())
+                : origin.owner() != null && origin.owner().equals(f.owner()) && f.agentId() == null;
+        if (!mine) {
+            throw new IllegalArgumentException("只能覆盖本 Agent / 本任务做出的文件：" + id);
+        }
+        if (WorkFile.ORIGIN_UPLOAD.equals(f.origin())) {
+            throw new IllegalArgumentException("这是用户上传的文件，不能覆盖；请另存为新文件：" + id);
+        }
+        return f;
+    }
+
+    /** What a run made before (newest first), so the agent can pick one to revise. */
+    public List<WorkFile> producedBy(Origin origin) {
+        if (origin.agentId() != null) {
+            return store.listFor(null, List.of(origin.agentId()));
+        }
+        return store.listFor(origin.owner(), List.of()).stream()
+                .filter(f -> origin.taskId() != null ? origin.taskId().equals(f.taskId()) : f.agentId() == null)
+                .toList();
+    }
+
+    // --- what people attach to messages ---
+
+    /**
+     * Stores a file the user is about to send to an agent (or a task). Sending the same content to the same agent
+     * again reuses the stored file instead of keeping a second copy.
+     */
+    public WorkFileDto upload(String user, String agentId, String taskId, String name, InputStream in) {
+        Origin origin = uploadOrigin(user, agentId, taskId);
+        String fileName = cleanName(name);
+        Path staging = root.resolve(".staging");
+        Path tmp = null;
+        try {
+            Files.createDirectories(staging);
+            tmp = Files.createTempFile(staging, "upload-", ".tmp");
+            String hash = copyHashed(in, tmp);
+            long size = Files.size(tmp);
+            WorkFile same = sameUpload(origin, size, hash);
+            if (same != null) {
+                return get(same.id(), user);
+            }
+            Path source = tmp;
+            WorkFile saved = store(origin, fileName, null, target -> Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING));
+            return get(saved.id(), user);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot store file " + fileName, e);
+        } finally {
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp);
+                } catch (IOException ignored) {
+                    // a leftover staging file is harmless
+                }
+            }
+        }
+    }
+
+    /** Links the files a message carries to it (their cards show under it) and hands back their content. */
+    public List<Attachment> attach(List<String> fileIds, String user, String sessionId, String messageId) {
+        List<String> ids = fileIds == null ? List.of() : new ArrayList<>(new LinkedHashSet<>(fileIds));
+        if (ids.size() > UPLOAD_MAX_FILES) {
+            throw new IllegalArgumentException("一条消息最多附带 " + UPLOAD_MAX_FILES + " 个文件");
+        }
+        List<Attachment> out = new ArrayList<>();
+        for (String id : ids) {
+            WorkFile f = visible(id, user);
+            store.link(id, sessionId, messageId);
+            out.add(new Attachment(f.name(), f.mimeType(), contentPath(f)));
+        }
+        return out;
+    }
+
+    /**
+     * Copies a message's attachments into {@code <workspace>/uploads/}: the agent reads them with its own tools,
+     * whatever the format. Images the model can see are also handed over as images.
+     */
+    public static Delivered deliver(List<Attachment> files, String workspaceDir) {
+        if (files.isEmpty()) {
+            return new Delivered(List.of(), null);
+        }
+        if (workspaceDir == null) {
+            throw new IllegalStateException("This conversation has no workspace to put the files in");
+        }
+        List<ImageAttachment> images = new ArrayList<>();
+        List<String> placed = new ArrayList<>();
+        Path dir = Path.of(workspaceDir).resolve(UPLOADS_DIR);
+        try {
+            if (Files.isSymbolicLink(dir)) {
+                throw new IllegalStateException("The workspace's uploads folder is a link");
+            }
+            Files.createDirectories(dir);
+            for (Attachment a : files) {
+                Path target = freeTarget(dir, a.name());
+                Files.copy(a.content(), target);
+                placed.add(UPLOADS_DIR + "/" + target.getFileName());
+                if (MODEL_IMAGES.contains(a.mimeType())) {
+                    images.add(new ImageAttachment(a.content().toString(), a.mimeType()));
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot put the attachments into the workspace", e);
+        }
+        return new Delivered(images, "（用户随这条消息附带了文件，已放在你的工作目录：" + String.join("、", placed)
+                + "。需要时用你的工具读取。）");
+    }
+
+    private Origin uploadOrigin(String user, String agentId, String taskId) {
+        if (agentId != null && !agentId.isBlank()) {
+            if (!canAccessAgent(agentId, user)) {
+                throw new WorkFileNotFoundException(agentId);
+            }
+            return new Origin(user, agentId, null, null, null, WorkFile.ORIGIN_UPLOAD);
+        }
+        if (taskId != null && !taskId.isBlank()) {
+            Task task = tasks.findTask(taskId).filter(t -> user != null && user.equals(t.createdBy()))
+                    .orElseThrow(() -> new WorkFileNotFoundException(taskId));
+            return new Origin(user, taskAgents.agentOf(task.id()).orElse(null), task.id(), null, null, WorkFile.ORIGIN_UPLOAD);
+        }
+        throw new IllegalArgumentException("Say which agent or task the file is for");
+    }
+
+    /** An earlier upload with the same content, to the same agent (or, without one, the same task). */
+    private WorkFile sameUpload(Origin origin, long size, String hash) throws IOException {
+        List<WorkFile> candidates = origin.agentId() != null ? store.listFor(null, List.of(origin.agentId()))
+                : store.listFor(origin.owner(), List.of()).stream().filter(f -> origin.taskId().equals(f.taskId())).toList();
+        for (WorkFile f : candidates) {
+            if (!f.deleted() && WorkFile.ORIGIN_UPLOAD.equals(f.origin()) && f.size() == size) {
+                Path path = contentPath(f);
+                try (InputStream in = Files.newInputStream(path)) {
+                    if (hash.equals(copyHashed(in, null))) {
+                        return f;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Copies {@code in} to {@code target} (or just reads it, when null) within the upload limit; returns its SHA-256. */
+    private static String copyHashed(InputStream in, Path target) throws IOException {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+        long total = 0;
+        byte[] buf = new byte[64 * 1024];
+        try (OutputStream out = target == null ? OutputStream.nullOutputStream() : Files.newOutputStream(target)) {
+            for (int n; (n = in.read(buf)) > 0; ) {
+                total += n;
+                if (total > UPLOAD_MAX_BYTES) {
+                    throw new IllegalArgumentException("单个文件不能超过 " + UPLOAD_MAX_BYTES / 1024 / 1024 + " MB");
+                }
+                digest.update(buf, 0, n);
+                out.write(buf, 0, n);
+            }
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static Path freeTarget(Path dir, String name) {
+        Path target = dir.resolve(name);
+        int dot = name.lastIndexOf('.');
+        String base = dot > 0 ? name.substring(0, dot) : name;
+        String ext = dot > 0 ? name.substring(dot) : "";
+        for (int i = 2; Files.exists(target); i++) {
+            target = dir.resolve(base + " (" + i + ")" + ext);
+        }
+        return target;
+    }
+
+    private Path contentPath(WorkFile f) {
+        Path path = root.resolve(f.location()).resolve("content").normalize();
+        if (!path.startsWith(root) || !Files.isRegularFile(path)) {
+            throw new WorkFileNotFoundException(f.id());
+        }
+        return path;
+    }
+
+    // --- people using files ---
+
+    /** Files the user can see; {@code agentId} narrows to one agent's (which the user must have access to). */
+    public List<WorkFileDto> list(String user, String agentId) {
+        List<WorkFile> files;
+        if (agentId != null && !agentId.isBlank()) {
+            if (!canAccessAgent(agentId, user)) {
+                throw new WorkFileNotFoundException(agentId);
+            }
+            files = store.listFor(null, List.of(agentId));
+        } else {
+            files = store.listFor(user, accessibleAgents(user));
+        }
+        Map<String, List<String>> refs = store.messages(files.stream().map(WorkFile::id).toList());
+        return files.stream().map(f -> toDto(f, user, refs.getOrDefault(f.id(), List.of()))).toList();
+    }
+
+    public WorkFileDto get(String id, String user) {
+        WorkFile f = visible(id, user);
+        return toDto(f, user, store.messages(List.of(id)).getOrDefault(id, List.of()));
+    }
+
+    public Content content(String id, String user) {
+        WorkFile f = visible(id, user);
+        return new Content(contentPath(f), f.name(), f.mimeType());
+    }
+
+    public WorkFileDto rename(String id, String user, String name) {
+        WorkFile f = manageable(id, user);
+        String clean = cleanName(name);
+        store.save(f.withContent(clean, WorkFileKind.of(clean), mimeOf(clean), f.size()));
+        return get(id, user);
+    }
+
+    /** Soft delete: the file drops out of every list; its content stays on disk. */
+    public void delete(String id, String user) {
+        store.save(manageable(id, user).markDeleted());
+    }
+
+    private WorkFile visible(String id, String user) {
+        WorkFile f = store.find(id).filter(x -> !x.deleted()).orElseThrow(() -> new WorkFileNotFoundException(id));
+        boolean ok = user != null && (user.equals(f.owner()) || (f.agentId() != null && canAccessAgent(f.agentId(), user)));
+        if (!ok) {
+            throw new WorkFileNotFoundException(id);
+        }
+        return f;
+    }
+
+    private WorkFile manageable(String id, String user) {
+        WorkFile f = visible(id, user);
+        if (!canManage(f, user)) {
+            throw new WorkFileForbiddenException("只有发起人或 Agent 的所有者能修改这个文件");
+        }
+        return f;
+    }
+
+    private boolean canManage(WorkFile f, String user) {
+        return user != null && (user.equals(f.owner())
+                || (f.agentId() != null && agents.find(f.agentId()).map(Agent::owner).filter(user::equals).isPresent()));
+    }
+
+    private boolean canAccessAgent(String agentId, String user) {
+        if (user == null) {
+            return false;
+        }
+        return agents.find(agentId).filter(a -> a.status() != AgentStatus.DELETED)
+                .filter(a -> user.equals(a.owner()) || members.members(a.id()).stream().anyMatch(m -> m.username().equals(user)))
+                .isPresent();
+    }
+
+    private List<String> accessibleAgents(String user) {
+        Set<String> ids = new LinkedHashSet<>();
+        agents.list().stream().filter(a -> a.status() != AgentStatus.DELETED && user.equals(a.owner()))
+                .forEach(a -> ids.add(a.id()));
+        ids.addAll(members.agentsOf(user));
+        return new ArrayList<>(ids);
+    }
+
+    private WorkFileDto toDto(WorkFile f, String user, List<String> messageIds) {
+        Agent agent = f.agentId() == null ? null : agents.find(f.agentId()).orElse(null);
+        Task task = f.taskId() == null ? null : tasks.findTask(f.taskId()).orElse(null);
+        return new WorkFileDto(f.id(), f.name(), f.kind().name().toLowerCase(Locale.ROOT), f.mimeType(), f.size(),
+                f.storage(), f.origin(), f.owner(), displayName(f.owner()), f.agentId(),
+                agent == null ? null : agent.name(), agent == null ? null : agent.avatar(), f.taskId(),
+                task == null ? null : task.title(), messageIds, canManage(f, user), f.createdAt(), f.updatedAt());
+    }
+
+    private String displayName(String username) {
+        if (username == null) {
+            return null;
+        }
+        return users.findByUsername(username).map(User::displayName).filter(n -> n != null && !n.isBlank())
+                .orElse(username);
+    }
+
+    /** A plain file name: no folders (a file has none), no control characters, a sane length. */
+    static String cleanName(String name) {
+        String n = name == null ? "" : name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").strip();
+        n = n.replaceAll("^\\.+", "");
+        if (n.isBlank()) {
+            throw new IllegalArgumentException("文件名不能为空");
+        }
+        return n.length() <= 200 ? n : n.substring(0, 200);
+    }
+
+    static String mimeOf(String name) {
+        String n = name.toLowerCase(Locale.ROOT);
+        if (n.endsWith(".md") || n.endsWith(".markdown")) {
+            return "text/markdown";
+        }
+        if (n.endsWith(".webp")) {
+            return "image/webp";
+        }
+        if (n.endsWith(".webm")) {
+            return "video/webm";
+        }
+        if (n.endsWith(".mov")) {
+            return "video/quicktime";
+        }
+        String guessed = URLConnection.guessContentTypeFromName(n);
+        return guessed == null ? "application/octet-stream" : guessed;
+    }
+}

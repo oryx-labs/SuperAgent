@@ -1,9 +1,9 @@
-// SuperAgent UI — Skills: working standards in three layers (personal / team / company) — list, view, edit, images.
+// SuperAgent UI — Skills: working standards, personal or company-wide — list, view, edit, images.
 // Classic script sharing one global scope with the others; index.html loads them in order.
 "use strict";
 
 // ---------- skills ----------
-// Working standards; a skill lives in a layer with the knowledge base's rules (team skills reach sub-teams,
+// Working standards; a skill is the user's own or the company's (everyone uses it, only admins change it).
 // company skills everyone). Agents get the skills attached to them; their tasks inherit those.
 Object.assign(api, {
   listSkills: () => fetch("/api/v1/skills").then(kbJson),
@@ -48,11 +48,11 @@ const skel = {
   cancel: document.getElementById("sfCancel"),
 };
 let skills = [];             // SkillDto[] from the server
-let skLayer = "personal";    // the tab: personal | team | company
+let skLayer = "personal";    // the tab: personal | company
 let skSelectedId = null;     // the skill open in the drawer (set before setView("skills") to open one)
 let skEditing = null;        // null = viewing; "new" or a skill id = editing
 
-const skLayerOf = s => s.space === "personal" || s.space === "company" ? s.space : "team";
+const skLayerOf = s => s.space === "personal" ? "personal" : "company";
 
 async function loadSkillList() {
   try { skills = (await api.listSkills()) || []; } catch (e) { skills = []; showToast(e.message, true); }
@@ -74,10 +74,9 @@ function renderSkillTable() {
     t.querySelector("b").textContent = skills.filter(s => skLayerOf(s) === t.dataset.layer && matches(s)).length || "";
   });
   skel.hint.textContent = L("sk.hint." + skLayer);
-  // Team skills grouped by team; within a layer by category, then name.
+  // By category, then name.
   const shown = skills.filter(s => skLayerOf(s) === skLayer && matches(s)).sort((a, b) =>
-    (a.space || "").localeCompare(b.space || "") || (a.category || "").localeCompare(b.category || "")
-      || a.name.localeCompare(b.name));
+    (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name));
   skel.rows.replaceChildren(...shown.map(skillRow));
   skel.empty.hidden = shown.length > 0;
   skel.empty.textContent = L(q ? "sk.noMatch" : "sk.empty." + skLayer);
@@ -95,7 +94,7 @@ function skillRow(s) {
     return td;
   };
   const name = cell(s.name, "sk-row__name");
-  const owner = skLayerOf(s) === "team" ? skLayerLabel(s.space) : s.createdBy || "—";
+  const owner = s.createdBy || "—";
   const state = document.createElement("td");
   state.className = "sk-row__state";
   const badge = document.createElement("span");
@@ -122,9 +121,7 @@ skel.tabs.addEventListener("click", e => {
 });
 
 function skLayerLabel(space) {
-  if (space === "personal") return L("sk.layerPersonal");
-  if (space === "company") return L("sk.layerCompany");
-  return (space || "").replace(/^team:/, "");
+  return L(space === "personal" ? "sk.layerPersonal" : "sk.layerCompany");
 }
 
 // Markdown references images as images/<name>; point those at the skill's image endpoint.
@@ -205,7 +202,7 @@ function openSkillForm(skill) {
   skel.name.focus();
 }
 
-// The layers the user may put a skill in: their own, their teams, the company's (admins). A new skill starts in
+// The layers the user may put a skill in: their own, or the company's (admins). A new skill starts in
 // the open tab's layer when the user may write there.
 async function renderSkillSpaces(current, preferLayer) {
   skel.space.innerHTML = "";
@@ -219,9 +216,8 @@ async function renderSkillSpaces(current, preferLayer) {
   let spaces = [];
   try { spaces = (await api.skillSpaces()) || []; } catch (e) { return; }
   skel.space.innerHTML = "";
-  spaces.filter(sp => sp.canWrite || sp.id === current).forEach(sp => add(sp.id,
-    sp.kind === "personal" ? L("sk.spacePersonal")
-      : sp.kind === "company" ? L("sk.spaceCompany") : L("sk.spaceTeam", { team: sp.team })));
+  spaces.filter(sp => sp.kind !== "team" && (sp.canWrite || sp.id === current)).forEach(sp => add(sp.id,
+    L(sp.kind === "personal" ? "sk.spacePersonal" : "sk.spaceCompany")));
   const preferred = preferLayer && spaces.find(sp => sp.canWrite && sp.kind === preferLayer);
   skel.space.value = preferred ? preferred.id : current;
 }

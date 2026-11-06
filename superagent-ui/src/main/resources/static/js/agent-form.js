@@ -133,22 +133,35 @@ const chatImages = imageAttacher({
   tray: document.getElementById("chatImageTray"),
   pasteTarget: el.input,
   dropZone: el.composer,
+  imagesOnly: () => superMode,
 });
 
 el.composer.addEventListener("submit", async e => {
   e.preventDefault();
   if (streaming) { stopGeneration(); return; }
+  if (noChatModel) { showToast(L(isAdmin ? "chat.noModelAdmin" : "chat.noModelUser"), true); return; }
   const text = el.input.value.trim();
-  const hasImages = chatImages.count() > 0;
-  if (!text && !hasImages) return;
-  let images;
-  try { images = await chatImages.payload(); } catch (err) { showToast(L("img.readFailed"), true); return; }
+  if (!text && chatImages.count() === 0) return;
+  if (superMode) {
+    let images;
+    try { images = await chatImages.payload(); } catch (err) { showToast(L("img.readFailed"), true); return; }
+    submitToSuper(text, images);
+    return;
+  }
+  // Attachments go to Files first (under this agent); the message then carries their ids.
+  let fileIds = [];
+  if (chatImages.count()) {
+    el.sendBtn.disabled = true;
+    try { fileIds = await chatImages.upload({ agent: activeAgentId }); }
+    catch (err) { showToast(err.message, true); return; } // keep text and files so they can be resent
+    finally { el.sendBtn.disabled = noChatModel; }
+  }
   const urls = chatImages.previewUrls();
-  if (superMode) { submitToSuper(text, images); return; }
+  const names = chatImages.fileNames();
   el.input.value = "";
   autoGrow();
   chatImages.clear();
-  sendMessage(text, images, urls);
+  sendMessage(text, [], urls, fileIds, names);
 });
 
 el.input.addEventListener("input", autoGrow);

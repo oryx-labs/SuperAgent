@@ -25,6 +25,9 @@ public final class ApiPaths {
 
     public static final String TASKS = V1 + "/tasks";
 
+    /** Work files: what agents produced (documents, images, videos). */
+    public static final String FILES = V1 + "/files";
+
     /** Saved prompts that run as tasks by schedule or API call. */
     public static final String AUTOMATIONS = V1 + "/automations";
 

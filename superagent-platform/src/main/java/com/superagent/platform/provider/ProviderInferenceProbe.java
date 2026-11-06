@@ -21,6 +21,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import com.superagent.core.chat.RunCredential;
 
 /**
  * Checks whether a listed model can actually complete an inference — a model list only says
@@ -51,24 +52,27 @@ public class ProviderInferenceProbe {
 
     /** Runs one inference against {@code modelId}; returns normally on success, throws with a readable reason. */
     public void check(String providerKey, String modelId) throws IOException, InterruptedException {
+        check(providerKey, modelId, null);
+    }
+
+    /** The same check through a specific pool credential (null = the server's environment / CLI login). */
+    public void check(String providerKey, String modelId, RunCredential credential) throws IOException, InterruptedException {
         switch (providerKey) {
-            case "claude" -> checkClaude(modelId);
-            case "codex" -> checkCodex(modelId);
+            case "claude" -> checkClaude(modelId, credential);
+            case "codex" -> checkCodex(modelId, credential);
             default -> throw new IOException("Inference check is not available for " + providerKey + " yet");
         }
     }
 
     // --- claude ---
 
-    private void checkClaude(String modelId) throws IOException, InterruptedException {
-        String apiKey = System.getenv("ANTHROPIC_API_KEY");
-        String authToken = System.getenv("ANTHROPIC_AUTH_TOKEN");
-        if (blank(apiKey) && blank(authToken)) {
+    private void checkClaude(String modelId, RunCredential credential) throws IOException, InterruptedException {
+        java.util.Optional<ApiAccess> access = ApiAccess.anthropic(credential);
+        if (access.isEmpty()) {
             checkClaudeCli(modelId);
             return;
         }
-        String base = System.getenv("ANTHROPIC_BASE_URL");
-        base = blank(base) ? "https://api.anthropic.com" : base.replaceAll("/+$", "");
+        String base = access.get().base();
 
         ObjectNode body = mapper.createObjectNode();
         body.put("model", modelId);
@@ -79,12 +83,17 @@ public class ProviderInferenceProbe {
                 .header("anthropic-version", "2023-06-01")
                 .header("content-type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)));
-        if (!blank(apiKey)) {
-            req.header("x-api-key", apiKey);
-        } else {
-            req.header("Authorization", "Bearer " + authToken);
+        access.get().authorize(req);
+        HttpResponse<String> resp;
+        try {
+            resp = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
+        } catch (java.net.ConnectException | java.net.UnknownHostException | java.net.http.HttpTimeoutException e) {
+            // HttpClient's ConnectException usually has no message: name the cause so the UI can say something.
+            throw new ProbeUnreachableException("无法连接 " + base + "（" + e.getClass().getSimpleName()
+                    + (e.getMessage() == null ? "" : "：" + e.getMessage()) + "）");
+        } catch (IOException e) {
+            throw new ProbeUnreachableException("请求 " + base + " 失败：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
         }
-        HttpResponse<String> resp = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) {
             throw new IOException("HTTP " + resp.statusCode() + errorDetail(resp.body()));
         }
@@ -106,21 +115,36 @@ public class ProviderInferenceProbe {
 
     // --- codex ---
 
-    private void checkCodex(String modelId) throws IOException, InterruptedException {
+    private void checkCodex(String modelId, RunCredential credential) throws IOException, InterruptedException {
         Path codex = probe.findBinary("codex").orElseThrow(() -> new IOException("codex is not installed"));
         // Read-only sandbox, prompt on stdin: the probe can't touch anything even if the model tried.
-        run(List.of(codex.toString(), "exec", "--json", "--skip-git-repo-check", "-s", "read-only",
-                "-m", modelId, "-"), PROMPT);
+        List<String> argv = new java.util.ArrayList<>(List.of(codex.toString(), "exec", "--json", "--skip-git-repo-check",
+                "-s", "read-only", "-m", modelId));
+        java.util.Map<String, String> env = new java.util.HashMap<>();
+        if (credential != null) {
+            env.put("CODEX_API_KEY", credential.apiKey()); // env, never argv
+            if (credential.baseUrl() != null) {
+                argv.addAll(List.of("-c", "openai_base_url=" + mapper.writeValueAsString(credential.baseUrl())));
+            }
+        }
+        argv.add("-");
+        run(argv, PROMPT, env);
     }
 
     // --- helpers ---
 
-    /** Runs argv (no shell) in a scratch dir; non-zero exit or timeout is a failed check. */
     private String run(List<String> argv, String stdin) throws IOException, InterruptedException {
+        return run(argv, stdin, java.util.Map.of());
+    }
+
+    /** Runs argv (no shell) in a scratch dir; non-zero exit or timeout is a failed check. */
+    private String run(List<String> argv, String stdin, java.util.Map<String, String> extraEnv)
+            throws IOException, InterruptedException {
         Path dir = Files.createTempDirectory("sa-infer-");
         try {
             ProcessBuilder pb = new ProcessBuilder(argv).directory(dir.toFile()).redirectErrorStream(true);
             pb.environment().put("PATH", String.join(File.pathSeparator, probe.searchPath()));
+            pb.environment().putAll(extraEnv);
             Process p = pb.start();
             try (OutputStream in = p.getOutputStream()) {
                 if (stdin != null) {
@@ -134,12 +158,21 @@ public class ProviderInferenceProbe {
             }
             String out = output.join();
             if (p.exitValue() != 0) {
-                throw new IOException("exited with " + p.exitValue() + ": " + tail(out));
+                String detail = "exited with " + p.exitValue() + ": " + tail(out);
+                throw unreachable(out) ? new ProbeUnreachableException(detail) : new IOException(detail);
             }
             return out;
         } finally {
             deleteTree(dir);
         }
+    }
+
+    /** CLI output that means the CLI couldn't reach its service, rather than that the model refused. */
+    private static final List<String> UNREACHABLE = List.of("Failed to load cloud config bundle", "error sending request",
+            "Connection refused", "connection error", "ENOTFOUND", "ECONNREFUSED", "ETIMEDOUT", "stream disconnected");
+
+    static boolean unreachable(String out) {
+        return out != null && UNREACHABLE.stream().anyMatch(out::contains);
     }
 
     /** Best-effort cleanup of the scratch dir; a leftover temp dir isn't worth failing the check over. */

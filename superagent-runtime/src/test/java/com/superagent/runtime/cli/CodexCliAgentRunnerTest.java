@@ -4,6 +4,7 @@ import com.superagent.core.chat.AgentEventType;
 import com.superagent.core.chat.AgentRunRequest;
 import com.superagent.core.chat.Cancellation;
 import com.superagent.core.chat.ImageAttachment;
+import com.superagent.core.chat.RunCredential;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -57,6 +58,16 @@ class CodexCliAgentRunnerTest {
         assertThat(String.join(" ", cmd)).doesNotContain("s3cret");
         assertThat(CodexCliAgentRunner.mcpServers(req)).singleElement()
                 .satisfies(s -> assertThat(s.token()).isEqualTo("s3cret"));
+    }
+
+    @Test
+    void aPoolCredentialPointsTheRunAtItsEndpointWithTheKeyOutOfArgv() {
+        CodexCliAgentRunner runner = new CodexCliAgentRunner("codex", 600);
+        AgentRunRequest req = new AgentRunRequest("s1", null, "/w", "hi", null, List.of(), false, null, null)
+                .withCredential(new RunCredential("c1", "https://relay.example/v1", "sk-relay-key", false));
+        List<String> cmd = runner.buildCommand(req, null);
+        assertThat(cmd).containsSubsequence("-c", "openai_base_url=\"https://relay.example/v1\"");
+        assertThat(String.join(" ", cmd)).doesNotContain("sk-relay-key");
     }
 
     @Test

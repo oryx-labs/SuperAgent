@@ -56,7 +56,7 @@ bin/superagent-start.sh force    # restart: stop the running process, then start
 bin/superagent-stop.sh           # stop
 ```
 
-Start checks for Java 21+ and reports success only once `/actuator/health` responds. Once started, open `http://<host>:8080` and sign in as the admin user.
+Start checks for Java 21+ and reports success only once `/actuator/health` responds. Once started, open `http://<host>:18080` and sign in as the admin user.
 
 ## Take your first work through it
 
@@ -69,7 +69,7 @@ Start checks for Java 21+ and reports success only once `/actuator/health` respo
 
 ```bash
 mvn clean install                           # build and test all modules
-mvn -pl superagent-server spring-boot:run   # run everything on :8080
+mvn -pl superagent-server spring-boot:run   # run everything on :18080
 ```
 
-Smoke-check the web wiring: `curl localhost:8080/api/v1/meta`.
+Smoke-check the web wiring: `curl localhost:18080/api/v1/meta`.

@@ -8,7 +8,9 @@ import com.superagent.api.agent.CreateAgentRequest;
 import com.superagent.api.agent.InviteMembersRequest;
 import com.superagent.api.agent.UpdateAgentRequest;
 import com.superagent.api.chat.ChatSegmentDto;
+import com.superagent.api.task.TaskDto;
 import com.superagent.core.agent.AgentCharacters;
+import com.superagent.task.TaskService;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,9 +27,11 @@ import java.util.List;
 public class AgentController {
 
     private final AgentService agentService;
+    private final TaskService taskService;
 
-    public AgentController(AgentService agentService) {
+    public AgentController(AgentService agentService, TaskService taskService) {
         this.agentService = agentService;
+        this.taskService = taskService;
     }
 
     @GetMapping(ApiPaths.AGENTS)
@@ -60,6 +64,13 @@ public class AgentController {
     @GetMapping(ApiPaths.AGENTS + "/{id}/history")
     public ApiResponse<List<ChatSegmentDto>> history(@PathVariable String id, Authentication auth) {
         return ApiResponse.ok(agentService.history(id, auth.getName()));
+    }
+
+    /** The tasks this agent set off, newest first — shown in its side panel. */
+    @GetMapping(ApiPaths.AGENTS + "/{id}/tasks")
+    public ApiResponse<List<TaskDto>> tasks(@PathVariable String id, Authentication auth) {
+        agentService.get(id, auth.getName()); // access check: owner or collaborator, else throws
+        return ApiResponse.ok(taskService.listForAgent(id));
     }
 
     @PutMapping(ApiPaths.AGENTS + "/{id}")

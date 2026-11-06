@@ -12,9 +12,9 @@ Object.assign(api, {
   taskStatus: id => fetch("/api/v1/tasks/" + id + "/status").then(r => r.json()),
   taskEvents: (id, offset) => fetch("/api/v1/tasks/" + id + "/events?offset=" + offset).then(r => r.json()),
   taskArtifacts: id => fetch("/api/v1/tasks/" + id + "/artifacts").then(r => r.json()),
-  taskMessage: (id, content, images) => fetch("/api/v1/tasks/" + id + "/messages", {
+  taskMessage: (id, content, images, fileIds) => fetch("/api/v1/tasks/" + id + "/messages", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, images: images || [] }),
+    body: JSON.stringify({ content, images: images || [], fileIds: fileIds || [] }),
   }),
   stopTask: id => fetch("/api/v1/tasks/" + id + "/stop", { method: "POST" }),
   deleteTask: id => fetch("/api/v1/tasks/" + id, { method: "DELETE" }),
@@ -448,10 +448,11 @@ function appendStreamItem(item) {
     ev.appendChild(lab);
   }
   if (item.images && item.images.length) ev.appendChild(imageStrip(item.images));
+  if (item.files && item.files.length) ev.appendChild(fileNameChips(item.files));
   const body = document.createElement("div");
   body.className = "ev__body";
   setEvBody(body, type, item.payload || "");
-  body.hidden = type === "cmd" && !item.payload && !!(item.images && item.images.length);
+  body.hidden = type === "cmd" && !item.payload && !!((item.images && item.images.length) || (item.files && item.files.length));
   ev.appendChild(body);
   tel.stream.appendChild(ev);
 
@@ -697,18 +698,22 @@ tel.steerForm.addEventListener("submit", async e => {
   if ((!text && taskImages.count() === 0) || !task.id) return;
   let res;
   try {
-    res = await api.taskMessage(task.id, text, await taskImages.payload());
-  } catch (err) { res = null; }
+    // Attachments go to Files first (under this task); the message then carries their ids.
+    const fileIds = taskImages.count() ? await taskImages.upload({ task: task.id }) : [];
+    res = await api.taskMessage(task.id, text, [], fileIds);
+  } catch (err) { showToast(err.message || L("tasks.steerFailed"), true); return; }
   if (!res || !res.ok) {
-    showToast(L("tasks.steerFailed"), true); // keep the text and images so they can be resent
+    const body = res && await res.json().catch(() => null);
+    showToast((body && body.message) || L("tasks.steerFailed"), true); // keep the text and files so they can be resent
     return;
   }
   const urls = taskImages.previewUrls();
+  const names = taskImages.fileNames();
   tel.steerInput.value = "";
   autoGrowSteer();
   taskImages.clear();
   setTaskTab("run");
-  appendStreamItem({ kind: "cmd", payload: text, images: urls });
+  appendStreamItem({ kind: "cmd", payload: text, images: urls, files: names });
   startTaskPolling();
 });
 tel.steerInput.addEventListener("keydown", e => {

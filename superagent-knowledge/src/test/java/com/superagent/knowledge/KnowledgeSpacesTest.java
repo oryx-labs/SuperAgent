@@ -1,7 +1,6 @@
 package com.superagent.knowledge;
 
 import com.superagent.api.knowledge.KnowledgeSpaceDto;
-import com.superagent.core.org.TeamRenamed;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -16,7 +15,7 @@ class KnowledgeSpacesTest {
     @Test
     void teamsReadUpwardOnlyMembersWriteAndOnlyAdminsWriteTheCompanyLayer(@TempDir Path dir) {
         KnowledgeService knowledge = new KnowledgeService(dir.toString());
-        KnowledgeSpaces spaces = TestOrg.spaces(knowledge);
+        KnowledgeSpaces spaces = TestOrg.spaces();
 
         assertThat(spaces.visible("bob")).extracting(KnowledgeSpaceDto::id)
                 .containsExactly("personal", "team:技术中心/后端组", "team:技术中心", "company");
@@ -39,9 +38,5 @@ class KnowledgeSpacesTest {
         knowledge.createFolder(spaces.resolve("bob", "team:技术中心/后端组", true), "接口");
         assertThat(knowledge.list(KnowledgeSpace.team("技术中心"), "")).extracting(e -> e.name()).containsExactly("规范");
 
-        // Renaming a team moves its knowledge base and the sub-teams' along.
-        spaces.onTeamRenamed(new TeamRenamed("技术中心", "研发中心"));
-        assertThat(knowledge.list(KnowledgeSpace.team("研发中心/后端组"), "")).extracting(e -> e.name()).containsExactly("接口");
-        assertThat(knowledge.list(KnowledgeSpace.team("研发中心"), "")).extracting(e -> e.name()).containsExactly("规范");
     }
 }

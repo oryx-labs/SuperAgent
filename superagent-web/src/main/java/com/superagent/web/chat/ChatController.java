@@ -76,7 +76,8 @@ public class ChatController {
     public SseEmitter sendMessage(@PathVariable String id, @RequestBody SendMessageRequest request,
                                   Authentication auth) {
         chatService.requireAccess(id, auth.getName());
-        return chatService.sendMessage(id, request.content(), request.images(), auth == null ? null : auth.getName());
+        return chatService.sendMessage(id, request.content(), request.images(), request.fileIds(),
+                auth == null ? null : auth.getName());
     }
 
     @GetMapping(ApiPaths.SESSIONS + "/{id}/messages/{messageId}/images/{index}")

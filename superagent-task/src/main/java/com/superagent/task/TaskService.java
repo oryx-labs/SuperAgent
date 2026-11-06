@@ -24,6 +24,8 @@ import com.superagent.core.chat.ImageAttachment;
 import com.superagent.core.chat.MessageRole;
 import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.task.Task;
+import com.superagent.platform.provider.CredentialService;
+import com.superagent.core.task.TaskAgentStore;
 import com.superagent.core.task.TaskKind;
 import com.superagent.core.task.TaskKindClassifier;
 import com.superagent.core.task.TaskPhase;
@@ -35,6 +37,7 @@ import com.superagent.core.task.TaskSource;
 import com.superagent.core.task.TaskStatus;
 import com.superagent.core.task.TaskStore;
 import jakarta.annotation.PreDestroy;
+import com.superagent.files.FileService;
 import com.superagent.knowledge.skill.SkillService;
 import com.superagent.runtime.attachment.ImageAttachmentStore;
 import com.superagent.runtime.mcp.McpGrants;
@@ -103,6 +106,7 @@ public class TaskService implements TaskRecovery {
     /** Each task's latest final reply, so the "finished" to-do item can say what came out of it. */
     private final Map<String, String> lastReply = new ConcurrentHashMap<>();
     private final ImageAttachmentStore images;
+    private final FileService files;
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "task-run");
         t.setDaemon(true);
@@ -116,6 +120,13 @@ public class TaskService implements TaskRecovery {
     private final String defaultOwner;
     private final McpGrants mcpGrants;   // null = task runs get no knowledge-base tools
     private final SkillService skills;   // null = tasks run without skills (tests)
+    private final TaskAgentStore taskAgents;   // null = task→agent links not recorded (tests)
+    private CredentialService credentials;     // null in tests: runs use the server's environment
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setCredentials(CredentialService credentials) {
+        this.credentials = credentials;
+    }
     private final ApplicationEventPublisher events;   // null = no to-do items (tests)
     private final CodingFlow codingFlow;
 
@@ -146,7 +157,9 @@ public class TaskService implements TaskRecovery {
             @Value("${superagent.task.default-owner:local}") String defaultOwner,
             McpGrants mcpGrants,
             SkillService skills,
-            ApplicationEventPublisher events) {
+            TaskAgentStore taskAgents,
+            ApplicationEventPublisher events,
+            FileService files) {
         this.tasks = tasks;
         this.phaseStore = phaseStore;
         this.codingFlow = new CodingFlow(phaseStore);
@@ -163,7 +176,9 @@ public class TaskService implements TaskRecovery {
         this.defaultOwner = defaultOwner;
         this.mcpGrants = mcpGrants != null && mcpGrants.available() ? mcpGrants : null;
         this.skills = skills;
+        this.taskAgents = taskAgents;
         this.events = events;
+        this.files = files;
         this.pool = new TaskSessionPool(maxParallel, workspaceRoot);
         if (skipPermissions) {
             log.warn("superagent.task.skip-permissions=true: tasks run the agent WITHOUT tool-permission prompts "
@@ -279,6 +294,17 @@ public class TaskService implements TaskRecovery {
     /** The user's live tasks, newest first. */
     public List<TaskDto> list(String owner) {
         return owned(owner).map(this::toListDto).toList();
+    }
+
+    /** The tasks this agent set off (via its chat MCP tools), newest first; excludes deleted. */
+    public List<TaskDto> listForAgent(String agentId) {
+        if (taskAgents == null) {
+            return List.of();
+        }
+        return taskAgents.tasksForAgent(agentId).stream()
+                .map(tasks::findTask).flatMap(java.util.Optional::stream)
+                .filter(t -> t.status() != TaskStatus.DELETED)
+                .map(this::toListDto).toList();
     }
 
     private java.util.stream.Stream<Task> owned(String owner) {
@@ -404,24 +430,6 @@ public class TaskService implements TaskRecovery {
         return file;
     }
 
-    /**
-     * "Save the main output to the knowledge base" is carried as an instruction in the brief: the
-     * agent does the save with its knowledge tools, and the request stays visible in the Prompt tab.
-     */
-    private static String withKnowledgeNote(String brief, CreateTaskRequest request) {
-        if (!Boolean.TRUE.equals(request.saveToKnowledge())) {
-            return brief;
-        }
-        // Blank folder = the agent decides; "/" = the root.
-        String raw = request.knowledgeFolder() == null ? "" : request.knowledgeFolder().strip();
-        String folder = raw.replaceAll("^/+|/+$", "");
-        String where = raw.isEmpty()
-                ? "根据内容选择合适的目录（先用 knowledge_list_folders 查看已有目录，没有合适的就用 knowledge_create_folder 新建）"
-                : folder.isEmpty() ? "根目录" : "「" + folder + "」目录";
-        String note = "完成后：用 knowledge_save 把本任务的主要产出文件保存到知识库的" + where + "，并在最终回复里写明保存位置。";
-        return (brief == null ? "" : brief + "\n\n") + "---\n" + note;
-    }
-
     private static long sizeOf(Path p) {
         try {
             return Files.size(p);
@@ -457,7 +465,7 @@ public class TaskService implements TaskRecovery {
         Instant now = Instant.now();
         // No workspace yet: it comes from the session this task is scheduled onto.
         // The kind is stored in the (otherwise unused) flow column — zero migration.
-        Task task = new Task(id, cleanTitle(request.title()), withKnowledgeNote(blankToNull(request.brief()), request),
+        Task task = new Task(id, cleanTitle(request.title()), blankToNull(request.brief()),
                 source,
                 blankToNull(request.repo()), blankToNull(request.branch()), kind.storageName(),
                 TaskStatus.PENDING, 0, BigDecimal.ZERO, blankToNull(request.model()), agentType,
@@ -468,6 +476,9 @@ public class TaskService implements TaskRecovery {
         }
         if (agentId != null && skills != null) {
             skills.bindTaskToAgent(id, agentId); // before scheduling, so the first turn already has them
+        }
+        if (agentId != null && taskAgents != null) {
+            taskAgents.link(id, agentId); // so the agent's panel can list the work it set off
         }
         log.info("created task {} ({}), kind={}", id, task.title(), kind.storageName());
         publish(task, agentId);
@@ -551,10 +562,11 @@ public class TaskService implements TaskRecovery {
      * currently holds that session, the steering run queues until it frees.
      */
     public void sendMessage(String id, String owner, String content) {
-        sendMessage(id, owner, content, List.of());
+        sendMessage(id, owner, content, List.of(), List.of());
     }
 
-    public void sendMessage(String id, String owner, String text, List<ImageUploadDto> uploads) {
+    /** {@code fileIds}: files the user uploaded for this message (see FileService#upload); they go into the workspace. */
+    public void sendMessage(String id, String owner, String text, List<ImageUploadDto> uploads, List<String> fileIds) {
         Task task = require(id, owner);
         if (task.status() == TaskStatus.RUNNING || task.workspaceDir() == null) {
             throw new TaskBusyException(id); // running, or queued and never started
@@ -566,13 +578,18 @@ public class TaskService implements TaskRecovery {
                 throw new TaskBusyException(id); // a steering run is already waiting for this session
             }
             String messageId = UUID.randomUUID().toString();
-            List<ImageAttachment> attached = images.save(id, messageId, uploads);
+            List<ImageAttachment> attached = new ArrayList<>(images.save(id, messageId, uploads));
+            FileService.Delivered delivered = fileIds == null || fileIds.isEmpty() || files == null ? null
+                    : FileService.deliver(files.attach(fileIds, owner, id, messageId), task.workspaceDir());
+            if (delivered != null) {
+                attached.addAll(delivered.images());
+            }
             runStore.appendMessage(new ChatMessage(messageId, id,
                     MessageRole.USER, text == null ? "" : text, Instant.now()));
             if (!attached.isEmpty()) {
                 nextTurnImages.put(id, attached);
             }
-            String content = agentPrompt(text, attached);
+            String content = withNote(agentPrompt(text, attached), delivered);
             TaskSessionPool.Lease lease = pool.acquireSession(task.createdBy(), task.agentType(), id, sessionId, task.workspaceDir());
             if (lease != null) {
                 resumeRun(task, lease, content);
@@ -585,6 +602,10 @@ public class TaskService implements TaskRecovery {
                 log.info("task {} steering queued: its session {} is held by another task", id, sessionId);
             }
         }
+    }
+
+    private static String withNote(String prompt, FileService.Delivered delivered) {
+        return delivered == null ? prompt : prompt + "\n\n" + delivered.note();
     }
 
     /** The prompt to run for a user message: an image-only message still needs some text for the CLI. */
@@ -804,23 +825,35 @@ public class TaskService implements TaskRecovery {
 
         // agentSessionId is the pool session's id: --session-id on its first turn, --resume after,
         // so a reused session keeps its accumulated context. Events are re-keyed to task.id above.
-        // A per-turn token gives this run the knowledge tools for its owner only, revoked after the turn.
+        // A per-turn token gives this run the file and skill tools for its owner only, revoked after the turn.
         McpGrants.Grant grant = mcpGrants == null || task.workspaceDir() == null ? null
                 : mcpGrants.openTask(task.createdBy(), task.id(), task.workspaceDir());
         List<String> tools = allowedTools;
         if (grant != null) {
             tools = new ArrayList<>(allowedTools);
-            tools.addAll(McpGrants.KNOWLEDGE_TOOLS);
+            tools.addAll(McpGrants.WORK_TOOLS);
         }
+        String cli = task.agentType().cliName();
+        CredentialService.Choice choice = credentials == null ? new CredentialService.Choice(null) : credentials.current(cli);
         AgentRunRequest request = new AgentRunRequest(
                 agentSessionId, sessionFirstTurn ? null : agentSessionId, task.workspaceDir(),
                 wrapBriefPrompt ? wrapBrief(prompt) : prompt,
                 effectiveModel(task),
                 tools, skipPermissions, grant == null ? null : mcpGrants.mcpConfig(grant),
-                skills == null ? null : skills.install(task.workspaceDir(), skills.forTask(task.id(), task.createdBy()), grant != null),
-                nextTurnImages.remove(task.id()));
+                taskSystemPrompt(task, grant != null),
+                nextTurnImages.remove(task.id()), null, choice.credential());
         try {
             runner.run(request, sink, cancellation);
+            // The endpoint or key failed before the agent produced anything: switch keys and run the turn again.
+            boolean nothingSaid = text.isEmpty() && result.get() == null;
+            if (credentials != null && nothingSaid && error.get() != null && !cancellation.isCancelled()) {
+                java.util.Optional<CredentialService.Choice> next = credentials.failover(cli, choice, error.get());
+                if (next.isPresent()) {
+                    log.info("task {}: retrying the turn on endpoint {}", task.id(), next.get().id());
+                    error.set(null);
+                    runner.run(request.withCredential(next.get().credential()), sink, cancellation);
+                }
+            }
         } finally {
             if (grant != null) {
                 mcpGrants.close(grant);
@@ -1047,6 +1080,15 @@ public class TaskService implements TaskRecovery {
                 }
             });
         }
+    }
+
+    /** The task's skills index, plus how to hand over files when the run has the file tools. */
+    private String taskSystemPrompt(Task task, boolean withTools) {
+        String index = skills == null ? null : skills.install(task.workspaceDir(), skills.forTask(task.id(), task.createdBy()), withTools);
+        if (!withTools) {
+            return index;
+        }
+        return index == null ? McpGrants.FILES_HINT : index + "\n\n" + McpGrants.FILES_HINT;
     }
 
     /** Best-effort delivery artifact so the final result lands on disk in the task workspace. */
