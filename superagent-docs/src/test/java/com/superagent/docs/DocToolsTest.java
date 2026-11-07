@@ -71,6 +71,9 @@ class DocToolsTest {
             case "POST /open-apis/docx/v1/documents/blocks/convert" -> "{\"code\":0,\"data\":{\"first_level_block_ids\":[\"b1\"],"
                     + "\"blocks\":[{\"block_id\":\"b1\",\"block_type\":2,\"text\":{}}]}}";
             case "GET /open-apis/docx/v1/documents/DocFromWiki01/blocks/DocFromWiki01" -> "{\"code\":0,\"data\":{\"block\":{\"children\":[\"x\",\"y\"]}}}";
+            case "GET /open-apis/drive/v1/files" -> "{\"code\":0,\"data\":{\"has_more\":true,\"next_page_token\":\"next1\","
+                    + "\"files\":[{\"name\":\"周报\",\"type\":\"docx\",\"token\":\"Doc1\",\"url\":\"https://x/docx/Doc1\"},"
+                    + "{\"name\":\"子目录\",\"type\":\"folder\",\"token\":\"Fold456\"}]}}";
             case "POST /open-apis/docx/v1/documents" -> "{\"code\":0,\"data\":{\"document\":{\"document_id\":\"NewDoc000001\"}}}";
             default -> "{\"code\":0,\"data\":{}}";
         });
@@ -98,6 +101,18 @@ class DocToolsTest {
         assertThat(tools.call(grant(), "feishu_doc_create", json.readTree("{\"title\":\"周报\",\"content\":\"- a\"}")).toString())
                 .contains("https://www.feishu.cn/docx/NewDoc000001");
         assertThat(calls.get(2)).contains("/documents/NewDoc000001/blocks/NewDoc000001/descendant");
+
+        // The SuperAgent's chat lists and reads, but writing goes to its team; its background touches nothing.
+        calls.clear();
+        McpGrants.Grant superChat = new McpGrants.Grant("t", McpGrants.Kind.SUPER, "ada", null, "sa", "s1", null, null);
+        assertThat(tools.call(superChat, "feishu_doc_list", json.readTree("{\"folder\":\"https://x.feishu.cn/drive/folder/Fold123\"}"))
+                .text()).contains("周报", "新版文档", "Fold456", "下一页 page_token：next1");
+        assertThat(calls.get(0)).contains("/open-apis/drive/v1/files?").contains("folder_token=Fold123");
+        assertThatThrownBy(() -> tools.call(superChat, "feishu_doc_create", json.readTree("{\"title\":\"x\",\"content\":\"y\"}")))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("start_task");
+        McpGrants.Grant background = new McpGrants.Grant("t", McpGrants.Kind.SUPER, "ada", null, "sa", null, null, null);
+        assertThatThrownBy(() -> tools.call(background, "feishu_doc_list", json.createObjectNode()))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("后台");
 
         when(connectors.userToken(ConnectorService.FEISHU_DOCS_ID, "ada")).thenReturn(Optional.empty());
         assertThatThrownBy(() -> tools.call(grant(), "feishu_doc_read", json.readTree("{\"doc\":\"DocFromWiki01\"}")))

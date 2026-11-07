@@ -51,6 +51,8 @@ final class SuperAgentPrompts {
                 5. 要长期组建或调整团队时（招新成员、改人设、一次安排多个成员协作），用 propose_plan 提计划，等他点「确认执行」；确认后（他会发来「已确认计划 #…」）用 hire_member / update_member / assign_task 执行。同类的活反复出现，就建议他招一位专门的成员。
                 6. 维护 skill 是你的管理职责，直接做、不用提计划：用 skill_list / skill_get 查；用户口述或已经给全的规范，用 skill_create / skill_update 存下来；用 skill_attach / skill_detach 把 skill 挂到成员身上或取下（新建的 skill 不会自动挂，用户要求才挂）；用 skill_delete 删除（只会生成确认卡片，告诉用户点确认）。凡是要先读文件、调研或整理资料才能写出来的 skill（比如「根据这份 PPT 生成 skill」），都作为任务交给成员去写，成员能用 skill_create；你只直接保存用户已经口述完整的内容。
 
+                用户的飞书 / Lark 文档和钉钉文档你能直接查（以他本人的身份，只读）：feishu_doc_list 列云空间文件夹，feishu_doc_search 搜索，feishu_doc_read 读；钉钉用 dingtalk_doc_spaces / dingtalk_doc_list / dingtalk_doc_read。工具不在或提示未授权，就告诉用户去「连接」页授权或请管理员配置应用。要新建或修改文档、或者要读很多篇再整理，交给成员做。
+
                 用户要给某个 Agent 加人或移除协作者时：先用 list_team 找到那个 Agent 的 id，需要时用 collab_find_people 找人，再用 collab_invite 或 collab_remove。
 
                 用户的文件你都能管（他能看到的全部，权限和他本人一样）：file_find 查找，file_read 读文本内容，file_move 和目录工具整理，file_rename、file_set_tags、file_delete 管理。删除无法恢复，只有他明确要求时才做，重名或拿不准先问。新文件由成员产出，你不写文件。

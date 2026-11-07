@@ -85,9 +85,28 @@ public class McpGrants {
     public static final List<String> SKILL_CHAT_TOOLS = List.of("mcp__superagent__skill_delete");
 
     /** Office document tools (Feishu / Lark, DingTalk); each only shows up once its app is set up. */
-    public static final List<String> DOC_TOOLS = java.util.stream.Stream.of("feishu_doc_search", "feishu_doc_read",
-            "feishu_doc_create", "feishu_doc_append", "feishu_doc_replace", "dingtalk_doc_spaces", "dingtalk_doc_list",
-            "dingtalk_doc_read", "dingtalk_doc_create", "dingtalk_doc_replace").map(n -> "mcp__superagent__" + n).toList();
+    public static final List<String> DOC_TOOLS = java.util.stream.Stream.of("feishu_doc_search", "feishu_doc_list",
+            "feishu_doc_read", "feishu_doc_create", "feishu_doc_append", "feishu_doc_replace", "dingtalk_doc_spaces",
+            "dingtalk_doc_list", "dingtalk_doc_read", "dingtalk_doc_create", "dingtalk_doc_replace")
+            .map(n -> "mcp__superagent__" + n).toList();
+
+    /** The reading half: the SuperAgent's chat looks things up itself and hands writing to its team. */
+    public static final List<String> DOC_READ_TOOLS = java.util.stream.Stream.of("feishu_doc_search", "feishu_doc_list",
+            "feishu_doc_read", "dingtalk_doc_spaces", "dingtalk_doc_list", "dingtalk_doc_read")
+            .map(n -> "mcp__superagent__" + n).toList();
+
+    /** Whether a run may call this office document tool: the SuperAgent's chat only reads, its background never. */
+    public static void requireDocAccess(Grant grant, String tool) {
+        if (grant.kind() != Kind.SUPER) {
+            return;
+        }
+        if (grant.sessionId() == null) {
+            throw new McpToolException("后台处理不能读写用户的文档。");
+        }
+        if (!DOC_READ_TOOLS.contains("mcp__superagent__" + tool)) {
+            throw new McpToolException("SuperAgent 只读文档；新建或修改文档请用 start_task 交给成员去做。");
+        }
+    }
 
     /** File and skill tool names, for chat and task allowlists. */
     public static final List<String> WORK_TOOLS = java.util.stream.Stream.of(FILE_TOOLS, SKILL_TOOLS, DOC_TOOLS).flatMap(List::stream).toList();

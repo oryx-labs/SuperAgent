@@ -36,10 +36,11 @@ import static com.superagent.runtime.mcp.McpTools.tool;
 @Component
 public class FeishuDocTools implements McpToolProvider {
 
-    public static final List<String> NAMES = List.of("feishu_doc_search", "feishu_doc_read", "feishu_doc_create",
-            "feishu_doc_append", "feishu_doc_replace");
+    public static final List<String> NAMES = List.of("feishu_doc_search", "feishu_doc_list", "feishu_doc_read",
+            "feishu_doc_create", "feishu_doc_append", "feishu_doc_replace");
     private static final Pattern DOCX = Pattern.compile("/docx/([A-Za-z0-9]+)");
     private static final Pattern WIKI = Pattern.compile("/wiki/([A-Za-z0-9]+)");
+    private static final Pattern FOLDER = Pattern.compile("/folder/([A-Za-z0-9]+)");
     private static final int READ_CHARS = 30_000;
 
     private final ConnectorService connectors;
@@ -55,7 +56,7 @@ public class FeishuDocTools implements McpToolProvider {
 
     @Override
     public Set<McpGrants.Kind> kinds() {
-        return Set.of(McpGrants.Kind.CHAT, McpGrants.Kind.TASK);
+        return Set.of(McpGrants.Kind.CHAT, McpGrants.Kind.TASK, McpGrants.Kind.SUPER);
     }
 
     @Override
@@ -67,6 +68,9 @@ public class FeishuDocTools implements McpToolProvider {
         String md = "内容，Markdown 格式（标题、列表、表格、代码块都会转成飞书文档的格式）";
         return List.of(
                 tool("feishu_doc_search", "按关键词搜索用户能看到的飞书 / Lark 云文档。", props(req("query", "string", "关键词")), "query"),
+                tool("feishu_doc_list", "列出用户飞书 / Lark 云空间里一个文件夹下的文件和子文件夹（名称、类型、链接）。不填 folder 列出「我的空间」根目录。",
+                        props(opt("folder", "string", "文件夹链接（/drive/folder/…）或文件夹 token；不填为根目录"),
+                                opt("page_token", "string", "上一次结果给出的下一页标记")), (String[]) null),
                 tool("feishu_doc_read", "读取一篇飞书 / Lark 新版文档的纯文本内容（最多前 3 万字）。", props(req("doc", "string", doc)), "doc"),
                 tool("feishu_doc_create", "以用户本人身份新建一篇飞书 / Lark 文档并写入内容，返回链接。",
                         props(req("title", "string", "标题"), req("content", "string", md),
@@ -81,12 +85,14 @@ public class FeishuDocTools implements McpToolProvider {
     @Override
     public McpToolResult call(McpGrants.Grant grant, String name, JsonNode args) {
         String owner = requireOwner(grant, "飞书文档");
+        McpGrants.requireDocAccess(grant, name);
         String token = connectors.userToken(ConnectorService.FEISHU_DOCS_ID, owner).orElseThrow(() -> new McpToolException(
                 "用户还没有授权飞书文档。请让他在 SuperAgent 的「连接」页找到「飞书 / Lark 文档」点授权，然后再试。"));
         Map<String, String> auth = Map.of("Authorization", "Bearer " + token);
         String base = oauth.base();
         return McpToolResult.ok(switch (name) {
             case "feishu_doc_search" -> search(base, auth, require(args, "query"));
+            case "feishu_doc_list" -> list(base, auth, strOrNull(args, "folder"), strOrNull(args, "page_token"));
             case "feishu_doc_read" -> {
                 String id = documentId(base, auth, require(args, "doc"));
                 String text = api.send("GET", base + "/open-apis/docx/v1/documents/" + id + "/raw_content", auth, null)
@@ -137,6 +143,44 @@ public class FeishuDocTools implements McpToolProvider {
         docs.forEach(d -> sb.append("- ").append(d.path("title").asText("（无标题）")).append(" | 类型 ")
                 .append(d.path("docs_type").asText()).append(" | token ").append(d.path("docs_token").asText()).append("\n"));
         return sb.append("新版文档（docx）可以用 token 读取和修改。").toString();
+    }
+
+    private String list(String base, Map<String, String> auth, String folder, String pageToken) {
+        StringBuilder url = new StringBuilder(base + "/open-apis/drive/v1/files?page_size=50&order_by=EditedTime&direction=DESC");
+        if (folder != null) {
+            Matcher m = FOLDER.matcher(folder);
+            url.append("&folder_token=").append(URLEncoder.encode(m.find() ? m.group(1) : folder.strip(), StandardCharsets.UTF_8));
+        }
+        if (pageToken != null) {
+            url.append("&page_token=").append(URLEncoder.encode(pageToken, StandardCharsets.UTF_8));
+        }
+        JsonNode data = api.send("GET", url.toString(), auth, null).path("data");
+        JsonNode files = data.path("files");
+        if (files.isEmpty()) {
+            return "这个文件夹是空的。";
+        }
+        StringBuilder sb = new StringBuilder((folder == null ? "我的空间" : "这个文件夹") + "下有 " + files.size() + " 项：\n");
+        files.forEach(f -> sb.append("- ").append(f.path("name").asText("（无标题）")).append(" | ")
+                .append(typeLabel(f.path("type").asText())).append(" | token ").append(f.path("token").asText())
+                .append(f.hasNonNull("url") ? " | " + f.path("url").asText() : "").append("\n"));
+        if (data.path("has_more").asBoolean(false)) {
+            sb.append("还有更多，下一页 page_token：").append(data.path("next_page_token").asText()).append("\n");
+        }
+        return sb.append("文件夹可以用 token 继续往下列；新版文档（docx）可以读取和修改。").toString();
+    }
+
+    private static String typeLabel(String type) {
+        return switch (type) {
+            case "folder" -> "文件夹";
+            case "docx" -> "新版文档";
+            case "doc" -> "旧版文档";
+            case "sheet" -> "表格";
+            case "bitable" -> "多维表格";
+            case "mindnote" -> "思维笔记";
+            case "file" -> "文件";
+            case "shortcut" -> "快捷方式";
+            default -> type;
+        };
     }
 
     /** A docx id from a link or token; a wiki page is looked up to the document it holds. */

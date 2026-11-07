@@ -60,7 +60,7 @@ public class DingTalkDocTools implements McpToolProvider {
 
     @Override
     public Set<McpGrants.Kind> kinds() {
-        return Set.of(McpGrants.Kind.CHAT, McpGrants.Kind.TASK);
+        return Set.of(McpGrants.Kind.CHAT, McpGrants.Kind.TASK, McpGrants.Kind.SUPER);
     }
 
     @Override
@@ -87,6 +87,7 @@ public class DingTalkDocTools implements McpToolProvider {
     @Override
     public McpToolResult call(McpGrants.Grant grant, String name, JsonNode args) {
         String owner = requireOwner(grant, "钉钉文档");
+        McpGrants.requireDocAccess(grant, name);
         String operator = unionId(owner);
         Map<String, String> auth = Map.of("x-acs-dingtalk-access-token", appToken());
         String op = "operatorId=" + enc(operator);
