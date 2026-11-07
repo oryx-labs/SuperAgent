@@ -57,6 +57,9 @@ class CredentialServiceTest {
                 throw new IOException("HTTP 429: quota exceeded");
             }
         }
+        @Override public void checkKey(String key, String model, RunCredential c) throws IOException {
+            check(key, model, c);
+        }
     }
 
     @TempDir

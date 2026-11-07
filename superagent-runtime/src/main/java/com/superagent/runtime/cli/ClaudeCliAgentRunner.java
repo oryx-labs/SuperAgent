@@ -86,6 +86,8 @@ public class ClaudeCliAgentRunner implements AgentRunner {
     /** The run's endpoint and key; a subclass running Claude Code against another vendor adds what it needs. */
     protected void applyEnvironment(ProcessBuilder pb, AgentRunRequest request) {
         applyCredential(pb, request.credential());
+        // No update check, telemetry or error reporting on each run: measured 4.7s → 3.2s to the CLI's first event.
+        pb.environment().put("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
     }
 
     static void applyCredential(ProcessBuilder pb, com.superagent.core.chat.RunCredential credential) {
@@ -291,6 +293,9 @@ public class ClaudeCliAgentRunner implements AgentRunner {
             cmd.add("--mcp-config");
             cmd.add(mcpConfigFile.toString());
         }
+        // Only the run's own MCP servers: not whatever the server's account set up for itself (slower to start, and
+        // not the company's to hand an agent).
+        cmd.add("--strict-mcp-config");
 
         if (request.isFirstTurn()) {
             cmd.add("--session-id");

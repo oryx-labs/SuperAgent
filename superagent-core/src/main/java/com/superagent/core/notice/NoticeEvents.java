@@ -35,6 +35,13 @@ public final class NoticeEvents {
     public record AgentShared(String agentId, String agentName, String username, String byName) {
     }
 
+    /**
+     * The default model stopped working and conversations moved to {@code inUse} ({@code down}), or it works again
+     * ({@code down} false). For the admins.
+     */
+    public record DefaultModelChanged(String defaultModel, String inUse, boolean down, String reason) {
+    }
+
     /** The user ignored an item; the module that owns what it is about may react (e.g. dismiss the to-do). */
     public record NoticeIgnored(String owner, String linkType, String linkId) {
     }

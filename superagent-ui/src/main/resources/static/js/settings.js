@@ -58,7 +58,57 @@ async function loadSettingsForm() {
   sel.missing.hidden = !none;
   sel.filtered.hidden = !ok || ok === listed;
   sel.filtered.textContent = L("settings.modelsFiltered", { ok, total: listed });
+  backupModels = (systemSettings.backupModels || []).slice();
+  backupGroups = groups;
+  renderBackupModels();
 }
+
+// Backup models: where conversations go, in order, when the default model can't run.
+let backupModels = [];
+let backupGroups = [];
+function renderBackupModels() {
+  const list = document.getElementById("sfBackupList");
+  list.replaceChildren(...backupModels.map((id, i) => {
+    const row = document.createElement("div");
+    row.className = "backup-models__row";
+    const n = document.createElement("span");
+    n.className = "backup-models__n";
+    n.textContent = i + 1;
+    const name = document.createElement("span");
+    name.className = "backup-models__id";
+    name.textContent = id;
+    const up = document.createElement("button");
+    up.type = "button";
+    up.textContent = "↑";
+    up.title = L("settings.backupUp");
+    up.disabled = i === 0;
+    up.addEventListener("click", () => { [backupModels[i - 1], backupModels[i]] = [backupModels[i], backupModels[i - 1]]; renderBackupModels(); });
+    const del = document.createElement("button");
+    del.type = "button";
+    del.textContent = "✕";
+    del.title = L("settings.backupRemove");
+    del.addEventListener("click", () => { backupModels.splice(i, 1); renderBackupModels(); });
+    row.append(n, name, up, del);
+    return row;
+  }));
+  const add = document.getElementById("sfBackupAdd");
+  add.replaceChildren();
+  const first = document.createElement("option");
+  first.value = "";
+  first.textContent = L(backupModels.length ? "settings.backupAddMore" : "settings.backupAuto");
+  add.appendChild(first);
+  const taken = new Set([...backupModels, sel.agentModel.value]);
+  fillModelGroups(add, backupGroups.map(g => Object.assign({}, g, { models: g.models.filter(m => !taken.has(m.id)) }))
+    .filter(g => g.models.length), m => m.displayName && m.displayName !== m.id ? m.displayName + " (" + m.id + ")" : m.id);
+  add.value = "";
+}
+document.getElementById("sfBackupAdd").addEventListener("change", e => {
+  if (e.target.value) { backupModels.push(e.target.value); renderBackupModels(); }
+});
+sel.agentModel.addEventListener("change", () => {
+  backupModels = backupModels.filter(m => m !== sel.agentModel.value);
+  renderBackupModels();
+});
 
 sel.form.addEventListener("submit", async e => {
   e.preventDefault();
@@ -69,6 +119,7 @@ sel.form.addEventListener("submit", async e => {
       companyName: sel.companyName.value.trim() || null,
       companyShortName: sel.companyShortName.value.trim() || null,
       publicUrl: sel.publicUrl.value.trim(), // "" clears it
+      backupModels,
     });
     if (!res || !res.data) throw new Error((res && res.message) || "no data");
     systemSettings = res.data;

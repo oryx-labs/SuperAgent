@@ -39,6 +39,11 @@ public final class UsageDtos {
      * key "" for what belongs to no agent). {@code byUser} only in the company view.
      */
     public record Summary(Instant from, Instant to, Total total, Total taskTotal, Total agentTotal, List<Total> byDay,
-                          List<Total> tasks, List<Total> agents, List<Total> byModel, List<Total> byUser) {
+                          List<Total> tasks, List<Total> agents, List<Total> byModel, List<Total> byUser,
+                          /**
+                           * The system's own background work (checking models and keys), which belongs to nobody:
+                           * {@code systemTotal} and one row per kind and model ({@code key} "kind|model"). Company view only.
+                           */
+                          Total systemTotal, List<Total> system) {
     }
 }

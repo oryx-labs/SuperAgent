@@ -73,8 +73,17 @@ public class ModelPriceService implements ModelRouter {
     public record Price(double input, double output, Double cacheRead, Double cacheWrite, String source) {
     }
 
+    /** How long a model that failed is passed over before it's tried again. */
+    private static final Duration COOL_DOWN = Duration.ofMinutes(10);
+
     private final ProviderService providers;
     private final SystemSettingStore store;
+    private com.superagent.platform.settings.SettingsService settings; // null in tests: no default model
+    private org.springframework.context.ApplicationEventPublisher events; // null in tests: nobody told
+    private final java.util.Map<String, Instant> failedUntil = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<String, String> failedWhy = new java.util.concurrent.ConcurrentHashMap<>();
+    /** The default model conversations were last moved off, or null while they run on it. */
+    private volatile String standingIn;
     private final String catalogUrl;
     private final long checkSeconds;
     private final ModelCatalog bundled;
@@ -102,6 +111,16 @@ public class ModelPriceService implements ModelRouter {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    @Autowired(required = false)
+    void setSettings(com.superagent.platform.settings.SettingsService settings) {
+        this.settings = settings;
+    }
+
+    @Autowired(required = false)
+    void setEvents(org.springframework.context.ApplicationEventPublisher events) {
+        this.events = events;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -162,6 +181,66 @@ public class ModelPriceService implements ModelRouter {
         return candidates().stream().filter(Candidate::priced).findFirst()
                 .or(() -> candidates().stream().findFirst())
                 .map(c -> new ModelChoice(c.id(), c.cli()));
+    }
+
+    // --- conversations: the default model, or a stand-in nobody has to notice ---
+
+    @Override
+    public List<String> chatModels() {
+        String def = settings == null ? null : settings.agentDefaultModel();
+        if (def == null) {
+            return List.of();
+        }
+        List<Candidate> runnable = candidates();
+        java.util.function.Predicate<String> usable = id -> runnable.stream().anyMatch(c -> c.id().equals(id)) && !coolingDown(id);
+        List<String> out = new java.util.ArrayList<>();
+        if (usable.test(def)) {
+            out.add(def);
+        }
+        settings.backupModels().stream().filter(usable).filter(m -> !out.contains(m)).forEach(out::add);
+        runnable.stream().sorted(Comparator.comparingDouble(Candidate::blended).reversed()) // strongest first
+                .map(Candidate::id).filter(usable).filter(m -> !out.contains(m)).forEach(out::add);
+        if (out.isEmpty()) {
+            out.add(def); // nothing else either: keep trying the default
+        }
+        noteStandIn(def, out.get(0));
+        return out;
+    }
+
+    @Override
+    public void reportFailure(String model, String error) {
+        if (model == null) {
+            return;
+        }
+        failedUntil.put(model, Instant.now().plus(COOL_DOWN));
+        failedWhy.put(model, error == null ? "" : error.length() > 300 ? error.substring(0, 300) + "…" : error);
+        log.warn("model {} failed, passed over for {} min: {}", model, COOL_DOWN.toMinutes(), error);
+    }
+
+    private boolean coolingDown(String model) {
+        Instant until = failedUntil.get(model);
+        if (until == null) {
+            return false;
+        }
+        if (until.isBefore(Instant.now())) {
+            failedUntil.remove(model); // its time is up: try it again
+            return false;
+        }
+        return true;
+    }
+
+    /** Tells the admins once when conversations leave the default model, and once when they're back on it. */
+    private synchronized void noteStandIn(String def, String inUse) {
+        boolean down = !def.equals(inUse);
+        if (down == (standingIn != null) && (!down || def.equals(standingIn))) {
+            return;
+        }
+        standingIn = down ? def : null;
+        String why = down ? failedWhy.getOrDefault(def, "没通过可用性检查") : null;
+        log.warn(down ? "default model {} can't run: conversations use {}" : "default model {} works again", def, inUse);
+        if (events != null) {
+            events.publishEvent(new com.superagent.core.notice.NoticeEvents.DefaultModelChanged(def, inUse, down, why));
+        }
     }
 
     private Optional<ModelCatalog.Fact> fact(String id, Map<String, String> saved) {
@@ -276,6 +355,11 @@ public class ModelPriceService implements ModelRouter {
             throw new IllegalArgumentException("A model is required");
         }
         return model.strip();
+    }
+
+    /** For tests: as if every failed model's time out were up. */
+    void forgetFailures() {
+        failedUntil.clear();
     }
 
     /** For tests: the prices of a directory, as if just downloaded. */

@@ -111,7 +111,7 @@ public class ProviderService {
                 }
                 store.findByKey(key).ifPresent(p -> lookup.execute(() -> {
                     refreshModels(p);
-                    store.findById(p.id()).ifPresent(this::refreshInference);
+                    store.findById(p.id()).ifPresent(x -> refreshInference(x, true)); // another endpoint: check them all
                 }));
             });
         }
@@ -192,7 +192,7 @@ public class ProviderService {
                 refreshLatest(p);
                 refreshLocal(p);
                 refreshModels(p);
-                refreshInference(p); // so a newly added CLI's models get a status without waiting a full cycle
+                refreshInference(p, true); // so a newly added CLI's models get a status without waiting a full cycle
             });
         }
         return toDto(refreshed);
@@ -209,7 +209,7 @@ public class ProviderService {
     /** The list now; whether each model answers follows in the background (one inference per model). */
     public ProviderDto refreshModelsNow(String id) {
         ModelProvider refreshed = refreshModels(require(id));
-        lookup.execute(() -> store.findById(id).ifPresent(this::refreshInference));
+        lookup.execute(() -> store.findById(id).ifPresent(x -> refreshInference(x, MANUAL_RECHECK_AFTER)));
         return toDto(refreshed);
     }
 
@@ -490,30 +490,83 @@ public class ProviderService {
      * keeps its last status: one network blip must not mark every model failed (and block chat) for an hour.
      * Returns false when some checks were unreachable, so the caller can retry soon.
      */
+    /** The scheduled sweep: models checked within the last {@link #RECHECK_AFTER} keep their result. */
     boolean refreshInference(ModelProvider p) {
+        return refreshInference(p, RECHECK_AFTER);
+    }
+
+    /** {@code all}: every model (another endpoint, a new CLI); else as the scheduled sweep. */
+    boolean refreshInference(ModelProvider p, boolean all) {
+        return refreshInference(p, all ? java.time.Duration.ZERO : RECHECK_AFTER);
+    }
+
+    /** The Refresh button: a model checked in the last minute keeps its result, so clicking again re-checks nothing. */
+    static final java.time.Duration MANUAL_RECHECK_AFTER = java.time.Duration.ofMinutes(1);
+
+    /** A model checked this recently isn't checked again by the scheduled sweep (a restart included). */
+    static final java.time.Duration RECHECK_AFTER = java.time.Duration.ofMinutes(50);
+    private static final int PARALLEL_CHECKS = 6;
+    /** Rounds running now, by provider id, and since when: one at a time per CLI, however they're asked for. */
+    private final Map<String, Instant> checking = new java.util.concurrent.ConcurrentHashMap<>();
+    private final ExecutorService checks = Executors.newFixedThreadPool(PARALLEL_CHECKS, r -> {
+        Thread t = new Thread(r, "provider-check");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /**
+     * Checks that each listed model answers, in parallel: those not checked within {@code freshEnough}. A round
+     * already running for this CLI isn't started twice.
+     */
+    boolean refreshInference(ModelProvider p, java.time.Duration freshEnough) {
         ProviderCatalog.Entry entry = entryOf(p);
         if (!entry.supported()) {
             return true;
         }
-        Map<String, ProviderModelDto> results = new LinkedHashMap<>();
+        Instant started = Instant.now();
+        if (checking.putIfAbsent(p.id(), started) != null) {
+            log.info("provider {}: a model check is already running, not starting another", entry.key());
+            return true;
+        }
+        try {
+            return sweep(p, entry, freshEnough, started);
+        } finally {
+            checking.remove(p.id());
+        }
+    }
+
+    private boolean sweep(ModelProvider p, ProviderCatalog.Entry entry, java.time.Duration freshEnough, Instant started) {
+        Map<String, ProviderModelDto> results = new java.util.concurrent.ConcurrentHashMap<>();
         com.superagent.core.chat.RunCredential credential = currentCredential(entry.key());
-        int unreachable = 0;
-        String lastUnreachable = null;
-        for (ProviderModelDto m : parseModels(p.modelsJson())) {
+        java.util.concurrent.atomic.AtomicInteger unreachableCount = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicReference<String> lastUnreachableRef = new java.util.concurrent.atomic.AtomicReference<>();
+        List<ProviderModelDto> due = parseModels(p.modelsJson()).stream().filter(m -> m.inferCheckedAt() == null
+                || !m.inferCheckedAt().plus(freshEnough).isAfter(started)).toList();
+        if (due.isEmpty()) {
+            return true;
+        }
+        log.info("provider {}: checking {} model(s)", entry.key(), due.size());
+        List<java.util.concurrent.Callable<Void>> jobs = due.stream().<java.util.concurrent.Callable<Void>>map(m -> () -> {
             try {
                 inferenceProbe.check(entry.key(), m.id(), credential);
                 results.put(m.id(), m.withInference(ProviderModelDto.INFER_OK, null, Instant.now()));
             } catch (ProbeUnreachableException e) {
-                unreachable++;
-                lastUnreachable = e.getMessage();
+                unreachableCount.incrementAndGet();
+                lastUnreachableRef.set(e.getMessage());
             } catch (IOException e) {
                 String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 results.put(m.id(), m.withInference(ProviderModelDto.INFER_ERROR, reason, Instant.now()));
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return true;
             }
+            return null;
+        }).toList();
+        try {
+            checks.invokeAll(jobs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return true;
         }
+        int unreachable = unreachableCount.get();
+        String lastUnreachable = lastUnreachableRef.get();
         if (unreachable > 0) {
             log.warn("provider {} inference check: {} models unreachable, kept their last status ({})",
                     entry.key(), unreachable, lastUnreachable);
@@ -522,9 +575,34 @@ public class ProviderService {
             long failed = results.values().stream().filter(m -> !m.canInfer()).count();
             log.info("provider {} inference check: {}/{} models ok", entry.key(), results.size() - failed, results.size());
             update(p, cur -> cur.withModelsJson(toJson(keepInference(parseModels(cur.modelsJson()),
-                    List.copyOf(results.values())))));
+                    mergeChecked(parseModels(cur.modelsJson()), results)))));
         }
         return unreachable == 0;
+    }
+
+    /** The models' last results with this round's on top (a partial round keeps the others' results). */
+    private static List<ProviderModelDto> mergeChecked(List<ProviderModelDto> current, Map<String, ProviderModelDto> fresh) {
+        return current.stream().map(m -> fresh.getOrDefault(m.id(), m)).toList();
+    }
+
+    private com.superagent.core.usage.UsageStore usageStore; // null in tests: no figure shown
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setUsageStore(com.superagent.core.usage.UsageStore usageStore) {
+        this.usageStore = usageStore;
+    }
+
+    /** What this CLI's background checks used in the last day. */
+    private long checkTokens24h(String providerKey) {
+        if (usageStore == null) {
+            return 0;
+        }
+        try {
+            return usageStore.between(ProviderInferenceProbe.SYSTEM_USER, Instant.now().minus(java.time.Duration.ofDays(1)), Instant.now())
+                    .stream().filter(r -> providerKey.equals(r.cli())).mapToLong(com.superagent.core.usage.UsageRecord::total).sum();
+        } catch (RuntimeException e) {
+            return 0;
+        }
     }
 
     /** {@code models} with each one's probe result carried over from {@code previous} (matched by id). */
@@ -589,7 +667,7 @@ public class ProviderService {
                 status, e.installCommand(), e.upgradeCommand(),
                 parseModels(p.modelsJson()), modelsSource.get(p.id()), p.modelsError(), p.modelsCheckedAt(),
                 lastError.get(p.id()), job == null ? null : job.currentStep(), job != null,
-                p.lastCheckedAt(), p.createdAt());
+                p.lastCheckedAt(), p.createdAt(), checking.get(p.id()), checkTokens24h(e.key()));
     }
 
 
@@ -601,5 +679,6 @@ public class ProviderService {
     void shutdown() {
         installer.shutdownNow();
         lookup.shutdownNow();
+        checks.shutdownNow();
     }
 }

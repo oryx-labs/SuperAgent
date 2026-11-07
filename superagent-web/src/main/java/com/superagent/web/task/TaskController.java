@@ -94,7 +94,13 @@ public class TaskController {
         return ApiResponse.ok(taskService.modelChoices(id, auth.getName()));
     }
 
-        @GetMapping(ApiPaths.TASKS + "/{id}/status")
+        /** Where the task's time went: waiting to run, each turn's stages, waiting for replies. */
+    @GetMapping(ApiPaths.TASKS + "/{id}/timing")
+    public ApiResponse<com.superagent.api.timing.TaskTimingDto> timing(@PathVariable String id, Authentication auth) {
+        return ApiResponse.ok(taskService.timing(id, auth.getName()));
+    }
+
+    @GetMapping(ApiPaths.TASKS + "/{id}/status")
     public ApiResponse<TaskDto> status(@PathVariable String id, Authentication auth) {
         return ApiResponse.ok(taskService.status(id, auth.getName()));
     }

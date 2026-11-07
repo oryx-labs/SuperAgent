@@ -11,9 +11,18 @@ package com.superagent.api.settings;
  *                          handed to other systems such as OAuth callbacks; null = follow the browser's address.
  *                          On a save, null keeps it and blank clears it
  */
-public record SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl) {
+public record SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl,
+                                /**
+                                 * Models conversations move to, in this order, when the default model can't run; null
+                                 * on a save keeps them. Without any, the strongest other model that can run.
+                                 */
+                                java.util.List<String> backupModels) {
 
     public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName) {
-        this(agentDefaultModel, companyName, companyShortName, null);
+        this(agentDefaultModel, companyName, companyShortName, null, null);
+    }
+
+    public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl) {
+        this(agentDefaultModel, companyName, companyShortName, publicUrl, null);
     }
 }

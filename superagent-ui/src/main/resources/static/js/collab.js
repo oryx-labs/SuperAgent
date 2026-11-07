@@ -230,6 +230,7 @@ async function selectSession(id) {
   messages.forEach(renderHistoryItem);
   scrollToBottom();
   if (activeAgent) attachFileCards(activeAgent); // each reply's files, under it
+  if (activeAgent) attachTimings(activeAgent.id); // and where its time went
   if (activeAgent) attachInviteCards(activeAgent); // invitations the agent proposed, under the reply that did
   if (activeAgent) attachSkillDeletionCards(activeAgent.id); // and skill deletions waiting for a yes
   if (activeAgent) attachAgentTaskCards(); // and the tasks each reply set off

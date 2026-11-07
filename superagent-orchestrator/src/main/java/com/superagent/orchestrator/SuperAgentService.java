@@ -147,6 +147,12 @@ public class SuperAgentService {
     private final SkillService skills;
     private final com.superagent.agent.AgentInviteService inviteService;
     private final Map<AgentType, AgentRunner> runners = new EnumMap<>(AgentType.class);
+    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests: the default model
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
+        this.modelRouter = modelRouter;
+    }
     private com.superagent.core.usage.UsageRecorder usage; // null in tests: tokens aren't kept
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -334,8 +340,9 @@ public class SuperAgentService {
      */
     private void runRound(String owner, Agent sa, List<ChatMessage> batch, Instant cutoff) {
         long startedAt = System.currentTimeMillis();
-        // Like the chat, on the admin's default model: it thinks and hands out work.
-        String model = settings.agentDefaultModel();
+        // Like the chat: the admin's default model, or its stand-in while it can't run.
+        List<String> usable = modelRouter == null ? List.of() : modelRouter.chatModels();
+        String model = usable.isEmpty() ? settings.agentDefaultModel() : usable.get(0);
         ChatSession session = backgroundSession(sa);
         String replyId = UUID.randomUUID().toString();
         RoundAttempt attempt = attemptRound(owner, sa, session, model, batch, memory.read(sa), replyId);

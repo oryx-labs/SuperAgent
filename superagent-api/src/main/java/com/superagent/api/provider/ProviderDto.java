@@ -41,5 +41,9 @@ public record ProviderDto(
         /** There's a log of the last install/upgrade to show. */
         boolean hasInstallLog,
         Instant lastCheckedAt,
-        Instant createdAt) {
+        Instant createdAt,
+        /** A round of model checks is running since then (models checked before it show as being checked), else null. */
+        Instant checkingSince,
+        /** Tokens the background checks of this CLI used in the last 24 hours (model and key checks). */
+        long checkTokens24h) {
 }

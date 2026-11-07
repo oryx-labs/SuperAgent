@@ -30,6 +30,23 @@ public final class EndpointFailures {
     private EndpointFailures() {
     }
 
+    /** Words for a model that doesn't exist (any more) or the account can't use. */
+    private static final List<String> MODEL_GONE = List.of("model not found", "model_not_found", "not_found_error",
+            "does not exist", "no such model", "unknown model", "invalid model", "model is not supported",
+            "not supported model", "deprecated", "模型不存在", "模型不可用");
+
+    /**
+     * The model couldn't be reached or used at all (its endpoint, key, quota, or the model itself), as opposed to a
+     * problem with this one conversation: another model would do.
+     */
+    public static boolean isModelFailure(String error) {
+        if (isEndpointFailure(error)) {
+            return true;
+        }
+        String e = error == null ? "" : error.toLowerCase(Locale.ROOT);
+        return MODEL_GONE.stream().anyMatch(e::contains) || e.matches("(?s).*\\b404\\b.*");
+    }
+
     public static boolean isEndpointFailure(String error) {
         if (error == null || error.isBlank()) {
             return false;

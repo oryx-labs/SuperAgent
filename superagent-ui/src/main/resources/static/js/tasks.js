@@ -336,6 +336,7 @@ function renderDetail(d) {
   loadTaskFiles(t.id);
   task.choiceKey = t.status + "|" + t.model;
   loadModelChoices(t);
+  loadTaskTiming(t.id);
   loadTaskUsage(t.id);
   task.lastPhaseKey = t.status + "|" + t.progress;
   if (isActiveStatus(t.status)) startTaskPolling(); else stopTaskPolling();
@@ -840,6 +841,7 @@ async function pollTask() {
       task.lastPhaseKey = phaseKey;
       try { const dRes = await api.taskDetail(id); if (dRes && dRes.data) renderPhases(dRes.data.phases); } catch (e) { /* ignore */ }
     }
+    if (task.timingKey !== t.status) { task.timingKey = t.status; loadTaskTiming(id); } // a turn ended or the task moved on
     if (!isActiveStatus(t.status)) { stopTaskPolling(); loadTaskFiles(id); }
   } catch (e) { /* ignore transient poll errors */ }
 }

@@ -34,6 +34,7 @@ import com.superagent.core.user.UserStore;
 import com.superagent.files.FileService;
 import com.superagent.skills.SkillService;
 import com.superagent.platform.provider.CredentialService;
+import com.superagent.platform.provider.EndpointFailures;
 import com.superagent.platform.provider.ProviderService;
 import com.superagent.platform.settings.SettingsService;
 import com.superagent.runtime.attachment.ImageAttachmentStore;
@@ -108,6 +109,12 @@ public class ChatService {
     private final AgentMemoryService memory;
     private final AgentLogService runLog;
     private ChatTaskResults taskResults; // null in tests: no task reports, no task guidance
+    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests: the default model, no stand-in
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
+        this.modelRouter = modelRouter;
+    }
     private com.superagent.core.usage.UsageRecorder usage; // null in tests: tokens aren't kept
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -197,6 +204,13 @@ public class ChatService {
         return List.copyOf(out);
     }
 
+
+    private com.superagent.core.timing.TurnTimingStore timings; // null in tests: timings aren't kept
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setTimings(com.superagent.core.timing.TurnTimingStore timings) {
+        this.timings = timings;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setCredentials(CredentialService credentials) {
@@ -448,6 +462,7 @@ public class ChatService {
     /** {@code fileIds}: files the user uploaded for this message (see FileService#upload); they go into the workspace. */
     public SseEmitter sendMessage(String requestedSessionId, String content, List<ImageUploadDto> uploads,
                                   List<String> fileIds, String user) {
+        com.superagent.core.timing.TurnTimer timer = new com.superagent.core.timing.TurnTimer(); // from the request on
         ChatSession session = store.findSession(requestedSessionId)
                 .orElseThrow(() -> new SessionNotFoundException(requestedSessionId));
         String sessionId = session.id();
@@ -529,7 +544,7 @@ public class ChatService {
         executor.execute(() -> {
             try {
                 runTurn(agent, turn, agentType, runner, model, systemPrompt, agentMemory, turnPrompt, attached,
-                        user, userMessageId, assistantMessageId, new TurnStream(emitter, live, agent, special), cancellation);
+                        user, userMessageId, assistantMessageId, new TurnStream(emitter, live, agent, special, timer), cancellation);
             } finally {
                 liveTurns.remove(liveKey, live);
                 live.end();
@@ -553,6 +568,12 @@ public class ChatService {
      * work, which wants the strongest; the work itself runs in tasks, each on a model chosen for it.
      */
     private String resolveModel(Agent agent) {
+        if (agent != null && modelRouter != null) {
+            List<String> usable = modelRouter.chatModels();
+            if (!usable.isEmpty()) {
+                return usable.get(0); // the default while it works; a stand-in nobody has to notice when it doesn't
+            }
+        }
         String model = settingsService.agentDefaultModel();
         return model != null ? model : defaultModel;
     }
@@ -589,6 +610,9 @@ public class ChatService {
     }
 
     /** How one attempt at a turn went. {@code error} set + blank {@code text} = the attempt failed. */
+    /** How many other models a turn tries when its model can't run. */
+    private static final int MODEL_HOPS = 2;
+
     private record Attempt(ChatSession session, String text, String error, String agentSessionId) {
         boolean failed() {
             return text.isBlank() && error != null;
@@ -611,6 +635,26 @@ public class ChatService {
         try {
             Attempt attempt = attempt(session, agentType, runner, model, systemPrompt, agentMemory, prompt, attached,
                     user, assistantMessageId, emitter, cancellation);
+            // The model itself can't run (endpoint, every key, quota, gone): the same turn again on the next model the
+            // conversation may use, quietly. The failed one is passed over for a while, then tried again.
+            for (int hop = 0; hop < MODEL_HOPS && agent != null && modelRouter != null && attempt.failed()
+                    && !cancellation.isCancelled() && EndpointFailures.isModelFailure(attempt.error()); hop++) {
+                modelRouter.reportFailure(model, attempt.error());
+                String failed = model;
+                String next = modelRouter.chatModels().stream().filter(m -> !m.equals(failed)).findFirst().orElse(null);
+                AgentType nextType = next == null ? null : providerService.cliFor(next).map(AgentType::fromString)
+                        .filter(runners::containsKey).orElse(null);
+                if (nextType == null) {
+                    break;
+                }
+                log.warn("agent {}: {} can't run ({}); this turn moves to {}", agent.id(), model, attempt.error(), next);
+                model = next;
+                agentType = nextType;
+                runner = runners.get(nextType);
+                ChatSession moved = sessionForTurn(agent, next); // another model: a new session, from memory + recent messages
+                attempt = attempt(moved, agentType, runner, model, systemPrompt, memory.context(agent, Set.of(userMessageId)),
+                        prompt, attached, user, assistantMessageId, emitter, cancellation);
+            }
             if (agent != null && !cancellation.isCancelled()) {
                 if (!attempt.failed()) {
                     memory.recordSuccess(agent);
@@ -630,6 +674,7 @@ public class ChatService {
             store.appendMessage(new ChatMessage(assistantMessageId, attempt.session().id(),
                     MessageRole.ASSISTANT, storedReply(attempt.text(), attempt.error(), cancellation.isCancelled()), Instant.now()));
             saved = true;
+            saveTiming(emitter, attempt.session().id(), assistantMessageId); // before "done": the page reloads then
             persistSessionUpdate(attempt.session(), agentType, attempt.agentSessionId(), prompt);
             logTurn(agent, model, startedAt, attempt, retried, cancellation.isCancelled());
 
@@ -647,6 +692,7 @@ public class ChatService {
             if (!saved) { // keep the error in the conversation, or reopening it shows nothing went wrong
                 store.appendMessage(new ChatMessage(assistantMessageId, session.id(), MessageRole.ASSISTANT,
                         storedReply("", detail, false), Instant.now()));
+                saveTiming(emitter, session.id(), assistantMessageId);
             }
             send(emitter, new StreamEventDto("error", -1, detail));
             emitter.sender().complete();
@@ -670,7 +716,7 @@ public class ChatService {
                 emitter.agent() != null && emitter.agent().isSuper() ? com.superagent.core.usage.UsageContext.SOURCE_SUPERAGENT
                         : com.superagent.core.usage.UsageContext.SOURCE_CHAT,
                 session.agentId(), null, session.id(), agentType.cliName());
-        AgentEventSink sink = com.superagent.core.usage.UsageRecorder.tap(usage, paying, event -> {
+        AgentEventSink sink = emitter.timer().tapTools(com.superagent.core.usage.UsageRecorder.tap(usage, paying, event -> {
             store.appendEvent(new AgentEvent(session.id(), assistantMessageId, event.seq(),
                     event.type(), event.payload(), event.createdAt()));
             switch (event.type()) {
@@ -687,7 +733,7 @@ public class ChatService {
             if (event.type() != AgentEventType.ERROR) {
                 send(emitter, new StreamEventDto(event.type().name().toLowerCase(), event.seq(), event.payload()));
             }
-        });
+        }));
 
         AgentTurnCustomizer special = emitter.special();
         McpGrants.Grant grant = special != null ? special.openGrant(emitter.agent(), user, session, assistantMessageId)
@@ -713,7 +759,7 @@ public class ChatService {
                 tools, skipPermissions && (special == null || special.runsCommands(emitter.agent())), McpGrants.withServers(grant == null ? null : mcpGrants.mcpConfig(grant), connected),
                 systemPrompt, attached, agentMemory, choice.credential());
         try {
-            runOnce(runner, request, sink, cancellation, error, session);
+            runOnce(runner, request, sink, cancellation, error, session, emitter.timer());
             // The endpoint or key failed (auth, quota, server down) before anything was said: switch to the
             // next key in the pool and try the same turn once more, so the user rarely sees the failure.
             boolean nothingSaid = textAccumulator.isEmpty() && resultText.get() == null;
@@ -722,7 +768,8 @@ public class ChatService {
                 if (next.isPresent()) {
                     log.info("session {}: retrying the turn on endpoint {}", session.id(), next.get().id());
                     error.set(null);
-                    runOnce(runner, request.withCredential(next.get().credential()), sink, cancellation, error, session);
+                    runOnce(runner, request.withCredential(next.get().credential()), sink, cancellation, error, session,
+                            emitter.timer());
                 }
             }
         } finally {
@@ -735,14 +782,34 @@ public class ChatService {
     }
 
     private void runOnce(AgentRunner runner, AgentRunRequest request, AgentEventSink sink, Cancellation cancellation,
-                         AtomicReference<String> error, ChatSession session) {
+                         AtomicReference<String> error, ChatSession session, com.superagent.core.timing.TurnTimer timer) {
+        timer.attemptStarted();
         try {
             runner.run(request, sink, cancellation);
         } catch (RuntimeException e) {
             // A runner that blows up is a failed attempt like any other: it may count against the session.
             log.warn("turn attempt failed in session {}: {}", session.id(), e.getMessage());
             error.set(e.getMessage() != null ? e.getMessage() : "agent run failed");
+        } finally {
+            timer.attemptEnded();
         }
+    }
+
+    /** Keeps where the reply's time went, shown under it; losing it must never cost the reply. */
+    private void saveTiming(TurnStream stream, String sessionId, String messageId) {
+        if (timings == null) {
+            return;
+        }
+        try {
+            timings.save(stream.timer().finish(sessionId, messageId, null));
+        } catch (RuntimeException e) {
+            log.warn("could not keep the timing of reply {}: {}", messageId, e.getMessage());
+        }
+    }
+
+    /** The timings of these sessions' replies, for showing under them. */
+    public List<com.superagent.core.timing.TurnTiming> timings(java.util.Collection<String> sessionIds) {
+        return timings == null ? List.of() : timings.forSessions(sessionIds);
     }
 
     /**
@@ -784,7 +851,8 @@ public class ChatService {
      * Where a turn's events go — the sender's own stream and every other viewer of the agent — plus the agent and,
      * for a kind of agent another module runs differently (the SuperAgent), how its turns are set up.
      */
-    record TurnStream(SseEmitter sender, LiveTurn live, Agent agent, AgentTurnCustomizer special) {
+    record TurnStream(SseEmitter sender, LiveTurn live, Agent agent, AgentTurnCustomizer special,
+                      com.superagent.core.timing.TurnTimer timer) {
     }
 
     private void send(TurnStream stream, StreamEventDto event) {

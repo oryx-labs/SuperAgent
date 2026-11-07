@@ -756,6 +756,7 @@ img { max-width: 100%; }
 .layout--admin > .admin { grid-column: 2; }
 .admin-side { grid-column: 1; grid-row: 1; background: var(--panel); padding: 18px 12px; }
 .admin-side .nav__item:hover { background: var(--line); }
+.admin-side .nav__item.is-active, .admin-side .nav__item.is-active:hover { background: var(--ink); color: var(--paper); }
 .admin-side { position: relative; }
 .admin-side__toggle { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin: 0 0 8px auto;
   font: inherit; font-size: 15px; line-height: 1; color: var(--muted); background: none; border: 0; border-radius: 7px; cursor: pointer; }
@@ -1656,7 +1657,7 @@ button.stat-card:hover { border-color: var(--line-strong); }
 
 /* System settings */
 .settings-form { display: flex; flex-direction: column; gap: 12px; max-width: 520px; padding-top: 8px; }
-.settings-form .field-hint { margin: -4px 0 0; line-height: 1.5; }
+.settings-form .field-hint { margin: 2px 0 0; line-height: 1.5; }
 .settings-form__section { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
 .settings-form__actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
 .settings-form__status { font-size: 12px; color: var(--muted); }
@@ -1982,9 +1983,6 @@ small.model-note { display: block; margin-top: 4px; }
 .mt-none { color: #b45309; }
 
 /* Integration dialog: the setup steps, folded away. Block layout: a flex <details> leaves blank space when closed. */
-.settings-advanced { padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; }
-.settings-advanced > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
-.settings-advanced[open] > summary { margin-bottom: 10px; color: var(--ink); }
 #intHelp > summary { font-weight: 500; }
 #intHelp .field-hint { margin: 0 0 10px; line-height: 1.5; }
 #intHelp .field { margin: 0; }
@@ -2130,3 +2128,74 @@ small.model-note { display: block; margin-top: 4px; }
 
 .mp-body { padding: 20px 28px 32px; }
 .mt-panel--page { margin-top: 0; }
+
+/* Backup models: an ordered list under the default model */
+.backup-models { display: flex; flex-direction: column; gap: 6px; }
+.backup-models__list { display: flex; flex-direction: column; gap: 6px; }
+.backup-models__row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--paper); font-size: 13px; color: var(--ink); }
+.backup-models__n { width: 18px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.backup-models__id { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.backup-models__row button { padding: 0 6px; border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; }
+.backup-models__row button:hover { color: var(--ink); }
+.backup-models__row button:disabled { visibility: hidden; }
+.settings-form .backup-models { margin-top: 10px; }
+
+.status-badge.is-infer-checking { background: #eff6ff; color: #1d4ed8; }
+
+/* ---------- Where time went: under replies, and the task's Time tab ---------- */
+.tm-line { margin-top: 4px; }
+.tm-line__btn { padding: 0; font: inherit; font-size: 11.5px; color: var(--muted-2); background: none; border: 0; cursor: pointer; text-align: left; }
+.tm-line__btn:hover { color: var(--muted); }
+.tm-detail { margin-top: 8px; padding: 10px 12px; max-width: 520px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.tm-bar { display: flex; height: 8px; overflow: hidden; background: var(--line); border-radius: 999px; }
+.tm-bar__seg { height: 100%; }
+.tm-detail .tm-bar { margin-bottom: 10px; }
+.tm-stages { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 12px; }
+.tm-stages dt { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.tm-stages dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; }
+.tm-dot { width: 8px; height: 8px; border-radius: 2px; }
+.tm-prep { background: #a1a1aa; }
+.tm-retry { background: #ef4444; }
+.tm-startup { background: #f59e0b; }
+.tm-model { background: #8b5cf6; }
+.tm-tools { background: #0ea5e9; }
+.tm-output { background: #22c55e; }
+.tm-save { background: #d4d4d8; }
+.tm-toollist { list-style: none; margin: 10px 0 0; padding: 8px 0 0; border-top: 1px solid var(--line); font-size: 12px; }
+.tm-toollist li { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.tm-toollist li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.tm-toollist li span:last-child { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tm-note { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+.tm-task { display: flex; flex-direction: column; gap: 12px; padding: 4px 0 24px; }
+.tm-task .tm-detail { max-width: none; }
+.tm-task__head { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.tm-task__stat { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
+.tm-task__stat b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.tm-task__stat span { font-size: 12px; color: var(--muted); }
+.tm-flow { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.tm-flow__item { padding: 10px 12px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; }
+.tm-flow__item:not(.is-turn) { background: var(--panel); border-style: dashed; }
+.tm-flow__item.is-wait_user { border-color: #fcd34d; }
+.tm-flow__item .tm-bar { margin: 8px 0 6px; }
+.tm-flow__title { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
+.tm-flow__title span:first-child { font-weight: 600; }
+.tm-flow__when { flex: 1 1 auto; font-size: 11.5px; color: var(--muted-2); }
+.tm-flow__title b { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* Integrations: the setup guide drawer, step by step, with the callback URL to copy. */
+.int-guide-link { align-self: flex-start; font-size: 13px; }
+.int-guide { font-size: 13.5px; line-height: 1.65; color: var(--ink); }
+.int-guide__intro { margin: 0 0 16px; color: var(--muted); }
+.int-guide__steps { margin: 0 0 16px; padding-left: 22px; display: flex; flex-direction: column; gap: 12px; }
+.int-guide__steps p { margin: 0; }
+.int-guide__callback {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 10px 12px;
+  border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel);
+}
+.int-guide__callback code { flex: 1 1 260px; font-size: 12.5px; overflow-wrap: anywhere; }
+.int-guide__callback small { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+.int-guide > .btn { align-self: flex-start; text-decoration: none; }
+.int-guide { display: flex; flex-direction: column; }
+.int-guide__note { margin: 0 0 16px; padding: 10px 12px; border-radius: 10px; background: var(--panel); color: var(--muted); font-size: 12.5px; }
+

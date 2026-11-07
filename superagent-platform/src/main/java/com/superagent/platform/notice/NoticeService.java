@@ -201,6 +201,34 @@ public class NoticeService {
                 "agent", e.agentId()));
     }
 
+    private com.superagent.core.user.UserStore users; // null in tests: only the built-in admin
+    private String adminUsername = "admin";
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setUsers(com.superagent.core.user.UserStore users,
+                  @Value("${superagent.auth.admin.username:admin}") String adminUsername) {
+        this.users = users;
+        this.adminUsername = adminUsername;
+    }
+
+    /** The admins hear when conversations leave the default model, and when they're back on it (same item). */
+    @EventListener
+    public void onDefaultModel(NoticeEvents.DefaultModelChanged e) {
+        Set<String> admins = new LinkedHashSet<>();
+        admins.add(adminUsername);
+        if (users != null) {
+            users.listUsers().stream().filter(u -> u.enabled() && u.roles() != null && u.roles().contains("ADMIN"))
+                    .forEach(u -> admins.add(u.username()));
+        }
+        String title = e.down() ? "默认模型 " + e.defaultModel() + " 用不了，对话已自动改用 " + e.inUse()
+                : "默认模型 " + e.defaultModel() + " 已恢复，对话已改回";
+        String body = e.down() ? "用户无感知。原因：" + (e.reason() == null || e.reason().isBlank() ? "未知" : e.reason())
+                + "。可到「模型 → 模型配置」检查它的 Key 和可用性，或到「系统设置 → 基础」换默认模型。" : null;
+        for (String admin : admins) {
+            guard(() -> upsert(admin, "default-model", Notice.Kind.NOTICE, title, body, "系统", null, null));
+        }
+    }
+
     /** One-time import of what was already waiting before the to-do page existed. */
     @EventListener(ApplicationReadyEvent.class)
     public void backfill() {

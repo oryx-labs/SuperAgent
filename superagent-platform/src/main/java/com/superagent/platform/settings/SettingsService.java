@@ -15,6 +15,7 @@ public class SettingsService {
     static final String COMPANY_NAME = "company.name";
     static final String COMPANY_SHORT_NAME = "company.short-name";
     static final String PUBLIC_URL = "app.public-url";
+    static final String BACKUP_MODELS = "agent.backup-models";
 
     private final SystemSettingStore store;
     private final ProviderService providerService;
@@ -27,7 +28,7 @@ public class SettingsService {
     public SystemSettingsDto get() {
         Map<String, String> all = store.all();
         return new SystemSettingsDto(trimToNull(all.get(AGENT_DEFAULT_MODEL)), trimToNull(all.get(COMPANY_NAME)),
-                trimToNull(all.get(COMPANY_SHORT_NAME)), trimToNull(all.get(PUBLIC_URL)));
+                trimToNull(all.get(COMPANY_SHORT_NAME)), trimToNull(all.get(PUBLIC_URL)), backupModels(all));
     }
 
     /**
@@ -43,6 +44,21 @@ public class SettingsService {
         store.put(AGENT_DEFAULT_MODEL, model);
         store.put(COMPANY_NAME, name(request.companyName(), 100));
         store.put(COMPANY_SHORT_NAME, name(request.companyShortName(), 20));
+        if (request.backupModels() != null) {
+            java.util.List<String> backups = new java.util.ArrayList<>();
+            for (String m : request.backupModels()) {
+                String id = trimToNull(m);
+                if (id == null || backups.contains(id) || id.equals(model)) {
+                    continue;
+                }
+                // Like the default: only a model the probe saw answer, unless it was already saved.
+                if (!backupModels().contains(id) && providerService.cliFor(id).isEmpty()) {
+                    throw new IllegalArgumentException("Model " + id + " has not passed the inference check");
+                }
+                backups.add(id);
+            }
+            store.put(BACKUP_MODELS, backups.isEmpty() ? null : String.join(",", backups));
+        }
         if (request.publicUrl() != null) {
             store.put(PUBLIC_URL, publicUrl(request.publicUrl()));
         }
@@ -52,6 +68,17 @@ public class SettingsService {
     /** The model conversations run on (and that judges each task's model), or null for the CLI's own default. */
     public String agentDefaultModel() {
         return get().agentDefaultModel();
+    }
+
+    /** Where conversations go, in order, when the default model can't run. */
+    public java.util.List<String> backupModels() {
+        return backupModels(store.all());
+    }
+
+    private static java.util.List<String> backupModels(Map<String, String> all) {
+        String v = trimToNull(all.get(BACKUP_MODELS));
+        return v == null ? java.util.List.of() : java.util.Arrays.stream(v.split(",")).map(String::strip)
+                .filter(x -> !x.isEmpty()).toList();
     }
 
     /** How people reach this server from outside, set by the admin; null when it should follow the request. */

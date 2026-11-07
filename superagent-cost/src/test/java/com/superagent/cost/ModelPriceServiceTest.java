@@ -66,4 +66,40 @@ class ModelPriceServiceTest {
         prices.setForTasks("mid", false);
         assertThat(prices.candidates()).filteredOn(c -> !c.forTasks()).extracting(ModelPriceService.Candidate::id).containsExactly("mid");
     }
+
+    @Test
+    void conversationsLeaveABrokenDefaultForTheBackupThenTheStrongestAndComeBack() throws Exception {
+        for (String id : List.of("strong", "mid", "fast")) {
+            running.add(new ProviderModelDto(id, id, List.of(), null, "none", null, true).withInference("ok", null, null));
+        }
+        prices.useCatalog(ModelCatalog.parse(new ByteArrayInputStream("""
+                {"openai":{"models":{"strong":{"cost":{"input":10,"output":50}},"mid":{"cost":{"input":1,"output":5}},
+                  "fast":{"cost":{"input":0.1,"output":0.5}}}}}
+                """.getBytes(StandardCharsets.UTF_8))));
+        com.superagent.platform.settings.SettingsService settings = mock(com.superagent.platform.settings.SettingsService.class);
+        when(settings.agentDefaultModel()).thenReturn("mid");
+        when(settings.backupModels()).thenReturn(List.of("fast"));
+        prices.setSettings(settings);
+        List<Object> told = new ArrayList<>();
+        prices.setEvents(told::add);
+
+        assertThat(prices.chatModels()).containsExactly("mid", "fast", "strong");
+        assertThat(told).isEmpty();
+
+        prices.reportFailure("mid", "API Error: 503");
+        assertThat(prices.chatModels()).containsExactly("fast", "strong"); // the backup first, then the strongest
+        prices.chatModels();
+        assertThat(told).singleElement().satisfies(e -> {
+            var d = (com.superagent.core.notice.NoticeEvents.DefaultModelChanged) e;
+            assertThat(d.down()).isTrue();
+            assertThat(d.inUse()).isEqualTo("fast");
+            assertThat(d.reason()).contains("503");
+        }); // told once, not on every turn
+
+        // Its time out is up: the default is tried again, and the admins hear it's back.
+        prices.forgetFailures();
+        assertThat(prices.chatModels().get(0)).isEqualTo("mid");
+        assertThat(told).hasSize(2);
+        assertThat(((com.superagent.core.notice.NoticeEvents.DefaultModelChanged) told.get(1)).down()).isFalse();
+    }
 }

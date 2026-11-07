@@ -83,11 +83,15 @@ async function loadUsage() {
     card(usShort(s.agentTotal.total), L("us.kindAgents"), usCost(s.agentTotal) + " · " + L("us.runs", { n: usNum(s.agentTotal.runs) })),
     card(usShort(s.taskTotal.total), L("us.kindTasks"), usCost(s.taskTotal) + " · " + L("us.runs", { n: usNum(s.taskTotal.runs) })),
     card(usShort(inputAll), L("us.inputAll"), inputAll ? L("us.hitRate", { pct: Math.round(100 * t.cacheRead / inputAll) }) : ""),
-    card(usShort(t.output), L("us.output"), t.reasoning ? L("us.reasoningOf", { n: usShort(t.reasoning) }) : ""));
+    card(usShort(t.output), L("us.output"), t.reasoning ? L("us.reasoningOf", { n: usShort(t.reasoning) }) : ""),
+    ...(company ? [card(usShort(s.systemTotal.total), L("us.kindSystem"), usCost(s.systemTotal) + " · " + L("us.runs", { n: usNum(s.systemTotal.runs) }))] : []));
   usEl.chartBox.hidden = !s.byDay.length; // nothing to draw: no empty chart
   usRenderChart(s.byDay);
   usEl.agentsCount.textContent = s.agents.length;
   usEl.tasksCount.textContent = s.tasks.length;
+  document.getElementById("usSystemTab").hidden = !company;
+  document.getElementById("usSystemCount").textContent = (s.system || []).length;
+  if (!company && usKind === "system") usKind = "agents";
   usRenderDetail();
   usEl.peopleBox.hidden = !company;
   usEl.people.replaceChildren(...(company ? [usTable(null, s.byUser, {
@@ -103,6 +107,17 @@ function usRenderDetail() {
   const s = usLast;
   if (!s) return;
   usEl.kinds.querySelectorAll(".model-tab").forEach(b => b.classList.toggle("is-active", b.dataset.kind === usKind));
+  if (usKind === "system") {
+    // The background's own checks, per kind and model: what keeping the model statuses current costs.
+    usEl.detail.replaceChildren(usTable(null, s.system || [], {
+      textCols: 1,
+      head: [L("us.colCheck"), L("us.colModel"), L("us.input"), L("us.cacheRead"), L("us.output"), L("us.colTotal"),
+        L("us.cost"), L("us.colRuns"), L("us.colLast")],
+      cells: r => { const [kind, model] = r.key.split("|"); return [L("us.src." + kind), model || "—", usNum(r.input),
+        usNum(r.cacheRead), usNum(r.output), usNum(r.total), usCost(r), usNum(r.runs), r.lastAt ? relativeTime(r.lastAt) : "—"]; },
+    }));
+    return;
+  }
   const agents = usKind === "agents";
   const rows = agents ? s.agents : s.tasks;
   usEl.detail.replaceChildren(usTable(null, rows, {

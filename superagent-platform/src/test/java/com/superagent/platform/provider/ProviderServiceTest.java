@@ -85,14 +85,26 @@ class ProviderServiceTest {
     private static final class FakeInference extends ProviderInferenceProbe {
         final Set<String> failing = new HashSet<>();
         boolean offline;
+        int calls;
         FakeInference() { super(new FakeProbe(true, true)); }
         @Override public void check(String key, String modelId, RunCredential credential) throws IOException {
+            calls++;
             if (offline) {
                 throw new ProbeUnreachableException("无法连接 https://gateway（ConnectException）");
             }
             if (failing.contains(modelId)) {
                 throw new IOException("HTTP 404: model not found");
             }
+        }
+    }
+
+    /** Waits until no round of model checks is running for the provider (they run in the background). */
+    private static void idle(ProviderService service, String id) {
+        for (int i = 0; i < 200; i++) {
+            if (service.detail(id).checkingSince() == null && service.detail(id).models().stream().allMatch(m -> m.inferStatus() != null)) {
+                return;
+            }
+            try { Thread.sleep(25); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
         }
     }
 
@@ -177,7 +189,10 @@ class ProviderServiceTest {
         String id = service.add("claude").id();
         service.refreshModelsNow(id);
 
+        // Adding it and refreshing the list each start a round in the background; another round meanwhile isn't
+        // started twice. Wait for it.
         service.refreshInference(store.findById(id).orElseThrow());
+        idle(service, id);
         assertThat(service.canInfer("claude", "claude-good")).isTrue();
         assertThat(service.canInfer("claude", "claude-listed-only")).isFalse();
         assertThat(service.detail(id).models()).filteredOn(m -> m.id().equals("claude-listed-only"))
@@ -192,12 +207,18 @@ class ProviderServiceTest {
 
         // A sweep that can't reach the gateway is no verdict on the models: they keep their status, and the
         // caller is told to retry soon.
+        idle(service, id); // the list refresh above started a round of its own
         inference.offline = true;
-        assertThat(service.refreshInference(store.findById(id).orElseThrow())).isFalse();
+        assertThat(service.refreshInference(store.findById(id).orElseThrow(), true)).isFalse();
         assertThat(service.canInfer("claude", "claude-good")).isTrue();
         assertThat(service.canInfer("claude", "claude-listed-only")).isFalse();
         inference.offline = false;
         assertThat(service.refreshInference(store.findById(id).orElseThrow())).isTrue();
+
+        // The scheduled sweep leaves models checked within the hour alone (a restart doesn't re-check them all).
+        int calls = inference.calls;
+        assertThat(service.refreshInference(store.findById(id).orElseThrow())).isTrue();
+        assertThat(inference.calls).isEqualTo(calls);
     }
 
     @Test

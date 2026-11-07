@@ -405,7 +405,7 @@ async function loadModelDetail(id) {
   const models = p.models || [];
   const inferRank = m => ({ ok: 0, error: 2 }[m.inferStatus] ?? 1);
   models.slice().sort((a, b) => inferRank(a) - inferRank(b))
-    .forEach(m => mel.models.appendChild(modelItem(m)));
+    .forEach(m => mel.models.appendChild(modelItem(m, p.checkingSince)));
   mel.modelsEmpty.hidden = models.length > 0;
   mel.modelsEmpty.textContent = p.supported ? L("models.noModels") : L("models.modelsComingSoon");
   mel.refreshBtn.hidden = !p.supported;
@@ -417,13 +417,16 @@ async function loadModelDetail(id) {
         source: p.modelsSource || "—",
         time: formatDateTime(p.modelsCheckedAt),
       }) + (inferOk || inferError ? L("models.inferSummary", { ok: inferOk, error: inferError }) : "")
+      + (p.checkingSince ? L("models.checkingNow") : "")
+      + (p.checkTokens24h ? L("models.checkTokens", { n: Number(p.checkTokens24h).toLocaleString() }) : "")
     : "";
+  mel.refreshBtn.disabled = !!p.checkingSince;
   mel.modelsError.hidden = !p.modelsError;
   mel.modelsError.textContent = p.modelsError ? L("models.modelsError", { msg: p.modelsError }) : "";
 }
 
 // One table row per model: id (+ display name, non-native tag), effort levels, default level, context.
-function modelItem(m) {
+function modelItem(m, checkingSince) {
   const tr = document.createElement("tr");
 
   const tdModel = document.createElement("td");
@@ -473,18 +476,21 @@ function modelItem(m) {
   tdCtx.className = "t-spend";
   tdCtx.textContent = m.contextWindow ? formatContext(m.contextWindow) : "—";
 
-  tr.append(tdModel, tdEfforts, tdDefault, tdCtx, inferenceCell(m));
+  tr.append(tdModel, tdEfforts, tdDefault, tdCtx, inferenceCell(m, checkingSince));
   return tr;
 }
 
 // Background probe result: healthy / failing (with the reason) / not checked yet.
-function inferenceCell(m) {
+function inferenceCell(m, checkingSince) {
   const td = document.createElement("td");
-  const state = m.inferStatus === "ok" ? "ok" : m.inferStatus === "error" ? "error" : "unchecked";
+  // A round is running and this model's result is from before it: it's being checked right now.
+  const pending = checkingSince && (!m.inferCheckedAt || new Date(m.inferCheckedAt) < new Date(checkingSince));
+  const state = pending ? "checking" : m.inferStatus === "ok" ? "ok" : m.inferStatus === "error" ? "error" : "unchecked";
   const badge = document.createElement("span");
   badge.className = "status-badge is-infer-" + state;
-  badge.textContent = L({ ok: "models.inferOk", error: "models.inferError", unchecked: "models.inferUnchecked" }[state]);
-  if (m.inferError) {
+  badge.textContent = L({ ok: "models.inferOk", error: "models.inferError", unchecked: "models.inferUnchecked",
+    checking: "models.inferChecking" }[state]);
+  if (m.inferError && !pending) {
     // The reason is long raw API text — keep it out of the row, show it on hover.
     const wrap = document.createElement("span");
     wrap.className = "infer-tip";

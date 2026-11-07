@@ -211,7 +211,8 @@ public class CredentialService {
     public void checkAll() {
         for (String key : POOLED) {
             String before = current(key).id();
-            store.list(key).stream().filter(ProviderCredential::enabled).forEach(this::check);
+            // A failing key every round (so a recovered one takes over again soon); a working one hourly.
+            store.list(key).stream().filter(ProviderCredential::enabled).filter(this::dueForCheck).forEach(this::check);
             if (!current(key).id().equals(before)) {
                 log.info("{}: now using {} (was {})", key, current(key).id(), before);
                 notifySwitch(key);
@@ -219,17 +220,28 @@ public class CredentialService {
         }
     }
 
-    /** One real inference through the entry, on a model the CLI is known to run. */
+    private static final java.time.Duration HEALTHY_RECHECK = java.time.Duration.ofHours(1);
+
+    private boolean dueForCheck(ProviderCredential c) {
+        return !ProviderCredential.OK.equals(c.status()) || c.checkedAt() == null
+                || c.checkedAt().plus(HEALTHY_RECHECK).isBefore(java.time.Instant.now());
+    }
+
+    /**
+     * Whether the entry works: its endpoint's model list when it has one (no tokens), else one tiny inference on a
+     * model the CLI is known to run.
+     */
     ProviderCredential check(ProviderCredential c) {
         String model = testModel(c.providerKey());
         ProviderCredential checked;
-        boolean vendor = VENDOR_CHECKED.contains(c.providerKey()); // these can check a key without a model
-        if (model == null && !vendor) {
+        // Vendors and Codex list models with the key alone; Claude needs a model to ask.
+        boolean keyAlone = VENDOR_CHECKED.contains(c.providerKey()) || "codex".equals(c.providerKey());
+        if (!CHECKED.contains(c.providerKey()) || (model == null && !keyAlone)) {
             checked = c.withHealth(ProviderCredential.UNKNOWN, CHECKED.contains(c.providerKey())
                     ? "还没有可用来测试的模型（等模型列表刷新后再检查）" : "这个 CLI 暂不支持检查 Key");
         } else {
             try {
-                probe.check(c.providerKey(), model, toRun(c));
+                probe.checkKey(c.providerKey(), model, toRun(c));
                 checked = c.withHealth(ProviderCredential.OK, null);
             } catch (IOException e) {
                 checked = c.withHealth(ProviderCredential.ERROR, tail(e.getMessage() == null ? e.toString() : e.getMessage()));

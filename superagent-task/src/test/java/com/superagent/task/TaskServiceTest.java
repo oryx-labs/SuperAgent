@@ -675,4 +675,35 @@ class TaskServiceTest {
             assertThat(c.reasoning()).contains("没有开启模型分档", "指定了 claude-opus-5-5");
         });
     }
+
+    @Test
+    void aTaskRecordsWhereItsTimeWent() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        List<com.superagent.core.timing.TurnTiming> kept = Collections.synchronizedList(new ArrayList<>());
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.SYSTEM, "sid", Instant.now()));
+                sink.emit(new AgentEvent(req.sessionId(), null, 1, AgentEventType.TOOL_USE, "Bash", Instant.now()));
+                sink.emit(new AgentEvent(req.sessionId(), null, 2, AgentEventType.TOOL_RESULT, "ok", Instant.now()));
+                sink.emit(new AgentEvent(req.sessionId(), null, 3, AgentEventType.RESULT, "done", Instant.now()));
+            }
+        };
+        TaskService service = service(runner, tasks);
+        service.setTimings(new com.superagent.core.timing.TurnTimingStore() {
+            @Override public void save(com.superagent.core.timing.TurnTiming t) { kept.add(t); }
+            @Override public List<com.superagent.core.timing.TurnTiming> forSessions(java.util.Collection<String> ids) {
+                return kept.stream().filter(t -> ids.contains(t.sessionId())).toList();
+            }
+        });
+        String id = service.create(brief("整理会议纪要")).id();
+        awaitStatus(tasks, id, "DONE");
+
+        var timing = service.timing(id, "tester");
+        assertThat(timing.open()).isFalse();
+        assertThat(timing.segments()).filteredOn(s -> s.kind().equals("turn")).singleElement().satisfies(s -> {
+            assertThat(s.turn().attempts()).isEqualTo(1);
+            assertThat(s.turn().tools()).extracting(com.superagent.api.timing.TurnTimingDto.Tool::name).containsExactly("Bash");
+        });
+    }
 }

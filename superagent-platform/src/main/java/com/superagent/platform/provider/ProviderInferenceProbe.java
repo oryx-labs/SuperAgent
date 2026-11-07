@@ -30,10 +30,12 @@ import com.superagent.core.chat.RunCredential;
  * <ul>
  *   <li><b>claude</b> with an API key / auth token: one {@code POST /v1/messages} with a tiny
  *       {@code max_tokens}, against the same base URL Claude Code uses.</li>
- *   <li><b>claude</b> on a subscription login, and <b>codex</b>: a one-shot CLI run, since there
- *       is no key to call the API with. These cost a full CLI turn, so they're kept to the few
- *       models those paths list.</li>
+ *   <li><b>codex</b> with an API key: one {@code POST /responses} capped at a few output tokens, against the
+ *       credential's own endpoint (a full Codex run costs ~7,000 input tokens of system prompt; this costs ~10).</li>
+ *   <li><b>claude</b> on a subscription login, and <b>codex</b> on a ChatGPT login: a one-shot CLI run, since there
+ *       is no key to call the API with. These cost a full CLI turn.</li>
  * </ul>
+ * Every check's tokens are kept, on "system" (they belong to no one), so the background's cost shows.
  */
 @Component
 public class ProviderInferenceProbe {
@@ -46,9 +48,64 @@ public class ProviderInferenceProbe {
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
+    /** Who background checks are booked to in the usage records. */
+    public static final String SYSTEM_USER = "system";
+    public static final String SOURCE_MODEL_CHECK = "model_check";
+    public static final String SOURCE_KEY_CHECK = "key_check";
+
+    /** Looked up when a check is booked: the recorder needs prices, which need the providers this probe serves. */
+    private org.springframework.beans.factory.ObjectProvider<com.superagent.core.usage.UsageRecorder> usage; // null in tests
+
     public ProviderInferenceProbe(ProviderProbe probe) {
         this.probe = probe;
     }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setUsageRecorder(org.springframework.beans.factory.ObjectProvider<com.superagent.core.usage.UsageRecorder> usage) {
+        this.usage = usage;
+    }
+
+    /** What this check cost, on "system". */
+    private void book(String providerKey, String source, com.superagent.core.usage.TokenUsage used) {
+        com.superagent.core.usage.UsageRecorder recorder = usage == null ? null : usage.getIfAvailable();
+        if (recorder == null || used == null || used.nothingUsed()) {
+            return;
+        }
+        try {
+            recorder.record(new com.superagent.core.usage.UsageContext(SYSTEM_USER, source, null, null, null, providerKey),
+                    mapper.writeValueAsString(List.of(used)));
+        } catch (IOException | RuntimeException e) {
+            // keeping the record is best effort: the check itself stands
+        }
+    }
+
+    /**
+     * Whether a pool credential works at all, as cheaply as can be: its endpoint's model list (no tokens) when it has
+     * one, else one tiny inference on {@code modelId}.
+     */
+    public void checkKey(String providerKey, String modelId, RunCredential credential) throws IOException, InterruptedException {
+        var entry = com.superagent.core.provider.ProviderCatalog.find(providerKey).orElseThrow();
+        java.util.Optional<ApiAccess> access = "claude".equals(providerKey) ? ApiAccess.anthropic(credential)
+                : ApiAccess.of(entry, credential);
+        if (access.isPresent() && !"claude".equals(providerKey) && !"glm".equals(providerKey)) {
+            ApiAccess a = access.get();
+            HttpResponse<String> resp = sendRaw(a.base(), a.authorizeBearer(HttpRequest.newBuilder(URI.create(a.modelsUrl(providerKey)))
+                    .timeout(Duration.ofSeconds(30)).GET()));
+            if (resp.statusCode() == 200) {
+                return;
+            }
+            if (resp.statusCode() == 401 || resp.statusCode() == 403) {
+                throw new IOException(cause(resp.statusCode()) + "（HTTP " + resp.statusCode() + errorDetail(resp.body()) + "）");
+            }
+            // No model list there (some relays): fall through to one tiny inference.
+        }
+        if (modelId == null && !VENDORS.contains(providerKey)) {
+            throw new IOException("还没有可用来测试的模型（等模型列表刷新后再检查）");
+        }
+        check(providerKey, modelId, credential, SOURCE_KEY_CHECK);
+    }
+
+    private static final java.util.Set<String> VENDORS = java.util.Set.of("deepseek", "glm", "kimi", "qwen");
 
     /** Runs one inference against {@code modelId}; returns normally on success, throws with a readable reason. */
     public void check(String providerKey, String modelId) throws IOException, InterruptedException {
@@ -57,49 +114,60 @@ public class ProviderInferenceProbe {
 
     /** The same check through a specific pool credential (null = the server's environment / CLI login). */
     public void check(String providerKey, String modelId, RunCredential credential) throws IOException, InterruptedException {
-        switch (providerKey) {
+        check(providerKey, modelId, credential, SOURCE_MODEL_CHECK);
+    }
+
+    private void check(String providerKey, String modelId, RunCredential credential, String source)
+            throws IOException, InterruptedException {
+        com.superagent.core.usage.TokenUsage used = switch (providerKey) {
             case "claude" -> checkClaude(modelId, credential);
             case "codex" -> checkCodex(modelId, credential);
             case "deepseek", "glm", "kimi", "qwen" -> checkVendor(providerKey, modelId, credential);
             default -> throw new IOException("Inference check is not available for " + providerKey + " yet");
-        }
+        };
+        book(providerKey, source, used);
     }
 
     // --- claude ---
 
-    private void checkClaude(String modelId, RunCredential credential) throws IOException, InterruptedException {
+    private com.superagent.core.usage.TokenUsage checkClaude(String modelId, RunCredential credential) throws IOException, InterruptedException {
         java.util.Optional<ApiAccess> access = ApiAccess.anthropic(credential);
         if (access.isEmpty()) {
-            checkClaudeCli(modelId);
-            return;
+            return checkClaudeCli(modelId);
         }
-        checkAnthropic(access.get(), modelId);
+        return checkAnthropic(access.get(), modelId);
     }
 
     /**
      * The vendors reached by key alone: no key, no check. {@code modelId} null (a new key, no model list yet) asks
      * for the list instead of an inference, which still proves the key.
      */
-    private void checkVendor(String providerKey, String modelId, RunCredential credential) throws IOException, InterruptedException {
+    private com.superagent.core.usage.TokenUsage checkVendor(String providerKey, String modelId, RunCredential credential) throws IOException, InterruptedException {
         var entry = com.superagent.core.provider.ProviderCatalog.find(providerKey).orElseThrow();
         ApiAccess access = ApiAccess.of(entry, credential).orElseThrow(() -> new IOException("还没有配置 API Key"));
         if (modelId == null) {
             send(access.base(), access.authorizeBearer(HttpRequest.newBuilder(URI.create(access.modelsUrl(providerKey)))
                     .timeout(Duration.ofSeconds(30)).GET()));
+            return null;
         } else if (com.superagent.core.provider.ProviderCatalog.ANTHROPIC.equals(entry.access().protocol())) {
-            checkAnthropic(access, modelId);
+            return checkAnthropic(access, modelId);
         } else {
             ObjectNode body = mapper.createObjectNode();
             body.put("model", modelId);
             body.put("max_tokens", 8);
             body.putArray("messages").addObject().put("role", "user").put("content", PROMPT);
-            send(access.base(), access.authorizeBearer(HttpRequest.newBuilder(URI.create(access.base() + "/chat/completions"))
+            HttpResponse<String> resp = send(access.base(), access.authorizeBearer(HttpRequest.newBuilder(URI.create(access.base() + "/chat/completions"))
                     .timeout(Duration.ofSeconds(60)).header("content-type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))));
+            JsonNode u = mapper.readTree(resp.body()).path("usage");
+            long cached = u.path("prompt_tokens_details").path("cached_tokens").asLong(0);
+            return new com.superagent.core.usage.TokenUsage(modelId, Math.max(0, u.path("prompt_tokens").asLong(0) - cached),
+                    cached, 0, 0, u.path("completion_tokens").asLong(0),
+                    u.path("completion_tokens_details").path("reasoning_tokens").asLong(0), null);
         }
     }
 
-    private void checkAnthropic(ApiAccess access, String modelId) throws IOException, InterruptedException {
+    private com.superagent.core.usage.TokenUsage checkAnthropic(ApiAccess access, String modelId) throws IOException, InterruptedException {
         String base = access.base();
 
         ObjectNode body = mapper.createObjectNode();
@@ -117,9 +185,22 @@ public class ProviderInferenceProbe {
         if (!root.path("content").isArray()) {
             throw new IOException("response has no content");
         }
+        JsonNode u = root.path("usage");
+        return new com.superagent.core.usage.TokenUsage(modelId, u.path("input_tokens").asLong(0),
+                u.path("cache_read_input_tokens").asLong(0), u.path("cache_creation_input_tokens").asLong(0), 0,
+                u.path("output_tokens").asLong(0), 0, null);
     }
 
     private HttpResponse<String> send(String base, HttpRequest.Builder req) throws IOException, InterruptedException {
+        HttpResponse<String> resp = sendRaw(base, req);
+        if (resp.statusCode() != 200) {
+            throw new IOException(cause(resp.statusCode()) + "（HTTP " + resp.statusCode() + errorDetail(resp.body()) + "）");
+        }
+        return resp;
+    }
+
+    /** The response whatever its status; only an unreachable endpoint throws. */
+    private HttpResponse<String> sendRaw(String base, HttpRequest.Builder req) throws IOException, InterruptedException {
         HttpResponse<String> resp;
         try {
             resp = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
@@ -130,13 +211,10 @@ public class ProviderInferenceProbe {
         } catch (IOException e) {
             throw new ProbeUnreachableException("请求 " + base + " 失败：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
         }
-        if (resp.statusCode() != 200) {
-            throw new IOException(cause(resp.statusCode()) + "（HTTP " + resp.statusCode() + errorDetail(resp.body()) + "）");
-        }
         return resp;
     }
 
-    private void checkClaudeCli(String modelId) throws IOException, InterruptedException {
+    private com.superagent.core.usage.TokenUsage checkClaudeCli(String modelId) throws IOException, InterruptedException {
         Path claude = probe.findBinary("claude").orElseThrow(() -> new IOException("claude is not installed"));
         String out = run(List.of(claude.toString(), "-p", "--output-format", "json", "--max-turns", "1",
                 "--model", modelId, "--", PROMPT), null);
@@ -144,26 +222,55 @@ public class ProviderInferenceProbe {
         if (root.path("is_error").asBoolean(false)) {
             throw new IOException(tail(root.path("result").asText("claude reported an error")));
         }
+        // The whole run, the CLI's own side calls included (modelUsage); usage alone is the main call.
+        long[] t = new long[5];
+        root.path("modelUsage").forEach(m -> {
+            t[0] += m.path("inputTokens").asLong(0);
+            t[1] += m.path("cacheReadInputTokens").asLong(0);
+            t[2] += m.path("cacheCreationInputTokens").asLong(0);
+            t[3] += m.path("outputTokens").asLong(0);
+        });
+        return new com.superagent.core.usage.TokenUsage(modelId, t[0], t[1], t[2], 0, t[3], 0, null);
     }
 
     // --- codex ---
 
-    private void checkCodex(String modelId, RunCredential credential) throws IOException, InterruptedException {
+    /**
+     * With a key: one tiny Responses API call on the credential's own endpoint (never the machine's Codex config).
+     * Without one (a ChatGPT login): a Codex run, the only way in.
+     */
+    private com.superagent.core.usage.TokenUsage checkCodex(String modelId, RunCredential credential) throws IOException, InterruptedException {
+        if (credential != null) {
+            var entry = com.superagent.core.provider.ProviderCatalog.find("codex").orElseThrow();
+            ApiAccess access = ApiAccess.of(entry, credential).orElseThrow();
+            ObjectNode body = mapper.createObjectNode();
+            body.put("model", modelId);
+            body.put("input", PROMPT);
+            body.put("max_output_tokens", 16);
+            HttpResponse<String> resp = send(access.base(), access.authorizeBearer(HttpRequest.newBuilder(URI.create(access.base() + "/responses"))
+                    .timeout(Duration.ofSeconds(60)).header("content-type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))));
+            JsonNode u = mapper.readTree(resp.body()).path("usage");
+            long cached = u.path("input_tokens_details").path("cached_tokens").asLong(0);
+            return new com.superagent.core.usage.TokenUsage(modelId, Math.max(0, u.path("input_tokens").asLong(0) - cached), cached,
+                    0, 0, u.path("output_tokens").asLong(0), u.path("output_tokens_details").path("reasoning_tokens").asLong(0), null);
+        }
         Path codex = probe.findBinary("codex").orElseThrow(() -> new IOException("codex is not installed"));
         // Read-only sandbox, prompt on stdin: the probe can't touch anything even if the model tried.
         List<String> argv = new java.util.ArrayList<>(List.of(codex.toString(), "exec", "--json", "--skip-git-repo-check",
-                "-s", "read-only", "-m", modelId));
-        java.util.Map<String, String> env = new java.util.HashMap<>();
-        if (credential != null) {
-            env.put("CODEX_API_KEY", credential.apiKey()); // env, never argv
-            // Like a run: the machine's config.toml may pick a relay provider, which would check its key, not this one.
-            argv.addAll(List.of("-c", "model_provider=\"openai\""));
-            if (credential.baseUrl() != null) {
-                argv.addAll(List.of("-c", "openai_base_url=" + mapper.writeValueAsString(credential.baseUrl())));
+                "-s", "read-only", "-m", modelId, "-"));
+        String out = run(argv, PROMPT, java.util.Map.of());
+        long in = 0, cached = 0, outTokens = 0, reasoning = 0;
+        for (String line : out.split("\\R")) {
+            if (line.contains("turn.completed")) {
+                JsonNode u = mapper.readTree(line).path("usage");
+                in += u.path("input_tokens").asLong(0);
+                cached += u.path("cached_input_tokens").asLong(0);
+                outTokens += u.path("output_tokens").asLong(0);
+                reasoning += u.path("reasoning_output_tokens").asLong(0);
             }
         }
-        argv.add("-");
-        run(argv, PROMPT, env);
+        return new com.superagent.core.usage.TokenUsage(modelId, Math.max(0, in - cached), cached, 0, 0, outTokens, reasoning, null);
     }
 
     // --- helpers ---

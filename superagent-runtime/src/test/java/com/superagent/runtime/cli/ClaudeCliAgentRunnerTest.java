@@ -142,4 +142,13 @@ class ClaudeCliAgentRunnerTest {
         }
         assertThat(ClaudeCliAgentRunner.writeRunSettings(request(null))).isNull();
     }
+
+    @Test
+    void aRunStartsWithOnlyItsOwnMcpServersAndNoBackgroundTraffic() {
+        ClaudeCliAgentRunner runner = new ClaudeCliAgentRunner("claude", 600);
+        assertThat(runner.buildCommand(request(null), null)).contains("--strict-mcp-config");
+        ProcessBuilder pb = new ProcessBuilder("claude");
+        runner.applyEnvironment(pb, request(null));
+        assertThat(pb.environment()).containsEntry("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
+    }
 }

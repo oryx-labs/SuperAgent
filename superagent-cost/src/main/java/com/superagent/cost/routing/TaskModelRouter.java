@@ -119,11 +119,15 @@ public class TaskModelRouter implements TaskModelSelector {
                         .orElse(forTasks.isEmpty() ? null : forTasks.get(forTasks.size() - 1)));
     }
 
-    /** The default model first (it judges for conversations too), then the dearest others. */
+    /** What conversations run on (the default model, or its stand-in), then the dearest others. */
     private List<Candidate> judges(List<Candidate> all) {
         List<Candidate> out = new ArrayList<>();
-        String model = defaultModel();
-        all.stream().filter(c -> c.id().equals(model)).findFirst().ifPresent(out::add);
+        for (String m : prices.chatModels()) {
+            all.stream().filter(c -> c.id().equals(m)).findFirst().filter(c -> !out.contains(c)).ifPresent(out::add);
+            if (out.size() >= JUDGES) {
+                return out;
+            }
+        }
         all.stream().filter(Candidate::priced).sorted(Comparator.comparingDouble(Candidate::blended).reversed())
                 .filter(c -> !out.contains(c)).limit(Math.max(0, JUDGES - out.size())).forEach(out::add);
         return out;

@@ -42,6 +42,7 @@ class TaskModelRouterTest {
     TaskModelRouterTest() {
         when(prices.candidates()).thenReturn(models);
         when(settings.agentDefaultModel()).thenReturn("opus");
+        when(prices.chatModels()).thenReturn(List.of("opus", "gpt-big"));
     }
 
     @Test

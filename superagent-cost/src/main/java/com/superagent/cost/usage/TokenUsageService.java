@@ -39,6 +39,8 @@ public class TokenUsageService implements UsageRecorder {
     private static final Logger log = LoggerFactory.getLogger(TokenUsageService.class);
     /** Without a listed cache price: what the main vendors charge relative to input (reads ~10%, writes 1.25×, 1h 2×). */
     private static final double CACHE_READ = 0.1;
+    /** The background's own checks are booked to this "user" (see ProviderInferenceProbe). */
+    private static final String SYSTEM = com.superagent.platform.provider.ProviderInferenceProbe.SYSTEM_USER;
     private static final double CACHE_WRITE = 1.25;
     private static final double CACHE_WRITE_1H = 2.0;
 
@@ -116,15 +118,18 @@ public class TokenUsageService implements UsageRecorder {
     public UsageDtos.Summary summary(String user, Instant from, Instant to, ZoneId zone) {
         List<UsageRecord> records = store.between(user, from, to);
         Map<String, String> agentNames = agentNames();
-        Map<String, String> people = new java.util.HashMap<>();
+        Map<String, String> names = new java.util.HashMap<>();
         if (user == null) {
-            users.listUsers().forEach(u -> people.put(u.username(), u.displayName() == null ? u.username() : u.displayName()));
+            users.listUsers().forEach(u -> names.put(u.username(), u.displayName() == null ? u.username() : u.displayName()));
         }
         List<UsageDtos.Total> byDay = group(records, r -> LocalDate.ofInstant(r.at(), zone).toString(), d -> d);
         byDay = byDay.stream().sorted(Comparator.comparing(UsageDtos.Total::key)).toList();
-        // Two kinds: a task's runs (its own and choosing its model), and everything else, by agent.
-        List<UsageRecord> forTasks = records.stream().filter(r -> r.taskId() != null).toList();
-        List<UsageRecord> forAgents = records.stream().filter(r -> r.taskId() == null).toList();
+        // Two kinds: a task's runs (its own and choosing its model), and everything else, by agent; and apart from
+        // both, the system's own background checks, which are nobody's.
+        List<UsageRecord> forSystem = records.stream().filter(r -> SYSTEM.equals(r.user())).toList();
+        List<UsageRecord> people = records.stream().filter(r -> !SYSTEM.equals(r.user())).toList();
+        List<UsageRecord> forTasks = people.stream().filter(r -> r.taskId() != null).toList();
+        List<UsageRecord> forAgents = people.stream().filter(r -> r.taskId() == null).toList();
         Map<String, String> titles = new java.util.HashMap<>();
         forTasks.forEach(r -> titles.computeIfAbsent(r.taskId(), id -> tasks.findTask(id).map(com.superagent.core.task.Task::title).orElse(null)));
         List<UsageDtos.Total> byTask = group(forTasks, UsageRecord::taskId, id -> titles.get(id) == null ? "" : titles.get(id));
@@ -132,7 +137,8 @@ public class TokenUsageService implements UsageRecorder {
                 a -> a.isEmpty() ? "" : agentNames.getOrDefault(a, ""));
         return new UsageDtos.Summary(from, to, total(records), total(forTasks), total(forAgents), byDay,
                 latestFirst(byTask), byAgent, group(records, UsageRecord::model, m -> m),
-                user == null ? group(records, r -> r.user() == null ? "" : r.user(), u -> people.getOrDefault(u, u)) : List.of());
+                user == null ? group(people, r -> r.user() == null ? "" : r.user(), u -> names.getOrDefault(u, u)) : List.of(),
+                total(forSystem), group(forSystem, r -> r.source() + "|" + r.model(), k -> k));
     }
 
     private static List<UsageDtos.Total> latestFirst(List<UsageDtos.Total> rows) {

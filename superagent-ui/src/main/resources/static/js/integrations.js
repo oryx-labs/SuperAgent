@@ -15,9 +15,10 @@ const intel = {
   modal: document.getElementById("intModal"),
   form: document.getElementById("intForm"),
   title: document.getElementById("intModalTitle"),
-  hint: document.getElementById("intHint"),
-  help: document.getElementById("intHelp"),
-  helpSummary: document.getElementById("intHelpSummary"),
+  guideLink: document.getElementById("intGuideLink"),
+  guide: document.getElementById("intGuide"),
+  guideTitle: document.getElementById("intGuideTitle"),
+  guideBody: document.getElementById("intGuideBody"),
   callbackField: document.getElementById("intCallbackField"),
   callback: document.getElementById("intCallback"),
   fields: document.getElementById("intFields"),
@@ -95,7 +96,12 @@ function integrationRow(i) {
   edit.className = "link-btn";
   edit.textContent = L("common.edit");
   edit.addEventListener("click", () => openIntegration(i));
-  act.appendChild(edit);
+  const guide = document.createElement("button");
+  guide.type = "button";
+  guide.className = "link-btn link-btn--muted";
+  guide.textContent = L("int.guide");
+  guide.addEventListener("click", () => openIntegrationGuide(i));
+  act.append(guide, edit);
   actions.appendChild(act);
 
   tr.append(name, status, config, actions);
@@ -105,9 +111,6 @@ function integrationRow(i) {
 function openIntegration(i) {
   intEditing = i;
   intel.title.textContent = i.name;
-  intel.hint.textContent = L("int.hint." + i.key);
-  intel.help.open = false;
-  intel.helpSummary.textContent = L(i.callbackUrl ? "int.helpWithCallback" : "int.help");
   intel.callbackField.hidden = !i.callbackUrl;
   intel.callback.value = i.callbackUrl || "";
   intel.fields.innerHTML = "";
@@ -158,3 +161,74 @@ intel.form.addEventListener("submit", async e => {
 
 intel.modal.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", () => { intel.modal.hidden = true; }));
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !intel.modal.hidden) intel.modal.hidden = true; });
+
+// ---------- setup guide: how to create the app on the other side ----------
+// Steps are i18n strings ("int.guide.<key>.<n>"), read until one is missing. The callback URL (when the system
+// has one) is shown where a step needs it, with a copy button: it must be entered there exactly.
+
+function openIntegrationGuide(i) {
+  intel.guideTitle.textContent = L("int.guideTitle", { name: i.name });
+  const body = intel.guideBody;
+  body.replaceChildren();
+  const intro = document.createElement("p");
+  intro.className = "int-guide__intro";
+  intro.textContent = L("int.guide." + i.key + ".intro");
+  body.appendChild(intro);
+
+  const ol = document.createElement("ol");
+  ol.className = "int-guide__steps";
+  for (let n = 1; ; n++) {
+    const k = "int.guide." + i.key + "." + n;
+    const text = L(k);
+    if (text === k) break; // no such step
+    const li = document.createElement("li");
+    const p = document.createElement("p");
+    p.textContent = text;
+    li.appendChild(p);
+    if (i.callbackUrl && L(k + ".callback") === "1") li.appendChild(guideCallback(i.callbackUrl));
+    ol.appendChild(li);
+  }
+  body.appendChild(ol);
+
+  const note = L("int.guide." + i.key + ".note");
+  if (note !== "int.guide." + i.key + ".note") {
+    const n = document.createElement("p");
+    n.className = "int-guide__note";
+    n.textContent = note;
+    body.appendChild(n);
+  }
+  const link = L("int.guide." + i.key + ".url");
+  const open = document.createElement("a");
+  open.className = "btn btn--sm";
+  open.href = link;
+  open.target = "_blank";
+  open.rel = "noopener noreferrer";
+  open.textContent = L("int.guideGo", { name: i.name });
+  body.appendChild(open);
+  intel.guide.hidden = false;
+}
+
+/** The callback URL, copyable, with where to change it if it's wrong. */
+function guideCallback(url) {
+  const box = document.createElement("div");
+  box.className = "int-guide__callback";
+  const code = document.createElement("code");
+  code.textContent = url;
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "btn btn--sm";
+  copy.textContent = L("int.copy");
+  copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(url); showToast(L("int.copied"), false); }
+    catch (e) { showToast(url, false); }
+  });
+  const hint = document.createElement("small");
+  hint.textContent = L("int.callbackHint");
+  box.append(code, copy, hint);
+  return box;
+}
+
+intel.guideLink.addEventListener("click", () => { if (intEditing) openIntegrationGuide(intEditing); });
+intel.guide.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", () => { intel.guide.hidden = true; }));
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !intel.guide.hidden) intel.guide.hidden = true; });
+

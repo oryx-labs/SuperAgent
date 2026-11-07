@@ -228,6 +228,12 @@ public class AgentService {
         return chatService.agentHistory(requireViewer(id, user).id());
     }
 
+    /** Where each reply's time went, for everyone who can read the conversation. */
+    public List<com.superagent.api.timing.TurnTimingDto> timings(String id, String user) {
+        List<String> sessions = chatService.agentHistory(requireViewer(id, user).id()).stream().map(ChatSegmentDto::sessionId).toList();
+        return chatService.timings(sessions).stream().map(com.superagent.api.timing.TurnTimingDto::of).toList();
+    }
+
     /** Only built-ins are accepted, so an avatar is always a known, short emoji. */
     private static String validAvatar(String avatar) {
         if (!AVATARS.contains(avatar)) {

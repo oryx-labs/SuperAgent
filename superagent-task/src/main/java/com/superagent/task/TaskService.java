@@ -142,6 +142,12 @@ public class TaskService implements TaskRecovery {
     }
     private com.superagent.core.task.TaskModelSelector selector; // null in tests: tasks run on the model they were given
     private com.superagent.core.task.TaskModelChoiceStore choices; // null in tests: decisions aren't kept
+    private com.superagent.core.timing.TurnTimingStore timings; // null in tests: timings aren't kept
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setTimings(com.superagent.core.timing.TurnTimingStore timings) {
+        this.timings = timings;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setModelSelection(com.superagent.core.task.TaskModelSelector selector,
@@ -398,6 +404,47 @@ public class TaskService implements TaskRecovery {
             }
         }
         return new TaskStatsDto(all.size(), active, waiting, doneToday, failed, spend);
+    }
+
+    /**
+     * Where a task's time went, start to end: waiting before it ran (the scheduler, choosing its model, a free
+     * session), each turn broken down, and the gaps between turns, waiting for the user's reply or for a slot again.
+     */
+    public com.superagent.api.timing.TaskTimingDto timing(String id, String owner) {
+        Task task = require(id, owner);
+        List<com.superagent.core.timing.TurnTiming> turns = timings == null ? List.of() : timings.forSessions(List.of(id));
+        List<Instant> replies = runStore.listMessages(id).stream().filter(m -> m.role() == MessageRole.USER)
+                .map(ChatMessage::createdAt).sorted().toList();
+        List<com.superagent.api.timing.TaskTimingDto.Segment> out = new ArrayList<>();
+        Instant at = task.createdAt();
+        for (com.superagent.core.timing.TurnTiming t : turns) {
+            if (t.startedAt().isAfter(at)) {
+                String kind = out.isEmpty() ? com.superagent.api.timing.TaskTimingDto.WAIT_START
+                        : com.superagent.api.timing.TaskTimingDto.WAIT_QUEUE;
+                Instant from = at;
+                Instant reply = replies.stream().filter(r -> r.isAfter(from) && !r.isAfter(t.startedAt())).findFirst().orElse(null);
+                if (!out.isEmpty() && reply != null) {
+                    out.add(com.superagent.api.timing.TaskTimingDto.wait(com.superagent.api.timing.TaskTimingDto.WAIT_USER, from, reply));
+                    out.add(com.superagent.api.timing.TaskTimingDto.wait(kind, reply, t.startedAt()));
+                } else {
+                    out.add(com.superagent.api.timing.TaskTimingDto.wait(kind, from, t.startedAt()));
+                }
+            }
+            out.add(com.superagent.api.timing.TaskTimingDto.turn(com.superagent.api.timing.TurnTimingDto.of(t)));
+            at = t.finishedAt().isAfter(at) ? t.finishedAt() : at;
+        }
+        boolean open = task.status() == TaskStatus.PENDING || task.status() == TaskStatus.RUNNING
+                || task.status() == TaskStatus.NEEDS_CONFIRMATION;
+        Instant end = open ? Instant.now() : task.finishedAt() != null ? task.finishedAt() : at;
+        if (end.isAfter(at)) {
+            String kind = task.status() == TaskStatus.NEEDS_CONFIRMATION ? com.superagent.api.timing.TaskTimingDto.WAIT_USER
+                    : task.status() == TaskStatus.RUNNING ? com.superagent.api.timing.TaskTimingDto.RUNNING
+                    : out.isEmpty() ? com.superagent.api.timing.TaskTimingDto.WAIT_START : com.superagent.api.timing.TaskTimingDto.WAIT_QUEUE;
+            if (open || kind.equals(com.superagent.api.timing.TaskTimingDto.WAIT_START)) {
+                out.add(com.superagent.api.timing.TaskTimingDto.wait(kind, at, end));
+            }
+        }
+        return new com.superagent.api.timing.TaskTimingDto(task.createdAt(), end, open, out);
     }
 
     public TaskDetailDto detail(String id, String owner) {
@@ -993,11 +1040,35 @@ public class TaskService implements TaskRecovery {
     /** Runs one agent turn, persisting its events/messages; returns the outcome without settling. */
     private TurnResult executeTurn(Task task, String prompt, String agentSessionId, boolean sessionFirstTurn,
                                    boolean wrapBriefPrompt, Runnable onToolUse, Cancellation cancellation) {
+        return executeTurn(task, prompt, agentSessionId, sessionFirstTurn, wrapBriefPrompt, onToolUse, cancellation, null);
+    }
+
+    /** {@code label}: what the turn is, for its timing (a coding phase's key), or null. */
+    private TurnResult executeTurn(Task task, String prompt, String agentSessionId, boolean sessionFirstTurn,
+                                   boolean wrapBriefPrompt, Runnable onToolUse, Cancellation cancellation, String label) {
+        com.superagent.core.timing.TurnTimer timer = new com.superagent.core.timing.TurnTimer();
+        String turnId = UUID.randomUUID().toString();
+        try {
+            return timedTurn(task, prompt, agentSessionId, sessionFirstTurn, wrapBriefPrompt, onToolUse, cancellation,
+                    timer, turnId);
+        } finally {
+            if (timings != null) {
+                try {
+                    timings.save(timer.finish(task.id(), turnId, label));
+                } catch (RuntimeException e) {
+                    log.warn("could not keep the timing of a turn of task {}: {}", task.id(), e.getMessage());
+                }
+            }
+        }
+    }
+
+    private TurnResult timedTurn(Task task, String prompt, String agentSessionId, boolean sessionFirstTurn,
+                                 boolean wrapBriefPrompt, Runnable onToolUse, Cancellation cancellation,
+                                 com.superagent.core.timing.TurnTimer timer, String messageId) {
         AgentRunner runner = runners.get(task.agentType());
         if (runner == null) {
             throw new IllegalStateException("No runner for agent type " + task.agentType());
         }
-        String messageId = UUID.randomUUID().toString();
         StringBuilder text = new StringBuilder();
         AtomicReference<String> result = new AtomicReference<>();
         AtomicReference<BigDecimal> turnCost = new AtomicReference<>(BigDecimal.ZERO);
@@ -1008,7 +1079,7 @@ public class TaskService implements TaskRecovery {
         com.superagent.core.usage.UsageContext paying = new com.superagent.core.usage.UsageContext(task.createdBy(),
                 com.superagent.core.usage.UsageContext.SOURCE_TASK,
                 taskAgents == null ? null : taskAgents.agentOf(task.id()).orElse(null), task.id(), null, task.agentType().cliName());
-        AgentEventSink sink = event -> {
+        AgentEventSink sink = timer.tapTools(event -> {
             if (event.type() == AgentEventType.TOKENS) {
                 Double usd = usage == null ? null : usage.record(paying, event.payload());
                 if (usd != null) {
@@ -1029,7 +1100,7 @@ public class TaskService implements TaskRecovery {
                 case ERROR -> error.set(event.payload());
                 default -> { /* thinking / system / tool_result already persisted */ }
             }
-        };
+        });
 
         // agentSessionId is the pool session's id: --session-id on its first turn, --resume after,
         // so a reused session keeps its accumulated context. Events are re-keyed to task.id above.
@@ -1056,7 +1127,12 @@ public class TaskService implements TaskRecovery {
                 taskSystemPrompt(task, grant != null),
                 nextTurnImages.remove(task.id()), null, choice.credential());
         try {
-            runner.run(request, sink, cancellation);
+            timer.attemptStarted();
+            try {
+                runner.run(request, sink, cancellation);
+            } finally {
+                timer.attemptEnded();
+            }
             // The endpoint or key failed before the agent produced anything: switch keys and run the turn again.
             boolean nothingSaid = text.isEmpty() && result.get() == null;
             if (credentials != null && nothingSaid && error.get() != null && !cancellation.isCancelled()) {
@@ -1064,7 +1140,12 @@ public class TaskService implements TaskRecovery {
                 if (next.isPresent()) {
                     log.info("task {}: retrying the turn on endpoint {}", task.id(), next.get().id());
                     error.set(null);
-                    runner.run(request.withCredential(next.get().credential()), sink, cancellation);
+                    timer.attemptStarted();
+                    try {
+                        runner.run(request.withCredential(next.get().credential()), sink, cancellation);
+                    } finally {
+                        timer.attemptEnded();
+                    }
                 }
             }
         } finally {
@@ -1150,7 +1231,7 @@ public class TaskService implements TaskRecovery {
 
                 String prompt = (i == start && resumePrompt != null)
                         ? resumePrompt : codingFlow.prompt(phase.key(), task.brief());
-                TurnResult turn = executeTurn(task, prompt, agentSessionId, firstTurn, false, null, cancellation);
+                TurnResult turn = executeTurn(task, prompt, agentSessionId, firstTurn, false, null, cancellation, phase.key());
                 firstTurn = false;
                 addSpend(task.id(), turn.cost());
 
@@ -1166,7 +1247,7 @@ public class TaskService implements TaskRecovery {
                 if (CodingFlow.PRD.equals(phase.key())) {
                     String prd = firstNonBlank(turn.finalText());
                     if (prd == null) {
-                        TurnResult retry = executeTurn(task, CodingFlow.PRD_RETRY_PROMPT, agentSessionId, false, false, null, cancellation);
+                        TurnResult retry = executeTurn(task, CodingFlow.PRD_RETRY_PROMPT, agentSessionId, false, false, null, cancellation, phase.key());
                         addSpend(task.id(), retry.cost());
                         if (retry.cancelled()) {
                             settle(task, TaskStatus.STOPPED, CodingFlow.runningProgress(i), null, BigDecimal.ZERO);

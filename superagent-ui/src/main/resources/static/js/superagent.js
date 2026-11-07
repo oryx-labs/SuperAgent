@@ -66,6 +66,7 @@ async function refreshSuper(force) {
   if (activeAgent) attachFileCards(activeAgent);
   attachSuperInviteCards();
   attachSkillDeletionCards(activeAgentId);
+  attachTimings(activeAgentId);
   attachDispatchCards();
   if (force || nearBottom || !last || last.role !== "assistant") scrollToBottom();
 }

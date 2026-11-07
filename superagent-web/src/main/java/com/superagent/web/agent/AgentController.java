@@ -66,6 +66,12 @@ public class AgentController {
         return ApiResponse.ok(agentService.history(id, auth.getName()));
     }
 
+    /** Where each reply's time went (prep, CLI start, waiting for the model, tools, output), shown under it. */
+    @GetMapping(ApiPaths.AGENTS + "/{id}/timings")
+    public ApiResponse<List<com.superagent.api.timing.TurnTimingDto>> timings(@PathVariable String id, Authentication auth) {
+        return ApiResponse.ok(agentService.timings(id, auth.getName()));
+    }
+
     /** The tasks this agent set off, newest first — shown in its side panel. */
     @GetMapping(ApiPaths.AGENTS + "/{id}/tasks")
     public ApiResponse<List<TaskDto>> tasks(@PathVariable String id, Authentication auth) {
