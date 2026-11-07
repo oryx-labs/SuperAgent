@@ -61,6 +61,6 @@ class SuperAgentInboxProcessor implements InboxProcessor {
     }
 
     private static String label(String sourceType) {
-        return EventSource.FEISHU.equals(sourceType) ? "飞书" : sourceType;
+        return EventSource.label(sourceType);
     }
 }

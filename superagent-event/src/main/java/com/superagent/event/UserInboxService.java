@@ -60,8 +60,10 @@ public class UserInboxService {
 
     /** Whether the owner is linked to the company's Feishu app, and what arrived for them today. */
     public InboxSummaryDto summary(String owner) {
-        String appId = integrations.value(IntegrationService.FEISHU, "appId").orElse(null);
-        boolean linked = sources.find(owner, EventSource.FEISHU).filter(s -> s.linkedTo(appId)).isPresent();
+        String feishu = integrations.value(IntegrationService.FEISHU, "appId").orElse(null);
+        String dingtalk = integrations.value(IntegrationService.DINGTALK, "clientId").orElse(null);
+        boolean linked = sources.find(owner, EventSource.FEISHU).filter(s -> s.linkedTo(feishu)).isPresent()
+                || sources.find(owner, EventSource.DINGTALK).filter(s -> s.linkedTo(dingtalk)).isPresent();
         List<InboxEvent> today = recentOf(owner).stream().filter(e -> !e.receivedAt().isBefore(startOfToday())).toList();
         return new InboxSummaryDto(linked, today.size(), (int) today.stream().filter(InboxEvent::processed).count());
     }

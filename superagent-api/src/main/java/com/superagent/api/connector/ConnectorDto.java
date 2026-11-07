@@ -37,5 +37,10 @@ public record ConnectorDto(
         /** How many employees have authorized (or are linked, for Feishu). */
         int authorizedCount,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        /**
+         * Comes with the system (SuperAgent's own, the messaging apps, the built-in MCP connectors): it can't be edited
+         * or deleted, only turned on and off. Only connectors an administrator added are theirs to change.
+         */
+        boolean system) {
 }

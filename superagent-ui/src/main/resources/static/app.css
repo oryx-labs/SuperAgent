@@ -844,6 +844,7 @@ button.stat-card:hover { border-color: var(--line-strong); }
 .c-icon--github { background: #18181b; color: #fff; border-color: #18181b; }
 .c-icon--gitee { background: #c71d23; color: #fff; border-color: #c71d23; font-weight: 700; }
 .c-icon--feishu { background: #e0eaff; color: #2563eb; border-color: #c7d7fe; }
+.c-icon--dingtalk { background: #e6f4ff; color: #0089ff; border-color: #bae0ff; }
 .c-icon--gitlab { background: #fff1e8; color: #e24329; border-color: #fcd9c4; }
 .c-icon--atlassian { background: #e9f0ff; color: #0052cc; border-color: #cfdcfb; }
 .c-icon--notion { background: #fff; color: #18181b; }
@@ -2199,3 +2200,42 @@ small.model-note { display: block; margin-top: 4px; }
 .int-guide { display: flex; flex-direction: column; }
 .int-guide__note { margin: 0 0 16px; padding: 10px 12px; border-radius: 10px; background: var(--panel); color: var(--muted); font-size: 12.5px; }
 
+
+.conn-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+/* A switch, not a checkbox: blue track when on, grey when off. */
+.conn-switch input {
+  appearance: none; -webkit-appearance: none; margin: 0; cursor: pointer; flex: none;
+  position: relative; width: 32px; height: 18px; border-radius: 999px;
+  background: var(--line-strong); transition: background .15s ease;
+}
+.conn-switch input::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s ease;
+}
+.conn-switch input:checked { background: var(--accent); }
+.conn-switch input:checked::after { transform: translateX(14px); }
+.conn-switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.conn-switch input:checked + span { color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .conn-switch input, .conn-switch input::after { transition: none; } }
+
+/* Connector capabilities drawer: one row per MCP tool, its parameters folded away. */
+.ct-meta { margin: 0; font-size: 12px; color: var(--muted); }
+.ct-meta.is-error { color: #b42318; }
+.ct-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; }
+.ct-list:empty { display: none; }
+.ct-tool { padding: 12px 14px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.ct-tool:first-child { border-top: 0; }
+.ct-tool__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ct-tool__name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-weight: 600; color: var(--ink); }
+.ct-tool__title { font-size: 12px; color: var(--muted); }
+.ct-tool__desc { margin: 0; font-size: 13px; color: var(--ink); line-height: 1.5; white-space: pre-line;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ct-badge { font-size: 11px; border-radius: 5px; padding: 1px 6px; border: 1px solid var(--line-strong); color: var(--muted); }
+.ct-badge--read { color: var(--ink); background: var(--panel); }
+.ct-badge--danger { color: #b42318; border-color: rgba(180, 35, 24, .35); }
+.ct-params summary { font-size: 12px; color: var(--muted); cursor: pointer; width: max-content; }
+.ct-params summary:hover { color: var(--ink); }
+.ct-params ul { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.ct-params li { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.ct-params code { color: var(--ink); font-size: 12px; }
+.ct-params .ct-req { color: var(--ink); font-weight: 600; margin-left: 4px; }

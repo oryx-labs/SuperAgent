@@ -64,7 +64,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/providers/**").hasRole("ADMIN") // runs install commands on the host
                         // Everyone sees the connectors and manages their own authorization (a personal token,
                         // an OAuth handshake, a Feishu bind code); adding, editing and removing stay with admins.
-                        .requestMatchers(HttpMethod.GET, "/api/v1/connectors").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/connectors", "/api/v1/connectors/*/tools").authenticated()
                         .requestMatchers("/api/v1/connectors/*/token", "/api/v1/connectors/*/bind-code",
                                 "/api/v1/oauth/**").authenticated()
                         .requestMatchers("/api/v1/connectors/**").hasRole("ADMIN")

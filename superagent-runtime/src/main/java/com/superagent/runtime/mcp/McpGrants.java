@@ -84,8 +84,13 @@ public class McpGrants {
     /** Deleting a skill needs a card the user confirms, so only conversations get it (not tasks). */
     public static final List<String> SKILL_CHAT_TOOLS = List.of("mcp__superagent__skill_delete");
 
+    /** Office document tools (Feishu / Lark, DingTalk); each only shows up once its app is set up. */
+    public static final List<String> DOC_TOOLS = java.util.stream.Stream.of("feishu_doc_search", "feishu_doc_read",
+            "feishu_doc_create", "feishu_doc_append", "feishu_doc_replace", "dingtalk_doc_spaces", "dingtalk_doc_list",
+            "dingtalk_doc_read", "dingtalk_doc_create", "dingtalk_doc_replace").map(n -> "mcp__superagent__" + n).toList();
+
     /** File and skill tool names, for chat and task allowlists. */
-    public static final List<String> WORK_TOOLS = java.util.stream.Stream.concat(FILE_TOOLS.stream(), SKILL_TOOLS.stream()).toList();
+    public static final List<String> WORK_TOOLS = java.util.stream.Stream.of(FILE_TOOLS, SKILL_TOOLS, DOC_TOOLS).flatMap(List::stream).toList();
 
     /**
      * Told to every chat and task run that has the file tools: work results go to the user through them.

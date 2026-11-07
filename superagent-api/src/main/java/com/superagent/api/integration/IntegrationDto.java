@@ -17,6 +17,10 @@ public record IntegrationDto(
         String lastError,
         List<Field> fields) {
 
-    public record Field(String key, String label, boolean secret, String value, boolean set) {
+    /** {@code options}: the values a choice can take (shown as a select); empty for free text. */
+    public record Field(String key, String label, boolean secret, String value, boolean set, List<Option> options) {
+    }
+
+    public record Option(String value, String label) {
     }
 }

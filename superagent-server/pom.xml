@@ -52,6 +52,11 @@
       <artifactId>superagent-cost</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <dependency>
+      <groupId>com.superagent</groupId>
+      <artifactId>superagent-docs</artifactId>
+      <version>${project.version}</version>
+    </dependency>
 
     <dependency>
       <groupId>io.micrometer</groupId>

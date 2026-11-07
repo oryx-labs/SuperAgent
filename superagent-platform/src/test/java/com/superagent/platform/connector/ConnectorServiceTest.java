@@ -122,18 +122,21 @@ class ConnectorServiceTest {
     @Test
     void seedsGitHubAndGiteeAsPersonallyAuthorizedConnectors() {
         assertThat(service.list("ada", false)).filteredOn(c -> c.kind().equals("mcp")).extracting(ConnectorDto::id)
-                .containsExactly("github", "gitee");
-        assertThat(service.list("ada", false)).filteredOn(c -> c.kind().equals("mcp")).allSatisfy(c -> {
+                .containsExactly("github", "gitee", "feishu-docs", "notion", "dingtalk-tools");
+        assertThat(service.list("ada", false)).filteredOn(c -> c.kind().equals("mcp") && !c.id().equals("dingtalk-tools")).allSatisfy(c -> {
             assertThat(c.needsAuthorization()).isTrue();
             assertThat(c.authorized()).isFalse();
             assertThat(c.endpoint()).isNull(); // configuration is for administrators
         });
         assertThat(service.mcpServersFor("ada")).isEmpty(); // not authorized: agents don't get it
 
-        // An administrator who removes Gitee doesn't get it back on the next start.
-        service.delete("gitee");
-        setUp();
-        assertThat(connectors).doesNotContainKey("gitee");
+        // They come with the system: marked so, not edited or deleted, only turned on and off.
+        assertThat(service.list("ada", true)).filteredOn(c -> c.kind().equals("mcp")).allSatisfy(c -> assertThat(c.system()).isTrue());
+        assertThatThrownBy(() -> service.delete("gitee")).isInstanceOf(com.superagent.core.error.ForbiddenException.class);
+        assertThatThrownBy(() -> service.update("gitee", new SaveConnectorRequest("x", null, "oauth", "http", "https://evil", null, null, true), "admin"))
+                .isInstanceOf(com.superagent.core.error.ForbiddenException.class);
+        assertThat(service.setEnabled("dingtalk-tools", true, "admin").enabled()).isTrue();
+        assertThat(connectors.get("gitee").endpoint()).isEqualTo("https://api.gitee.com/mcp");
     }
 
     @Test
@@ -252,5 +255,22 @@ class ConnectorServiceTest {
     private static SaveConnectorRequest mcp(String name, String auth, String transport, String endpoint, String tokenEnv,
                                             String secret) {
         return new SaveConnectorRequest(name, null, auth, transport, endpoint, tokenEnv, secret, true);
+    }
+
+    @Test
+    void feishuDefaultsToTheChinaDomainAndCanBeSwitchedToLark() {
+        IntegrationDto f = integrations.update("feishu",
+                new SaveIntegrationRequest(true, Map.of("appId", "cli_1", "appSecret", "s")), "https://sa.example");
+        assertThat(integrations.ready("feishu")).isTrue(); // the domain has a default, so it's not required
+        assertThat(integrations.value("feishu", "domain")).hasValue("feishu");
+        assertThat(f.fields()).filteredOn(x -> x.key().equals("domain")).singleElement()
+                .satisfies(x -> assertThat(x.options()).extracting(IntegrationDto.Option::value).containsExactly("feishu", "lark"));
+
+        integrations.update("feishu", new SaveIntegrationRequest(true, Map.of("domain", "lark", "appId", "cli_1")), "https://sa.example");
+        assertThat(integrations.value("feishu", "domain")).hasValue("lark");
+        assertThat(integrations.value("feishu", "appSecret")).hasValue("s"); // kept
+        assertThatThrownBy(() -> integrations.update("feishu",
+                new SaveIntegrationRequest(true, Map.of("domain", "mars", "appId", "cli_1")), "https://sa.example"))
+                .hasMessageContaining("must be one of");
     }
 }

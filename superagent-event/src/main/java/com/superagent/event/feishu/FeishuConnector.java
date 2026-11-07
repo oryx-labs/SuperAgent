@@ -155,7 +155,11 @@ public class FeishuConnector implements SmartLifecycle {
         }
         setStatus("connecting", null);
         // Bounded, so an unreachable Feishu shows up as an error instead of a check that never returns.
-        Client api = Client.newBuilder(appId, secret).requestTimeout(15, TimeUnit.SECONDS).build();
+        // Lark is the same platform under another domain: the app was made on one of them.
+        com.lark.oapi.core.enums.BaseUrlEnum base = IntegrationService.FEISHU_DOMAIN_LARK.equals(
+                integrations.value(IntegrationService.FEISHU, "domain").orElse(null))
+                ? com.lark.oapi.core.enums.BaseUrlEnum.LarkSuite : com.lark.oapi.core.enums.BaseUrlEnum.FeiShu;
+        Client api = Client.newBuilder(appId, secret).openBaseUrl(base).requestTimeout(15, TimeUnit.SECONDS).build();
         String botOpenId;
         try {
             botOpenId = botOpenId(api);
@@ -172,7 +176,7 @@ public class FeishuConnector implements SmartLifecycle {
                     }
                 })
                 .build();
-        conn.ws = new com.lark.oapi.ws.Client.Builder(appId, secret)
+        conn.ws = new com.lark.oapi.ws.Client.Builder(appId, secret).domain(base.getUrl())
                 .eventHandler(dispatcher).autoReconnect(true).build();
         current = conn;
         Thread t = new Thread(() -> {
@@ -516,7 +520,7 @@ public class FeishuConnector implements SmartLifecycle {
         for (Throwable t = e; t != null; t = t.getCause()) {
             if (t instanceof java.net.UnknownHostException || t instanceof java.net.ConnectException
                     || t instanceof java.net.SocketTimeoutException || t instanceof java.io.InterruptedIOException) {
-                return "无法连接飞书开放平台（open.feishu.cn），请检查服务器的网络或代理";
+                return "无法连接飞书 / Lark 开放平台，请检查服务器的网络或代理，以及「版本」是否选对";
             }
         }
         return "飞书拒绝了连接（请检查 App ID / App Secret 和应用权限）：" + e.getMessage();

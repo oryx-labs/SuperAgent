@@ -28,6 +28,12 @@ public record EventSource(
         Instant updatedAt) {
 
     public static final String FEISHU = "feishu";
+    public static final String DINGTALK = "dingtalk";
+
+    /** The messaging connectors, for showing a source to people. */
+    public static String label(String type) {
+        return FEISHU.equals(type) ? "飞书" : DINGTALK.equals(type) ? "钉钉" : type;
+    }
 
     /** Whether the owner's identity is known under this app. */
     public boolean linkedTo(String currentAppId) {

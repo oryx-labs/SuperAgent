@@ -28,6 +28,7 @@
     <module>superagent-skills</module>
     <module>superagent-files</module>
     <module>superagent-cost</module>
+    <module>superagent-docs</module>
     <module>superagent-agent</module>
     <module>superagent-task</module>
     <module>superagent-orchestrator</module>
@@ -89,6 +90,11 @@
       <dependency>
         <groupId>com.superagent</groupId>
         <artifactId>superagent-cost</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-docs</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

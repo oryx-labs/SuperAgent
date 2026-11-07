@@ -246,6 +246,7 @@ public class NoticeService {
                 }
             }
             sources.listEnabled(EventSource.FEISHU).forEach(s -> owners.add(s.owner()));
+            sources.listEnabled(EventSource.DINGTALK).forEach(s -> owners.add(s.owner()));
             for (String owner : owners) {
                 for (InboxTodo t : todos.list(owner)) {
                     if (t.status() == InboxTodo.TodoStatus.OPEN) {

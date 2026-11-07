@@ -17,9 +17,9 @@ SuperAgent is designed from the company's side instead: the company and its empl
 | --- | --- | --- |
 | Who it serves | One person | The whole company and its employees |
 | Where the work goes | A personal account; leaves with the person | Company assets that accumulate automatically |
-| Working together | Everyone separately | Shared agents, and handoff when people leave |
-| Cost | Every employee subscribes; tokens wasted | Ready on day one, billed by usage, routed to the right model |
-| Control | Invisible to the company | Company-controlled, audited, connected to approvals |
+| Working together | Everyone separately | Share Agents; a SuperAgent that runs a team |
+| Cost | Every employee subscribes; tokens wasted | Ready on day one on the company's keys; spend visible per task and model |
+| Control | Invisible to the company | Company-controlled; people approve; run logs |
 
 ## Why SuperAgent?
 
@@ -29,15 +29,15 @@ Handing every employee a personal assistant doesn't make AI work for a company. 
 
 ## Core capabilities
 
-In priority order. Items marked *(coming soon)* are still being built.
+In priority order. The [website docs](https://oryx-labs.github.io/SuperAgent/docs/features) cover each one in detail; what isn't built yet is on the [roadmap](https://oryx-labs.github.io/SuperAgent/docs/roadmap).
 
-1. **Work becomes company assets.** Everyone works in one system. Everything agents produce, and everything people send them (files and links), is kept in Files, and each agent builds its own long-term memory. When people change, the agent stays with its memory and files.
-2. **Collaboration and handoff.** Collaboration happens inside one AI system: several people can work with the same agent on the same job. When someone leaves, their agents and context go to the next person, who continues from there *(handoff: coming soon)*.
-3. **Reusable methods.** Skills at the personal and company levels turn good practice into company practice. Agents are team assets too: their setup, memory, and files belong to the company, so a new hire takes over instead of starting from zero.
-4. **Cost and models.** Employees get AI on day one, with no personal subscriptions and no wasted tokens. The company pays by usage, sees spend per task and per model, works with any model provider, and routes each task to a model that fits its difficulty *(routing by difficulty: coming soon)*.
-5. **Audit and security.** Built-in audit and security: human confirmation for key decisions, identity and permissions, per-agent run logs, and office tools such as Feishu, with enterprise approvals connected *(approvals: coming soon)*.
+1. **Work becomes company assets.** Everyone works in one system. Everything agents produce, and everything people send them (files and links), is kept in Files, in personal folders with topic tags, and each agent builds its own long-term memory. When people change, the agent stays with its memory and files.
+2. **Collaboration.** A Share Agent lets several people work with the same agent on the same job; colleagues can be invited right from the chat. Each person's SuperAgent plans work, forms a small team of agents and hands it out.
+3. **Reusable methods.** Skills at the personal and company levels turn good practice into company practice. Agents are team assets too: their setup, memory and files belong to the company.
+4. **Cost and models.** Employees get AI on day one on the company's keys: one key pool per CLI with failover, spend per task and per model, and model tiers (preview). Claude Code, Codex, DeepSeek, Kimi, Qwen and GLM run the work.
+5. **Visible and safe.** People approve plans and key decisions; permissions, per-agent run logs, and secrets encrypted at rest.
 
-Also included: a SuperAgent for every employee (inbox, plan-then-execute, team assignment, reporting back), task execution in managed sessions including coding agents such as Claude Code and Codex, and scheduled, one-off, and API-triggered automations.
+Also included: tasks from requirement to delivery, scheduled / cron / one-off / API-triggered automations, connectors (GitHub, Gitee, Feishu / Lark, DingTalk, your own MCP servers), and an admin console for users, models, analytics, integrations and file storage (on the server or S3-compatible).
 
 ## Architecture
 
@@ -139,4 +139,4 @@ While the pull request is open, [the release workflow](.github/workflows/release
 
 ## Status
 
-SuperAgent is iterating fast. The core is already running in daily use; items marked *coming soon* above are still being built.
+SuperAgent is iterating fast. The core is already running in daily use; what isn't built yet is on the [roadmap](https://oryx-labs.github.io/SuperAgent/docs/roadmap).

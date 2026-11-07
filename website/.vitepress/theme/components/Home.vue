@@ -57,10 +57,10 @@ const features = computed(() => [
     eyebrow: t('协作与交接', 'Collaboration & handoff'),
     title: t('接着前人做,不用从头来', 'Pick up where others left off'),
     bullets: [
-      { text: t('多人在同一个 Agent 上协作', 'Several people, one shared agent') },
+      { text: t('协作 Agent：多人在同一个 Agent 上协作', 'Share Agent: several people, one agent') },
       { text: t('离职后 Agent 和上下文交接', 'Agents and context handed over'), soon: true },
     ],
-    shot: { src: '/shots/agents.jpg', label: 'agents', w: 1649, h: 987, alt: t('团队共享的 Agent', 'A shared team agent') },
+    shot: { src: '/shots/agents.jpg', label: 'agents', w: 1649, h: 987, alt: t('协作 Agent', 'A Share Agent') },
   },
   {
     icon: 'M12 2l9 5-9 5-9-5 9-5zM3 12l9 5 9-5M3 17l9 5 9-5',

@@ -31,7 +31,7 @@ An agent is a colleague the company keeps. Its setup, memory and the files it pr
 
 ## Working with colleagues
 
-- **One agent, several people.** Add colleagues as members and work on the same job together. Every member's message moves the work forward, and everyone sees the conversation live.
+- **Share Agent: one agent, several people.** Add colleagues as members and work on the same job together. Every member's message moves the work forward, and everyone sees the conversation live.
 - **Invite from the chat.** Ask the agent (or your SuperAgent) to bring someone in. It finds the person in the directory and proposes the invitation; the owner confirms it with one click in the conversation. Removing a member takes effect at once.
 - **Only the owner changes the setup** (persona, model, skills, memory). Members work with the agent as it is.
 

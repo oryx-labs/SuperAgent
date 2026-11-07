@@ -17,7 +17,7 @@ SuperAgent starts from the company and its employees instead. Companies need AI 
 | --- | --- | --- |
 | Who it serves | One person | The whole company and its employees |
 | Where the work goes | A personal account; leaves with the person | Company assets that accumulate automatically |
-| Working together | Everyone separately | Shared agents; a SuperAgent that runs a team |
+| Working together | Everyone separately | Share Agents; a SuperAgent that runs a team |
 | Cost | Every employee subscribes; tokens wasted | Ready on day one on the company's keys; spend visible per task and model |
 | Control | Invisible to the company | Company-controlled; people approve; run logs |
 

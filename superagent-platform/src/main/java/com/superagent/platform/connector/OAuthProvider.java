@@ -22,6 +22,20 @@ public interface OAuthProvider {
 
     String key();
 
+    /** The integration under System Settings whose app this provider signs in with (by default its own). */
+    default String integration() {
+        return key();
+    }
+
+    /** The fields of that integration holding the app's id and secret. */
+    default String clientIdField() {
+        return "clientId";
+    }
+
+    default String clientSecretField() {
+        return "clientSecret";
+    }
+
     String authorizeUrl(String clientId, String redirectUri, String state);
 
     Tokens exchange(String clientId, String clientSecret, String code, String redirectUri) throws IOException, InterruptedException;

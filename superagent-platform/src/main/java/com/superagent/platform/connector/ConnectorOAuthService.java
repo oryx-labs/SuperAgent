@@ -68,7 +68,7 @@ public class ConnectorOAuthService {
 
     /** The provider's app is enabled and filled in under System Settings. */
     public boolean isConfigured(String provider) {
-        return provider != null && providers.containsKey(provider) && integrations.ready(provider);
+        return provider != null && providers.containsKey(provider) && integrations.ready(providers.get(provider).integration());
     }
 
     /** The provider slug if this connector uses an OAuth handshake, else {@code null}. */
@@ -196,11 +196,13 @@ public class ConnectorOAuthService {
     }
 
     private String clientId(String provider) {
-        return integrations.value(provider, "clientId").orElse("");
+        OAuthProvider p = providers.get(provider);
+        return integrations.value(p.integration(), p.clientIdField()).orElse("");
     }
 
     private String clientSecret(String provider) {
-        return integrations.value(provider, "clientSecret").orElseThrow(() -> new OAuthException("not_configured"));
+        OAuthProvider p = providers.get(provider);
+        return integrations.value(p.integration(), p.clientSecretField()).orElseThrow(() -> new OAuthException("not_configured"));
     }
 
     private void purgeExpiredStates() {

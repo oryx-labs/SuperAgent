@@ -1036,6 +1036,24 @@
   </div>
 
   <!-- An employee's own token for a connector that acts as each person. -->
+  <!-- A connector's capabilities: the tools its MCP server lists for the viewer's own authorization. -->
+  <div class="drawer" id="connToolsDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <div class="drawer__panel drawer__panel--wide">
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <h3 class="drawer__title" id="connToolsTitle"></h3>
+        <div class="kb__actions">
+          <button class="btn btn--sm" type="button" id="connToolsRefresh" data-i18n="conn.toolsRefresh">Refresh</button>
+        </div>
+      </div>
+      <div class="drawer__body">
+        <p class="ct-meta" id="connToolsMeta"></p>
+        <div class="ct-list" id="connToolsList"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="connTokenModal" hidden>
     <div class="modal__backdrop" data-close></div>
     <form class="modal__card" id="connTokenForm">

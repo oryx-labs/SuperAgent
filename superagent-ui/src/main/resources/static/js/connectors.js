@@ -14,9 +14,12 @@ Object.assign(api, {
   createConnector: body => connSend("POST", "/api/v1/connectors", body),
   updateConnector: (id, body) => connSend("PUT", "/api/v1/connectors/" + id, body),
   deleteConnector: id => connSend("DELETE", "/api/v1/connectors/" + id),
+  setConnectorEnabled: (id, enabled) => connSend("PUT", "/api/v1/connectors/" + id + "/enabled", { enabled }),
   saveConnectorToken: (id, token) => connSend("PUT", "/api/v1/connectors/" + id + "/token", { token }),
   revokeConnector: id => connSend("DELETE", "/api/v1/connectors/" + id + "/token"),
   connectorBindCode: id => connSend("POST", "/api/v1/connectors/" + id + "/bind-code"),
+  connectorTools: (id, refresh) => fetch("/api/v1/connectors/" + encodeURIComponent(id) + "/tools"
+    + (refresh ? "?refresh=true" : "")).then(kbJson),
 });
 
 const cel = {
@@ -63,6 +66,7 @@ const CONNECTOR_MARKS = [
   { test: c => /github/i.test(c.name + " " + (c.endpoint || "")), cls: "github", svg: SVG_GITHUB },
   { test: c => c.id === "gitee" || /gitee|码云/i.test(c.name + " " + (c.endpoint || "")), cls: "gitee", text: "G" },
   { test: c => c.kind === "feishu" || /feishu|lark|飞书/i.test(c.name), cls: "feishu", text: "飞" },
+  { test: c => c.kind === "dingtalk" || /dingtalk|钉钉/i.test(c.name), cls: "dingtalk", text: "钉" },
   { test: c => /gitlab/i.test(c.name + " " + (c.endpoint || "")), cls: "gitlab", text: "GL" },
   { test: c => /jira|atlassian|confluence/i.test(c.name + " " + (c.endpoint || "")), cls: "atlassian", text: "J" },
   { test: c => /notion/i.test(c.name + " " + (c.endpoint || "")), cls: "notion", text: "N" },
@@ -96,7 +100,7 @@ function connectorRow(c) {
   text.className = "c-name__text";
   text.appendChild(document.createTextNode(c.name));
   const builtin = c.kind === "builtin"; // SuperAgent's own MCP: shown, never edited
-  if (builtin) {
+  if (builtin || c.system) {
     const tag = document.createElement("span");
     tag.className = "pill pill--method conn-builtin";
     tag.textContent = L("conn.builtin");
@@ -132,7 +136,7 @@ function connectorRow(c) {
   if (isAdmin && c.needsAuthorization) {
     const n = document.createElement("small");
     n.className = "conn-count";
-    n.textContent = L(c.kind === "feishu" ? "conn.linkedCount" : "conn.authorizedCount", { n: c.authorizedCount });
+    n.textContent = L(isMessaging(c) ? "conn.linkedCount" : "conn.authorizedCount", { n: c.authorizedCount });
     status.appendChild(n);
   }
 
@@ -143,7 +147,26 @@ function connectorRow(c) {
   const cell = document.createElement("div");
   cell.className = "cell-actions";
   actions.appendChild(cell);
-  if (isAdmin && c.kind === "mcp") { // SuperAgent's own and Feishu are set up elsewhere
+  if (canSeeTools(c)) cell.appendChild(linkBtn(L("conn.tools"), () => openConnTools(c)));
+  if (isAdmin && c.kind === "mcp" && c.system) {
+    // Comes with the system: not edited or deleted, only turned on and off.
+    const sw = document.createElement("label");
+    sw.className = "conn-switch";
+    sw.title = L(c.enabled ? "conn.disable" : "conn.enable");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.setAttribute("role", "switch");
+    box.checked = box.defaultChecked = c.enabled;
+    box.setAttribute("aria-label", L("conn.enabledLabel"));
+    box.addEventListener("change", async () => {
+      try { await api.setConnectorEnabled(c.id, box.checked); await loadConnectors(); }
+      catch (e) { box.checked = !box.checked; showToast(e.message, true); }
+    });
+    const word = document.createElement("span");
+    word.textContent = L(c.enabled ? "conn.on" : "conn.off");
+    sw.append(box, word);
+    cell.appendChild(sw);
+  } else if (isAdmin && c.kind === "mcp") { // SuperAgent's own and Feishu are set up elsewhere
     const edit = linkBtn("✎", () => openConnectorModal(c), "link-btn--muted");
     edit.title = L("common.edit");
     const del = linkBtn("×", () => deleteConnector(c), "link-btn--danger");
@@ -154,11 +177,14 @@ function connectorRow(c) {
   return tr;
 }
 
+/** Feishu and DingTalk: messaging apps the company sets up once; each employee is linked, not authorized. */
+const isMessaging = c => c.kind === "feishu" || c.kind === "dingtalk";
+
 /** disabled · connected / connecting / error (Feishu's live connection) · noToken (company token missing) · ready */
 function connState(c) {
   if (!c.enabled) return "disabled";
   if (c.authMethod === "oauth" && !c.oauthConfigured) return "notSetUp";
-  if (c.kind === "feishu" || c.kind === "builtin") return c.status || "connecting";
+  if (isMessaging(c) || c.kind === "builtin") return c.status || "connecting";
   if (c.authMethod === "shared_token" && !c.authorized) return "noToken";
   return "ready";
 }
@@ -177,12 +203,12 @@ function myAuthorization(c) {
     text(c.enabled ? L("conn.notNeeded") : "—", true);
     return box;
   }
-  if (c.kind === "feishu") {
+  if (isMessaging(c)) {
     if (c.authorized) { text(L("conn.feishuLinked")); return box; }
     if (c.bindCode) {
       const hint = document.createElement("span");
       hint.className = "conn-bind";
-      hint.append(document.createTextNode(L("conn.bindHint") + " "));
+      hint.append(document.createTextNode(L(c.kind === "dingtalk" ? "conn.bindHintDingtalk" : "conn.bindHint") + " "));
       const code = document.createElement("code");
       code.textContent = L("conn.bindWord") + " " + c.bindCode;
       hint.appendChild(code);
@@ -247,6 +273,126 @@ async function deleteConnector(c) {
   if (!window.confirm(L("conn.deleteConfirm", { name: c.name }))) return;
   await connectorAction(() => api.deleteConnector(c.id));
 }
+
+// ---------- capabilities: the tools a connector's MCP server lists, under the viewer's own authorization ----------
+
+/** Only once it can work for the viewer: on, set up, and authorized by them (or needing nobody's authorization). */
+function canSeeTools(c) {
+  if (!c.enabled) return false;
+  if (c.kind === "builtin") return true;
+  if (c.kind === "dingtalk") return true;
+  if (c.kind !== "mcp") return false;
+  if (c.authMethod === "oauth" && !c.oauthConfigured) return false;
+  return c.authorized;
+}
+
+const ctEl = {
+  drawer: document.getElementById("connToolsDrawer"),
+  title: document.getElementById("connToolsTitle"),
+  meta: document.getElementById("connToolsMeta"),
+  list: document.getElementById("connToolsList"),
+  refresh: document.getElementById("connToolsRefresh"),
+};
+let ctFor = null;
+
+function openConnTools(c) {
+  ctFor = c;
+  ctEl.title.textContent = L("conn.toolsTitle", { name: c.name });
+  ctEl.drawer.hidden = false;
+  loadConnTools(false);
+}
+
+async function loadConnTools(refresh) {
+  const c = ctFor;
+  ctEl.list.replaceChildren();
+  ctEl.meta.classList.remove("is-error");
+  // A local server may first download its package: say so instead of looking stuck.
+  ctEl.meta.textContent = L(c.transport === "stdio" && c.kind === "mcp" ? "conn.toolsLoadingSlow" : "conn.toolsLoading");
+  ctEl.refresh.disabled = true;
+  try {
+    const r = await api.connectorTools(c.id, refresh);
+    if (ctFor !== c) return;
+    if (r.error) {
+      ctEl.meta.textContent = L("conn.toolsError", { msg: r.error });
+      ctEl.meta.classList.add("is-error");
+      return;
+    }
+    ctEl.meta.textContent = r.tools.length
+      ? L("conn.toolsCount", { n: r.tools.length, when: formatDateTime(r.fetchedAt) })
+      : (r.note || L("conn.toolsNone"));
+    ctEl.list.replaceChildren(...r.tools.map(connToolRow));
+  } catch (e) {
+    if (ctFor !== c) return;
+    ctEl.meta.textContent = e.message;
+    ctEl.meta.classList.add("is-error");
+  } finally {
+    if (ctFor === c) ctEl.refresh.disabled = false;
+  }
+}
+
+function connToolRow(t) {
+  const row = document.createElement("div");
+  row.className = "ct-tool";
+  const head = document.createElement("div");
+  head.className = "ct-tool__head";
+  const name = document.createElement("span");
+  name.className = "ct-tool__name";
+  name.textContent = t.name;
+  head.appendChild(name);
+  if (t.title && t.title !== t.name) {
+    const title = document.createElement("span");
+    title.className = "ct-tool__title";
+    title.textContent = t.title;
+    head.appendChild(title);
+  }
+  // The server's own hints; a tool that gives none is left unmarked rather than guessed at.
+  const badge = (key, cls) => {
+    const b = document.createElement("span");
+    b.className = "ct-badge " + cls;
+    b.textContent = L(key);
+    b.title = L(key + "Hint");
+    head.appendChild(b);
+  };
+  if (t.readOnly === true) badge("conn.toolRead", "ct-badge--read");
+  else if (t.destructive === true) badge("conn.toolDanger", "ct-badge--danger");
+  else if (t.readOnly === false) badge("conn.toolWrite", "");
+  row.appendChild(head);
+  if (t.description) {
+    const d = document.createElement("p");
+    d.className = "ct-tool__desc";
+    d.textContent = t.description;
+    d.title = t.description;
+    row.appendChild(d);
+  }
+  if (t.params && t.params.length) {
+    const box = document.createElement("details");
+    box.className = "ct-params";
+    const sum = document.createElement("summary");
+    sum.textContent = L("conn.toolParams", { n: t.params.length });
+    const ul = document.createElement("ul");
+    t.params.forEach(p => {
+      const li = document.createElement("li");
+      const code = document.createElement("code");
+      code.textContent = p.name;
+      li.appendChild(code);
+      if (p.type) li.appendChild(document.createTextNode(" · " + p.type));
+      if (p.required) {
+        const req = document.createElement("span");
+        req.className = "ct-req";
+        req.textContent = L("conn.toolRequired");
+        li.appendChild(req);
+      }
+      if (p.description) li.appendChild(document.createTextNode(" — " + p.description));
+      ul.appendChild(li);
+    });
+    box.append(sum, ul);
+    row.appendChild(box);
+  }
+  return row;
+}
+
+ctEl.refresh.addEventListener("click", () => loadConnTools(true));
+ctEl.drawer.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", () => { ctEl.drawer.hidden = true; ctFor = null; }));
 
 // ---------- the admin's add / edit form ----------
 
@@ -333,6 +479,7 @@ document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   if (!cel.modal.hidden) closeConnectorModal();
   if (!cel.tokenModal.hidden) cel.tokenModal.hidden = true;
+  if (!ctEl.drawer.hidden) { ctEl.drawer.hidden = true; ctFor = null; }
 });
 
 // Full-page navigation to the provider's authorize endpoint (the built-in OAuth connectors' id is the provider:
