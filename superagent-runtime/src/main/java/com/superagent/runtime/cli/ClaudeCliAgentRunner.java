@@ -59,7 +59,6 @@ public class ClaudeCliAgentRunner implements AgentRunner {
     void setCliPaths(CliPaths cliPaths) {
         this.cliPaths = cliPaths;
     }
-    private final ClaudeStreamParser parser = new ClaudeStreamParser();
     /** Claude's stderr when {@code --session-id} names a conversation an earlier (failed) first turn already began. */
     private static final String SESSION_IN_USE = "is already in use";
     /** How an attempt ended when the run should be tried again a different way. */
@@ -185,6 +184,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         stderr.setDaemon(true);
         stderr.start();
 
+        ClaudeStreamParser parser = new ClaudeStreamParser(); // per run: it tracks this run's token usage
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
@@ -211,6 +211,9 @@ public class ClaudeCliAgentRunner implements AgentRunner {
                 if (e.costUsd() != null) {
                     sink.emit(new AgentEvent(request.sessionId(), null, seq.getAndIncrement(),
                             AgentEventType.USAGE, String.valueOf(e.costUsd()), Instant.now()));
+                }
+                if (!e.tokens().isEmpty()) {
+                    Tokens.emit(sink, request.sessionId(), seq.getAndIncrement(), withModel(e.tokens(), request.model()));
                 }
             }
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
@@ -245,8 +248,17 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         } finally {
             deleteQuietly(mcpConfigFile);
             deleteQuietly(settingsFile);
+            // Stopped, timed out or crashed before its result: what the calls so far used is still billed.
+            Tokens.emit(sink, request.sessionId(), seq.getAndIncrement(), withModel(parser.unreportedTokens(), request.model()));
         }
         return conversationMissing ? Retry.NEW_CONVERSATION : Retry.NONE;
+    }
+
+    /** Usage the CLI didn't name a model for runs on the one requested (or, with none, the CLI's own default). */
+    static List<com.superagent.core.usage.TokenUsage> withModel(List<com.superagent.core.usage.TokenUsage> usage, String model) {
+        String fallback = model == null || model.isBlank() ? "default" : model;
+        return usage.stream().map(u -> u.model() != null ? u : new com.superagent.core.usage.TokenUsage(fallback, u.input(),
+                u.cacheRead(), u.cacheWrite(), u.cacheWrite1h(), u.output(), u.reasoning(), u.cliCostUsd())).toList();
     }
 
     // Package-private for unit testing of the argv assembly (persona injection, flag ordering).

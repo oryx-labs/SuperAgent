@@ -1,7 +1,6 @@
 package com.superagent.platform.settings;
 
 import com.superagent.api.settings.SystemSettingsDto;
-import com.superagent.core.provider.ModelTier;
 import com.superagent.core.settings.SystemSettingStore;
 import com.superagent.platform.provider.ProviderService;
 import org.springframework.stereotype.Service;
@@ -15,8 +14,6 @@ public class SettingsService {
     static final String AGENT_DEFAULT_MODEL = "agent.default-model";
     static final String COMPANY_NAME = "company.name";
     static final String COMPANY_SHORT_NAME = "company.short-name";
-    static final String TIERS_ENABLED = "model.tiers-enabled";
-    static final String DEFAULT_TIER = "model.default-tier";
     static final String PUBLIC_URL = "app.public-url";
 
     private final SystemSettingStore store;
@@ -30,8 +27,7 @@ public class SettingsService {
     public SystemSettingsDto get() {
         Map<String, String> all = store.all();
         return new SystemSettingsDto(trimToNull(all.get(AGENT_DEFAULT_MODEL)), trimToNull(all.get(COMPANY_NAME)),
-                trimToNull(all.get(COMPANY_SHORT_NAME)), "true".equals(all.get(TIERS_ENABLED)), defaultTier(all),
-                trimToNull(all.get(PUBLIC_URL)));
+                trimToNull(all.get(COMPANY_SHORT_NAME)), trimToNull(all.get(PUBLIC_URL)));
     }
 
     /**
@@ -50,17 +46,10 @@ public class SettingsService {
         if (request.publicUrl() != null) {
             store.put(PUBLIC_URL, publicUrl(request.publicUrl()));
         }
-        if (request.tiersEnabled() != null) {
-            store.put(TIERS_ENABLED, request.tiersEnabled().toString());
-        }
-        ModelTier tier = ModelTier.of(request.defaultTier());
-        if (tier != null) {
-            store.put(DEFAULT_TIER, tier.key());
-        }
         return get();
     }
 
-    /** The model Agents chat with when they don't set their own, or null to fall back further. */
+    /** The model conversations run on (and that judges each task's model), or null for the CLI's own default. */
     public String agentDefaultModel() {
         return get().agentDefaultModel();
     }
@@ -91,20 +80,6 @@ public class SettingsService {
             v = v.substring(0, v.length() - 1);
         }
         return v;
-    }
-
-    /** Whether people choose a tier (fast / standard / strong) rather than a model. */
-    public boolean tiersEnabled() {
-        return "true".equals(store.all().get(TIERS_ENABLED));
-    }
-
-    public String defaultTier() {
-        return defaultTier(store.all());
-    }
-
-    private static String defaultTier(Map<String, String> all) {
-        String tier = trimToNull(all.get(DEFAULT_TIER));
-        return tier != null ? tier : ModelTier.STANDARD.key();
     }
 
     private static String name(String value, int max) {

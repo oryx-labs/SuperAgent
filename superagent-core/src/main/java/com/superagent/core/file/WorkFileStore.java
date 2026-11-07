@@ -25,8 +25,6 @@ public interface WorkFileStore {
     /** Live files nobody has tagged yet (oldest first), for the tagger. */
     List<WorkFile> untagged(int limit);
 
-    /** A task's automatically captured delivery file, if any (deleted ones included, so it isn't re-created). */
-    Optional<WorkFile> delivery(String taskId);
 
     /** Records that the chat reply {@code messageId} produced (or revised) {@code fileId}. Idempotent. */
     void link(String fileId, String sessionId, String messageId);

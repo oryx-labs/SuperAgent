@@ -46,7 +46,6 @@ const ael2 = {
   fPrompt: document.getElementById("afPrompt"),
   fName: document.getElementById("afAutoName"),
   fType: document.getElementById("afType"),
-  fModel: document.getElementById("afAutoModel"),
   fRecurring: document.getElementById("afRecurring"),
   fPreset: document.getElementById("afPreset"),
   fWeekday: document.getElementById("afWeekday"),
@@ -375,44 +374,8 @@ async function openAutomation(id, freshToken) {
 }
 
 // --- form (drawer) ---
-const autoModelLabel = a => systemSettings.tiersEnabled ? tierLabel(a.tier || systemSettings.defaultTier) : a.model || L("auto.modelDefault");
-let autoSavedModel = null; // with tiers on the form picks a tier; the model chosen before stays for if they're turned off
-async function loadAutoModelOptions(selected, tier) {
-  autoSavedModel = selected || null;
-  if (systemSettings.tiersEnabled) {
-    await mtFillSelect(ael2.fModel, tier);
-    return;
-  }
-  let options = [];
-  try { const res = await api.taskAgents(); options = (res && res.data) || []; } catch (e) { /* default only */ }
-  ael2.fModel.replaceChildren();
-  const def = document.createElement("option");
-  def.value = "";
-  def.textContent = L("auto.modelDefault");
-  ael2.fModel.appendChild(def);
-  let found = !selected;
-  options.forEach(o => {
-    const ok = (o.models || []).filter(m => m.inferStatus === "ok"); // same rule as the server
-    if (!ok.length) return;
-    const g = document.createElement("optgroup");
-    g.label = o.name;
-    ok.forEach(m => {
-      const opt = document.createElement("option");
-      opt.value = m.id;
-      opt.textContent = m.displayName && m.displayName !== m.id ? m.displayName + " (" + m.id + ")" : m.id;
-      if (m.id === selected) found = true;
-      g.appendChild(opt);
-    });
-    ael2.fModel.appendChild(g);
-  });
-  if (!found) { // keep a saved model selectable even if it stopped passing the check
-    const opt = document.createElement("option");
-    opt.value = selected;
-    opt.textContent = selected + " · " + L("auto.modelUnhealthy");
-    ael2.fModel.appendChild(opt);
-  }
-  ael2.fModel.value = selected || "";
-}
+// No model to pick: each run's task gets one chosen for the job.
+const autoModelLabel = () => L("auto.modelAuto");
 
 function syncAutoForm() {
   const type = ael2.fType.value;
@@ -437,7 +400,6 @@ function autoFormBody() {
     cron: type === "recurring" ? presetToCron() : null,
     runAt: type === "once" ? ael2.fRunAt.value || null : null,
     timezone: ael2.fTimezone.value,
-    ...(systemSettings.tiersEnabled ? { model: autoSavedModel, tier: ael2.fModel.value } : { model: ael2.fModel.value }),
     overlap: ael2.fOverlap.value,
   };
 }
@@ -508,7 +470,6 @@ async function openAutoForm(a) {
   ael2.fRunAt.value = a && a.type === "once" ? toLocalInput(a.runAt, a.timezone) : "";
   ael2.drawer.hidden = false;
   syncAutoForm();
-  await loadAutoModelOptions(a ? a.model : null, a ? a.tier : null);
   ael2.fPrompt.focus();
 }
 

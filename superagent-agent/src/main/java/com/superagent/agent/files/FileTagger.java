@@ -110,7 +110,7 @@ public class FileTagger {
             Map<String, List<FileService.Untagged>> groups = new LinkedHashMap<>();
             pending.forEach(u -> groups.computeIfAbsent(u.file().owner() + "/" + u.file().agentId(), k -> new ArrayList<>()).add(u));
             for (List<FileService.Untagged> group : groups.values()) {
-                Map<String, List<String>> result = parse(ask(prompt(group)));
+                Map<String, List<String>> result = parse(ask(group.get(0).file().owner(), prompt(group)));
                 for (FileService.Untagged u : group) {
                     // A file the model skipped is marked done too (with no tags): it won't be retried every minute.
                     files.autoTag(u.file().id(), result.getOrDefault(u.file().id(), List.of()));
@@ -133,7 +133,7 @@ public class FileTagger {
             if (pending.isEmpty()) {
                 continue;
             }
-            Map<String, String> picked = parseFolders(ask(folderPrompt(folders.paths(owner), pending)));
+            Map<String, String> picked = parseFolders(ask(owner, folderPrompt(folders.paths(owner), pending)));
             pending.forEach(u -> folders.autoFile(owner, u.file().id(), picked.get(u.file().id())));
             log.info("filed {} file(s) of {}", pending.size(), owner);
         }
@@ -223,7 +223,7 @@ public class FileTagger {
     }
 
     /** One no-tools run in a scratch directory, on the cheapest model that answers (else the system default). */
-    String ask(String prompt) {
+    String ask(String owner, String prompt) {
         String model = cheapModel();
         AgentType type = providers.cliFor(model).map(AgentType::fromString).filter(runners::containsKey)
                 .orElse(AgentType.CLAUDE);
@@ -251,7 +251,11 @@ public class FileTagger {
         try {
             runner.run(new AgentRunRequest(UUID.randomUUID().toString(), null, scratch.toString(), prompt, model,
                     List.of(), false, null, null, List.of(), null,
-                    credentials == null ? null : credentials.current(type.cliName()).credential()), sink, new Cancellation());
+                    credentials == null ? null : credentials.current(type.cliName()).credential()),
+                    // Tagging and filing someone's files is on them.
+                    com.superagent.core.usage.UsageRecorder.tap(usage, new com.superagent.core.usage.UsageContext(owner,
+                            com.superagent.core.usage.UsageContext.SOURCE_FILE_TAGS, null, null, null, type.cliName()), sink),
+                    new Cancellation());
         } finally {
             try (Stream<Path> walk = Files.walk(scratch)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
@@ -267,20 +271,27 @@ public class FileTagger {
     }
 
     /** Tagging is a small job: a Haiku-class model that passed its inference check, else the system default. */
-    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests; off unless the admin turns tiers on
+    private com.superagent.core.usage.UsageRecorder usage; // null in tests: tokens aren't kept
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setUsageRecorder(com.superagent.core.usage.UsageRecorder usage) {
+        this.usage = usage;
+    }
+
+    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests: the old way below
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
         this.modelRouter = modelRouter;
     }
 
-    private boolean tiersOn() {
-        return modelRouter != null && modelRouter.enabled();
-    }
 
     private String cheapModel() {
-        if (tiersOn()) {
-            return modelRouter.background().map(com.superagent.core.provider.ModelRouter.ModelChoice::model).orElse(null);
+        if (modelRouter != null) {
+            var cheapest = modelRouter.cheapest();
+            if (cheapest.isPresent()) {
+                return cheapest.get().model(); // the cheapest that can run: tagging is a small job
+            }
         }
         return providers.list().stream()
                 .filter(p -> "claude".equals(p.key()))

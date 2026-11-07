@@ -35,5 +35,7 @@ public record TaskDto(
          */
         String sessionState,
         /** The tier it ran at, when tiers are on; {@code model} is the model that tier meant. */
-        String tier) {
+        String tier,
+        /** The chat reply that set it off, in an agent's list of its tasks; null elsewhere. */
+        String originMessageId) {
 }

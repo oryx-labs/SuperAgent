@@ -48,6 +48,8 @@ public class SecurityConfig {
     SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
+                // The Files drawer shows a PDF in a frame of this same site; other sites still can't frame any page.
+                .headers(h -> h.frameOptions(f -> f.sameOrigin()))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/login", "/login.html", "/login.css", "/login.js", "/app.css", "/js/**",
                                 "/i18n.js", "/superagent-logo.png", "/favicon.ico").permitAll()

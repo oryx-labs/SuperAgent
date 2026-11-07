@@ -107,6 +107,18 @@ public class ChatService {
     private final SkillService skills;
     private final AgentMemoryService memory;
     private final AgentLogService runLog;
+    private ChatTaskResults taskResults; // null in tests: no task reports, no task guidance
+    private com.superagent.core.usage.UsageRecorder usage; // null in tests: tokens aren't kept
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setUsageRecorder(com.superagent.core.usage.UsageRecorder usage) {
+        this.usage = usage;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setTaskResults(ChatTaskResults taskResults) {
+        this.taskResults = taskResults;
+    }
 
     /** Task and automation tools exposed by SuperAgent's own MCP server, allowlisted so the chat agent may call them. */
     private static final List<String> SUPERAGENT_MCP_TOOLS = List.of(
@@ -185,16 +197,6 @@ public class ChatService {
         return List.copyOf(out);
     }
 
-    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests; off unless the admin turns tiers on
-
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
-        this.modelRouter = modelRouter;
-    }
-
-    private boolean tiersOn() {
-        return modelRouter != null && modelRouter.enabled();
-    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setCredentials(CredentialService credentials) {
@@ -483,7 +485,8 @@ public class ChatService {
             String character = agent == null ? null : AgentCharacters.systemPrompt(agent);
             String skillIndex = skills.install(session.workspaceDir(),
                     agent == null ? List.of() : skills.forAgent(agent.id(), agent.owner()), mcpGrants != null);
-            systemPrompt = joinPrompt(joinPrompt(character, skillIndex), mcpGrants == null ? null : McpGrants.FILES_HINT);
+            systemPrompt = joinPrompt(joinPrompt(joinPrompt(character, skillIndex), mcpGrants == null ? null : McpGrants.FILES_HINT),
+                    worksInTasks(agent) ? ChatTaskResults.GUIDE : null);
         }
 
         // Images are stored under the user message's id before it's appended, so a bad upload stores nothing.
@@ -540,15 +543,16 @@ public class ChatService {
     }
 
     /** Model precedence: the agent's own override > admin's system default > deployment config. */
+    /** An agent with the task tools does its work in tasks: talk here, work there. */
+    private boolean worksInTasks(Agent agent) {
+        return agent != null && !agent.isSuper() && mcpGrants != null && taskResults != null;
+    }
+
+    /**
+     * Every conversation runs on the admin's default model, not on a model of its own: the chat thinks and hands out
+     * work, which wants the strongest; the work itself runs in tasks, each on a model chosen for it.
+     */
     private String resolveModel(Agent agent) {
-        if (tiersOn()) {
-            // Stays on the session's model while it still belongs to the tier: a different model means a new session.
-            return modelRouter.choose(agent == null ? null : agent.tier(), agent == null ? null : memory.lastModel(agent.id()))
-                    .map(com.superagent.core.provider.ModelRouter.ModelChoice::model).orElse(defaultModel);
-        }
-        if (agent != null && agent.model() != null && !agent.model().isBlank()) {
-            return agent.model().trim();
-        }
         String model = settingsService.agentDefaultModel();
         return model != null ? model : defaultModel;
     }
@@ -567,6 +571,21 @@ public class ChatService {
     public void editMessage(String sessionId, String messageId, String content) {
         store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
         store.updateMessage(sessionId, messageId, content);
+    }
+
+    /**
+     * Starts the line a failed turn's error is kept under in its reply, so reopening the chat still says what went
+     * wrong instead of showing an empty reply. The page styles what follows it as an error.
+     */
+    public static final String ERROR_MARK = "⚠️ 出错了：";
+
+    /** The reply as stored: what was said, then the error if the turn failed (a stopped turn isn't an error). */
+    static String storedReply(String text, String error, boolean cancelled) {
+        String said = text == null ? "" : text;
+        if (error == null || error.isBlank() || cancelled) {
+            return said;
+        }
+        return (said.isBlank() ? "" : said.stripTrailing() + "\n\n") + ERROR_MARK + error.strip();
     }
 
     /** How one attempt at a turn went. {@code error} set + blank {@code text} = the attempt failed. */
@@ -588,6 +607,7 @@ public class ChatService {
                          Cancellation cancellation) {
         long startedAt = System.currentTimeMillis();
         boolean retried = false;
+        boolean saved = false;
         try {
             Attempt attempt = attempt(session, agentType, runner, model, systemPrompt, agentMemory, prompt, attached,
                     user, assistantMessageId, emitter, cancellation);
@@ -608,7 +628,8 @@ public class ChatService {
                 }
             }
             store.appendMessage(new ChatMessage(assistantMessageId, attempt.session().id(),
-                    MessageRole.ASSISTANT, attempt.text(), Instant.now()));
+                    MessageRole.ASSISTANT, storedReply(attempt.text(), attempt.error(), cancellation.isCancelled()), Instant.now()));
+            saved = true;
             persistSessionUpdate(attempt.session(), agentType, attempt.agentSessionId(), prompt);
             logTurn(agent, model, startedAt, attempt, retried, cancellation.isCancelled());
 
@@ -623,6 +644,10 @@ public class ChatService {
         } catch (Exception e) {
             log.error("turn failed for session {}", session.id(), e);
             String detail = e.getMessage() != null ? e.getMessage() : "agent run failed";
+            if (!saved) { // keep the error in the conversation, or reopening it shows nothing went wrong
+                store.appendMessage(new ChatMessage(assistantMessageId, session.id(), MessageRole.ASSISTANT,
+                        storedReply("", detail, false), Instant.now()));
+            }
             send(emitter, new StreamEventDto("error", -1, detail));
             emitter.sender().complete();
         } finally {
@@ -640,7 +665,12 @@ public class ChatService {
         String agentSessionId = agentSessionIdFor(session, agentType);
         AtomicReference<String> capturedAgentSessionId = new AtomicReference<>(agentSessionId);
 
-        AgentEventSink sink = event -> {
+        // The tokens go on whoever sent the message (in a shared agent, that member), not the agent's owner.
+        com.superagent.core.usage.UsageContext paying = new com.superagent.core.usage.UsageContext(user,
+                emitter.agent() != null && emitter.agent().isSuper() ? com.superagent.core.usage.UsageContext.SOURCE_SUPERAGENT
+                        : com.superagent.core.usage.UsageContext.SOURCE_CHAT,
+                session.agentId(), null, session.id(), agentType.cliName());
+        AgentEventSink sink = com.superagent.core.usage.UsageRecorder.tap(usage, paying, event -> {
             store.appendEvent(new AgentEvent(session.id(), assistantMessageId, event.seq(),
                     event.type(), event.payload(), event.createdAt()));
             switch (event.type()) {
@@ -657,7 +687,7 @@ public class ChatService {
             if (event.type() != AgentEventType.ERROR) {
                 send(emitter, new StreamEventDto(event.type().name().toLowerCase(), event.seq(), event.payload()));
             }
-        };
+        });
 
         AgentTurnCustomizer special = emitter.special();
         McpGrants.Grant grant = special != null ? special.openGrant(emitter.agent(), user, session, assistantMessageId)
@@ -677,7 +707,8 @@ public class ChatService {
             tools = new ArrayList<>(tools);
             tools.addAll(com.superagent.platform.connector.ConnectorService.toolPatterns(connected));
         }
-        String sent = special == null ? prompt : special.prompt(emitter.agent(), session, prompt);
+        String sent = special != null ? special.prompt(emitter.agent(), session, prompt)
+                : worksInTasks(emitter.agent()) ? taskResults.prompt(session.id(), prompt) : prompt;
         AgentRunRequest request = new AgentRunRequest(session.id(), agentSessionId, session.workspaceDir(), sent, model,
                 tools, skipPermissions && (special == null || special.runsCommands(emitter.agent())), McpGrants.withServers(grant == null ? null : mcpGrants.mcpConfig(grant), connected),
                 systemPrompt, attached, agentMemory, choice.credential());

@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS superagent.task (
   flow          String,
   status        String,
   progress      Int32,
-  spend         Decimal(12, 2),
+  spend         Decimal(16, 6),
   model         String,
   tier             String,
   agent_type    String,

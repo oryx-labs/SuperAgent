@@ -45,7 +45,7 @@ import java.util.regex.Pattern;
  * <p>The prompt goes in on stdin ({@code -}): no argv flag injection, and stdin is closed so
  * Codex doesn't sit waiting for more input. Permissions map from the Claude-style settings:
  * skip-permissions → bypass sandbox; an allowlist with a write-capable tool → workspace-write;
- * otherwise read-only. Codex reports token usage but no dollar cost, so no USAGE is emitted.
+ * otherwise read-only. Codex reports token usage (TOKENS) but no dollar cost, so no USAGE is emitted.
  */
 @Component
 public class CodexCliAgentRunner implements AgentRunner {
@@ -155,6 +155,8 @@ public class CodexCliAgentRunner implements AgentRunner {
             Thread.currentThread().interrupt();
             process.destroyForcibly();
             emit(sink, request, seq, AgentEventType.ERROR, "Codex run interrupted");
+        } finally {
+            Tokens.emit(sink, request.sessionId(), seq + 1, parser.tokens(request.model()));
         }
     }
 

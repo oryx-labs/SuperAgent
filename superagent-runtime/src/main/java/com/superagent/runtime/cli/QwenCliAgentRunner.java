@@ -95,6 +95,34 @@ public class QwenCliAgentRunner extends JsonLineCliRunner {
     @Override
     protected LineParser newParser() {
         ClaudeStreamParser claude = new ClaudeStreamParser();
-        return line -> claude.parse(line).map(e -> List.of(new Line(e.type(), e.payload()))).orElse(List.of());
+        return new LineParser() {
+            private com.fasterxml.jackson.databind.JsonNode usage;
+
+            @Override
+            public List<Line> parse(String line) {
+                if (line.contains("\"result\"")) {
+                    try {
+                        com.fasterxml.jackson.databind.JsonNode root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(line);
+                        if ("result".equals(root.path("type").asText()) && root.path("usage").isObject()) {
+                            usage = root.path("usage");
+                        }
+                    } catch (Exception ignored) {
+                        // not JSON: the Claude parser skips it too
+                    }
+                }
+                return claude.parse(line).map(e -> List.of(new Line(e.type(), e.payload()))).orElse(List.of());
+            }
+
+            /**
+             * Qwen Code's result looks like Claude Code's but counts differently: its input is the whole prompt, cache
+             * reads included (read in its source: promptTokenCount → input_tokens, cachedContentTokenCount →
+             * cache_read_input_tokens), and output includes reasoning. Cache writes aren't reported apart.
+             */
+            @Override
+            public List<com.superagent.core.usage.TokenUsage> tokens(String model) {
+                return usage == null ? List.of() : List.of(Tokens.fromTotalInput(model, Tokens.n(usage, "input_tokens"),
+                        Tokens.n(usage, "cache_read_input_tokens"), 0, Tokens.n(usage, "output_tokens"), 0));
+            }
+        };
     }
 }

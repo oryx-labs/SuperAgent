@@ -122,14 +122,41 @@ public class FileController {
         return response.body(c.resource());
     }
 
-    /** A file to attach to the next message to an agent ({@code agent}) or a task ({@code task}). */
+    /**
+     * A file to attach to the next message to an agent ({@code agent}) or a task ({@code task}); with neither, one the
+     * user keeps in the Files page, placed in {@code folder} if given.
+     */
     @PostMapping(ApiPaths.FILES + "/uploads")
     public ApiResponse<WorkFileDto> upload(@RequestParam(required = false) String agent,
                                            @RequestParam(required = false) String task,
+                                           @RequestParam(required = false) String folder,
                                            @RequestParam("file") MultipartFile file, Authentication auth) throws IOException {
+        WorkFileDto saved;
         try (InputStream in = file.getInputStream()) {
-            return ApiResponse.ok(files.upload(auth.getName(), agent, task, file.getOriginalFilename(), in));
+            saved = files.upload(auth.getName(), agent, task, file.getOriginalFilename(), in);
         }
+        return ApiResponse.ok(placed(saved, folder, auth));
+    }
+
+    /** A Markdown file written in the Files page. */
+    @PostMapping(ApiPaths.FILES + "/markdown")
+    public ApiResponse<WorkFileDto> createMarkdown(@RequestBody WorkFileRequests.CreateMarkdown request, Authentication auth) {
+        return ApiResponse.ok(placed(files.createMarkdown(auth.getName(), request.name(), request.content()),
+                request.folderId(), auth));
+    }
+
+    @PutMapping(ApiPaths.FILES + "/{id}/content")
+    public ApiResponse<WorkFileDto> editContent(@PathVariable String id, @RequestBody WorkFileRequests.EditContent request,
+                                                Authentication auth) {
+        return ApiResponse.ok(files.editText(id, auth.getName(), request.content()));
+    }
+
+    private WorkFileDto placed(WorkFileDto file, String folder, Authentication auth) {
+        if (folder == null || folder.isBlank()) {
+            return file;
+        }
+        folders.move(auth.getName(), file.id(), folder);
+        return files.get(file.id(), auth.getName());
     }
 
     @PutMapping(ApiPaths.FILES + "/{id}")

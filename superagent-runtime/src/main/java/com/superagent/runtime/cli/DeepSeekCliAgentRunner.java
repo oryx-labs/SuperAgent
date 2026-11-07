@@ -94,7 +94,45 @@ public class DeepSeekCliAgentRunner extends JsonLineCliRunner {
 
     @Override
     protected LineParser newParser() {
-        return DeepSeekCliAgentRunner::parseLine;
+        return new LineParser() {
+            private final long[] sum = new long[5]; // input, cache read, cache write, output, reasoning
+
+            @Override
+            public List<Line> parse(String line) {
+                addStepUsage(line, sum);
+                return parseLine(line);
+            }
+
+            @Override
+            public List<com.superagent.core.usage.TokenUsage> tokens(String model) {
+                return List.of(new com.superagent.core.usage.TokenUsage(model, sum[0], sum[1], sum[2], 0, sum[3], sum[4], null));
+            }
+        };
+    }
+
+    /**
+     * dsh reports each step's usage on its {@code status / step_end} line (retried attempts included), in Anthropic's
+     * terms: input excludes the cache, which comes as separate reads and writes (read in its source: totalTokens =
+     * input + output + cacheRead + cacheWrite); reasoning is part of output.
+     */
+    static void addStepUsage(String line, long[] sum) {
+        if (!line.contains("step_end")) {
+            return;
+        }
+        try {
+            JsonNode e = JSON.readTree(line);
+            JsonNode u = e.path("usage");
+            if (!"status".equals(e.path("type").asText()) || !"step_end".equals(e.path("phase").asText()) || !u.isObject()) {
+                return;
+            }
+            sum[0] += Tokens.n(u, "inputTokens");
+            sum[1] += Tokens.n(u, "cacheReadTokens");
+            sum[2] += Tokens.n(u, "cacheWriteTokens");
+            sum[3] += Tokens.n(u, "outputTokens");
+            sum[4] += Tokens.n(u, "reasoningTokens");
+        } catch (IOException ignored) {
+            // not JSON: nothing to count
+        }
     }
 
     /** {@code session} carries the id, {@code text} the reply, {@code final} how the run ended. */

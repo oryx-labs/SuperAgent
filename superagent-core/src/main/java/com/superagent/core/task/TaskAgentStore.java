@@ -11,11 +11,22 @@ import java.util.Optional;
 public interface TaskAgentStore {
 
     /** Records that {@code taskId} was created via {@code agentId} (no-op if either is null). */
-    void link(String taskId, String agentId);
+    default void link(String taskId, String agentId) {
+        link(taskId, agentId, null, null);
+    }
+
+    /** As {@link #link(String, String)}, also remembering the chat reply that created it. */
+    void link(String taskId, String agentId, String sessionId, String messageId);
 
     /** Task ids this agent spawned, newest first. */
     List<String> tasksForAgent(String agentId);
 
     /** The agent that spawned this task, if one did. */
     Optional<String> agentOf(String taskId);
+
+    /** Where this task was set off, if an agent did. */
+    Optional<TaskOrigin> origin(String taskId);
+
+    /** Where each task this agent spawned was set off, newest first. */
+    List<TaskOrigin> originsForAgent(String agentId);
 }

@@ -13,7 +13,9 @@ import java.util.List;
 public class ClickHouseTaskStore extends AbstractJdbcTaskStore {
 
     public ClickHouseTaskStore(JdbcTemplate jdbc) {
-        super(jdbc, List.of("ALTER TABLE task ADD COLUMN IF NOT EXISTS tier String"));
+        super(jdbc, List.of("ALTER TABLE task ADD COLUMN IF NOT EXISTS tier String",
+                // Cents were too coarse: a small task costs a fraction of a cent.
+                "ALTER TABLE task MODIFY COLUMN spend Decimal(16, 6)"));
     }
 
     @Override

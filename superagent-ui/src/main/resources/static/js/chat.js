@@ -383,8 +383,9 @@ function renderAgentPanel(agent) {
   document.getElementById("agentPersonaWrap").hidden = !agent.persona;
   setupPersonaClamp();
   if (!characterChoices.length) loadCharacters().then(() => { if (activeAgent === agent && agent.character) renderAgentPanel(agent); });
-  const model = agent.model || systemSettings.agentDefaultModel || "default";
-  document.getElementById("agentInfoModel").textContent = systemSettings.tiersEnabled ? tierLabel(agent.tier || systemSettings.defaultTier) : model;
+  // Conversations run on what the admin set, not a model of each agent's own (the work runs in tasks).
+  const model = systemSettings.agentDefaultModel || "default";
+  document.getElementById("agentInfoModel").textContent = model;
   renderComposerModel(agent);
   renderAgentSkills(agent);
 }
@@ -414,8 +415,10 @@ const composerModel = document.getElementById("statusHint");
 // No model has passed its probe: chatting can't work, so say so instead of offering a "Default" that would fail.
 let noChatModel = false;
 
+// Nobody picks a model for a conversation any more: the admin sets it (System Settings). The picker only shows to
+// say that no model can run at all.
 async function renderComposerModel(agent) {
-  if (systemSettings.tiersEnabled) return renderComposerTiers(agent);
+  composerModel.hidden = true;
   const { groups, failed } = await loadChatModels();
   if (activeAgent !== agent) return; // switched agents while loading
   composerModel.innerHTML = "";
@@ -447,6 +450,7 @@ const cliDefaultWorks = groups => groups.some(g => g.key === "claude");
 
 function setNoChatModel(on) {
   noChatModel = on;
+  composerModel.hidden = !on;
   el.composer.classList.toggle("composer--nomodel", on);
   el.sendBtn.disabled = on;
   el.input.setAttribute("placeholder", on ? L(isAdmin ? "chat.noModelAdmin" : "chat.noModelUser")
@@ -483,18 +487,4 @@ function fillModelGroups(select, groups, label) {
   });
 }
 
-composerModel.addEventListener("change", async () => {
-  const agent = activeAgent;
-  if (!agent) return;
-  try {
-    const res = await api.updateAgent(agent.id, {
-      name: agent.name, avatar: agent.avatar, character: agent.character, persona: agent.persona,
-      ...(systemSettings.tiersEnabled ? { model: agent.model, tier: composerModel.value } : { model: composerModel.value || null }),
-    });
-    activeAgent = res.data;
-    renderAgentPanel(res.data);
-  } catch (e) {
-    showToast(L("chat.modelSaveFailed"), true);
-    composerModel.value = (systemSettings.tiersEnabled ? agent.tier : agent.model) || "";
-  }
-});
+// The picker only says that no model can run; it chooses nothing (the admin sets the model).

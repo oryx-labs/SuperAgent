@@ -89,7 +89,12 @@ public class TaskController {
         return ApiResponse.ok(taskService.eventsFrom(id, auth.getName(), offset));
     }
 
-    @GetMapping(ApiPaths.TASKS + "/{id}/status")
+    @GetMapping(ApiPaths.TASKS + "/{id}/model-choices")
+    public ApiResponse<List<com.superagent.api.task.TaskModelChoiceDto>> modelChoices(@PathVariable String id, Authentication auth) {
+        return ApiResponse.ok(taskService.modelChoices(id, auth.getName()));
+    }
+
+        @GetMapping(ApiPaths.TASKS + "/{id}/status")
     public ApiResponse<TaskDto> status(@PathVariable String id, Authentication auth) {
         return ApiResponse.ok(taskService.status(id, auth.getName()));
     }

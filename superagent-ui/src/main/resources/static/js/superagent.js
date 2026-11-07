@@ -172,6 +172,7 @@ async function attachDispatchCards() {
   });
 }
 
+/** {@code items}: what one reply set off, oldest first; an item marked {@code self} is the agent's own task (no "→ who"). */
 function dispatchCard(items) {
   const box = document.createElement("div");
   box.className = "sa-dispatch";
@@ -184,6 +185,7 @@ function dispatchCard(items) {
     task.title = L("super.dispatchOpenTask");
     task.textContent = w.title;
     task.addEventListener("click", () => openTaskFromWork(w.taskId));
+    if (w.self) { row.append(workBadge(w.status), task); box.appendChild(row); return; } // the agent does it itself
     const arrow = document.createElement("span");
     arrow.className = "sa-dispatch__arrow";
     arrow.textContent = "→";

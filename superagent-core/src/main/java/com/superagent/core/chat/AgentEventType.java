@@ -28,6 +28,12 @@ public enum AgentEventType {
     /** Cost/usage metadata for a turn (e.g. total_cost_usd); not shown in the output stream. */
     USAGE,
 
+    /**
+     * The tokens a run used, exactly as its CLI counted them: a JSON array of {@link com.superagent.core.usage.TokenUsage},
+     * one per model. Not shown and not stored with the run's events: the usage records keep it.
+     */
+    TOKENS,
+
     /** Something failed. */
     ERROR
 }

@@ -187,6 +187,7 @@ async function openFile(fileOrId) {
   flel.download.href = fileContentUrl(f.id, true);
   flel.download.hidden = link; // a link has no content of its own
   flel.rename.hidden = flel.del.hidden = !f.canManage;
+  fwSyncEdit(f);
   renderDrawerTags(f);
   ffFillMove(f);
   flel.drawer.hidden = false;
@@ -226,7 +227,7 @@ async function renderFilePreview(f) {
   const src = fileContentUrl(f.id, false);
   const ext = (f.name.split(".").pop() || "").toLowerCase();
   // Documents read better wider than the drawer's usual width.
-  flel.drawer.querySelector(".drawer__panel").classList.toggle("fl-panel-doc", ext === "md" || ext === "markdown");
+  flel.drawer.querySelector(".drawer__panel").classList.toggle("fl-panel-doc", ["md", "markdown", "pdf"].includes(ext));
   if (f.kind === "link") {
     // The address and a way to open it; nothing is fetched here (many links need the viewer's own login).
     const url = document.createElement("p");
@@ -252,6 +253,19 @@ async function renderFilePreview(f) {
     video.preload = "metadata";
     video.src = src;
     box.appendChild(video);
+  } else if (ext === "pdf") {
+    // The browser's own PDF viewer, inside the drawer: pages, zoom and search come with it.
+    const frame = document.createElement("iframe");
+    frame.className = "fl-pdf";
+    frame.src = src;
+    frame.title = f.name;
+    const open = document.createElement("a");
+    open.className = "btn btn--sm fl-open-tab";
+    open.href = src;
+    open.target = "_blank";
+    open.rel = "noopener";
+    open.textContent = L("fl.openTab");
+    box.append(frame, open);
   } else if (["md", "markdown", "txt", "csv", "json", "html", "htm"].includes(ext)) {
     let text;
     try {
@@ -269,20 +283,11 @@ async function renderFilePreview(f) {
       box.appendChild(pre);
     }
   } else {
-    // PDFs and the rest: the browser (or the user's own app) does it better than an embed here.
+    // The rest (slides, spreadsheets, archives…): the user's own app does it, after downloading.
     const p = document.createElement("p");
     p.className = "kb-empty";
-    p.textContent = L(ext === "pdf" ? "fl.pdfHint" : "fl.noPreview");
+    p.textContent = L("fl.noPreview");
     box.appendChild(p);
-    if (ext === "pdf") {
-      const open = document.createElement("a");
-      open.className = "btn btn--sm fl-open-tab";
-      open.href = src;
-      open.target = "_blank";
-      open.rel = "noopener";
-      open.textContent = L("fl.openTab");
-      box.appendChild(open);
-    }
   }
 }
 

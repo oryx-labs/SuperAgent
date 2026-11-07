@@ -121,16 +121,6 @@ public class TaskService implements TaskRecovery {
     private final TaskAgentStore taskAgents;   // null = task→agent links not recorded (tests)
     private CredentialService credentials;     // null in tests: runs use the server's environment
 
-    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests; off unless the admin turns tiers on
-
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
-        this.modelRouter = modelRouter;
-    }
-
-    private boolean tiersOn() {
-        return modelRouter != null && modelRouter.enabled();
-    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setCredentials(CredentialService credentials) {
@@ -142,6 +132,35 @@ public class TaskService implements TaskRecovery {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setConnectors(com.superagent.platform.connector.ConnectorService connectors) {
         this.connectors = connectors;
+    }
+    private com.superagent.core.task.TaskDoers doers; // null in tests: a task runs as no one in particular
+    private com.superagent.core.usage.UsageRecorder usage; // null in tests: tokens aren't kept
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setUsageRecorder(com.superagent.core.usage.UsageRecorder usage) {
+        this.usage = usage;
+    }
+    private com.superagent.core.task.TaskModelSelector selector; // null in tests: tasks run on the model they were given
+    private com.superagent.core.task.TaskModelChoiceStore choices; // null in tests: decisions aren't kept
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setModelSelection(com.superagent.core.task.TaskModelSelector selector,
+                           com.superagent.core.task.TaskModelChoiceStore choices) {
+        this.selector = selector;
+        this.choices = choices;
+    }
+
+    /**
+     * Wakes the scheduler, which admits new tasks in the background (choosing their model first). Null until a
+     * {@link TaskScheduler} takes over (tests): then a new task is admitted at once, as before.
+     */
+    private volatile Runnable wakeScheduler;
+    /** Tasks handed to admission (being judged, or queued for a session), so a sweep doesn't take them twice. */
+    private final Set<String> admitted = ConcurrentHashMap.newKeySet();
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setDoers(com.superagent.core.task.TaskDoers doers) {
+        this.doers = doers;
     }
     private com.superagent.platform.provider.ProviderService providers; // null in tests: no model fallback
 
@@ -273,10 +292,7 @@ public class TaskService implements TaskRecovery {
             }
         }
         owners.forEach(this::tryDispatch);
-        // New tasks still waiting for their first session were queued in memory too.
-        tasks.listTasks().stream()
-                .filter(t -> t.status() == TaskStatus.PENDING && t.workspaceDir() == null)
-                .forEach(this::schedule);
+        // New tasks still waiting for their first session: the scheduler takes them up once it starts.
     }
 
     private ChatMessage lastUserMessage(String taskId) {
@@ -318,15 +334,17 @@ public class TaskService implements TaskRecovery {
         return owned(owner).map(this::toListDto).toList();
     }
 
-    /** The tasks this agent set off (via its chat MCP tools), newest first; excludes deleted. */
+    /** The tasks this agent set off (via its chat MCP tools), newest first, each with the reply that did; excludes deleted. */
     public List<TaskDto> listForAgent(String agentId) {
         if (taskAgents == null) {
             return List.of();
         }
-        return taskAgents.tasksForAgent(agentId).stream()
-                .map(tasks::findTask).flatMap(java.util.Optional::stream)
-                .filter(t -> t.status() != TaskStatus.DELETED)
-                .map(this::toListDto).toList();
+        List<TaskDto> out = new ArrayList<>();
+        for (com.superagent.core.task.TaskOrigin o : taskAgents.originsForAgent(agentId)) {
+            tasks.findTask(o.taskId()).filter(t -> t.status() != TaskStatus.DELETED).ifPresent(t ->
+                    out.add(toDto(t, t.workspaceDir() == null ? null : deriveSessionId(t), o.messageId())));
+        }
+        return out;
     }
 
     private java.util.stream.Stream<Task> owned(String owner) {
@@ -423,20 +441,19 @@ public class TaskService implements TaskRecovery {
      * {@code agentId} is the agent creating it, whose skills the task then uses (null = all skills).
      */
     public TaskDto create(CreateTaskRequest request, String owner, String agentId) {
+        return create(request, owner, agentId, null, null);
+    }
+
+    /**
+     * As {@link #create(CreateTaskRequest, String, String)}, set off from a chat reply ({@code sessionId}/{@code messageId}),
+     * whose conversation then hears how it went. The task runs as that agent (its character and memory), on a model
+     * chosen for the job.
+     */
+    public TaskDto create(CreateTaskRequest request, String owner, String agentId, String sessionId, String messageId) {
         String id = UUID.randomUUID().toString();
         AgentType agentType = AgentType.fromString(request.agentType());
         String model = blankToNull(request.model());
-        String tier = null;
-        if (tiersOn()) {
-            // The tier decides everything: nothing below may pick a model of its own. Empty when no model can run,
-            // and then the request stands as it is.
-            var choice = modelRouter.choose(request.tier(), null).orElse(null);
-            if (choice != null) {
-                tier = choice.tier();
-                model = choice.model();
-                agentType = AgentType.fromString(choice.cli());
-            }
-        }
+        // A stand-in until just before it runs: then its model is chosen for the job (TaskModelSelector).
         if (!runners.containsKey(agentType)) {
             // Fail at creation rather than letting the task start and error with "no runner".
             throw new IllegalArgumentException("Agent " + agentType.cliName() + " can't run tasks here yet; available: "
@@ -451,7 +468,7 @@ public class TaskService implements TaskRecovery {
                 source,
                 blankToNull(request.repo()), blankToNull(request.branch()), kind.storageName(),
                 TaskStatus.PENDING, 0, BigDecimal.ZERO, model, agentType,
-                null, owner == null || owner.isBlank() ? defaultOwner : owner, null, now, null, null, now, tier);
+                null, owner == null || owner.isBlank() ? defaultOwner : owner, null, now, null, null, now, null);
         tasks.save(task);
         if (kind == TaskKind.CODING) {
             codingFlow.persist(id, CodingFlow.initialPhases());
@@ -460,11 +477,20 @@ public class TaskService implements TaskRecovery {
             skills.bindTaskToAgent(id, agentId); // before scheduling, so the first turn already has them
         }
         if (agentId != null && taskAgents != null) {
-            taskAgents.link(id, agentId); // so the agent's panel can list the work it set off
+            taskAgents.link(id, agentId, sessionId, messageId); // so the agent's panel and chat can show the work it set off
+        }
+        if ((selector == null || !selector.enabled()) && choices != null) {
+            // Nothing will judge this task (admit skips choosing): say now why it runs on what it runs on.
+            choices.save(defaultChoice(task, request, agentId, now));
         }
         log.info("created task {} ({}), kind={}", id, task.title(), kind.storageName());
         publish(task, agentId);
-        schedule(task);
+        Runnable wake = wakeScheduler;
+        if (wake != null) {
+            wake.run(); // recorded now, run by the scheduler
+        } else {
+            admit(task);
+        }
         return toDto(task);
     }
 
@@ -479,6 +505,167 @@ public class TaskService implements TaskRecovery {
             return TaskKind.fromStorage(k);
         }
         return request.repo() != null && !request.repo().isBlank() ? TaskKind.CODING : TaskKind.GENERAL;
+    }
+
+    // --- admission (driven by TaskScheduler) ---
+
+    /** The scheduler takes over admitting new tasks; {@code wake} prompts it to look now. */
+    void useScheduler(Runnable wake) {
+        this.wakeScheduler = wake;
+    }
+
+    /** New tasks waiting to start, oldest first, that nothing has taken up yet. */
+    List<Task> awaitingAdmission() {
+        List<Task> waiting = tasks.listTasks().stream()
+                .filter(t -> t.status() == TaskStatus.PENDING && t.workspaceDir() == null)
+                .sorted(Comparator.comparing(Task::createdAt)).toList();
+        Set<String> ids = new java.util.HashSet<>();
+        waiting.forEach(t -> ids.add(t.id()));
+        admitted.retainAll(ids); // started, stopped or deleted since: forget them
+        return waiting.stream().filter(t -> !admitted.contains(t.id())).toList();
+    }
+
+    /**
+     * Takes a new task up: first its model, when none was decided yet (a model is asked, so on a
+     * worker thread), then a session. Where task dependencies will be checked, when there are some.
+     */
+    void admit(Task task) {
+        if (!admitted.add(task.id())) {
+            return;
+        }
+        boolean decided = choices == null || !choices.list(task.id()).isEmpty();
+        if (selector == null || !selector.enabled() || decided) {
+            schedule(task);
+            return;
+        }
+        executor.execute(() -> {
+            try {
+                chooseModel(task);
+            } catch (RuntimeException e) {
+                log.warn("choosing a model for task {} failed; it runs on {}", task.id(), task.model(), e);
+            }
+            tasks.findTask(task.id()).filter(t -> t.status() == TaskStatus.PENDING && t.workspaceDir() == null)
+                    .ifPresentOrElse(this::schedule, () -> admitted.remove(task.id()));
+        });
+    }
+
+    private void chooseModel(Task task) {
+        var choice = selector.choose(task).orElse(null);
+        if (choice == null) {
+            return; // nothing can run: the stand-in stays, and fails at the runner with a clear error
+        }
+        AgentType type = AgentType.fromString(choice.cli());
+        if (!runners.containsKey(type)) {
+            choice = new com.superagent.core.task.TaskModelChoice(task.id(), 0, com.superagent.core.task.TaskModelChoice.BY_FALLBACK,
+                    choice.difficulty(), task.tier(), task.model(), task.agentType().cliName(), choice.judge(), choice.candidates(),
+                    choice.reasoning() + "（选中的 " + choice.model() + " 要用 " + choice.cli() + "，这里还不能用它执行任务，改用默认的 "
+                            + task.model() + "。）", choice.createdAt());
+            type = task.agentType();
+        }
+        recordChoice(choice);
+        AgentType runOn = type;
+        String model = choice.model();
+        String tier = choice.tier();
+        tasks.findTask(task.id()).filter(t -> t.status() == TaskStatus.PENDING)
+                .ifPresent(t -> tasks.save(t.withModel(model, runOn, tier)));
+        log.info("task {} will run on {} ({}), decided by {}", task.id(), model, tier, choice.by());
+    }
+
+    /**
+     * Why a task runs on what it runs on when tiers are off: nothing is judged, so the reason is where the model came
+     * from (the creator, or the configured defaults) and what else could have run it.
+     */
+    private com.superagent.core.task.TaskModelChoice defaultChoice(Task task, CreateTaskRequest request, String agentId,
+                                                                  Instant at) {
+        String runs = effectiveModel(task);
+        String shown = runs != null ? runs : task.agentType().cliName() + " 自己的默认模型";
+        StringBuilder why = new StringBuilder("没有开启模型分档，所以不按任务难度选模型，按默认规则：");
+        if (task.model() != null) {
+            String who = "automation".equals(request.source()) ? "这个定时任务" : agentId != null ? "发起它的 Agent" : "创建任务时";
+            why.append(who).append("指定了 ").append(task.model()).append("，就用它。");
+        } else if (runs != null && task.agentType() == AgentType.CLAUDE) {
+            why.append("创建时没有指定模型，用部署配置的默认模型 ").append(runs).append("（superagent.agent.default-model）。");
+        } else if (runs != null) {
+            why.append("创建时没有指定模型，用 ").append(task.agentType().cliName())
+                    .append(" 下第一个通过可用性检查的模型 ").append(runs).append("。");
+        } else {
+            why.append("创建时没有指定模型，系统也没有配置默认模型，由 ").append(task.agentType().cliName())
+                    .append(" 用它自己的默认模型。");
+        }
+        why.append("想让系统按任务难度自动挑模型，可以在系统设置里开启「按档位选择模型」。");
+        return new com.superagent.core.task.TaskModelChoice(task.id(), 1, com.superagent.core.task.TaskModelChoice.BY_DEFAULT,
+                null, null, shown, task.agentType().cliName(), null, runnableModels(), why.toString(), at);
+    }
+
+    /** Every model that passed its check, per CLI: what the task could have run on. */
+    private String runnableModels() {
+        if (providers == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (AgentType type : runners.keySet()) {
+            providers.storedModels(type.cliName()).stream().filter(com.superagent.api.provider.ProviderModelDto::canInfer)
+                    .forEach(m -> sb.append(m.id()).append(" · ").append(type.cliName()).append("\n"));
+        }
+        return sb.isEmpty() ? null : sb.toString().stripTrailing();
+    }
+
+    private void recordChoice(com.superagent.core.task.TaskModelChoice choice) {
+        if (choices != null) {
+            choices.save(choice.withSeq(choices.list(choice.taskId()).size() + 1));
+        }
+    }
+
+    /** The decisions about which model runs this task, oldest first. */
+    public List<com.superagent.api.task.TaskModelChoiceDto> modelChoices(String id, String owner) {
+        require(id, owner);
+        return choices == null ? List.of() : choices.list(id).stream().map(c -> new com.superagent.api.task.TaskModelChoiceDto(
+                c.seq(), c.by(), c.difficulty(), c.tier(), c.model(), c.cli(), c.judge(), c.candidates(), c.reasoning(),
+                c.createdAt())).toList();
+    }
+
+    /**
+     * A task that failed on a model chosen for it moves up a tier and starts over, rather than failing: start cheap,
+     * pay more only when it's needed. Not when the user picked the tier, nor once there's nothing stronger.
+     */
+    private boolean escalate(Task task, String error) {
+        if (selector == null || choices == null || !selector.enabled()) {
+            return false;
+        }
+        List<com.superagent.core.task.TaskModelChoice> made = choices.list(task.id());
+        if (made.isEmpty() || made.stream().anyMatch(c -> com.superagent.core.task.TaskModelChoice.BY_USER.equals(c.by()))) {
+            return false;
+        }
+        var up = selector.escalate(task, error == null ? "执行失败" : error).orElse(null);
+        if (up == null || !runners.containsKey(AgentType.fromString(up.cli()))) {
+            return false;
+        }
+        recordChoice(up);
+        synchronized (schedulerLock) {
+            TaskSessionPool.Session session = pool.sessionForTask(task.id());
+            if (session != null) {
+                pool.release(session);
+            }
+        }
+        runStates.delete(task.id());
+        if (TaskKind.fromStorage(task.flow()) == TaskKind.CODING) {
+            codingFlow.persist(task.id(), CodingFlow.initialPhases());
+        }
+        runStore.appendEvent(AgentEvent.of(task.id(), Long.MAX_VALUE, AgentEventType.SYSTEM,
+                "在 " + task.model() + " 上失败，改用更贵的 " + up.model() + " 从头重新执行。"));
+        Task again = task.requeuedOn(up.model(), AgentType.fromString(up.cli()), up.tier());
+        tasks.save(again);
+        publish(again, null);
+        admitted.remove(task.id());
+        log.info("task {} failed on {}: moving up to {}", task.id(), task.model(), up.model());
+        Runnable wake = wakeScheduler;
+        if (wake != null) {
+            wake.run();
+        } else {
+            admit(again);
+        }
+        tryDispatch(task.createdBy());
+        return true;
     }
 
     /**
@@ -645,7 +832,19 @@ public class TaskService implements TaskRecovery {
     }
 
     public void stop(String id, String owner) {
-        require(id, owner);
+        Task waiting = require(id, owner);
+        if (waiting.status() == TaskStatus.PENDING && waiting.workspaceDir() == null) {
+            synchronized (schedulerLock) { // not started yet: take it out of the queue
+                Deque<QueuedRun> q = queues.get(waiting.createdBy());
+                if (q != null) {
+                    q.removeIf(r -> r.taskId().equals(id));
+                }
+            }
+            Task stopped = waiting.finished(TaskStatus.STOPPED, 0, null);
+            tasks.save(stopped);
+            publish(stopped, null);
+            return;
+        }
         Cancellation cancellation = activeRuns.get(id);
         if (cancellation != null) {
             cancellation.cancel();
@@ -804,7 +1003,19 @@ public class TaskService implements TaskRecovery {
         AtomicReference<BigDecimal> turnCost = new AtomicReference<>(BigDecimal.ZERO);
         AtomicReference<String> error = new AtomicReference<>();
 
+        // The task's spend: our estimate from its tokens, for every CLI; what the CLI says only where we have no price.
+        AtomicReference<BigDecimal> estimated = new AtomicReference<>();
+        com.superagent.core.usage.UsageContext paying = new com.superagent.core.usage.UsageContext(task.createdBy(),
+                com.superagent.core.usage.UsageContext.SOURCE_TASK,
+                taskAgents == null ? null : taskAgents.agentOf(task.id()).orElse(null), task.id(), null, task.agentType().cliName());
         AgentEventSink sink = event -> {
+            if (event.type() == AgentEventType.TOKENS) {
+                Double usd = usage == null ? null : usage.record(paying, event.payload());
+                if (usd != null) {
+                    estimated.accumulateAndGet(BigDecimal.valueOf(usd), (a, b) -> a == null ? b : a.add(b));
+                }
+                return;
+            }
             if (event.type() == AgentEventType.USAGE) {
                 try { turnCost.set(new BigDecimal(event.payload())); } catch (RuntimeException ignore) { /* keep 0 */ }
                 return; // cost metadata, not part of the visible output stream
@@ -874,7 +1085,7 @@ public class TaskService implements TaskRecovery {
         if (finalText != null && !finalText.isBlank()) {
             lastReply.put(task.id(), finalText);
         }
-        return new TurnResult(finalText, turnCost.get(), cancellation.isCancelled());
+        return new TurnResult(finalText, estimated.get() != null ? estimated.get() : turnCost.get(), cancellation.isCancelled());
     }
 
     /** Single-pass execution for non-coding tasks: run the turn, then settle to a terminal/confirmation status. */
@@ -1035,6 +1246,13 @@ public class TaskService implements TaskRecovery {
      */
     private void settle(Task task, TaskStatus status, int progress, String error, BigDecimal turnCost) {
         Task latest = tasks.findTask(task.id()).orElse(task);
+        if (status == TaskStatus.ERROR) {
+            BigDecimal spent = (latest.spend() == null ? BigDecimal.ZERO : latest.spend())
+                    .add(turnCost == null ? BigDecimal.ZERO : turnCost);
+            if (escalate(latest.withSpend(spent), error)) {
+                return;
+            }
+        }
         Task next = status == TaskStatus.NEEDS_CONFIRMATION
                 ? latest.withStatus(TaskStatus.NEEDS_CONFIRMATION).withProgress(progress)
                 : latest.finished(status, progress, error);
@@ -1087,10 +1305,36 @@ public class TaskService implements TaskRecovery {
     /** The task's skills index, plus how to hand over files when the run has the file tools. */
     private String taskSystemPrompt(Task task, boolean withTools) {
         String index = skills == null ? null : skills.install(task.workspaceDir(), skills.forTask(task.id(), task.createdBy()), withTools);
-        if (!withTools) {
-            return index;
+        String prompt = join(doerPrompt(task), index);
+        return withTools ? join(prompt, McpGrants.FILES_HINT) : prompt;
+    }
+
+    /**
+     * Who does this task: the agent that set it off, with its character and memory. Every turn, not only the first:
+     * a pool session runs one task after another, and the next may be another agent's.
+     */
+    private String doerPrompt(Task task) {
+        if (doers == null || taskAgents == null) {
+            return null;
         }
-        return index == null ? McpGrants.FILES_HINT : index + "\n\n" + McpGrants.FILES_HINT;
+        return taskAgents.agentOf(task.id()).flatMap(doers::doer).map(d -> {
+            StringBuilder sb = new StringBuilder("## 你是谁\n你是「").append(d.name())
+                    .append("」，这个任务由你自己执行。");
+            if (d.character() != null && !d.character().isBlank()) {
+                sb.append("\n\n").append(d.character().strip());
+            }
+            if (d.memory() != null && !d.memory().isBlank()) {
+                sb.append("\n\n## 你的记忆（之前和用户共事时记下的）\n").append(d.memory().strip());
+            }
+            return sb.toString();
+        }).orElse(null);
+    }
+
+    private static String join(String a, String b) {
+        if (a == null || a.isBlank()) {
+            return b;
+        }
+        return b == null || b.isBlank() ? a : a + "\n\n" + b;
     }
 
     /** Best-effort delivery artifact so the final result lands on disk in the task workspace. */
@@ -1150,11 +1394,15 @@ public class TaskService implements TaskRecovery {
     }
 
     private TaskDto toDto(Task t, String sessionId) {
+        return toDto(t, sessionId, null);
+    }
+
+    private TaskDto toDto(Task t, String sessionId, String originMessageId) {
         return new TaskDto(t.id(), t.title(), t.source().name().toLowerCase(),
                 t.repo(), t.branch(), t.flow(), t.status().name().toLowerCase(),
                 t.progress(), t.spend(), t.model(), t.createdBy(), t.error(),
                 t.createdAt(), t.startedAt(), t.finishedAt(), t.updatedAt(),
-                t.agentType().name().toLowerCase(), sessionId, t.workspaceDir(), sessionState(t.id(), sessionId), t.tier());
+                t.agentType().name().toLowerCase(), sessionId, t.workspaceDir(), sessionState(t.id(), sessionId), t.tier(), originMessageId);
     }
 
     private String sessionState(String taskId, String sessionId) {

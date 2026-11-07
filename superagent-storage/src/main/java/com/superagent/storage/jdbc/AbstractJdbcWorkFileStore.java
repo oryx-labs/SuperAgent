@@ -97,12 +97,6 @@ abstract class AbstractJdbcWorkFileStore implements WorkFileStore {
                 + ") ORDER BY updated_at DESC", mapper, args.toArray());
     }
 
-    @Override
-    public Optional<WorkFile> delivery(String taskId) {
-        return jdbc.query("SELECT * FROM work_file" + readFinal() + " WHERE task_id = ? AND origin = ?",
-                mapper, taskId, WorkFile.ORIGIN_DELIVERY).stream().findFirst();
-    }
-
     /** Insert-if-absent, so a reply that revises a file twice keeps its first position in the order. */
     @Override
     public void link(String fileId, String sessionId, String messageId) {

@@ -20,7 +20,7 @@ public class MysqlTaskStore extends AbstractJdbcTaskStore {
               flow          VARCHAR(255),
               status        VARCHAR(32)   NOT NULL,
               progress      INT           NOT NULL DEFAULT 0,
-              spend         DECIMAL(12,2) NOT NULL DEFAULT 0,
+              spend         DECIMAL(16,6) NOT NULL DEFAULT 0,
               model         VARCHAR(128),
               agent_type    VARCHAR(32)   NOT NULL,
               workspace_dir VARCHAR(1024),
@@ -38,6 +38,16 @@ public class MysqlTaskStore extends AbstractJdbcTaskStore {
     public MysqlTaskStore(JdbcTemplate jdbc) {
         super(jdbc, SCHEMA);
         ensureTier();
+        ensureSpendPrecision();
+    }
+
+    /** Cents were too coarse: one small task costs a fraction of a cent, which showed as $0.00. */
+    private void ensureSpendPrecision() {
+        Integer scale = jdbc.queryForObject("SELECT MAX(numeric_scale) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                + "AND LOWER(table_name) = 'task' AND LOWER(column_name) = 'spend'", Integer.class);
+        if (scale != null && scale < 6) {
+            jdbc.execute("ALTER TABLE task MODIFY spend DECIMAL(16,6) NOT NULL DEFAULT 0");
+        }
     }
 
     private void ensureTier() {

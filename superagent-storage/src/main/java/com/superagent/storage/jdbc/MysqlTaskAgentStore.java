@@ -12,11 +12,19 @@ public class MysqlTaskAgentStore extends AbstractJdbcTaskAgentStore {
                 CREATE TABLE IF NOT EXISTS task_agent (
                   task_id    VARCHAR(64) NOT NULL,
                   agent_id   VARCHAR(64) NOT NULL,
+                  session_id VARCHAR(64),
+                  message_id VARCHAR(64),
                   created_at DATETIME(3) NOT NULL,
                   PRIMARY KEY (task_id),
                   KEY idx_task_agent (agent_id, created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        // Tables from before tasks remembered the chat reply that set them off.
+        Integer present = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                + "AND LOWER(table_name) = 'task_agent' AND LOWER(column_name) = 'message_id'", Integer.class);
+        if (present == null || present == 0) {
+            jdbc.execute("ALTER TABLE task_agent ADD COLUMN session_id VARCHAR(64), ADD COLUMN message_id VARCHAR(64)");
+        }
     }
 
     @Override
@@ -25,8 +33,8 @@ public class MysqlTaskAgentStore extends AbstractJdbcTaskAgentStore {
     }
 
     @Override
-    protected void upsert(String taskId, String agentId, LocalDateTime at) {
-        jdbc.update("REPLACE INTO task_agent (task_id, agent_id, created_at) VALUES (?, ?, ?)",
-                taskId, agentId, at);
+    protected void upsert(String taskId, String agentId, String sessionId, String messageId, LocalDateTime at) {
+        jdbc.update("REPLACE INTO task_agent (task_id, agent_id, session_id, message_id, created_at) VALUES (?, ?, ?, ?, ?)",
+                taskId, agentId, sessionId, messageId, at);
     }
 }

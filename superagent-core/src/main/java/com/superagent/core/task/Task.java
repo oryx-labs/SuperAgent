@@ -89,6 +89,18 @@ public record Task(
                 model, agentType, workspaceDir, createdBy, errorOrNull, createdAt, startedAt, now, now, tier);
     }
 
+    /** Runs on another model: back to the queue, from scratch (a new session; another CLI can't resume this one). */
+    public Task requeuedOn(String newModel, AgentType newAgentType, String newTier) {
+        return new Task(id, title, brief, source, repo, branch, flow, TaskStatus.PENDING, 0, spend,
+                newModel, newAgentType, null, createdBy, null, createdAt, null, null, Instant.now(), newTier);
+    }
+
+    /** The model it will run on, decided before it starts. */
+    public Task withModel(String newModel, AgentType newAgentType, String newTier) {
+        return new Task(id, title, brief, source, repo, branch, flow, status, progress, spend,
+                newModel, newAgentType, workspaceDir, createdBy, error, createdAt, startedAt, finishedAt, Instant.now(), newTier);
+    }
+
     public Task withTitle(String newTitle) {
         return new Task(id, newTitle, brief, source, repo, branch, flow, status, progress, spend,
                 model, agentType, workspaceDir, createdBy, error, createdAt, startedAt, finishedAt, Instant.now(), tier);

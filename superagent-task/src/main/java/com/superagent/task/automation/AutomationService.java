@@ -250,7 +250,8 @@ public class AutomationService {
         String brief = a.prompt()
                 + (input == null || input.isBlank() ? "" : "\n\n## 本次输入\n" + input.strip())
                 + "\n\n" + UNATTENDED_NOTE;
-        return new CreateTaskRequest(title, brief, "automation", null, null, null, model, agentType, null, a.tier());
+        // The model is a stand-in: each run's task gets its model chosen for the job.
+        return new CreateTaskRequest(title, brief, "automation", null, null, null, model, agentType, null, null);
     }
 
     private boolean stillRunning(String taskId) {
@@ -334,8 +335,7 @@ public class AutomationService {
         }
         OverlapPolicy overlap = parse(OverlapPolicy.class, r.overlap(), OverlapPolicy.SKIP, "overlap");
         boolean enabled = r.enabled() == null || r.enabled();
-        com.superagent.core.provider.ModelTier tier = com.superagent.core.provider.ModelTier.of(r.tier());
-        return new Spec(name, prompt, type, cron, runAt, timezone, model, overlap, enabled, tier == null ? null : tier.key());
+        return new Spec(name, prompt, type, cron, runAt, timezone, model, overlap, enabled, null); // no tiers any more
     }
 
     private static <E extends Enum<E>> E parse(Class<E> type, String value, E fallback, String field) {

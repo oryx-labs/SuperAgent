@@ -28,10 +28,10 @@ let modelDetailId = null;
 // back/forward restores the same view. Admin-only views fall back to the default
 // for non-admins. See initialView().
 const KNOWN_VIEWS = new Set(["todo", "chat", "files", "tasks", "messages", "skills", "automation", "connectors", "models",
-  "users", "settings", "integrations", "file-storage", "analytics"]);
+  "users", "settings", "integrations", "file-storage", "analytics", "usage", "company-usage", "model-prices"]);
 // The "Workspace" dropdown's pages, and the admin pages (shown with the admin sidebar).
-const WORKSPACE_VIEWS = new Set(["skills", "connectors"]);
-const ADMIN_VIEWS = new Set(["settings", "integrations", "file-storage", "analytics", "models", "users"]);
+const WORKSPACE_VIEWS = new Set(["skills", "connectors", "usage"]);
+const ADMIN_VIEWS = new Set(["settings", "integrations", "file-storage", "analytics", "company-usage", "models", "model-prices", "users"]);
 const DEFAULT_VIEW = "todo"; // the to-do list is home: the first thing to look at each day
 let isAdmin = false;
 
@@ -58,12 +58,15 @@ function setView(view) {
   document.getElementById("adminTopNav").classList.toggle("is-active", inAdmin);
   document.getElementById("adminSide").hidden = !inAdmin;
   document.querySelector(".layout").classList.toggle("layout--admin", inAdmin);
+  document.querySelector(".layout").classList.toggle("layout--admin-collapsed", inAdmin && adminSideCollapsed);
+  if (inAdmin) renderNavGroups();
   closeWorkspaceMenu();
   const isChat = view === "chat";
   const isConnectors = view === "connectors";
   const isTasks = view === "tasks";
   const isUsers = view === "users";
   const isModels = view === "models";
+  const isModelPrices = view === "model-prices";
   const isSettings = view === "settings";
   const isIntegrations = view === "integrations";
   const isFileStorage = view === "file-storage";
@@ -71,6 +74,7 @@ function setView(view) {
   const isSkills = view === "skills";
   const isInbox = view === "messages"; // the message stream, opened from the SuperAgent panel
   const isAnalytics = view === "analytics";
+  const isUsage = view === "usage" || view === "company-usage"; // one page: mine, or (admins) the company's
   const isTodo = view === "todo";
   const isFiles = view === "files";
   todoPane.hidden = !isTodo;
@@ -78,19 +82,21 @@ function setView(view) {
   if (!flel.drawer.hidden) closeFile(); // a preview belongs to the page it was opened from
   chatPanes.forEach(p => { p.hidden = !isChat; });
   analyticsPane.hidden = !isAnalytics;
+  document.querySelector('[data-pane="usage"]').hidden = !isUsage;
   automationPane.hidden = !isAutomation;
   connectorsPane.hidden = !isConnectors;
   tasksPane.hidden = !isTasks;
   usersPane.hidden = !isUsers;
   modelsPane.hidden = !isModels;
+  document.querySelector('[data-pane="model-prices"]').hidden = !isModelPrices;
   settingsPane.hidden = !isSettings;
   integrationsPane.hidden = !isIntegrations;
   fileStoragePane.hidden = !isFileStorage;
   skPane.hidden = !isSkills;
   if (!isSkills && !skel.drawer.hidden) closeSkillDrawer();
   ibPane.hidden = !isInbox;
-  placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isSettings || isIntegrations
-    || isFileStorage || isAutomation || isSkills || isInbox || isAnalytics || isTodo || isFiles;
+  placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isModelPrices || isSettings || isIntegrations
+    || isFileStorage || isAutomation || isSkills || isInbox || isAnalytics || isTodo || isFiles || isUsage;
   if (!placeholderPane.hidden) placeholderText.textContent = L(placeholderLabels[view] || "placeholder.default");
   if (isConnectors) loadConnectors();
   if (isUsers) loadUsers();
@@ -100,12 +106,51 @@ function setView(view) {
   if (isSkills) loadSkills();
   if (isInbox) loadInbox();
   if (isAnalytics) loadAnalytics();
+  if (isUsage) { usScope = view === "company-usage" ? "all" : "me"; loadUsage(); }
   if (isTodo) loadTodos();
   if (isFiles) loadFiles();
   if (isAutomation) { showAutoList(); loadAutomations(); }
   if (isTasks) { showTaskList(); loadTasks(); } else { stopTaskPolling(); }
   if (isModels) { showModelList(); startModelPolling(); } else { stopModelPolling(); }
+  if (isModelPrices) mpLoad();
 }
+
+// The admin sidebar folds down to a narrow strip (open by default); the choice is remembered on this browser.
+const ADMIN_SIDE_KEY = "superagent.adminSideCollapsed";
+let adminSideCollapsed = (() => { try { return localStorage.getItem(ADMIN_SIDE_KEY) === "1"; } catch (e) { return false; } })();
+const adminSideToggle = document.getElementById("adminSideToggle");
+function renderAdminSide() {
+  const layout = document.querySelector(".layout");
+  layout.classList.toggle("layout--admin-collapsed", layout.classList.contains("layout--admin") && adminSideCollapsed);
+  adminSideToggle.setAttribute("aria-expanded", String(!adminSideCollapsed));
+  adminSideToggle.title = L(adminSideCollapsed ? "nav.expand" : "nav.collapse");
+  adminSideToggle.firstElementChild.textContent = adminSideCollapsed ? "»" : "«";
+}
+adminSideToggle.addEventListener("click", () => {
+  adminSideCollapsed = !adminSideCollapsed;
+  try { localStorage.setItem(ADMIN_SIDE_KEY, adminSideCollapsed ? "1" : "0"); } catch (e) { /* not remembered */ }
+  renderAdminSide();
+});
+renderAdminSide();
+
+// Each group in the admin sidebar folds its sub-items; the page on screen keeps its group open.
+const NAV_GROUPS_KEY = "superagent.navGroupsFolded";
+const foldedGroups = new Set((() => { try { return JSON.parse(localStorage.getItem(NAV_GROUPS_KEY) || "[]"); } catch (e) { return []; } })());
+function renderNavGroups() {
+  document.querySelectorAll(".nav__group").forEach(g => {
+    const holdsCurrent = !!g.querySelector(".nav__item.is-active");
+    const folded = foldedGroups.has(g.dataset.group) && !holdsCurrent;
+    g.classList.toggle("is-folded", folded);
+    g.querySelector(".nav__group-label").setAttribute("aria-expanded", String(!folded));
+  });
+}
+document.querySelectorAll(".nav__group-label").forEach(label => label.addEventListener("click", () => {
+  const g = label.closest(".nav__group");
+  if (g.classList.contains("is-folded")) foldedGroups.delete(g.dataset.group); else foldedGroups.add(g.dataset.group);
+  try { localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify([...foldedGroups])); } catch (e) { /* not remembered */ }
+  renderNavGroups();
+}));
+renderNavGroups();
 
 navItems.forEach(a => a.addEventListener("click", e => {
   e.preventDefault();

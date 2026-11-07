@@ -10,6 +10,7 @@ Object.assign(api, {
   taskDetail: id => fetch("/api/v1/tasks/" + id).then(r => r.json()),
   taskAgents: () => fetch("/api/v1/tasks/agents").then(r => r.json()),
   taskStatus: id => fetch("/api/v1/tasks/" + id + "/status").then(r => r.json()),
+  taskModelChoices: id => fetch("/api/v1/tasks/" + id + "/model-choices").then(r => r.json()),
   taskEvents: (id, offset) => fetch("/api/v1/tasks/" + id + "/events?offset=" + offset).then(r => r.json()),
   taskFiles: id => fetch("/api/v1/files?task=" + encodeURIComponent(id)).then(kbJson),
   taskMessage: (id, content, images, fileIds) => fetch("/api/v1/tasks/" + id + "/messages", {
@@ -328,17 +329,94 @@ function renderDetail(d) {
   tel.tabs.querySelector('[data-tab="run"]').textContent = task.hasPhases
     ? L("tasks.tabRunPhased", { n: d.phases.length }) : L("tasks.tabRun");
   if (tel.promptBody) tel.promptBody.innerHTML = renderMarkdown(d.brief || t.title || "");
-  setTaskTab("run");
+  // A finished task opens on what it came up with; one still at work on its run log.
+  const last = [...(d.events || [])].reverse().find(e => e.type === "result");
+  renderTaskOutput(last ? last.payload : null, t);
+  setTaskTab(last && t.status === "done" ? "output" : "run");
   loadTaskFiles(t.id);
+  task.choiceKey = t.status + "|" + t.model;
+  loadModelChoices(t);
+  loadTaskUsage(t.id);
   task.lastPhaseKey = t.status + "|" + t.progress;
   if (isActiveStatus(t.status)) startTaskPolling(); else stopTaskPolling();
 }
 
-// Detail tabs: Prompt / Conversation (run log + coding phases, the default) / Session.
+// The "model choice" tab: before the task runs, how hard it was judged, what it could have run on and what was
+// picked, and why; then one more entry each time it failed and moved to a dearer model.
+const CHOICE_BY = ["judge", "user", "fallback", "escalation", "default"];
+
+async function loadModelChoices(t) {
+  const box = document.getElementById("taskModelChoices");
+  let list = [];
+  try { list = ((await api.taskModelChoices(t.id)) || {}).data || []; } catch (e) { /* keep what's shown */ return; }
+  if (task.id !== t.id) return;
+  box.replaceChildren();
+  if (!list.length) {
+    const p = document.createElement("p");
+    p.className = "model-choices__empty";
+    p.textContent = t.status === "pending" ? L("tasks.choicePending") : L("tasks.choiceNone", { model: t.model || L("tasks.modelDefault") });
+    box.appendChild(p);
+    return;
+  }
+  list.forEach(c => box.appendChild(modelChoiceCard(c)));
+}
+
+function modelChoiceCard(c) {
+  const card = document.createElement("section");
+  card.className = "model-choice is-" + c.by;
+  const head = document.createElement("div");
+  head.className = "model-choice__head";
+  const by = document.createElement("span");
+  by.className = "model-choice__by";
+  by.textContent = CHOICE_BY.includes(c.by) ? L("tasks.choiceBy." + c.by) : c.by;
+  const when = document.createElement("span");
+  when.className = "model-choice__when";
+  when.textContent = formatDateTime(c.createdAt);
+  head.append(by, when);
+  const facts = document.createElement("dl");
+  facts.className = "model-choice__facts";
+  const row = (k, v) => { if (!v) return; const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v; facts.append(dt, dd); };
+  row(L("tasks.choiceDifficulty"), c.difficulty ? L("tasks.difficulty." + c.difficulty) : null);
+  row(L("tasks.choiceModel"), [c.model, c.cli].filter(Boolean).join(" · "));
+  row(L("tasks.choiceJudge"), c.judge);
+  card.append(head, facts);
+  if (c.reasoning) {
+    const why = document.createElement("p");
+    why.className = "model-choice__why";
+    why.textContent = c.reasoning;
+    card.appendChild(why);
+  }
+  if (c.candidates) {
+    const more = document.createElement("details");
+    more.className = "model-choice__candidates";
+    const sum = document.createElement("summary");
+    sum.textContent = L("tasks.choiceCandidates", { n: c.candidates.split("\n").length });
+    const pre = document.createElement("pre");
+    pre.textContent = c.candidates;
+    more.append(sum, pre);
+    card.appendChild(more);
+  }
+  return card;
+}
+
+// The task's output: its final reply (what it came up with). Not a file: files are what it saved on purpose.
+function renderTaskOutput(text, t) {
+  const box = document.getElementById("taskOutput");
+  if (text) { box.innerHTML = renderMarkdown(text); return; }
+  box.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "task-output__empty";
+  p.textContent = L(t && (t.status === "error" || t.status === "stopped") ? "tasks.outputNone" : "tasks.outputWaiting");
+  box.appendChild(p);
+}
+
+// Detail tabs: Prompt / Model choice / Conversation (run log + coding phases) / Output / Session.
 function setTaskTab(tab) {
   tel.tabs.querySelectorAll(".model-tab").forEach(b => b.classList.toggle("is-active", b.dataset.tab === tab));
   tel.detailView.querySelectorAll("[data-pane-tab]").forEach(p => { p.hidden = p.dataset.paneTab !== tab; });
   if (tab === "run") scrollRunToEnd();
+  if (tab === "usage" && task.id) loadTaskUsage(task.id); // a running task keeps adding up
 }
 tel.tabs.addEventListener("click", e => {
   const b = e.target.closest(".model-tab");
@@ -443,7 +521,9 @@ function setEvBody(bodyEl, kind, fullRaw) {
 
 function appendStreamItem(item) {
   const type = item.kind;
-  if (type === "system") return; // bootstrap noise
+  // The CLI's own system events carry just its session id: noise. SuperAgent's notes (moving to a stronger
+  // model after a failure) are worth showing.
+  if (type === "system" && (!item.payload || /^[0-9a-f-]{36}$/i.test(item.payload.trim()))) return;
 
   // A run of tool calls folds into one compact, collapsible block (one row per call).
   if (type === "tool_use" || type === "tool_result") { appendToolEvent(item); return; }
@@ -639,10 +719,10 @@ tel.confirmEdit.addEventListener("click", () => {
   tel.steerInput.placeholder = L("tasks.confirmEditPh");
 });
 
-// What a task records: the tier it ran at, when tiers were on, and the model that actually ran.
+// The model a task ran on (chosen for it before it started).
 function taskModelLabel(t) {
   const model = t.model || L("tasks.modelDefault");
-  return t.tier ? tierLabel(t.tier) + " · " + model : model;
+  return model;
 }
 
 function renderFacts(t) {
@@ -745,11 +825,15 @@ async function pollTask() {
     const newEvents = (evRes && evRes.data) || [];
     coalesce(newEvents.map(e => ({ kind: e.type, payload: e.payload, at: e.createdAt }))).forEach(appendStreamItem);
     task.renderedEvents += newEvents.length;
+    const result = [...newEvents].reverse().find(e => e.type === "result");
+    if (result) renderTaskOutput(result.payload, null);
     const t = stRes && stRes.data;
     if (!t) return;
     updateStatusUi(t);
     renderFacts(t);
     renderSessionInfo(t);
+    // The model is decided before the task starts, and again whenever it moves to a dearer one after failing.
+    if (task.choiceKey !== t.status + "|" + t.model) { task.choiceKey = t.status + "|" + t.model; loadModelChoices(t); loadTaskUsage(t.id); }
     // Phases only change when the task moves on: refetch the (large) detail then, not every poll.
     const phaseKey = t.status + "|" + t.progress;
     if (task.hasPhases && phaseKey !== task.lastPhaseKey) {

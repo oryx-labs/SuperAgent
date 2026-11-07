@@ -301,7 +301,7 @@ public class AgentMemoryService {
         String current = read(agent);
         String answer;
         try {
-            answer = summarize(AgentMemoryRules.prompt(agent.name(), current,
+            answer = summarize(agent, AgentMemoryRules.prompt(agent.name(), current,
                     AgentMemoryRules.transcript(fresh, zone)));
         } catch (RuntimeException e) {
             log.warn("memory run for agent {} failed, retrying later: {}", agent.id(), e.getMessage());
@@ -334,21 +334,26 @@ public class AgentMemoryService {
         backoff.remove(agent.id());
     }
 
-    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests; off unless the admin turns tiers on
+    private com.superagent.core.usage.UsageRecorder usage; // null in tests: tokens aren't kept
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setUsageRecorder(com.superagent.core.usage.UsageRecorder usage) {
+        this.usage = usage;
+    }
+
+    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests: the default model
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
         this.modelRouter = modelRouter;
     }
 
-    private boolean tiersOn() {
-        return modelRouter != null && modelRouter.enabled();
-    }
 
-    /** One run of the system default model (with tiers on, the fast tier), no tools, in a scratch directory; returns its final text. */
-    private String summarize(String prompt) {
-        String model = tiersOn() ? modelRouter.background().map(com.superagent.core.provider.ModelRouter.ModelChoice::model)
-                .orElse(null) : settings.agentDefaultModel();
+    /** One run of the cheapest model that can run (else the default), no tools, in a scratch directory; returns its final text. */
+    private String summarize(Agent agent, String prompt) {
+        String model = (modelRouter == null ? java.util.Optional.<com.superagent.core.provider.ModelRouter.ModelChoice>empty()
+                : modelRouter.cheapest()).map(com.superagent.core.provider.ModelRouter.ModelChoice::model)
+                .orElseGet(settings::agentDefaultModel);
         AgentType type = providers.cliFor(model).map(AgentType::fromString).filter(runners::containsKey)
                 .orElse(AgentType.CLAUDE);
         AgentRunner runner = runners.get(type);
@@ -375,7 +380,11 @@ public class AgentMemoryService {
         try {
             runner.run(new AgentRunRequest(UUID.randomUUID().toString(), null, scratch.toString(), prompt, model,
                     List.of(), false, null, null, List.of(), null,
-                    credentials == null ? null : credentials.current(type.cliName()).credential()), sink, new Cancellation());
+                    credentials == null ? null : credentials.current(type.cliName()).credential()),
+                    // Keeping an agent's memory is part of using it: on its owner.
+                    com.superagent.core.usage.UsageRecorder.tap(usage, new com.superagent.core.usage.UsageContext(agent.owner(),
+                            com.superagent.core.usage.UsageContext.SOURCE_MEMORY, agent.id(), null, null, type.cliName()), sink),
+                    new Cancellation());
         } finally {
             deleteQuietly(scratch);
         }

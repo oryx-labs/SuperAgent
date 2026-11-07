@@ -75,6 +75,7 @@ public record WorkFile(
     public static final String LINK = "link";
     public static final String ORIGIN_CHAT = "chat";
     public static final String ORIGIN_TASK = "task";
+    /** A task's final reply, saved as a file by older versions; a task's reply is its output now, not a file. */
     public static final String ORIGIN_DELIVERY = "delivery";
     /** Attached by a person to a message (not made by an agent). */
     public static final String ORIGIN_UPLOAD = "upload";

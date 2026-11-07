@@ -42,13 +42,17 @@ public final class ApiPaths {
 
     /** Platform-wide figures for administrators. */
     public static final String ANALYTICS = V1 + "/admin/analytics";
+    /** The caller's own token usage. */
+    public static final String USAGE = V1 + "/usage";
+    /** Everyone's token usage (admins). */
+    public static final String ADMIN_USAGE = V1 + "/admin/usage";
 
     /** The organisation: managers and teams (admin). */
     public static final String ORG = V1 + "/admin/org";
     /** Where Files keeps content: the store new files go to, and each store's settings (admin). */
     public static final String FILE_STORAGE = V1 + "/admin/file-storage";
-    public static final String MODEL_TIERS = V1 + "/model-tiers";
-    public static final String ADMIN_MODEL_TIERS = V1 + "/admin/model-tiers";
+    /** What each model that can run costs (admins). */
+    public static final String ADMIN_MODEL_PRICES = V1 + "/admin/model-prices";
 
     /** Model-vendor CLIs (claude, codex, ...) the runtime can call. */
     public static final String PROVIDERS = V1 + "/providers";

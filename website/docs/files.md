@@ -17,7 +17,7 @@ Files is where work results live, so they stay with the company instead of in a 
 - **Who sees what** — the person who started the work and the agent's members.
 - **Folders** — everyone has their own folders. Agents file new work into a fitting folder, and add one to three topic tags, so things are easy to find.
 - **Ask instead of clicking** — agents can find, move and organize files and folders; your SuperAgent can also read, rename, re-tag and delete them for you.
-- **Preview** in the page, or download.
+- **Preview** in the page: images, videos, PDFs, Markdown and text files. Anything else downloads.
 
 Where the content is stored is the administrator's choice: on the server, or in S3-compatible object storage. See [file storage](./admin#file-storage).
 

@@ -31,7 +31,6 @@ class WorkFileStoreTest {
         // ada sees her own (deleted one gone) and what the shared agent made for bob; not bob's private task.
         assertThat(store.listFor("ada", List.of("shared"))).extracting(WorkFile::id).containsExactly("b");
         assertThat(store.listFor("bob", List.of())).extracting(WorkFile::id).containsExactly("c", "b");
-        assertThat(store.delivery("t1")).map(WorkFile::id).contains("c");
         assertThat(store.find("b").orElseThrow().agentId()).isEqualTo("shared");
         assertThat(store.find("c").orElseThrow().agentId()).isNull();
 

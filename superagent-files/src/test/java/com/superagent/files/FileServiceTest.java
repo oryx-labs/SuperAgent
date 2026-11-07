@@ -12,7 +12,6 @@ import com.superagent.core.file.FileStoreProvider;
 import com.superagent.core.file.WorkFile;
 import com.superagent.core.file.WorkFileKind;
 import com.superagent.core.file.WorkFileStore;
-import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.security.SecretCipher;
 import com.superagent.core.settings.SystemSettingStore;
 import com.superagent.core.task.TaskAgentStore;
@@ -56,9 +55,6 @@ class FileServiceTest {
         }
         @Override public List<WorkFile> untagged(int limit) {
             return rows.values().stream().filter(f -> !f.deleted() && f.tagState().isEmpty()).limit(limit).toList();
-        }
-        @Override public Optional<WorkFile> delivery(String taskId) {
-            return rows.values().stream().filter(f -> taskId.equals(f.taskId()) && WorkFile.ORIGIN_DELIVERY.equals(f.origin())).findFirst();
         }
         @Override public void link(String fileId, String sessionId, String messageId) {
             refs.computeIfAbsent(fileId, k -> new LinkedHashSet<>()).add(messageId);
@@ -185,26 +181,6 @@ class FileServiceTest {
     }
 
     @Test
-    void aFinishedTasksResultBecomesItsDeliveryFileAndAReRunOverwritesIt() throws Exception {
-        InMemoryFiles store = new InMemoryFiles();
-        FileService svc = service(store);
-        svc.onTaskStatus(new NoticeEvents.TaskStatusChanged("t1", "bob", "写周报", "web_chat", "running", null, null));
-        assertThat(store.rows).isEmpty();
-        svc.onTaskStatus(new NoticeEvents.TaskStatusChanged("t1", "bob", "写周报", "web_chat", "done", null, null, "第一版"));
-        svc.onTaskStatus(new NoticeEvents.TaskStatusChanged("t1", "bob", "写周报", "web_chat", "done", null, null, "第二版"));
-
-        assertThat(store.rows).hasSize(1);
-        WorkFile delivery = store.rows.values().iterator().next();
-        assertThat(delivery.name()).isEqualTo("写周报.md");
-        assertThat(delivery.agentId()).isEqualTo("dev"); // so the agent's panel shows it
-        assertThat(new String(svc.content(delivery.id(), "ada").resource().getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("第二版");
-
-        svc.delete(delivery.id(), "bob");
-        svc.onTaskStatus(new NoticeEvents.TaskStatusChanged("t1", "bob", "写周报", "web_chat", "done", null, null, "第三版"));
-        assertThat(store.rows.values()).allMatch(WorkFile::deleted); // a deleted delivery stays gone
-    }
-
-    @Test
     void uploadsLandUnderTheAgentDedupeAndAreDeliveredIntoTheWorkspace() throws Exception {
         InMemoryFiles store = new InMemoryFiles();
         FileService svc = service(store);
@@ -229,6 +205,29 @@ class FileServiceTest {
         assertThat(d.note()).contains("uploads/需求.docx", "uploads/图.png");
         assertThat(svc.get(first.id(), "bob").messageIds()).containsExactly("m1");
         assertThatThrownBy(() -> svc.attach(List.of(first.id()), "carl", "s1", "m2")).isInstanceOf(WorkFileNotFoundException.class);
+    }
+
+    @Test
+    void peopleWriteMarkdownAndUploadAnyFileInTheFilesPageAndEditTheirText() throws Exception {
+        InMemoryFiles store = new InMemoryFiles();
+        FileService svc = service(store);
+
+        WorkFileDto note = svc.createMarkdown("bob", "周会纪要", "# 周会\n- 上线");
+        assertThat(note.name()).isEqualTo("周会纪要.md");
+        assertThat(note.agentId()).isNull();
+        assertThat(new String(svc.content(note.id(), "bob").resource().getInputStream().readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("# 周会\n- 上线");
+        assertThat(svc.editText(note.id(), "bob", "# 周会\n- 已上线").size()).isEqualTo("# 周会\n- 已上线".getBytes(
+                java.nio.charset.StandardCharsets.UTF_8).length);
+        assertThatThrownBy(() -> svc.editText(note.id(), "carl", "x")).isInstanceOf(WorkFileNotFoundException.class);
+
+        // Any file, for no agent or task: the same content twice is kept once; only text is edited in the page.
+        byte[] xlsx = {1, 2, 3, 4};
+        WorkFileDto sheet = svc.upload("bob", null, null, "预算.xlsx", new java.io.ByteArrayInputStream(xlsx));
+        assertThat(svc.upload("bob", null, null, "预算2.xlsx", new java.io.ByteArrayInputStream(xlsx)).id()).isEqualTo(sheet.id());
+        assertThat(svc.list("bob", null)).extracting(WorkFileDto::id).contains(note.id(), sheet.id());
+        assertThat(svc.list("carl", null)).isEmpty();
+        assertThatThrownBy(() -> svc.editText(sheet.id(), "bob", "x")).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

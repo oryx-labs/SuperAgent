@@ -19,4 +19,11 @@ public final class WorkFileRequests {
 
     public record SaveFolder(String name, String parentId) {
     }
+
+    /** A Markdown file a person writes in the page; {@code folderId} (optional) is where it goes. */
+    public record CreateMarkdown(String name, String content, String folderId) {
+    }
+
+    public record EditContent(String content) {
+    }
 }

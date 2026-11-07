@@ -108,6 +108,90 @@ public class KimiCliAgentRunner extends JsonLineCliRunner {
         return new Parser();
     }
 
+    // --- tokens ---
+    // Kimi Code's stream-json carries no usage at all (read in its source: the JSON writer prints only messages, tool
+    // results and meta lines). It logs every message, usage included, to wire.jsonl files under its home, so the run's
+    // tokens are read from what it appended there: its assistant messages' usage, in this session's files only
+    // (subagents included, other runs sharing the home excluded).
+
+    @Override
+    protected Object beforeRun(AgentRunRequest request) {
+        return wireSizes(home);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    protected List<com.superagent.core.usage.TokenUsage> loggedTokens(AgentRunRequest request, Object before) {
+        String session = sessionOf(request);
+        if (session == null || !(before instanceof Map<?, ?> sizes)) {
+            return List.of();
+        }
+        return List.of(appendedUsage(home, session, (Map<Path, Long>) sizes, modelOf(request)));
+    }
+
+    static Map<Path, Long> wireSizes(Path home) {
+        Map<Path, Long> sizes = new java.util.HashMap<>();
+        if (!Files.isDirectory(home)) {
+            return sizes;
+        }
+        try (var walk = Files.walk(home)) {
+            walk.filter(p -> p.getFileName().toString().equals("wire.jsonl")).forEach(p -> {
+                try {
+                    sizes.put(p, Files.size(p));
+                } catch (IOException ignored) {
+                    // gone meanwhile
+                }
+            });
+        } catch (IOException ignored) {
+            // nothing readable: nothing to count
+        }
+        return sizes;
+    }
+
+    static com.superagent.core.usage.TokenUsage appendedUsage(Path home, String session, Map<Path, Long> before, String model) {
+        long[] t = new long[4]; // input (not cached), cache read, cache write, output
+        wireSizes(home).forEach((file, size) -> {
+            if (!file.toString().contains(session)) {
+                return;
+            }
+            long from = before.getOrDefault(file, 0L);
+            if (size <= from) {
+                return;
+            }
+            try (var in = Files.newInputStream(file)) {
+                in.skipNBytes(from);
+                for (String line : new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).split("\n")) {
+                    addMessageUsage(line, t);
+                }
+            } catch (IOException ignored) {
+                // unreadable: counted as nothing rather than failing the run
+            }
+        });
+        return new com.superagent.core.usage.TokenUsage(model, t[0], t[1], t[2], 0, t[3], 0, null);
+    }
+
+    /** {@code {"type":"context.append_message","message":{"role":"assistant","usage":{inputOther,inputCacheRead,…}}}}. */
+    static void addMessageUsage(String line, long[] t) {
+        if (!line.contains("context.append_message") || !line.contains("usage")) {
+            return;
+        }
+        try {
+            JsonNode e = JSON.readTree(line);
+            JsonNode m = e.path("message");
+            JsonNode u = m.path("usage");
+            if (!"context.append_message".equals(e.path("type").asText()) || !"assistant".equals(m.path("role").asText())
+                    || !u.isObject()) {
+                return;
+            }
+            t[0] += Tokens.n(u, "inputOther");
+            t[1] += Tokens.n(u, "inputCacheRead");
+            t[2] += Tokens.n(u, "inputCacheCreation");
+            t[3] += Tokens.n(u, "output");
+        } catch (IOException ignored) {
+            // a partial line: skip it
+        }
+    }
+
     /** Whole messages by role, no deltas; the last assistant text is the result. */
     static final class Parser implements LineParser {
         private String last;

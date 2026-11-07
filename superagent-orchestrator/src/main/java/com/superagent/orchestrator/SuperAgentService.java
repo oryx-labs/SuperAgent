@@ -147,19 +147,15 @@ public class SuperAgentService {
     private final SkillService skills;
     private final com.superagent.agent.AgentInviteService inviteService;
     private final Map<AgentType, AgentRunner> runners = new EnumMap<>(AgentType.class);
+    private com.superagent.core.usage.UsageRecorder usage; // null in tests: tokens aren't kept
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setUsageRecorder(com.superagent.core.usage.UsageRecorder usage) {
+        this.usage = usage;
+    }
 
     private CredentialService credentials; // null in tests: runs use the server's environment
 
-    private com.superagent.core.provider.ModelRouter modelRouter; // null in tests; off unless the admin turns tiers on
-
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    void setModelRouter(com.superagent.core.provider.ModelRouter modelRouter) {
-        this.modelRouter = modelRouter;
-    }
-
-    private boolean tiersOn() {
-        return modelRouter != null && modelRouter.enabled();
-    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setCredentials(CredentialService credentials) {
@@ -338,8 +334,8 @@ public class SuperAgentService {
      */
     private void runRound(String owner, Agent sa, List<ChatMessage> batch, Instant cutoff) {
         long startedAt = System.currentTimeMillis();
-        String model = tiersOn() ? modelRouter.choose(sa.tier(), null).map(com.superagent.core.provider.ModelRouter.ModelChoice::model).orElse(null)
-                : sa.model() != null ? sa.model() : settings.agentDefaultModel();
+        // Like the chat, on the admin's default model: it thinks and hands out work.
+        String model = settings.agentDefaultModel();
         ChatSession session = backgroundSession(sa);
         String replyId = UUID.randomUUID().toString();
         RoundAttempt attempt = attemptRound(owner, sa, session, model, batch, memory.read(sa), replyId);
@@ -400,7 +396,10 @@ public class SuperAgentService {
             runner.run(new AgentRunRequest(session.id(), agentSessionId, session.workspaceDir(), roundPrompt(owner, batch),
                     model, external ? EXTERNAL_ROUND_TOOLS : BACKGROUND_TOOLS, false, grant == null ? null : grants.mcpConfig(grant),
                     SuperAgentPrompts.background(teamLimit), List.of(), context,
-                    credentials == null ? null : credentials.current(type.cliName()).credential()), sink, new Cancellation());
+                    credentials == null ? null : credentials.current(type.cliName()).credential()),
+                    com.superagent.core.usage.UsageRecorder.tap(usage, new com.superagent.core.usage.UsageContext(owner,
+                            com.superagent.core.usage.UsageContext.SOURCE_BACKGROUND, sa.id(), null, session.id(), type.cliName()),
+                            sink), new Cancellation());
         } catch (RuntimeException e) {
             log.warn("superagent round attempt failed for {}: {}", owner, e.getMessage());
             error.set(e.getMessage() != null ? e.getMessage() : "round failed");
@@ -622,14 +621,23 @@ public class SuperAgentService {
         if (title == null || title.isBlank() || brief == null || brief.isBlank()) {
             throw new IllegalArgumentException("A task needs a title and a brief");
         }
-        String model = m != null && m.model() != null ? m.model() : settings.agentDefaultModel();
-        String character = m == null ? null : AgentCharacters.systemPrompt(m);
-        String fullBrief = (m == null ? "" : "你是团队成员「" + m.name() + "」，由 SuperAgent 分派本任务。"
-                + (character == null ? "" : "\n\n## 你的角色\n" + character) + "\n\n")
+        String model = settings.agentDefaultModel(); // a stand-in: the task's model is chosen for it before it runs
+        // The member's character and memory ride along with the task itself (TaskDoers), not in the brief.
+        String fullBrief = (m == null ? "" : "你是团队成员「" + m.name() + "」，由 SuperAgent 分派本任务。\n\n")
                 + "## 任务\n" + brief.strip()
                 + "\n\n完成后给出简明的交付总结，说明产出放在哪里。";
+        // A member hears about it in its own chat: a short note that it took the task on (the task's card goes under
+        // it), and later the result, as for the tasks it sets off itself.
+        String memberSession = m == null ? null : chatService.currentSessionId(m.id());
+        String noteId = memberSession == null ? null : UUID.randomUUID().toString();
         String taskId = taskService.create(new CreateTaskRequest(title.strip(), fullBrief, "web_chat", null, null, null,
-                model, providers.cliFor(model).orElse(null), kind, m == null ? null : m.tier()), owner, m == null ? null : m.id()).id();
+                model, providers.cliFor(model).orElse(null), kind, null), owner, m == null ? null : m.id(),
+                memberSession, noteId).id();
+        if (noteId != null) {
+            chats.appendMessage(new ChatMessage(noteId, memberSession, MessageRole.ASSISTANT,
+                    "收到 SuperAgent 分派的任务「" + title.strip() + "」，开始执行。完成后结果会发在这里。",
+                    Instant.now(), com.superagent.agent.chat.ChatTaskResults.AUTHOR_PREFIX + taskId));
+        }
         // A task with no member is still tracked under the SuperAgent, so its result comes back the same way.
         String doerId = m != null ? m.id() : ensureState(owner).agentId();
         String doer = m != null ? m.name() : "独立任务";

@@ -19,8 +19,16 @@ import java.util.Optional;
  */
 final class ModelCatalog {
 
-    /** USD per million tokens; {@code released} is an ISO date or null. */
-    record Fact(double input, double output, String released, String source) {
+    /**
+     * USD per million tokens; {@code released} is an ISO date or null. Cache prices are null when the directory
+     * doesn't list them.
+     */
+    record Fact(double input, double output, String released, String source, Double cacheRead, Double cacheWrite) {
+
+        Fact(double input, double output, String released, String source) {
+            this(input, output, released, source, null, null);
+        }
+
         /** One number to compare models by: typical work reads about three tokens for each it writes. */
         double blended() {
             return (3 * input + output) / 4;
@@ -45,7 +53,9 @@ final class ModelCatalog {
                 String released = model.getValue().path("release_date").asText("");
                 offers.computeIfAbsent(key(model.getKey()), k -> new ArrayList<>()).add(new Fact(
                         cost.path("input").asDouble(), cost.path("output").asDouble(),
-                        released.isBlank() ? null : released, provider.getKey()));
+                        released.isBlank() ? null : released, provider.getKey(),
+                        cost.path("cache_read").isNumber() ? cost.path("cache_read").asDouble() : null,
+                        cost.path("cache_write").isNumber() ? cost.path("cache_write").asDouble() : null));
             }
         }));
         Map<String, Fact> facts = new HashMap<>();

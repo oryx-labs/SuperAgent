@@ -120,7 +120,7 @@ public class FileService {
         this.maxBytes = Math.max(1, maxMb) * 1024 * 1024;
     }
 
-    // --- producing files (agent tools, task delivery) ---
+    // --- producing files (agent tools) ---
 
     public WorkFile writeText(Origin origin, String name, String content, String replaceId) {
         return writeText(origin, name, content, replaceId, null);
@@ -221,31 +221,15 @@ public class FileService {
         return new Origin(owner, taskAgents.agentOf(taskId).orElse(null), taskId, null, null, WorkFile.ORIGIN_TASK);
     }
 
-    /** A finished task's final result becomes a file automatically, named after the task; a re-run overwrites it. */
-    @EventListener
-    public void onTaskStatus(NoticeEvents.TaskStatusChanged e) {
-        if (!"done".equals(e.status()) || e.result() == null || e.result().isBlank()) {
-            return;
-        }
-        Optional<WorkFile> existing = store.delivery(e.taskId());
-        if (existing.isPresent() && existing.get().deleted()) {
-            return; // the user deleted it; a re-run shouldn't bring it back
-        }
-        Origin origin = new Origin(e.owner(), taskAgents.agentOf(e.taskId()).orElse(null), e.taskId(), null, null,
-                WorkFile.ORIGIN_DELIVERY);
-        try {
-            writeText(origin, cleanName(e.title()) + ".md", e.result(), existing.map(WorkFile::id).orElse(null));
-        } catch (RuntimeException ex) {
-            log.warn("could not keep the delivery of task {} as a file: {}", e.taskId(), ex.getMessage());
-        }
-    }
-
     private interface Writer {
         void write(Path target) throws IOException;
     }
 
     private WorkFile store(Origin origin, String name, String replaceId, Writer writer) {
-        WorkFile existing = replaceId == null || replaceId.isBlank() ? null : replaceable(replaceId.strip(), origin);
+        return store(origin, name, replaceId == null || replaceId.isBlank() ? null : replaceable(replaceId.strip(), origin), writer);
+    }
+
+    private WorkFile store(Origin origin, String name, WorkFile existing, Writer writer) {
         String id = existing != null ? existing.id() : UUID.randomUUID().toString();
         String type = storage.activeChannel();
         Path staging = root.resolve(".staging");
@@ -304,6 +288,43 @@ public class FileService {
                 .toList();
     }
 
+    // --- what people write themselves ---
+
+    /** The largest Markdown file a person edits in the page. */
+    public static final int EDIT_MAX_CHARS = 200_000;
+
+    /** A Markdown file the user writes in the Files page: theirs alone, like anything they upload there. */
+    public WorkFileDto createMarkdown(String user, String name, String content) {
+        String clean = cleanName(name == null || name.isBlank() ? "未命名" : name);
+        if (!clean.toLowerCase(java.util.Locale.ROOT).endsWith(".md")) {
+            clean = clean + ".md";
+        }
+        WorkFile saved = writeText(new Origin(user, null, null, null, null, WorkFile.ORIGIN_UPLOAD), clean,
+                limitedText(content), null);
+        return get(saved.id(), user);
+    }
+
+    /** Rewrites a Markdown or plain-text file's content; whoever may rename or delete it may edit it. */
+    public WorkFileDto editText(String id, String user, String content) {
+        WorkFile f = manageable(id, user);
+        if (WorkFile.LINK.equals(f.storage()) || !(f.name().toLowerCase(java.util.Locale.ROOT).endsWith(".md")
+                || f.name().toLowerCase(java.util.Locale.ROOT).endsWith(".txt"))) {
+            throw new IllegalArgumentException("只能在页面里编辑 Markdown 或纯文本文件");
+        }
+        byte[] bytes = limitedText(content).getBytes(StandardCharsets.UTF_8);
+        store(new Origin(f.owner(), f.agentId(), f.taskId(), null, null, f.origin()), f.name(), f,
+                target -> Files.write(target, bytes));
+        return get(id, user);
+    }
+
+    private static String limitedText(String content) {
+        String text = content == null ? "" : content;
+        if (text.length() > EDIT_MAX_CHARS) {
+            throw new IllegalArgumentException("内容太长了（最多 " + EDIT_MAX_CHARS + " 个字符）");
+        }
+        return text;
+    }
+
     // --- what people attach to messages ---
 
     /**
@@ -325,7 +346,7 @@ public class FileService {
                 return get(same.id(), user);
             }
             Path source = tmp;
-            WorkFile saved = store(origin, fileName, null, target -> Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING));
+            WorkFile saved = store(origin, fileName, (String) null, target -> Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING));
             return get(saved.id(), user);
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot store file " + fileName, e);
@@ -404,13 +425,18 @@ public class FileService {
                     .orElseThrow(() -> new WorkFileNotFoundException(taskId));
             return new Origin(user, taskAgents.agentOf(task.id()).orElse(null), task.id(), null, null, WorkFile.ORIGIN_UPLOAD);
         }
-        throw new IllegalArgumentException("Say which agent or task the file is for");
+        // Uploaded in the Files page: the user's own, for no agent or task in particular.
+        return new Origin(user, null, null, null, null, WorkFile.ORIGIN_UPLOAD);
     }
 
-    /** What was sent to the same agent before (or, without one, to the same task). */
+    /** What was sent to the same agent before (or, without one, to the same task; without either, the user's own). */
     private List<WorkFile> sentTo(Origin origin) {
-        return origin.agentId() != null ? store.listFor(null, List.of(origin.agentId()))
-                : store.listFor(origin.owner(), List.of()).stream().filter(f -> origin.taskId().equals(f.taskId())).toList();
+        if (origin.agentId() != null) {
+            return store.listFor(null, List.of(origin.agentId()));
+        }
+        return store.listFor(origin.owner(), List.of()).stream()
+                .filter(f -> origin.taskId() != null ? origin.taskId().equals(f.taskId()) : f.taskId() == null && f.agentId() == null)
+                .toList();
     }
 
     /** An earlier upload with the same content, to the same agent (or, without one, the same task). */
@@ -596,7 +622,10 @@ public class FileService {
         }
     }
 
-    /** What a task produced (its delivery and the files its agent saved), as far as {@code user} can see. */
+    /**
+     * What a task produced (the files its agent saved), as far as {@code user} can see. Its final reply is its output,
+     * shown with the task, not a file.
+     */
     public List<WorkFileDto> listForTask(String user, String taskId) {
         return list(user, null).stream().filter(f -> taskId.equals(f.taskId())).toList();
     }

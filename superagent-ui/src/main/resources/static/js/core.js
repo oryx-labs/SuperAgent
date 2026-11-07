@@ -97,9 +97,18 @@ const isUserRole = role => role === "user";
 // inline edit can recover the source. User text stays plain; agent text is markdown.
 function setBubbleContent(bubble, role, content) {
   bubble.dataset.md = content == null ? "" : String(content);
-  if (isUserRole(role)) bubble.textContent = content;
-  else bubble.innerHTML = renderMarkdown(content);
+  if (isUserRole(role)) { bubble.textContent = content; return; }
+  // A failed turn keeps its error after the reply (ChatService.ERROR_MARK): show it as an error, not as Markdown.
+  const raw = content == null ? "" : String(content);
+  const at = raw.indexOf(REPLY_ERROR_MARK);
+  if (at < 0) { bubble.innerHTML = renderMarkdown(raw); return; }
+  bubble.innerHTML = at > 0 ? renderMarkdown(raw.slice(0, at)) : "";
+  const err = document.createElement("div");
+  err.className = "bubble__error";
+  err.textContent = L("chat.errored", { msg: raw.slice(at + REPLY_ERROR_MARK.length).trim() || L("chat.errGeneric") });
+  bubble.appendChild(err);
 }
+const REPLY_ERROR_MARK = "⚠️ 出错了：";
 
 // ---------- shared request helpers and the small dialog ----------
 // Server errors come back as {code, message}; surface the message.

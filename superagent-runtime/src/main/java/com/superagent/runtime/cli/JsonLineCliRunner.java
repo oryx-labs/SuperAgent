@@ -46,6 +46,11 @@ abstract class JsonLineCliRunner implements AgentRunner {
         default List<Line> finish() {
             return List.of();
         }
+
+        /** The tokens the output reported, for a run on {@code model}; empty when the CLI prints none. */
+        default List<com.superagent.core.usage.TokenUsage> tokens(String model) {
+            return List.of();
+        }
     }
 
     private final String command;
@@ -73,6 +78,19 @@ abstract class JsonLineCliRunner implements AgentRunner {
     protected abstract Map<String, String> environment(AgentRunRequest request) throws IOException;
 
     protected abstract LineParser newParser();
+
+    /**
+     * For a CLI that doesn't print its token usage but logs it: a note of where its logs stand before the run, so
+     * {@link #loggedTokens} reads only what the run added. Null when there's nothing to note.
+     */
+    protected Object beforeRun(AgentRunRequest request) {
+        return null;
+    }
+
+    /** The tokens the run logged since {@code before}; empty by default (the output carries them). */
+    protected List<com.superagent.core.usage.TokenUsage> loggedTokens(AgentRunRequest request, Object before) {
+        return List.of();
+    }
 
     /** Why the run can't start (e.g. no key configured), or null. */
     protected String precondition(AgentRunRequest request) {
@@ -105,6 +123,7 @@ abstract class JsonLineCliRunner implements AgentRunner {
             return;
         }
         String resumeId = request.isFirstTurn() ? null : readSession(request);
+        Object logsBefore = beforeRun(request);
         List<Path> cleanup = new ArrayList<>();
         Process process;
         try {
@@ -178,11 +197,24 @@ abstract class JsonLineCliRunner implements AgentRunner {
             emit(sink, request, seq, AgentEventType.ERROR, command + " run interrupted");
         } finally {
             delete(cleanup);
+            List<com.superagent.core.usage.TokenUsage> used = new ArrayList<>(parser.tokens(modelOf(request)));
+            used.addAll(loggedTokens(request, logsBefore));
+            Tokens.emit(sink, request.sessionId(), seq + 1, used);
         }
+    }
+
+    /** The model a run is billed under: the one requested, or the CLI's own default. */
+    protected static String modelOf(AgentRunRequest request) {
+        return request.model() == null || request.model().isBlank() ? "default" : request.model();
     }
 
     private Path sessionFile(AgentRunRequest request) {
         return Path.of(request.workspaceDir(), ".superagent", type().cliName() + "-session-" + request.sessionId());
+    }
+
+    /** The CLI's own session id for this conversation, once it has said it; null before. */
+    protected String sessionOf(AgentRunRequest request) {
+        return readSession(request);
     }
 
     private String readSession(AgentRunRequest request) {

@@ -26,6 +26,8 @@ async function renderAgentWork(agent) {
     [items, made] = await Promise.all([api.agentTasks(agent.id), api.listFiles(agent.id)]);
   } catch (e) { return; } // keep the last lists
   if (activeAgent !== agent) return; // switched agents while loading
+  noticeSettledTasks(agent, items || []);
+  attachAgentTaskCards(items || []);
   items = (items || []).slice().sort((a, b) => ACTIVE_TASK.has(b.status) - ACTIVE_TASK.has(a.status));
   awel.list.replaceChildren(...items.map(agentWorkRow));
   awel.empty.hidden = items.length > 0;
@@ -106,9 +108,61 @@ document.addEventListener("keydown", e => {
     && document.getElementById("memDrawer").hidden) closeAgentDetail();
 });
 
-// Tasks move on their own: keep the list current while the agent's chat is open.
+// The agent's chat talks, its tasks do the work: each reply that set off tasks gets a card of them (status, name,
+// a link to the task), and a task that finishes, fails or needs a decision reports back into the conversation.
+let agentTaskStatus = { agentId: null, byId: new Map(), items: [] };
+
+/** Without {@code items}, the last list fetched for the open agent (the conversation was just re-rendered). */
+function attachAgentTaskCards(items) {
+  if (!items) items = activeAgent && agentTaskStatus.agentId === activeAgent.id ? agentTaskStatus.items : [];
+  const byReply = new Map();
+  items.filter(t => t.originMessageId).forEach(t => {
+    if (!byReply.has(t.originMessageId)) byReply.set(t.originMessageId, []);
+    byReply.get(t.originMessageId).unshift({ taskId: t.id, title: t.title, status: t.status, self: true }); // oldest first
+  });
+  byReply.forEach((list, messageId) => {
+    const msg = el.messages.querySelector('.msg[data-mid="' + CSS.escape(messageId) + '"]');
+    if (!msg) return;
+    const card = dispatchCard(list);
+    const old = msg.querySelector(".sa-dispatch");
+    if (old) old.replaceWith(card); else (msg.querySelector(".bubble") || msg).appendChild(card);
+  });
+}
+
+/** A task that just stopped running has posted its outcome: show it (never over a reply that's streaming in). */
+function noticeSettledTasks(agent, items) {
+  const before = agentTaskStatus.agentId === agent.id ? agentTaskStatus.byId : null;
+  agentTaskStatus = { agentId: agent.id, byId: new Map(items.map(t => [t.id, t.status])), items };
+  if (!before || streaming || liveWatch) return;
+  // Moved since the last look — or new and already settled (it ran between two looks) — or handed to this agent
+  // from elsewhere (the SuperAgent), with a note in this chat the page hasn't shown yet.
+  const settled = items.some(t => before.get(t.id) !== t.status
+    && (t.status === "done" || t.status === "error" || t.status === "needs_confirmation"));
+  const arrived = items.some(t => !before.has(t.id) && t.originMessageId
+    && !el.messages.querySelector('.msg[data-mid="' + CSS.escape(t.originMessageId) + '"]'));
+  if (settled || arrived) selectSession(activeSessionId);
+}
+
+/** A note from a task in the chat (taken on, finished, failed, waiting): labelled as such, with a way to open it. */
+function markTaskReport(msgEl, taskId) {
+  msgEl.classList.add("msg--background", "msg--task-report");
+  const tag = document.createElement("button");
+  tag.type = "button";
+  tag.className = "msg__bg-tag msg__task-tag";
+  tag.textContent = L("chat.taskReportTag");
+  tag.title = L("super.dispatchOpenTask");
+  tag.addEventListener("click", () => { setView("tasks"); openTask(taskId); });
+  msgEl.prepend(tag);
+}
+
+// Tasks move on their own: keep the list current while the agent's chat is open — every 5 s while one is under
+// way (its outcome then shows promptly), otherwise every 15 s.
+let agentWorkTick = 0;
 setInterval(() => {
-  if (activeAgent && activeAgent.kind !== "super" && !document.querySelector('[data-pane="chat"]').hidden) {
+  agentWorkTick++;
+  const busy = [...agentTaskStatus.byId.values()].some(s => ACTIVE_TASK.has(s));
+  if ((busy || agentWorkTick % 3 === 0) && activeAgent && activeAgent.kind !== "super"
+      && !document.hidden && !document.querySelector('[data-pane="chat"]').hidden) {
     renderAgentWork(activeAgent);
   }
-}, 15000);
+}, 5000);

@@ -414,6 +414,7 @@ img { max-width: 100%; }
 .fl-head .drawer__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fl-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fl-preview { gap: 12px; }
+.fl-pdf { display: block; width: 100%; height: calc(100vh - 190px); min-height: 420px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .fl-media { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; border-radius: 8px; background: var(--panel); }
 .fl-text {
   margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12.5px; line-height: 1.6;
@@ -755,11 +756,27 @@ img { max-width: 100%; }
 .layout--admin > .admin { grid-column: 2; }
 .admin-side { grid-column: 1; grid-row: 1; background: var(--panel); padding: 18px 12px; }
 .admin-side .nav__item:hover { background: var(--line); }
+.admin-side { position: relative; }
+.admin-side__toggle { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin: 0 0 8px auto;
+  font: inherit; font-size: 15px; line-height: 1; color: var(--muted); background: none; border: 0; border-radius: 7px; cursor: pointer; }
+.admin-side__toggle:hover { color: var(--ink); background: var(--line); }
+/* Folded: a narrow strip with just the button to bring it back. */
+.layout--admin.layout--admin-collapsed { grid-template-columns: 44px 1fr; }
+.layout--admin-collapsed .admin-side { padding: 18px 8px; }
+.layout--admin-collapsed .admin-side .nav { display: none; }
+.layout--admin-collapsed .admin-side__toggle { margin: 0 auto; }
 .nav__group-label {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px; width: 100%;
   padding: 8px 10px; margin-top: 2px;
-  font-size: 13.5px; color: var(--ink);
+  font: inherit; font-size: 13.5px; color: var(--ink); text-align: left;
+  background: none; border: 0; border-radius: 8px; cursor: pointer;
 }
+.nav__group-label:hover { background: var(--line); }
+.nav__caret { margin-left: auto; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg); transition: transform .15s; }
+.nav__group.is-folded .nav__caret { transform: rotate(-45deg); }
+.nav__group-items { display: flex; flex-direction: column; gap: 2px; }
+.nav__group.is-folded .nav__group-items { display: none; }
 .nav__item--sub { padding-left: 26px; }
 
 /* Overview cards: the task list's (clickable filters) and the analytics page's. */
@@ -1083,6 +1100,7 @@ button.stat-card:hover { border-color: var(--line-strong); }
 /* text/result bodies hold rendered markdown HTML — don't preserve inter-tag whitespace */
 .ev--text .ev__body, .ev--result .ev__body { white-space: normal; }
 .ev--error .ev__body { color: #b91c1c; border-left: 3px solid #dc2626; padding-left: 12px; }
+.ev--system .ev__body { color: var(--muted); font-size: 13px; border-left: 3px dashed var(--line-strong); padding-left: 12px; }
 .ev--cmd .ev__body {
   background: var(--bubble-user); color: var(--bubble-user-ink); border-radius: 10px; padding: 8px 12px;
   display: inline-block; max-width: 90%;
@@ -1379,6 +1397,9 @@ button.stat-card:hover { border-color: var(--line-strong); }
 .msg--background .bubble { background: var(--panel); border: 1px dashed var(--line-strong); box-shadow: none; }
 .msg__bg-tag { margin: 0 0 4px 2px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--muted); }
 .msg__bg-tag::before { content: "↻ "; }
+.msg__task-tag { padding: 0; border: 0; background: none; font-family: inherit; text-align: left; cursor: pointer; }
+.msg__task-tag::before { content: "▸ "; }
+.msg__task-tag:hover { color: var(--accent); }
 /* Under a SuperAgent reply: the tasks it handed out, each with who's on it. */
 .sa-dispatch { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding: 10px 12px;
   border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
@@ -2023,3 +2044,89 @@ small.model-note { display: block; margin-top: 4px; }
 .task-file__icon { flex: none; }
 .task-file__name { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .task-file__size { flex: none; font-size: 12px; color: var(--muted-2); }
+
+/* A reply whose turn failed: the error, kept after whatever was said. */
+.bubble__error { color: #b91c1c; white-space: pre-wrap; word-break: break-word; }
+.bubble__error:not(:first-child) { margin-top: 8px; }
+
+/* Task detail: how its model was chosen */
+.model-choices { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
+.model-choices__empty { color: var(--muted); font-size: 13px; }
+.model-choice { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.model-choice.is-escalation, .model-choice.is-fallback { border-style: dashed; }
+.model-choice__head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.model-choice__by { font-weight: 600; font-size: 13px; }
+.model-choice__when { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.model-choice__facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+.model-choice__facts dt { color: var(--muted); }
+.model-choice__facts dd { margin: 0; overflow-wrap: anywhere; }
+.model-choice__why { margin: 10px 0 0; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.model-choice__candidates { margin-top: 8px; font-size: 12px; }
+.model-choice__candidates summary { cursor: pointer; color: var(--muted); }
+.model-choice__candidates pre { margin: 6px 0 0; padding: 8px 10px; overflow-x: auto; background: var(--rail); border-radius: 6px;
+  font-size: 12px; line-height: 1.5; }
+
+/* Task detail: what the task came up with */
+.task-output { padding: 4px 2px; line-height: 1.7; }
+.task-output__empty { color: var(--muted); font-size: 13px; }
+
+/* Files: writing Markdown, and dropping files onto the page */
+.fl-editor { width: min(1100px, 100%); }
+.fl-editor__panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 0; }
+.fl-editor__panes textarea { width: 100%; min-height: 50vh; resize: vertical; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 8px; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--paper); color: var(--ink); }
+.fl-editor__preview { min-height: 50vh; max-height: 60vh; overflow: auto; padding: 10px 14px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel); }
+.fl-editor__preview[hidden] + * { grid-column: 1 / -1; }
+@media (max-width: 760px) { .fl-editor__panes { grid-template-columns: 1fr; } .fl-editor__preview { min-height: 30vh; } }
+.fl-page.fl-dropping { outline: 2px dashed var(--accent); outline-offset: -6px; }
+
+/* Usage: tokens per day as stacked bars, and the totals tables */
+.us-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.us-scope { margin: 0; }
+.us-chart { display: flex; align-items: flex-end; gap: 4px; height: 120px; padding: 8px 4px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.us-day { flex: 1 0 14px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; }
+.us-bar { width: 100%; max-width: 26px; display: flex; flex-direction: column; border-radius: 3px 3px 0 0; overflow: hidden; }
+.us-bar i { display: block; min-height: 1px; }
+.us-day__label { font-size: 10px; color: var(--muted-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.us-bar .is-input, .us-legend .is-input { background: #2563eb; }
+.us-bar .is-cache-read, .us-legend .is-cache-read { background: #93c5fd; }
+.us-bar .is-cache-write, .us-legend .is-cache-write { background: #a1a1aa; }
+.us-bar .is-output, .us-legend .is-output { background: #0a0a0a; }
+.us-legend i { width: 10px; height: 10px; border-radius: 2px; }
+.us-scroll { overflow-x: auto; }
+.us-ctable td.num, .us-ctable th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.task-usage { display: flex; flex-direction: column; gap: 4px; }
+.task-usage__sum { margin: 4px 0 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+
+/* The page: summary, chart, details, each its own section with room around it. */
+.us-body { display: flex; flex-direction: column; gap: 28px; padding: 24px 28px 36px; }
+.us-summary { display: flex; flex-wrap: wrap; align-items: stretch; gap: 16px 24px; }
+.us-hero { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 180px; }
+.us-hero__what { color: var(--muted); font-size: 13px; }
+.us-hero__cost { display: flex; align-items: center; gap: 8px; font-size: 32px; font-weight: 700; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums; line-height: 1.1; }
+.us-hero__tokens { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.us-info { font-size: 14px; font-weight: 400; color: var(--muted-2); cursor: help; }
+.us-info:hover { color: var(--ink); }
+.us-cards { flex: 1 1 520px; margin: 0; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.us-section { display: flex; flex-direction: column; gap: 12px; }
+.us-section[hidden] { display: none; }
+.us-section__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.us-section__title { margin: 0; font-size: 14px; font-weight: 600; }
+.us-card { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--paper); }
+.us-card .us-ctable { margin: 0; }
+.us-card .us-ctable th, .us-card .us-ctable td { padding: 10px 14px; }
+.us-legend { margin: 0; }
+.us-link { padding: 0; border: 0; background: none; font: inherit; color: var(--ink); cursor: pointer; text-align: left;
+  text-decoration: underline; text-decoration-color: var(--line-strong); }
+.us-link:hover { color: var(--accent); }
+#usDetail .us-ctable td:nth-child(2) { color: var(--muted); font-size: 12px; max-width: 240px; }
+.mt-table th.num, .mt-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mp-price-input { width: 84px; padding: 3px 6px; font: inherit; font-size: 12.5px; text-align: right; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--line); border-radius: 8px; }
+.mp-editing td { background: var(--panel); }
+.mp-editing .btn + .link-btn { margin-left: 8px; }
+
+.mp-body { padding: 20px 28px 32px; }
+.mt-panel--page { margin-top: 0; }

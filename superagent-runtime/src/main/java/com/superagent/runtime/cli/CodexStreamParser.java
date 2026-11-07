@@ -77,10 +77,12 @@ public class CodexStreamParser {
             }
             case "turn.completed" -> {
                 finished = true;
+                addUsage(e.path("usage"));
                 out.add(new ParsedEvent(AgentEventType.RESULT, lastMessage == null ? "" : lastMessage));
             }
             case "turn.failed" -> {
                 finished = true;
+                addUsage(e.path("usage"));
                 out.add(new ParsedEvent(AgentEventType.ERROR, e.path("error").path("message").asText("Codex turn failed")));
             }
             case "error" -> out.add(new ParsedEvent(AgentEventType.ERROR, e.path("message").asText("Codex error")));
@@ -97,6 +99,31 @@ public class CodexStreamParser {
     /** True once the turn reported completion or failure. */
     public boolean finished() {
         return finished;
+    }
+
+    // --- tokens ---
+
+    /** input (cached included), cached, cache write, output (reasoning included), reasoning, over the run's turns. */
+    private final long[] tokens = new long[5];
+
+    private void addUsage(JsonNode u) {
+        if (!u.isObject()) {
+            return;
+        }
+        tokens[0] += Tokens.n(u, "input_tokens");
+        tokens[1] += Tokens.n(u, "cached_input_tokens");
+        tokens[2] += Tokens.n(u, "cache_write_input_tokens");
+        tokens[3] += Tokens.n(u, "output_tokens");
+        tokens[4] += Tokens.n(u, "reasoning_output_tokens");
+    }
+
+    /**
+     * What the run used. Codex reports input as a total that includes the cached part (checked against a real run:
+     * 20588 in, 20224 of them cached) and reasoning inside output, so input is split and reasoning kept as a part.
+     */
+    public java.util.List<com.superagent.core.usage.TokenUsage> tokens(String model) {
+        return java.util.List.of(Tokens.fromTotalInput(model == null || model.isBlank() ? "default" : model,
+                tokens[0], tokens[1], tokens[2], tokens[3], tokens[4]));
     }
 
     private void announceTool(JsonNode item, List<ParsedEvent> out) {
