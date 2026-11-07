@@ -17,19 +17,25 @@ SuperAgent starts from the company and its employees instead. Companies need AI 
 | --- | --- | --- |
 | Who it serves | One person | The whole company and its employees |
 | Where the work goes | A personal account; leaves with the person | Company assets that accumulate automatically |
-| Working together | Everyone separately | Shared agents, and handoff when people leave |
-| Cost | Every employee subscribes; tokens wasted | Ready on day one, billed by usage, routed to the right model |
-| Control | Invisible to the company | Company-controlled, audited, connected to approvals |
+| Working together | Everyone separately | Shared agents; a SuperAgent that runs a team |
+| Cost | Every employee subscribes; tokens wasted | Ready on day one on the company's keys; spend visible per task and model |
+| Control | Invisible to the company | Company-controlled; people approve; run logs |
+
+## How it fits together
+
+Work comes in from employees, Feishu and automations. Each person's SuperAgent plans it and hands it to agents and tasks, which run on the company's models and tools; the results stay as company assets. Governance runs through all of it.
+
+![SuperAgent architecture](/diagrams/architecture-en.svg)
 
 ## What it does, in priority order
 
-1. **Work becomes assets.** Everyone works in one system. Agent output and the material people send are kept in Files, and each agent builds long-term memory.
-2. **Collaboration and handoff.** Several people can work on the same agent, and when someone leaves, their agents and context go to the next person.
-3. **Reusable methods.** Personal and company skills, and agents whose setup, memory, and files belong to the company.
-4. **Cost and models.** No personal subscriptions, usage-based billing, any model, and routing by task difficulty.
-5. **Audit and security.** Built-in audit and security, connected to office tools and approvals.
+1. **Work becomes assets.** Everyone works in one system. What agents produce and what people send them is kept in Files, and each agent builds long-term memory.
+2. **Collaboration.** Several people work on the same agent; your SuperAgent forms a team and hands out the work.
+3. **Reusable methods.** Personal and company skills, and agents whose setup, memory and files belong to the company.
+4. **Cost and models.** No personal subscriptions; the company's keys with failover; spend per task and model; any of the major coding CLIs.
+5. **Visible and safe.** People approve plans and decisions; permissions, run logs and encrypted secrets.
 
-See [Features](./features) for details.
+See the [capability map](./features) for everything it does today, and the [roadmap](./roadmap) for what's coming.
 
 ## In short
 
@@ -37,10 +43,10 @@ See [Features](./features) for details.
 
 ## Status
 
-SuperAgent is open source, self-hosted, and iterating fast. The core is already running in daily use; items marked *coming soon* in [Features](./features) are still being built.
+SuperAgent is open source, self-hosted and iterating fast. The docs describe what works today; what isn't built yet is on the [roadmap](./roadmap).
 
 ## Next
 
 - [Why SuperAgent](./why): why companies need this rather than more assistants.
-- [Features](./features): each capability in detail.
+- [Capability map](./features): everything it can do, area by area.
 - [Quick Start](./getting-started): deploy it for your company.

@@ -106,8 +106,9 @@ public class SuperAgentTools implements McpToolProvider {
                 "id"));
         tools.add(tool("assign_task", "（计划确认后）把一个任务派给某个成员，立即开始执行。完成、失败或需要确认时你会收到系统消息。",
                 props(field("member_id", "string", "成员 id"), field("title", "string", "任务标题"),
-                        field("brief", "string", "任务说明：目标、范围、交付物与验收标准")),
-                "member_id", "title", "brief"));
+                        field("brief", "string", "任务说明：目标、范围、交付物与验收标准"),
+                        field("kind", "string", com.superagent.task.TaskKinds.DESCRIPTION)),
+                "member_id", "title", "brief", "kind"));
         tools.add(tool("list_assigned_tasks", "列出你派出的、仍在跟进的任务及其状态。", props()));
         tools.add(tool("get_task", "查看一个任务的状态与进度。", props(field("id", "string", "任务 id")), "id"));
         tools.add(tool("reply_task", "回复一个正在等待确认的任务（你能自己判断的小问题）。",
@@ -171,7 +172,7 @@ public class SuperAgentTools implements McpToolProvider {
                 }
                 case "assign_task" -> {
                     String taskId = service.assign(owner, required(args, "member_id"), text(args, "title"),
-                            text(args, "brief"));
+                            text(args, "brief"), grant.messageId(), com.superagent.task.TaskKinds.require(args));
                     yield "已派出任务 " + taskId + "，正在执行。结束后你会收到系统消息。";
                 }
                 case "list_assigned_tasks" -> {

@@ -32,15 +32,18 @@ public class SkillMcpTools implements McpToolProvider {
 
     private final SkillService skills;
     private final McpGrants grants;
+    private final SkillDeletionService deletions;
 
-    public SkillMcpTools(SkillService skills, McpGrants grants) {
+    public SkillMcpTools(SkillService skills, McpGrants grants, SkillDeletionService deletions) {
         this.skills = skills;
         this.grants = grants;
+        this.deletions = deletions;
     }
 
     @Override
     public Set<McpGrants.Kind> kinds() {
-        return Set.of(McpGrants.Kind.CHAT, McpGrants.Kind.TASK);
+        // SUPER: the SuperAgent's chat maintains skills too; its background rounds (no session) are refused below.
+        return Set.of(McpGrants.Kind.CHAT, McpGrants.Kind.TASK, McpGrants.Kind.SUPER);
     }
 
     @Override
@@ -48,7 +51,8 @@ public class SkillMcpTools implements McpToolProvider {
         return List.of(
                 tool("skill_list", "列出用户能看到的 skill（工作规范）：id、所在层（personal 个人 / company 公司）、名称、分类、适用场景。", props(), (String[]) null),
                 tool("skill_get", "查看一个 skill 的完整内容和图片列表。", props(req("id", "string", "skill id")), "id"),
-                tool("skill_create", "新建一个 skill，默认放在用户的个人层。description 要写清楚什么时候使用它，Agent 靠它判断是否适用。",
+                tool("skill_create", "新建一个 skill，默认放在用户的个人层。description 要写清楚什么时候使用它，Agent 靠它判断是否适用。"
+                                + "新建的 skill 不会自动挂到任何 Agent 上；用户要求时再用 skill_attach 挂。",
                         props(req("name", "string", "名称，如 写作规范"), req("description", "string", "适用场景，一句话"),
                                 opt("category", "string", "分类，如 写作 / 设计 / 运营"),
                                 req("content", "string", "正文（Markdown）：规范、步骤、示例；图片用 images/文件名 引用"),
@@ -63,12 +67,19 @@ public class SkillMcpTools implements McpToolProvider {
                 tool("skill_add_image", "把工作区里的一张图片（PNG/JPEG/GIF/WebP）加到 skill 中，返回可在正文里引用的路径。",
                         props(req("id", "string", "skill id"), req("file", "string", "工作区内的图片路径"),
                                 opt("name", "string", "图片名，默认沿用文件名")),
-                        "id", "file"));
+                        "id", "file"),
+                tool("skill_delete", "删除一个 skill。用到它的 Agent 都会失去它，只在用户明确要求时使用。"
+                                + "这只会在对话里生成一张确认卡片，用户点确认后才删除——请如实告诉用户需要他点确认，不要说已经删了。",
+                        props(req("id", "string", "skill id")), "id"));
     }
 
     @Override
     public McpToolResult call(McpGrants.Grant grant, String name, JsonNode args) {
         String user = grant.owner() == null || grant.owner().isBlank() ? "agent" : grant.owner();
+        if (grant.kind() == McpGrants.Kind.SUPER && grant.sessionId() == null) {
+            // A SuperAgent background round: it reads third-party messages, which must not change the user's skills.
+            throw new McpToolException("skill 只能在和用户的聊天里维护");
+        }
         try {
             String text = switch (name) {
                 case "skill_list" -> {
@@ -88,7 +99,7 @@ public class SkillMcpTools implements McpToolProvider {
                 case "skill_create" -> {
                     SkillDto s = skills.create(new SkillRequest(str(args, "name"), str(args, "description"),
                             strOrNull(args, "category"), str(args, "content"), true, strOrNull(args, "space")), user);
-                    yield "已创建 skill「" + s.name() + "」，id " + s.id() + "。可在侧边栏 Skills 中查看，并在编辑 Agent 时挂上。";
+                    yield "已创建 skill「" + s.name() + "」，id " + s.id() + "。它还没有挂到任何 Agent 上；用户要求时用 skill_attach 挂。";
                 }
                 case "skill_update" -> {
                     SkillDto s = skills.update(require(args, "id"), new SkillRequest(strOrNull(args, "name"),
@@ -103,6 +114,13 @@ public class SkillMcpTools implements McpToolProvider {
                     String stored = skills.addImage(require(args, "id"),
                             fileName != null ? fileName : file.getFileName().toString(), Files.readAllBytes(file), user);
                     yield "已添加图片，在正文中用 ![说明](images/" + stored + ") 引用。";
+                }
+                case "skill_delete" -> {
+                    if (grant.kind() == McpGrants.Kind.TASK || grant.agentId() == null || grant.messageId() == null) {
+                        throw new McpToolException("删除 skill 需要用户在对话里确认，任务里不能删除；请告诉用户去 Skills 页面删除");
+                    }
+                    var d = deletions.propose(require(args, "id"), user, grant.agentId(), grant.sessionId(), grant.messageId());
+                    yield "已在对话里生成删除确认卡片（skill「" + d.skillName() + "」）。用户点「确认删除」后才会删除，请这样告诉用户。";
                 }
                 default -> throw new McpToolException("Unknown tool: " + name);
             };

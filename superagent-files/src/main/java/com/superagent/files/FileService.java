@@ -7,6 +7,7 @@ import com.superagent.core.agent.AgentStatus;
 import com.superagent.core.agent.AgentStore;
 import com.superagent.core.chat.ImageAttachment;
 import com.superagent.core.file.FileStore;
+import com.superagent.core.file.FileFolderStore;
 import com.superagent.core.file.WorkFile;
 import com.superagent.core.file.WorkFileKind;
 import com.superagent.core.file.WorkFileStore;
@@ -101,12 +102,15 @@ public class FileService {
     public static final String UPLOADS_DIR = "uploads";
     private static final Set<String> MODEL_IMAGES = Set.of("image/png", "image/jpeg", "image/gif", "image/webp");
 
+    private final FileFolderStore folders;
+
     public FileService(WorkFileStore store, AgentStore agents, AgentMemberStore members, TaskStore tasks,
-                       TaskAgentStore taskAgents, UserStore users, FileStorageService storage,
+                       TaskAgentStore taskAgents, UserStore users, FileStorageService storage, FileFolderStore folders,
                        @Value("${superagent.files.dir:./data/files}") String dir,
                        @Value("${superagent.files.max-mb:200}") long maxMb) {
         this.store = store;
         this.storage = storage;
+        this.folders = folders;
         this.agents = agents;
         this.members = members;
         this.tasks = tasks;
@@ -188,7 +192,12 @@ public class FileService {
         return out;
     }
 
-    private String excerpt(WorkFile f) {
+    /** The owner's own files (not the ones they merely can see through an agent), for the auto-filer. */
+    List<WorkFile> ownedBy(String owner) {
+        return store.listFor(owner, List.of());
+    }
+
+    String excerpt(WorkFile f) {
         if (WorkFile.LINK.equals(f.storage())) {
             return f.location(); // the address says what it's about
         }
@@ -548,7 +557,48 @@ public class FileService {
             files = store.listFor(user, accessibleAgents(user));
         }
         Map<String, List<String>> refs = store.messages(files.stream().map(WorkFile::id).toList());
-        return files.stream().map(f -> toDto(f, user, refs.getOrDefault(f.id(), List.of()))).toList();
+        Map<String, String> placed = folders.placements(user);
+        return files.stream().map(f -> toDto(f, user, refs.getOrDefault(f.id(), List.of()), placed)).toList();
+    }
+
+    /** Copies a file the user can see into a run's workspace ({@code uploads/}), for it to work on; returns the relative path. */
+    public String copyToWorkspace(String id, String user, Path workspace) {
+        WorkFile f = visible(id, user);
+        if (WorkFile.LINK.equals(f.storage())) {
+            throw new IllegalArgumentException("这是一个链接，没有文件内容：" + f.location());
+        }
+        try {
+            Path dir = workspace.resolve(UPLOADS_DIR);
+            Files.createDirectories(dir);
+            Path target = freeTarget(dir, f.name());
+            Files.copy(localCopy(f), target);
+            return UPLOADS_DIR + "/" + target.getFileName();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot copy file " + id, e);
+        }
+    }
+
+    /** The start of a text file the user can see, a link's address, or null for what has no text to read. */
+    public String readText(String id, String user, int maxChars) {
+        WorkFile f = visible(id, user);
+        if (WorkFile.LINK.equals(f.storage())) {
+            return f.location();
+        }
+        if (f.kind() != WorkFileKind.DOCUMENT || !(f.mimeType().startsWith("text/")
+                || f.name().toLowerCase(Locale.ROOT).matches(".*\\.(md|markdown|txt|csv|json|html?|xml|ya?ml)$"))) {
+            return null;
+        }
+        try (InputStream in = openContent(f)) {
+            String text = new String(in.readNBytes(maxChars * 4), StandardCharsets.UTF_8);
+            return text.length() <= maxChars ? text : text.substring(0, maxChars) + "\n…（后面还有内容，已截断）";
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot read file " + id, e);
+        }
+    }
+
+    /** What a task produced (its delivery and the files its agent saved), as far as {@code user} can see. */
+    public List<WorkFileDto> listForTask(String user, String taskId) {
+        return list(user, null).stream().filter(f -> taskId.equals(f.taskId())).toList();
     }
 
     public WorkFileDto get(String id, String user) {
@@ -661,13 +711,19 @@ public class FileService {
     }
 
     private WorkFileDto toDto(WorkFile f, String user, List<String> messageIds) {
+        return toDto(f, user, messageIds, folders.placements(user));
+    }
+
+    private WorkFileDto toDto(WorkFile f, String user, List<String> messageIds, Map<String, String> placed) {
+        String folderId = placed.get(f.id());
         Agent agent = f.agentId() == null ? null : agents.find(f.agentId()).orElse(null);
         Task task = f.taskId() == null ? null : tasks.findTask(f.taskId()).orElse(null);
         return new WorkFileDto(f.id(), f.name(), f.kind().name().toLowerCase(Locale.ROOT), f.mimeType(), f.size(),
                 f.storage(), f.origin(), f.owner(), displayName(f.owner()), f.agentId(),
                 agent == null ? null : agent.name(), agent == null ? null : agent.avatar(), f.taskId(),
                 task == null ? null : task.title(), messageIds, canManage(f, user), f.createdAt(), f.updatedAt(),
-                f.tags(), f.tagState(), WorkFile.LINK.equals(f.storage()) ? f.location() : null);
+                f.tags(), f.tagState(), WorkFile.LINK.equals(f.storage()) ? f.location() : null,
+                folderId == null || folderId.isEmpty() ? null : folderId);
     }
 
     private String displayName(String username) {

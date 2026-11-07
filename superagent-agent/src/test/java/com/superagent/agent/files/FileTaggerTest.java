@@ -25,4 +25,17 @@ class FileTaggerTest {
                 .containsEntry("f1", List.of("周报", "讲义", "进展"));
         assertThatThrownBy(() -> tagger.parse("没法判断")).isInstanceOf(IllegalStateException.class);
     }
+
+    @Test
+    void asksForAFolderAmongThoseThatExistAndReadsTheAnswer() {
+        WorkFile f = new WorkFile("f1", "Q4复盘.md", com.superagent.core.file.WorkFileKind.DOCUMENT, "text/markdown", 1,
+                "internal", "f1", "ada", null, null, "chat", false, java.time.Instant.now(), java.time.Instant.now(),
+                List.of("复盘"), "agent");
+        String prompt = FileTagger.folderPrompt(List.of("项目/Q4"),
+                List.of(new com.superagent.files.FileFolderService.Unfiled(f, "第四季度")));
+        assertThat(prompt).contains("- 项目/Q4").contains("id: f1").contains("标签：复盘").contains("第四季度");
+        FileTagger tagger = new FileTagger(null, null, null, List.of(), false);
+        assertThat(tagger.parseFolders("```json\n{\"f1\": \"项目/Q4\", \"f2\": null}\n```"))
+                .containsEntry("f1", "项目/Q4").doesNotContainKey("f2");
+    }
 }

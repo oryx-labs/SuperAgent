@@ -18,6 +18,11 @@ public interface AgentTurnCustomizer {
     /** The whole system prompt (replaces the character, skill index and files hint). */
     String systemPrompt(Agent agent);
 
+    /** Whether its turns get the shell among the built-in tools (and permission to skip the allowlist). */
+    default boolean runsCommands(Agent agent) {
+        return true;
+    }
+
     /** MCP tool names the CLI may call, on top of the built-in tools. */
     List<String> tools(Agent agent);
 

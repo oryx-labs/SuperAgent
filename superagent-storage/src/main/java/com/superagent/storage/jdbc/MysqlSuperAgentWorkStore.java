@@ -22,6 +22,7 @@ public class MysqlSuperAgentWorkStore extends AbstractJdbcSuperAgentWorkStore {
               assigned_at DATETIME(3)  NOT NULL,
               finished_at DATETIME(3),
               updated_at  DATETIME(3)  NOT NULL,
+              message_id  VARCHAR(64),
               PRIMARY KEY (task_id),
               KEY idx_superagent_work_owner (owner, assigned_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -41,6 +42,12 @@ public class MysqlSuperAgentWorkStore extends AbstractJdbcSuperAgentWorkStore {
 
     public MysqlSuperAgentWorkStore(JdbcTemplate jdbc) {
         super(jdbc, SCHEMA);
+        // Tables from before work remembered the reply that handed it out.
+        Integer present = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                + "AND LOWER(table_name) = 'superagent_work' AND LOWER(column_name) = 'message_id'", Integer.class);
+        if (present == null || present == 0) {
+            jdbc.execute("ALTER TABLE superagent_work ADD COLUMN message_id VARCHAR(64)");
+        }
     }
 
     @Override

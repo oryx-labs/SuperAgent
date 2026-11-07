@@ -24,7 +24,8 @@ public class ClickHouseSuperAgentWorkStore extends AbstractJdbcSuperAgentWorkSto
               summary     String,
               assigned_at DateTime64(3, 'UTC'),
               finished_at Nullable(DateTime64(3, 'UTC')),
-              updated_at  DateTime64(3, 'UTC')
+              updated_at  DateTime64(3, 'UTC'),
+              message_id  String
             ) ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY task_id
             """,
@@ -42,6 +43,7 @@ public class ClickHouseSuperAgentWorkStore extends AbstractJdbcSuperAgentWorkSto
 
     public ClickHouseSuperAgentWorkStore(JdbcTemplate jdbc) {
         super(jdbc, SCHEMA);
+        jdbc.execute("ALTER TABLE superagent_work ADD COLUMN IF NOT EXISTS message_id String");
     }
 
     @Override

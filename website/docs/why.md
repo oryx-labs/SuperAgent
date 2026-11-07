@@ -18,10 +18,10 @@ AI is no longer optional for companies. What they need is AI that **actually get
 ## What SuperAgent does instead
 
 - **One system for everyone.** All work happens in the company's system, so it becomes company assets: files, and agents that remember.
-- **Collaboration and continuity.** People share agents on the same job; when someone leaves, their agents and context are handed over.
+- **Collaboration.** People share agents on the same job, and each person's SuperAgent runs a small team of agents.
 - **Reusable methods.** Personal and company skills, and agents that stay with the company.
-- **AI on day one, paid by usage.** No personal subscriptions; the system bills by usage and routes each task to a model that fits its difficulty.
-- **Visible and safe.** Built-in audit and security, with office tools and approvals connected.
+- **AI on day one, on the company's keys.** No personal subscriptions; keys are managed centrally with failover, and spend is visible per task and per model.
+- **Visible and safe.** People approve plans and key decisions; permissions, run logs and encrypted secrets; Feishu connected.
 
 ## The result
 
@@ -29,5 +29,5 @@ AI is no longer optional for companies. What they need is AI that **actually get
 
 ## Next
 
-- [Features](./features): each capability in detail.
+- [Capability map](./features): everything it can do, area by area.
 - [Quick Start](./getting-started): deploy it.

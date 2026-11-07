@@ -1155,3 +1155,43 @@ body {
     padding: 48px 24px;
   }
 }
+
+/* ─── Docs: screenshots and diagrams ──────────────────────────── */
+.doc-shot {
+  margin: 20px 0 28px;
+}
+.doc-shot img {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 10px;
+  box-shadow: var(--sa-shadow-sm);
+}
+.doc-shot figcaption {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--vp-c-text-3);
+  text-align: center;
+}
+.doc-shot__todo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 36px 20px;
+  border: 1.5px dashed #c7d6f5;
+  border-radius: 10px;
+  background: #f7f9fc;
+  color: var(--vp-c-text-2);
+  font-size: 14px;
+  text-align: center;
+}
+.doc-shot__todo small {
+  color: var(--vp-c-text-3);
+}
+.vp-doc .doc-diagram img,
+.vp-doc img.doc-diagram {
+  display: block;
+  width: 100%;
+  margin: 20px 0 28px;
+}

@@ -61,11 +61,31 @@ public class McpGrants {
             "mcp__superagent__inbox_search", "mcp__superagent__inbox_add_todo", "mcp__superagent__inbox_notify",
             "mcp__superagent__inbox_mark", "mcp__superagent__todo_list", "mcp__superagent__todo_update");
 
-    /** File (work output) and skill tool names as the Claude CLI sees them, for chat and task allowlists. */
-    public static final List<String> WORK_TOOLS = List.of(
+    /** Finding files and keeping the user's folders in order, as the Claude CLI sees them. */
+    public static final List<String> FOLDER_TOOLS = List.of(
+            "mcp__superagent__file_find", "mcp__superagent__file_folders", "mcp__superagent__file_move",
+            "mcp__superagent__file_create_folder", "mcp__superagent__file_rename_folder",
+            "mcp__superagent__file_move_folder", "mcp__superagent__file_delete_folder");
+
+    /** What does the work: delivering results, and fetching a file from Files to work on, plus the above. */
+    public static final List<String> FILE_TOOLS = java.util.stream.Stream.concat(java.util.stream.Stream.of(
             "mcp__superagent__file_write", "mcp__superagent__file_save", "mcp__superagent__file_list",
-            "mcp__superagent__skill_list", "mcp__superagent__skill_get", "mcp__superagent__skill_create",
-            "mcp__superagent__skill_update", "mcp__superagent__skill_add_image");
+            "mcp__superagent__file_get"), FOLDER_TOOLS.stream()).toList();
+
+    /** The SuperAgent's chat manages any file its user can see, but delegates making new ones. */
+    public static final List<String> SUPER_FILE_TOOLS = java.util.stream.Stream.concat(FOLDER_TOOLS.stream(), java.util.stream.Stream.of(
+            "mcp__superagent__file_read", "mcp__superagent__file_rename", "mcp__superagent__file_set_tags",
+            "mcp__superagent__file_delete")).toList();
+
+    /** Reading and writing skills: chats, tasks and the SuperAgent's chat. */
+    public static final List<String> SKILL_TOOLS = List.of("mcp__superagent__skill_list", "mcp__superagent__skill_get",
+            "mcp__superagent__skill_create", "mcp__superagent__skill_update", "mcp__superagent__skill_add_image");
+
+    /** Deleting a skill needs a card the user confirms, so only conversations get it (not tasks). */
+    public static final List<String> SKILL_CHAT_TOOLS = List.of("mcp__superagent__skill_delete");
+
+    /** File and skill tool names, for chat and task allowlists. */
+    public static final List<String> WORK_TOOLS = java.util.stream.Stream.concat(FILE_TOOLS.stream(), SKILL_TOOLS.stream()).toList();
 
     /**
      * Told to every chat and task run that has the file tools: work results go to the user through them.
@@ -76,6 +96,8 @@ public class McpGrants {
             + "用户会在「文件」里看到它，对话里也会出现文件卡片。不要用内置的 Write 工具写成交付物，也不要只把全文贴在回复里——那样用户拿不到文件。"
             + "修改之前交付过的文件：先用 file_list 找到它，再带 replace_id 覆盖，不要另存一份。交付后回复里简要说明内容并提文件名，不要贴路径。"
             + "交付时带上 tags（1~3 个内容主题标签，优先复用 file_list 里已在用的标签），方便用户按主题找文件。"
+            + "用户说了放哪个目录就带上 folder（file_list 会列出已有目录）；没说就不填，系统会自动归档。"
+            + "任务说明里给了文件 id 时，用 file_get 把它取到工作区再处理。用户要整理文件时，用 file_find 查找他能看到的文件，用 file_move 和 file_folders、file_create_folder 等目录工具操作；只有他明确要求才新建或删除目录。"
             + "只是闲聊、回答问题、给简短建议时直接回复即可，不必建文件。";
 
     /** Whether agents can reach {@link #selfUrl()}: unchecked until startup's self-check, then ok or error. */

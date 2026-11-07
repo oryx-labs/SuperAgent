@@ -46,3 +46,5 @@ docs/td/*
 # SuperAgent runtime data (sessions, agent workspaces)
 /data/
 superagent-server/data/*
+# Docker deployment secrets
+docker/.env

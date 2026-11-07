@@ -43,7 +43,8 @@ abstract class AbstractJdbcSuperAgentWorkStore implements SuperAgentWorkStore {
             emptyToNull(rs.getString("summary")),
             instant(rs, "assigned_at"),
             instant(rs, "finished_at"),
-            instant(rs, "updated_at"));
+            instant(rs, "updated_at"),
+            emptyToNull(rs.getString("message_id")));
 
     private final RowMapper<SuperAgentWorkEvent> eventMapper = (rs, n) -> new SuperAgentWorkEvent(
             rs.getString("id"),
@@ -77,12 +78,12 @@ abstract class AbstractJdbcSuperAgentWorkStore implements SuperAgentWorkStore {
     }
 
     protected static final String COLUMNS = "(task_id, owner, plan_id, title, member_id, member_name, status, summary, "
-            + "assigned_at, finished_at, updated_at)";
-    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            + "assigned_at, finished_at, updated_at, message_id)";
+    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(SuperAgentWork w) {
         return new Object[]{w.taskId(), w.owner(), nn(w.planId()), w.title(), nn(w.memberId()), nn(w.memberName()),
-                w.status(), nn(w.summary()), utc(w.assignedAt()), utc(w.finishedAt()), utc(w.updatedAt())};
+                w.status(), nn(w.summary()), utc(w.assignedAt()), utc(w.finishedAt()), utc(w.updatedAt()), nn(w.messageId())};
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

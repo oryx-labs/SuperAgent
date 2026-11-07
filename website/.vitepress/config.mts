@@ -61,12 +61,25 @@ export default defineConfig({
               ],
             },
             {
-              text: 'Capabilities',
-              items: [{ text: 'Features', link: '/docs/features' }],
-            },
-            {
               text: 'Getting Started',
               items: [{ text: 'Quick Start', link: '/docs/getting-started' }],
+            },
+            {
+              text: 'Capabilities',
+              items: [
+                { text: 'Capability map', link: '/docs/features' },
+                { text: 'Agents & collaboration', link: '/docs/agents' },
+                { text: 'SuperAgent', link: '/docs/superagent' },
+                { text: 'Tasks & automation', link: '/docs/tasks' },
+                { text: 'Files & skills', link: '/docs/files' },
+                { text: 'Connectors & messages', link: '/docs/connectors' },
+                { text: 'Models & cost', link: '/docs/models' },
+                { text: 'Administration & security', link: '/docs/admin' },
+              ],
+            },
+            {
+              text: 'More',
+              items: [{ text: 'Roadmap', link: '/docs/roadmap' }],
             },
           ],
         },
@@ -98,12 +111,25 @@ export default defineConfig({
               ],
             },
             {
-              text: '核心能力',
-              items: [{ text: '功能说明', link: '/zh/docs/features' }],
-            },
-            {
               text: '快速入门',
               items: [{ text: '快速开始', link: '/zh/docs/getting-started' }],
+            },
+            {
+              text: '能力',
+              items: [
+                { text: '能力地图', link: '/zh/docs/features' },
+                { text: 'Agent 与协作', link: '/zh/docs/agents' },
+                { text: 'SuperAgent', link: '/zh/docs/superagent' },
+                { text: '任务与自动化', link: '/zh/docs/tasks' },
+                { text: '文件与 Skills', link: '/zh/docs/files' },
+                { text: '连接与消息', link: '/zh/docs/connectors' },
+                { text: '模型与成本', link: '/zh/docs/models' },
+                { text: '管理与安全', link: '/zh/docs/admin' },
+              ],
+            },
+            {
+              text: '更多',
+              items: [{ text: '路线图', link: '/zh/docs/roadmap' }],
             },
           ],
         },

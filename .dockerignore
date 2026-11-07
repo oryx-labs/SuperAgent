@@ -1,0 +1,12 @@
+# Only the sources Maven needs go into the build context.
+**/target/
+**/node_modules/
+**/data/
+website/
+docs/
+.git/
+.github/
+.idea/
+.vscode/
+*.tar.gz
+*.log

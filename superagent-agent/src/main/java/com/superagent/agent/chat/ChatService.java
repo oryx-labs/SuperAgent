@@ -162,6 +162,8 @@ public class ChatService {
             tools.addAll(SUPERAGENT_MCP_TOOLS);
             tools.addAll(McpGrants.WORK_TOOLS);
             tools.addAll(AgentCollabMcpTools.TOOLS);
+            tools.addAll(McpGrants.SKILL_CHAT_TOOLS);
+            tools.addAll(com.superagent.agent.AgentSkillMcpTools.TOOLS);
         } else {
             this.mcpGrants = null;
         }
@@ -667,7 +669,8 @@ public class ChatService {
         List<String> tools = allowedTools;
         if (special != null) {
             // The built-in tools only: the chat MCP tools belong to a CHAT grant, not this agent's own.
-            tools = new ArrayList<>(allowedTools.stream().filter(t -> !t.startsWith("mcp__")).toList());
+            boolean shell = special.runsCommands(emitter.agent());
+            tools = new ArrayList<>(allowedTools.stream().filter(t -> !t.startsWith("mcp__") && (shell || !t.equals("Bash"))).toList());
             tools.addAll(special.tools(emitter.agent()));
         }
         if (!connected.isEmpty()) {
@@ -676,7 +679,7 @@ public class ChatService {
         }
         String sent = special == null ? prompt : special.prompt(emitter.agent(), session, prompt);
         AgentRunRequest request = new AgentRunRequest(session.id(), agentSessionId, session.workspaceDir(), sent, model,
-                tools, skipPermissions, McpGrants.withServers(grant == null ? null : mcpGrants.mcpConfig(grant), connected),
+                tools, skipPermissions && (special == null || special.runsCommands(emitter.agent())), McpGrants.withServers(grant == null ? null : mcpGrants.mcpConfig(grant), connected),
                 systemPrompt, attached, agentMemory, choice.credential());
         try {
             runOnce(runner, request, sink, cancellation, error, session);

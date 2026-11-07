@@ -1,40 +1,37 @@
 ---
 title: Quick Start
-description: Build, configure, run SuperAgent, and take your first work through it.
+description: Deploy SuperAgent for your company with Docker or the release tarball, then set it up and take the first work through it.
 ---
 
 # Quick Start
 
-SuperAgent is a Maven multi-module build on **Java 21** / Spring Boot. `superagent-server` is the one executable Spring Boot jar.
+SuperAgent is self-hosted: you run it on your own server, with MySQL. Each [release](https://github.com/oryx-labs/SuperAgent/releases) comes as a Docker image and a tarball.
 
-## Requirements
+## Option 1: Docker (recommended)
 
-- **Java 21+** and **Maven** to build; **Java 21+** on the server to run.
-- **MySQL 8** — the default storage; tables are created on first start.
-- The agent CLIs on the server's `PATH`: [Claude Code](https://www.npmjs.com/package/@anthropic-ai/claude-code) and/or [Codex](https://www.npmjs.com/package/@openai/codex). These can also be installed later from the **Models** page.
-
-## Build a release
-
-From the repository root:
+The image has Java 21, Node.js 24 and the coding-agent CLIs preinstalled (Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code, DeepSeek Harness).
 
 ```bash
-mvn clean package -PreleaseTgz          # add -DskipTests to skip the tests
+cp docker/.env.example docker/.env      # set the admin and MySQL passwords
+docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
 ```
 
-This produces `superagent-server/target/superagent-<version>.tar.gz`, which unpacks to:
+This starts SuperAgent and MySQL on `http://<host>:18080`. If the server can't reach the model APIs directly, set `HTTPS_PROXY` in `docker/.env`.
+
+## Option 2: Release tarball
+
+Requirements: **Java 21+** and **MySQL 8** (tables are created on first start). The coding CLIs can be installed later from the **Models** page.
 
 ```text
 superagent-<version>/
 ├── bin/      superagent-start.sh, superagent-stop.sh
 ├── config/   application.yml, superagent.env
 ├── libs/     superagent.jar
-├── logs/     superagent.log, console.out, superagent.pid
+├── logs/
 └── data/     agent and task workspaces
 ```
 
-## Configure
-
-Edit `config/superagent.env` before the first start (keep it at mode `600`):
+Set these in `config/superagent.env` before the first start (keep it at mode `600`):
 
 ```bash
 SUPERAGENT_ADMIN_PASSWORD=<a strong password>
@@ -43,33 +40,37 @@ SUPERAGENT_STORAGE_MYSQL_USERNAME=superagent
 SUPERAGENT_STORAGE_MYSQL_PASSWORD=<password>
 ```
 
-`config/application.yml` overrides the defaults built into the jar; changes take effect on restart, with no repackaging.
-
-## Start and stop
-
 ```bash
-tar -xzf superagent-<version>.tar.gz
-cd superagent-<version>
-
 bin/superagent-start.sh          # start in the background
-bin/superagent-start.sh force    # restart: stop the running process, then start
+bin/superagent-start.sh force    # restart
 bin/superagent-stop.sh           # stop
 ```
 
-Start checks for Java 21+ and reports success only once `/actuator/health` responds. Once started, open `http://<host>:18080` and sign in as the admin user.
+The start script checks for Java 21+ and reports success once the server answers its health check.
 
-## Take your first work through it
+## Set it up (administrator)
 
-1. **Sign in** as the admin user.
-2. On the **Models** page, add a model provider (and install a coding CLI if needed).
-3. Create your first **Agent**, or open a **Task**.
-4. Hand work to your **SuperAgent** via the inbox and let it plan, assign, and report back.
+Open `http://<host>:18080` and sign in as the admin. Everything else is set up in the console, not in files:
 
-## Develop locally
+1. **Models** — install the CLIs you want and add the company's API keys. Each key is checked with a real request; a failing one tells you why.
+2. **System Settings → Basic** — company name, logo, the default model, and the public address if people reach the server through a proxy or a domain.
+3. **System Settings → Integrations** — the company's GitHub / Gitee OAuth apps and the Feishu app, if you use them. See [Connectors & messages](./connectors).
+4. **System Settings → File storage** — keep files on the server, or use S3-compatible storage.
+5. **Users** — add the people who may sign in (username and password, or phone number).
+
+## First work (everyone)
+
+1. Open **Agents** and create an agent: give it a persona, a model and skills, then chat.
+2. Or drop something into your **SuperAgent**: it plans, asks you to approve, and gets a team on it.
+3. Long-running work goes to **Tasks**; recurring work to **Automations**.
+4. On the **Connectors** page, authorize the systems you want agents to use as you (e.g. GitHub).
+5. Check your **To-do** page: what needs you, and what your agents finished.
+
+## For developers
 
 ```bash
 mvn clean install                           # build and test all modules
 mvn -pl superagent-server spring-boot:run   # run everything on :18080
 ```
 
-Smoke-check the web wiring: `curl localhost:18080/api/v1/meta`.
+Release from a pull request titled `release: …` with the version bumped in the pom: merging it publishes the GitHub Release (tarball + `.sha256`) and the Docker images.

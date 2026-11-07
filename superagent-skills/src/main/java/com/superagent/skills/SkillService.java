@@ -55,14 +55,18 @@ public class SkillService {
 
     private final SkillStore store;
     private final SystemSettingStore settings;
+    private final String adminUsername;
     private final UserStore users;
     private final Path root;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public SkillService(SkillStore store, SystemSettingStore settings, UserStore users,
-                        @Value("${superagent.skill.dir:./data/skills}") String dir) {
+                        @Value("${superagent.skill.dir:./data/skills}") String dir,
+                        @Value("${superagent.auth.admin.username:admin}") String adminUsername) {
         this.store = store;
         this.settings = settings;
         this.users = users;
+        this.adminUsername = adminUsername;
         this.root = Path.of(dir).toAbsolutePath().normalize();
         seedOnce();
         retireTeamSkills();
@@ -108,6 +112,11 @@ public class SkillService {
 
     public void delete(String id, String user) {
         store.save(writable(id, user).withDeleted(user));
+    }
+
+    /** The skill {@code user} may delete, by name: fails the same way {@link #delete} would. */
+    public String requireDeletable(String id, String user) {
+        return writable(id, user).name();
     }
 
     // --- images ---
@@ -316,8 +325,10 @@ public class SkillService {
         return s -> ownerOf(s) == null ? admin : ownerOf(s).equals(user);
     }
 
+    /** An administrator: the built-in one from the configuration (not in the user table), or a user with that role. */
     private boolean isAdmin(String user) {
-        return user != null && users.findByUsername(user).map(u -> u.roles().contains("ADMIN")).orElse(false);
+        return user != null && (user.equals(adminUsername)
+                || users.findByUsername(user).map(u -> u.roles().contains("ADMIN")).orElse(false));
     }
 
     /** Where a new or moved skill goes, stored as {@code personal:<user>} or {@code company}; blank = the user's own. */

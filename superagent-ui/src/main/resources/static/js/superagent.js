@@ -65,6 +65,8 @@ async function refreshSuper(force) {
   if (!planShown) el.messages.appendChild(planCard(state.plan));
   if (activeAgent) attachFileCards(activeAgent);
   attachSuperInviteCards();
+  attachSkillDeletionCards(activeAgentId);
+  attachDispatchCards();
   if (force || nearBottom || !last || last.role !== "assistant") scrollToBottom();
 }
 
@@ -148,6 +150,62 @@ function backgroundRound(r) {
 
 document.getElementById("superBgBtn").addEventListener("click", openBackgroundRecord);
 bgel.drawer.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", () => { bgel.drawer.hidden = true; }));
+
+// ---------- what each reply handed out ----------
+// Under a SuperAgent reply that started or assigned tasks: each task's name (opens it), who's on it (opens their
+// chat; an independent task has nobody to open) and how it stands. Work from the background has no reply: no card.
+async function attachDispatchCards() {
+  const agentId = activeAgentId;
+  const res = await api.superWork("all", null, 200).catch(() => null);
+  if (!superMode || activeAgentId !== agentId) return;
+  const byReply = new Map();
+  ((res && res.data) || []).filter(w => w.messageId).forEach(w => {
+    if (!byReply.has(w.messageId)) byReply.set(w.messageId, []);
+    byReply.get(w.messageId).unshift(w); // oldest first, in the order they were handed out
+  });
+  byReply.forEach((items, messageId) => {
+    const msg = el.messages.querySelector('.msg[data-mid="' + CSS.escape(messageId) + '"]');
+    if (!msg) return;
+    const old = msg.querySelector(".sa-dispatch");
+    const card = dispatchCard(items);
+    if (old) old.replaceWith(card); else (msg.querySelector(".bubble") || msg).appendChild(card);
+  });
+}
+
+function dispatchCard(items) {
+  const box = document.createElement("div");
+  box.className = "sa-dispatch";
+  items.forEach(w => {
+    const row = document.createElement("div");
+    row.className = "sa-dispatch__row";
+    const task = document.createElement("button");
+    task.type = "button";
+    task.className = "sa-dispatch__task";
+    task.title = L("super.dispatchOpenTask");
+    task.textContent = w.title;
+    task.addEventListener("click", () => openTaskFromWork(w.taskId));
+    const arrow = document.createElement("span");
+    arrow.className = "sa-dispatch__arrow";
+    arrow.textContent = "→";
+    let who;
+    const member = w.byMember && agents.find(a => a.id === w.memberId);
+    if (member) {
+      who = document.createElement("button");
+      who.type = "button";
+      who.className = "sa-dispatch__who";
+      who.title = L("super.dispatchOpenAgent");
+      who.textContent = (member.avatar ? member.avatar + " " : "") + member.name;
+      who.addEventListener("click", () => selectAgent(member));
+    } else {
+      who = document.createElement("span");
+      who.className = "sa-dispatch__who is-plain";
+      who.textContent = w.byMember ? (w.memberName || "—") : L("super.dispatchIndependent");
+    }
+    row.append(workBadge(w.status), task, arrow, who);
+    box.appendChild(row);
+  });
+  return box;
+}
 
 /** What the background posted into the chat: labelled, so it doesn't read as an answer to the last message. */
 function markBackground(msgEl) {
@@ -239,7 +297,8 @@ const wel = {
 };
 
 async function loadSuperRecent() {
-  const res = await api.superWork("finished", null, 10).catch(() => null);
+  // Everything it set off, newest first: running and failed work is what most needs seeing.
+  const res = await api.superWork("all", null, 10).catch(() => null);
   const items = (res && res.data) || [];
   wel.recent.replaceChildren(...items.map(recentRow));
   wel.recentEmpty.hidden = items.length > 0;
@@ -251,7 +310,8 @@ function recentRow(w) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "sw-row";
-  btn.title = (TASK_STATUS_LABEL[w.status] || L("status." + w.status)) + " · " + formatDateTime(w.finishedAt);
+  const label = TASK_STATUS_LABEL[w.status] || L("status." + w.status);
+  btn.title = label + " · " + formatDateTime(w.finishedAt || w.assignedAt);
   const dot = document.createElement("span");
   dot.className = "sw-dot is-" + w.status;
   const body = document.createElement("span");
@@ -266,7 +326,10 @@ function recentRow(w) {
   who.textContent = (w.memberAvatar ? w.memberAvatar + " " : "") + (w.memberName || "—");
   const when = document.createElement("span");
   when.className = "sw-when";
-  when.textContent = w.finishedAt ? relativeTime(w.finishedAt) : "";
+  // Still going (or waiting on a decision): say so, since the dot alone is easy to miss.
+  const open = !w.finishedAt;
+  when.textContent = open ? label : relativeTime(w.finishedAt);
+  if (open) when.classList.add("sw-when--" + w.status);
   meta.append(who, when);
   body.append(title, meta);
   btn.append(dot, body);

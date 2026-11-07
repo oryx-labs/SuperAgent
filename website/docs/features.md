@@ -1,63 +1,53 @@
 ---
-title: Features
-description: SuperAgent's core capabilities in priority order, from work becoming company assets to audit and security.
+title: Capability map
+description: Everything SuperAgent can do today, organized by what it gives the company.
 ---
 
-# Features
+# Capability map
 
-SuperAgent is designed from the company's side: the company and its employees, not one person and an assistant. The capabilities below are in priority order. Items marked *(coming soon)* are still being built.
+SuperAgent is built from the company's side: the company and its employees, not one person and an assistant. This page is the overview. Each area links to a page with the details.
 
-## 1. Work becomes company assets
+![SuperAgent capabilities](/diagrams/capabilities-en.svg)
 
-Everyone in the company works in the same system, so the work stays with the company instead of leaving with people.
+## By what the company gets
 
-- **Files.** Everything agents produce, and everything people send them (files and links), is kept in Files, with a traceable record of the task that made it.
-- **Agent memory.** Each agent keeps its own long-term memory and gets better at its job over time. Members can read it; the agent's owner can edit it.
-- **Nothing leaves with people.** When someone changes roles, the agent stays, along with its memory and files.
-
-## 2. Collaboration and handoff
-
-Collaboration between employees happens inside one AI system.
-
-- **Shared agents.** Several people can work with the same agent on the same job and let it finish the task together. Every member's message moves the work forward.
-- **Handoff.** When someone leaves, their agents and context are handed to the next person, who continues from where they stopped. *(Coming soon.)*
-
-## 3. Reusable methods
-
-Good practice becomes something the whole company can use.
-
-| Skills | Who can use them | Who can edit them |
+| What the company gets | What makes it work | Details |
 | --- | --- | --- |
-| **Company** | Everyone in the company | Administrators |
-| **Personal** | Just the employee | The employee |
+| **Work becomes company assets** | Files for everything agents make and people send; long-term memory per agent; run logs | [Files & skills](./files), [Agents & collaboration](./agents) |
+| **Collaboration and continuity** | Several people on one agent; invitations from chat; a SuperAgent that hires a team and hands out work | [Agents & collaboration](./agents), [SuperAgent](./superagent) |
+| **Reusable methods** | Skills at the personal and company level, mounted on agents and inherited by tasks | [Files & skills](./files) |
+| **Cost under control** | One key pool per model with failover; spend per task and model; model tiers (preview) | [Models & cost](./models) |
+| **Visible and safe** | Human confirmation for key decisions, permissions, run logs, encrypted secrets | [Administration & security](./admin) |
 
-Skills are reusable instruction sets that agents and tasks load as needed. Agents are team assets too: their setup, memory, and files belong to the company, so a new hire takes over instead of starting from zero.
+## By area
 
-## 4. Cost, models, and governance
+### For every employee
 
-Employees get AI on day one, without paying for subscriptions.
+- **[To-do](./agents#to-do)** — the home page: what needs you, and what your agents finished.
+- **[Agents](./agents)** — chat with agents that have a persona, a model, skills and long-term memory; send them files, images and links; work on the same agent with colleagues.
+- **[Your SuperAgent](./superagent)** — drop work in; it plans, asks you to approve, forms a team, hands out tasks and reports back.
+- **[Tasks & automation](./tasks)** — long-running work from requirement to delivery, and work that runs on a schedule or an API call.
+- **[Files & skills](./files)** — everything agents produce, in personal folders; reusable working methods.
+- **[Connectors](./connectors)** — the outside systems agents can use (GitHub, Gitee, your own MCP servers), and messages from Feishu.
 
-- **Usage-based.** The company pays for what is used, and avoids each employee wasting tokens separately.
-- **Visible spend.** Spend is tracked per task, per model, and per month.
-- **Model-agnostic.** Model providers are added and switched centrally, with system-wide defaults; coding agents such as Claude Code and Codex run under the same controls.
-- **Routing by difficulty.** Each task goes to a model that fits how hard it is, to save cost. *(Coming soon.)*
+### For administrators
 
-## 5. Audit and security
+- **[Models & cost](./models)** — install the coding CLIs, manage API keys, see the spend.
+- **[Administration & security](./admin)** — users and the org chart, system settings, integrations, file storage.
 
-AI use in the company is safe and visible.
+## Supported models
 
-- **Human confirmation.** Key decisions wait for a person to confirm before work continues.
-- **Identity and permissions.** Users, teams, and access rules are managed by the company.
-- **Run logs.** Each agent's sessions, turns, memory changes, and actions are recorded.
-- **Office tools.** Connectors such as Feishu bring work in from the tools people already use.
-- **Approvals.** Connection to enterprise approval workflows. *(Coming soon.)*
+SuperAgent drives coding-agent CLIs and runs them on the company's keys:
 
-## Also included
+| CLI | Runs work | Notes |
+| --- | --- | --- |
+| Claude Code | ✓ | Also used for GLM (Zhipu) through its Anthropic-compatible endpoint |
+| OpenAI Codex | ✓ | |
+| DeepSeek Harness | ✓ | |
+| Kimi Code | ✓ | |
+| Qwen Code | ✓ | |
+| CodeBuddy, MiniMax Code, Gemini CLI | Install only | Install, upgrade and manage keys today; running work on them comes later |
 
-- **A SuperAgent for everyone.** Each employee's SuperAgent takes work into an inbox, plans before executing, forms a small team of agents, and reports back.
-- **Task execution.** Tasks run from requirement to result in managed sessions, including a dedicated coding flow.
-- **Automation.** Scheduled, one-off, and API-triggered automations, which can be created straight from a conversation.
+## What isn't built yet
 
-## In short
-
-**Company-controlled. Cost-efficient. Accumulates assets automatically. Easy to use.**
+Handover when someone leaves, company-wide knowledge consolidation, enterprise approval workflows and more are on the [roadmap](./roadmap).

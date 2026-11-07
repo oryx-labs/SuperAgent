@@ -142,11 +142,11 @@
           <p class="super-bg__state" id="superBgState"></p>
         </div>
         <div class="super-work__head">
-          <span class="panel__subhead" data-i18n="work.recent">Recently finished</span>
+          <span class="panel__subhead" data-i18n="work.recent">Recent tasks</span>
           <button class="super-work__all" type="button" id="superWorkAllBtn" data-i18n="work.viewAll">View all</button>
         </div>
         <ul class="super-work__list" id="superWorkList"></ul>
-        <p class="super-work__empty" id="superWorkEmpty" data-i18n="work.empty" hidden>Nothing finished yet.</p>
+        <p class="super-work__empty" id="superWorkEmpty" data-i18n="work.empty" hidden>No tasks yet.</p>
       </section>
     </aside>
 
@@ -223,32 +223,44 @@
     </section>
 
     <section class="admin fl-page" data-pane="files" aria-label="Files" hidden>
-      <!-- Kinds on the left, filters (agent, search) on the right. -->
-      <div class="fl-header">
-        <!-- Kinds as one segmented control; the counts follow the other filters. -->
-        <div class="fl-kinds" id="flTabs" role="tablist">
-          <button type="button" class="model-tab is-active" data-kind=""><span data-i18n="fl.kindAll">All</span> <b></b></button>
-          <button type="button" class="model-tab" data-kind="document"><span data-i18n="fl.kindDocument">Documents</span> <b></b></button>
-          <button type="button" class="model-tab" data-kind="image"><span data-i18n="fl.kindImage">Images</span> <b></b></button>
-          <button type="button" class="model-tab" data-kind="video"><span data-i18n="fl.kindVideo">Videos</span> <b></b></button>
-          <button type="button" class="model-tab" data-kind="link"><span data-i18n="fl.kindLink">Links</span> <b></b></button>
-          <button type="button" class="model-tab" data-kind="other"><span data-i18n="fl.kindOther">Other</span> <b></b></button>
-        </div>
-        <div class="fl-toolbar">
-          <select id="flAgent" aria-label="Agent"></select>
-          <input type="search" id="flSearch" data-i18n-ph="fl.search" aria-label="Search files" />
-        </div>
-      </div>
-      <div class="admin__body fl-body">
-        <!-- Topic tags across the files shown: pick one or more to see only files carrying all of them. -->
-        <div class="fl-tagbar" id="flTagBar" hidden></div>
-        <div class="fl-card">
-          <table class="ctable fl-table"><thead><tr>
-            <th data-i18n="fl.colName">Name</th><th class="fl-col-source" data-i18n="fl.colSource">From</th>
-            <th class="fl-col-owner" data-i18n="fl.colOwner">Asked by</th><th class="fl-col-size" data-i18n="fl.colSize">Size</th>
-            <th class="fl-col-time" data-i18n="fl.colUpdated">Updated</th>
-          </tr></thead><tbody id="flRows"></tbody></table>
-          <p class="kb-empty fl-empty" id="flEmpty" hidden></p>
+      <div class="fl-layout">
+        <!-- The person's own folders: picking one narrows everything on the right to it and what's inside it. -->
+        <nav class="fl-tree" aria-label="Folders">
+          <div class="fl-tree__head">
+            <span data-i18n="ff.title">Folders</span>
+            <button type="button" class="fl-tree__add" id="ffAdd" data-i18n-title="ff.new" aria-label="New folder">+</button>
+          </div>
+          <div id="ffTree" role="tree"></div>
+        </nav>
+        <div class="fl-main">
+          <!-- Kinds on the left, filters (agent, search) on the right. -->
+          <div class="fl-header">
+            <!-- Kinds as one segmented control; the counts follow the other filters. -->
+            <div class="fl-kinds" id="flTabs" role="tablist">
+              <button type="button" class="model-tab is-active" data-kind=""><span data-i18n="fl.kindAll">All</span> <b></b></button>
+              <button type="button" class="model-tab" data-kind="document"><span data-i18n="fl.kindDocument">Documents</span> <b></b></button>
+              <button type="button" class="model-tab" data-kind="image"><span data-i18n="fl.kindImage">Images</span> <b></b></button>
+              <button type="button" class="model-tab" data-kind="video"><span data-i18n="fl.kindVideo">Videos</span> <b></b></button>
+              <button type="button" class="model-tab" data-kind="link"><span data-i18n="fl.kindLink">Links</span> <b></b></button>
+              <button type="button" class="model-tab" data-kind="other"><span data-i18n="fl.kindOther">Other</span> <b></b></button>
+            </div>
+            <div class="fl-toolbar">
+              <select id="flAgent" aria-label="Agent"></select>
+              <input type="search" id="flSearch" data-i18n-ph="fl.search" aria-label="Search files" />
+            </div>
+          </div>
+          <div class="admin__body fl-body">
+            <!-- Topic tags across the files shown: pick one or more to see only files carrying all of them. -->
+            <div class="fl-tagbar" id="flTagBar" hidden></div>
+            <div class="fl-card">
+              <table class="ctable fl-table"><thead><tr>
+                <th data-i18n="fl.colName">Name</th><th class="fl-col-source" data-i18n="fl.colSource">From</th>
+                <th class="fl-col-owner" data-i18n="fl.colOwner">Asked by</th><th class="fl-col-size" data-i18n="fl.colSize">Size</th>
+                <th class="fl-col-time" data-i18n="fl.colUpdated">Updated</th>
+              </tr></thead><tbody id="flRows"></tbody></table>
+              <p class="kb-empty fl-empty" id="flEmpty" hidden></p>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -345,13 +357,18 @@
             <div class="progress"><div class="progress__bar" id="taskProgressBar"></div></div>
             <p class="progress__pct" id="taskProgressPct">0%</p>
             <dl class="task-facts" id="taskFacts"></dl>
-            <h3 class="panel__title panel__title--spaced" data-i18n="tasks.artifacts">Artifacts</h3>
-            <ul class="artifact-list" id="taskArtifacts"></ul>
-            <p class="artifact-empty" id="taskArtifactsEmpty" data-i18n="tasks.artifactsEmpty" hidden>No deliverables yet.</p>
+            <h3 class="panel__title panel__title--spaced" data-i18n="tasks.files">Files</h3>
+            <ul class="task-files" id="taskFiles"></ul>
+            <p class="artifact-empty" id="taskFilesEmpty" data-i18n="tasks.filesEmpty" hidden>No files yet.</p>
           </aside>
         </div>
         <div class="image-tray image-tray--steer" id="taskImageTray" hidden></div>
         <form class="task-steer" id="taskSteerForm">
+          <!-- The task paused for a decision (its question is the last message above): one click says yes. -->
+          <div class="task-confirm" id="taskConfirmBar" hidden>
+            <button type="button" class="task-confirm__btn task-confirm__btn--go" id="taskConfirmGo" data-i18n="tasks.confirmGo">Confirm and continue</button>
+            <button type="button" class="task-confirm__btn" id="taskConfirmEdit" data-i18n="tasks.confirmEdit">Change something</button>
+          </div>
           <button class="attach-btn" type="button" id="taskAttachBtn" data-i18n-title="img.attach" aria-label="Attach files"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
           <input type="file" id="taskImageInput" multiple hidden />
           <textarea class="task-steer__input" id="taskSteerInput" rows="1" data-i18n-ph="tasks.steer"></textarea>
@@ -614,6 +631,9 @@
             </div>
             <p class="field-hint" data-i18n="settings.logoHint">Shown on the sign-in page and at the top left. PNG, JPEG, GIF or WebP, up to 1 MB; a wide image with a transparent background works best.</p>
           </div>
+          <label class="field"><span data-i18n="settings.publicUrl">Public address</span>
+            <input type="url" id="sfPublicUrl" placeholder="https://ai.company.com" autocomplete="off" /></label>
+          <p class="field-hint" data-i18n="settings.publicUrlHint">Only needed when people reach this server through a domain or a reverse proxy. Leave it empty to use the address in the browser.</p>
           <h3 class="settings-form__section" data-i18n="settings.sectionAgent">Agent</h3>
           <label class="mt-switch">
             <input type="checkbox" id="sfTiersEnabled" />
@@ -808,6 +828,8 @@
           <h3 class="drawer__title" id="flTitle"></h3>
           <p class="fl-meta" id="flMeta"></p>
           <div class="fl-tags" id="flTags"></div>
+          <label class="ff-move"><span data-i18n="ff.folder">Folder</span>
+            <select id="ffMove"></select></label>
         </div>
         <span class="agent-detail__actions">
           <a class="btn btn--sm" id="flDownload" href="#" data-i18n="fl.download">Download</a>
@@ -824,11 +846,15 @@
     <div class="modal__backdrop" data-close></div>
     <form class="modal__card" id="intForm">
       <h3 class="modal__title" id="intModalTitle"></h3>
-      <p class="field-hint" id="intHint"></p>
-      <label class="field" id="intCallbackField"><span data-i18n="int.callback">Callback URL</span>
-        <input type="text" id="intCallback" readonly />
-        <small class="field-hint" data-i18n="int.callbackHint"></small></label>
       <div class="conn-section" id="intFields"></div>
+      <!-- Folded: only needed once, when creating the app on the other side. -->
+      <details class="settings-advanced" id="intHelp">
+        <summary id="intHelpSummary"></summary>
+        <p class="field-hint" id="intHint"></p>
+        <label class="field" id="intCallbackField"><span data-i18n="int.callback">Callback URL</span>
+          <input type="text" id="intCallback" readonly />
+          <small class="field-hint" data-i18n="int.callbackHint"></small></label>
+      </details>
       <label class="check-field"><input type="checkbox" id="intEnabled" /><span data-i18n="int.enabled">Enabled</span></label>
       <p class="field-hint kb-modal__error" id="intError" hidden></p>
       <div class="modal__actions">
@@ -1260,9 +1286,11 @@
   <script src="/js/chat-stream.js"></script>
   <script src="/js/agent-form.js"></script>
   <script src="/js/superagent.js"></script>
+  <script src="/js/skill-cards.js"></script>
   <script src="/js/agent-log.js"></script>
   <script src="/js/memory.js"></script>
   <script src="/js/files.js"></script>
+  <script src="/js/file-folders.js"></script>
   <script src="/js/agent-work.js"></script>
   <script src="/js/views.js"></script>
   <script src="/js/inbox.js"></script>

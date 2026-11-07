@@ -18,6 +18,7 @@ const sel = {
   logoInput: document.getElementById("sfLogoInput"),
   logoReset: document.getElementById("sfLogoReset"),
   companyShortName: document.getElementById("sfCompanyShortName"),
+  publicUrl: document.getElementById("sfPublicUrl"),
   missing: document.getElementById("sfAgentModelMissing"),
   filtered: document.getElementById("sfAgentModelFiltered"),
   status: document.getElementById("sfStatus"),
@@ -35,6 +36,7 @@ async function loadSettingsForm() {
   sel.companyName.value = systemSettings.companyName || "";
   refreshLogo();
   sel.companyShortName.value = systemSettings.companyShortName || "";
+  sel.publicUrl.value = systemSettings.publicUrl || "";
 
   sel.agentModel.innerHTML = "";
   const def = document.createElement("option");
@@ -67,6 +69,7 @@ sel.form.addEventListener("submit", async e => {
       agentDefaultModel: sel.agentModel.value || null,
       companyName: sel.companyName.value.trim() || null,
       companyShortName: sel.companyShortName.value.trim() || null,
+      publicUrl: sel.publicUrl.value.trim(), // "" clears it
       tiersEnabled: mtEl.enabled.checked,
       defaultTier: mtEl.defaultTier.value,
     });

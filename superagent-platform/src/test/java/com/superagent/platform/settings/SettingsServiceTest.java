@@ -65,4 +65,17 @@ class SettingsServiceTest {
         store.put(SettingsService.AGENT_DEFAULT_MODEL, "claude-gone");
         assertThat(service.update(new SystemSettingsDto("claude-gone", "OKG", null)).companyName()).isEqualTo("OKG");
     }
+
+    @Test
+    void thePublicAddressIsCheckedTidiedAndKeptUnlessChanged() {
+        assertThat(service.publicUrl()).isNull();
+        assertThat(service.update(new SystemSettingsDto(null, null, null, null, null, " https://ai.example.com/ ")).publicUrl())
+                .isEqualTo("https://ai.example.com");
+        assertThat(service.update(new SystemSettingsDto(null, "OKG", null)).publicUrl()).isEqualTo("https://ai.example.com");
+        for (String bad : new String[]{"ai.example.com", "ftp://ai.example.com", "https://ai.example.com/?a=1", "https://"}) {
+            assertThatThrownBy(() -> service.update(new SystemSettingsDto(null, null, null, null, null, bad)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThat(service.update(new SystemSettingsDto(null, null, null, null, null, "")).publicUrl()).isNull();
+    }
 }

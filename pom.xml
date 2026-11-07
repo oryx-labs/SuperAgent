@@ -27,7 +27,6 @@
     <module>superagent-platform</module>
     <module>superagent-skills</module>
     <module>superagent-files</module>
-    <module>superagent-files-s3</module>
     <module>superagent-cost</module>
     <module>superagent-agent</module>
     <module>superagent-task</module>
@@ -85,11 +84,6 @@
       <dependency>
         <groupId>com.superagent</groupId>
         <artifactId>superagent-files</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.superagent</groupId>
-        <artifactId>superagent-files-s3</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

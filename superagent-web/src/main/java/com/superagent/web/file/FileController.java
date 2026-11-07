@@ -2,8 +2,10 @@ package com.superagent.web.file;
 
 import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
+import com.superagent.api.file.FileFolderDto;
 import com.superagent.api.file.WorkFileDto;
 import com.superagent.api.file.WorkFileRequests;
+import com.superagent.files.FileFolderService;
 import com.superagent.files.FileService;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
@@ -47,14 +49,49 @@ public class FileController {
             Map.entry("m4v", "video/mp4"), Map.entry("pdf", "application/pdf"));
 
     private final FileService files;
+    private final FileFolderService folders;
 
-    public FileController(FileService files) {
+    public FileController(FileService files, FileFolderService folders) {
         this.files = files;
+        this.folders = folders;
     }
 
-    /** Everything the caller can see, newest first; {@code agent} narrows to one agent's files. */
+    @GetMapping(ApiPaths.FILE_FOLDERS)
+    public ApiResponse<List<FileFolderDto>> folders(Authentication auth) {
+        return ApiResponse.ok(folders.list(auth.getName()));
+    }
+
+    @PostMapping(ApiPaths.FILE_FOLDERS)
+    public ApiResponse<FileFolderDto> createFolder(@RequestBody WorkFileRequests.SaveFolder request, Authentication auth) {
+        return ApiResponse.ok(folders.create(auth.getName(), request.name(), request.parentId()));
+    }
+
+    @PutMapping(ApiPaths.FILE_FOLDERS + "/{id}")
+    public ApiResponse<FileFolderDto> renameFolder(@PathVariable String id, @RequestBody WorkFileRequests.SaveFolder request,
+                                                   Authentication auth) {
+        return ApiResponse.ok(folders.rename(auth.getName(), id, request.name()));
+    }
+
+    /** Its files and subfolders go up a level; no file is deleted. */
+    @DeleteMapping(ApiPaths.FILE_FOLDERS + "/{id}")
+    public ApiResponse<Void> deleteFolder(@PathVariable String id, Authentication auth) {
+        folders.delete(auth.getName(), id);
+        return ApiResponse.empty();
+    }
+
+    @PutMapping(ApiPaths.FILES + "/{id}/folder")
+    public ApiResponse<WorkFileDto> move(@PathVariable String id, @RequestBody WorkFileRequests.Move request, Authentication auth) {
+        folders.move(auth.getName(), id, request.folderId());
+        return ApiResponse.ok(files.get(id, auth.getName()));
+    }
+
+    /** Everything the caller can see, newest first; {@code agent} narrows to one agent's files, {@code task} to one task's. */
     @GetMapping(ApiPaths.FILES)
-    public ApiResponse<List<WorkFileDto>> list(@RequestParam(required = false) String agent, Authentication auth) {
+    public ApiResponse<List<WorkFileDto>> list(@RequestParam(required = false) String agent,
+                                               @RequestParam(required = false) String task, Authentication auth) {
+        if (task != null && !task.isBlank()) {
+            return ApiResponse.ok(files.listForTask(auth.getName(), task.strip()));
+        }
         return ApiResponse.ok(files.list(auth.getName(), agent));
     }
 

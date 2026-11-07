@@ -11,7 +11,7 @@ Object.assign(api, {
   taskAgents: () => fetch("/api/v1/tasks/agents").then(r => r.json()),
   taskStatus: id => fetch("/api/v1/tasks/" + id + "/status").then(r => r.json()),
   taskEvents: (id, offset) => fetch("/api/v1/tasks/" + id + "/events?offset=" + offset).then(r => r.json()),
-  taskArtifacts: id => fetch("/api/v1/tasks/" + id + "/artifacts").then(r => r.json()),
+  taskFiles: id => fetch("/api/v1/files?task=" + encodeURIComponent(id)).then(kbJson),
   taskMessage: (id, content, images, fileIds) => fetch("/api/v1/tasks/" + id + "/messages", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content, images: images || [], fileIds: fileIds || [] }),
@@ -48,8 +48,8 @@ const tel = {
   tabs: document.getElementById("taskTabs"),
   runPane: document.getElementById("taskRunPane"),
   sessionInfo: document.getElementById("taskSessionInfo"),
-  artifacts: document.getElementById("taskArtifacts"),
-  artifactsEmpty: document.getElementById("taskArtifactsEmpty"),
+  files: document.getElementById("taskFiles"),
+  filesEmpty: document.getElementById("taskFilesEmpty"),
   progress: document.querySelector("#taskDetailView .progress"),
   progressBar: document.getElementById("taskProgressBar"),
   progressPct: document.getElementById("taskProgressPct"),
@@ -57,6 +57,9 @@ const tel = {
   phasesPanel: document.getElementById("taskPhasesPanel"),
   phases: document.getElementById("taskPhases"),
   steerForm: document.getElementById("taskSteerForm"),
+  confirmBar: document.getElementById("taskConfirmBar"),
+  confirmGo: document.getElementById("taskConfirmGo"),
+  confirmEdit: document.getElementById("taskConfirmEdit"),
   steerInput: document.getElementById("taskSteerInput"),
   steerBtn: document.getElementById("taskSteerBtn"),
 };
@@ -307,7 +310,7 @@ function renderDetail(d) {
   task.mergeEl = null;
   task.mergeType = null;
   task.toolGroup = null;
-  timeline.forEach(appendStreamItem);
+  coalesce(timeline).forEach(appendStreamItem);
   task.renderedEvents = (d.events || []).length;
   if (timeline.length === 0) {
     const empty = document.createElement("p");
@@ -321,9 +324,13 @@ function renderDetail(d) {
   renderSessionInfo(t);
   renderPhases(d.phases);
   task.hasPhases = !!(d.phases && d.phases.length);
+  // Only a task with a flow of its own (coding) has phases; the rest just run.
+  tel.tabs.querySelector('[data-tab="run"]').textContent = task.hasPhases
+    ? L("tasks.tabRunPhased", { n: d.phases.length }) : L("tasks.tabRun");
   if (tel.promptBody) tel.promptBody.innerHTML = renderMarkdown(d.brief || t.title || "");
   setTaskTab("run");
-  loadArtifacts(t.id);
+  loadTaskFiles(t.id);
+  task.lastPhaseKey = t.status + "|" + t.progress;
   if (isActiveStatus(t.status)) startTaskPolling(); else stopTaskPolling();
 }
 
@@ -345,25 +352,49 @@ function scrollRunToEnd() {
   requestAnimationFrame(scrollStream);
 }
 
-async function loadArtifacts(id) {
-  let list = [];
-  try { const res = await api.taskArtifacts(id); list = (res && res.data) || []; } catch (e) { /* ignore */ }
-  tel.artifacts.innerHTML = "";
-  tel.artifactsEmpty.hidden = list.length > 0;
-  list.forEach(a => {
-    const li = document.createElement("li");
-    const link = document.createElement("a");
-    link.href = "/api/v1/tasks/" + id + "/artifacts/" + encodeURIComponent(a.name);
-    link.setAttribute("download", a.name);
-    const name = document.createElement("span");
-    name.textContent = a.name;
-    const size = document.createElement("span");
-    size.className = "artifact-size";
-    size.textContent = formatBytes(a.size);
-    link.append(name, size);
-    li.append(link);
-    tel.artifacts.appendChild(li);
+/**
+ * The agent's reply is stored as it streamed, a few characters per event: a long task has thousands. Rendering each
+ * one re-parsed the whole reply as Markdown every time (quadratic: one task here parsed 55 million characters on
+ * open and froze the page). Runs of text or thinking are joined first, so each block renders once.
+ */
+function coalesce(items) {
+  const out = [];
+  items.forEach(item => {
+    const prev = out[out.length - 1];
+    if (prev && (item.kind === "text" || item.kind === "thinking") && prev.kind === item.kind) {
+      prev.payload = (prev.payload || "") + (item.payload || "");
+    } else {
+      out.push({ ...item });
+    }
   });
+  return out;
+}
+
+// What the task produced, from Files: its delivery and anything its agent saved. A click opens the preview.
+async function loadTaskFiles(id) {
+  const list = await api.taskFiles(id).catch(() => []);
+  if (task.id !== id) return; // another task was opened meanwhile
+  tel.files.replaceChildren(...(list || []).map(f => {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "task-file";
+    btn.title = f.name;
+    const icon = document.createElement("span");
+    icon.className = "task-file__icon";
+    icon.textContent = fileIcon(f);
+    const name = document.createElement("span");
+    name.className = "task-file__name";
+    name.textContent = f.name;
+    const size = document.createElement("span");
+    size.className = "task-file__size";
+    size.textContent = f.kind === "link" ? "" : formatBytes(f.size);
+    btn.append(icon, name, size);
+    btn.addEventListener("click", () => openFile(f));
+    li.appendChild(btn);
+    return li;
+  }));
+  tel.filesEmpty.hidden = (list || []).length > 0;
 }
 
 function formatBytes(n) {
@@ -573,7 +604,40 @@ function updateStatusUi(t) {
   const waiting = t.status === "pending" && !!t.sessionId;
   tel.steerInput.placeholder = waiting ? L("tasks.steerWaiting") : busy ? L("tasks.steerBusy") : L("tasks.steer");
   tel.stopBtn.disabled = !busy;
+  renderConfirmBar(t);
 }
+
+// ---------- a decision the task is waiting for ----------
+// The agent stops with a "NEEDS_CONFIRMATION:" question (the last message in the stream); small buttons in the
+// reply box answer it in one click, and anything more goes in the box itself.
+function renderConfirmBar(t) {
+  const waiting = t.status === "needs_confirmation";
+  tel.confirmBar.hidden = !waiting;
+  tel.steerForm.classList.toggle("has-confirm", waiting);
+  if (waiting) tel.confirmGo.disabled = false;
+}
+
+tel.confirmGo.addEventListener("click", async () => {
+  if (!task.id) return;
+  const text = L("tasks.confirmReply");
+  tel.confirmGo.disabled = true;
+  const res = await api.taskMessage(task.id, text, [], []).catch(() => null);
+  if (!res || !res.ok) {
+    const body = res && await res.json().catch(() => null);
+    showToast((body && body.message) || L("tasks.steerFailed"), true);
+    tel.confirmGo.disabled = false;
+    return;
+  }
+  tel.confirmBar.hidden = true;
+  tel.steerForm.classList.remove("has-confirm");
+  setTaskTab("run");
+  appendStreamItem({ kind: "cmd", payload: text });
+  startTaskPolling();
+});
+tel.confirmEdit.addEventListener("click", () => {
+  tel.steerInput.focus();
+  tel.steerInput.placeholder = L("tasks.confirmEditPh");
+});
 
 // What a task records: the tier it ran at, when tiers were on, and the model that actually ran.
 function taskModelLabel(t) {
@@ -656,12 +720,20 @@ function renderPhases(phases) {
   });
 }
 
+// One poll at a time: the next is scheduled when this one is done, so a slow answer never overlaps the next
+// (overlapping polls read the same offset and drew the same events twice).
 function startTaskPolling() {
   stopTaskPolling();
-  task.pollTimer = setInterval(pollTask, 1500);
+  task.polling = true;
+  task.pollTimer = setTimeout(pollLoop, 1500);
 }
 function stopTaskPolling() {
-  if (task.pollTimer) { clearInterval(task.pollTimer); task.pollTimer = null; }
+  task.polling = false;
+  if (task.pollTimer) { clearTimeout(task.pollTimer); task.pollTimer = null; }
+}
+async function pollLoop() {
+  await pollTask();
+  if (task.polling) task.pollTimer = setTimeout(pollLoop, 1500);
 }
 
 async function pollTask() {
@@ -669,18 +741,22 @@ async function pollTask() {
   if (!id) { stopTaskPolling(); return; }
   try {
     const [evRes, stRes] = await Promise.all([api.taskEvents(id, task.renderedEvents), api.taskStatus(id)]);
+    if (task.id !== id) return; // another task was opened meanwhile
     const newEvents = (evRes && evRes.data) || [];
-    newEvents.forEach(e => appendStreamItem({ kind: e.type, payload: e.payload, at: e.createdAt }));
+    coalesce(newEvents.map(e => ({ kind: e.type, payload: e.payload, at: e.createdAt }))).forEach(appendStreamItem);
     task.renderedEvents += newEvents.length;
     const t = stRes && stRes.data;
     if (!t) return;
     updateStatusUi(t);
     renderFacts(t);
     renderSessionInfo(t);
-    if (task.hasPhases) {
+    // Phases only change when the task moves on: refetch the (large) detail then, not every poll.
+    const phaseKey = t.status + "|" + t.progress;
+    if (task.hasPhases && phaseKey !== task.lastPhaseKey) {
+      task.lastPhaseKey = phaseKey;
       try { const dRes = await api.taskDetail(id); if (dRes && dRes.data) renderPhases(dRes.data.phases); } catch (e) { /* ignore */ }
     }
-    if (!isActiveStatus(t.status)) { stopTaskPolling(); loadArtifacts(id); }
+    if (!isActiveStatus(t.status)) { stopTaskPolling(); loadTaskFiles(id); }
   } catch (e) { /* ignore transient poll errors */ }
 }
 

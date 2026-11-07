@@ -12,4 +12,11 @@ public final class WorkFileRequests {
     /** The file's tags as a person sets them; these win over the agent's and the tagger's from then on. */
     public record Tags(java.util.List<String> tags) {
     }
+
+    /** A blank {@code folderId} takes the file out of its folder. */
+    public record Move(String folderId) {
+    }
+
+    public record SaveFolder(String name, String parentId) {
+    }
 }

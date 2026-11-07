@@ -1,0 +1,53 @@
+# SuperAgent + MySQL on one host:
+#   cp docker/.env.example docker/.env   # then set the passwords in it
+#   docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
+# Open http://<host>:18080 and sign in as admin with SUPERAGENT_ADMIN_PASSWORD.
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: superagent
+      MYSQL_USER: superagent
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in docker/.env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in docker/.env}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  superagent:
+    image: ${SUPERAGENT_IMAGE:-ghcr.io/oryx-labs/superagent:latest}
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${SUPERAGENT_PORT:-18080}:18080"
+    environment:
+      SUPERAGENT_ADMIN_PASSWORD: ${SUPERAGENT_ADMIN_PASSWORD:?set SUPERAGENT_ADMIN_PASSWORD in docker/.env}
+      SUPERAGENT_STORAGE_MYSQL_URL: jdbc:mysql://mysql:3306/superagent?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+      SUPERAGENT_STORAGE_MYSQL_USERNAME: superagent
+      SUPERAGENT_STORAGE_MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      SUPERAGENT_BASE_URL: ${SUPERAGENT_BASE_URL:-}
+      JAVA_OPTS: ${JAVA_OPTS:--Xms512m -Xmx2g}
+      # Outbound proxy for the model APIs, when the host can't reach them directly (e.g. http://host.docker.internal:7890).
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      NO_PROXY: localhost,127.0.0.1,mysql
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - superagent-data:/app/data
+      - superagent-logs:/app/logs
+      - superagent-home:/home/superagent
+
+volumes:
+  mysql-data:
+  superagent-data:
+  superagent-logs:
+  superagent-home:

@@ -31,5 +31,7 @@ public record WorkFileDto(
         List<String> tags,
         /** "" (not tagged yet), agent, auto or user. */
         String tagState,
-        String url) {
+        String url,
+        /** Where the caller keeps it (folders are per person), or null when unfiled. */
+        String folderId) {
 }

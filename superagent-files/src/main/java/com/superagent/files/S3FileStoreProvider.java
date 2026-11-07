@@ -1,4 +1,4 @@
-package com.superagent.files.s3;
+package com.superagent.files;
 
 import com.superagent.core.file.FileStore;
 import com.superagent.core.file.FileStoreProvider;

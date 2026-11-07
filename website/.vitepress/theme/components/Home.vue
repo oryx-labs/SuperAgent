@@ -99,9 +99,9 @@ const features = computed(() => [
 
 const more = computed(() => [
   { icon: 'M12 3l8 3v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-3z', title: t('每人一个 SuperAgent', 'A SuperAgent each'), desc: t('接活、计划、派活、回报', 'Plans, assigns, reports back') },
-  { icon: 'M4 5h16v10H4zM2 19h20M9 9l2 2 4-4', title: t('编码 Agent', 'Coding agents'), desc: t('Claude Code、Codex', 'Claude Code, Codex') },
+  { icon: 'M4 5h16v10H4zM2 19h20M9 9l2 2 4-4', title: t('编码 Agent', 'Coding agents'), desc: t('Claude Code、Codex、DeepSeek、Kimi、Qwen、GLM', 'Claude Code, Codex, DeepSeek, Kimi, Qwen, GLM') },
   { icon: 'M12 7V3m0 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM12 12h4', title: t('自动化', 'Automation'), desc: t('定时、一次性、API 触发', 'Scheduled, one-off, API') },
-  { icon: 'M9 3v18M3 9h12M15 15h6M18 12v6', title: t('办公工具', 'Office tools'), desc: t('接入飞书等', 'Feishu and more') },
+  { icon: 'M9 3v18M3 9h12M15 15h6M18 12v6', title: t('连接外部系统', 'Connectors'), desc: t('飞书、GitHub、Gitee、MCP', 'Feishu, GitHub, Gitee, MCP') },
   { icon: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z', title: t('模型无关', 'Model-agnostic'), desc: t('不被厂商锁定', 'No vendor lock-in') },
   { icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 7v5l3 3', title: t('运行日志', 'Run logs'), desc: t('每一步都有记录', 'Every step recorded') },
 ])

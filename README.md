@@ -42,8 +42,23 @@ Also included: a SuperAgent for every employee (inbox, plan-then-execute, team a
 ## Architecture
 
 <p align="center">
-  <img src="docs/images/superagent-architecture.jpg" alt="SuperAgent architecture" width="100%" />
+  <img src="docs/images/superagent-architecture.svg" alt="SuperAgent architecture" width="100%" />
 </p>
+
+## Install
+
+Every release on the [Releases page](https://github.com/oryx-labs/SuperAgent/releases) has a tarball (`superagent-<version>.tar.gz`, with its `.sha256`) and a Docker image.
+
+**Docker** (the image has Java 21, Node.js 24 and the agent CLIs preinstalled: Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code and DeepSeek Harness):
+
+```bash
+cp docker/.env.example docker/.env      # set the admin and MySQL passwords
+docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
+```
+
+This starts SuperAgent with MySQL on `http://<host>:18080`. The image is `ghcr.io/oryx-labs/superagent:<version>` (or `:latest`). `ghcr.io/oryx-labs/superagent-base` is the same image without SuperAgent, if you only want the CLIs. If the host can't reach the model APIs directly, set `HTTPS_PROXY` in `docker/.env`.
+
+**Tarball:** download it from the release, then follow [Configure](#configure) and [Start and stop](#start-and-stop) below.
 
 ## Build and run
 
@@ -111,6 +126,16 @@ mvn -pl superagent-server spring-boot:run          # run locally on :18080
 ```
 
 Under `spring-boot:run`, the UI is served straight from `superagent-ui/src/main/resources/static`, so front-end edits show up on a browser refresh with no rebuild or restart. Back-end (Java) changes still need `mvn install` and a restart.
+
+### Releasing
+
+A pull request to `main` whose title starts with `release:` is a release. The version is the one in the pom, so bump it in that pull request:
+
+```bash
+mvn versions:set -DnewVersion=0.2.0 -DgenerateBackupPoms=false   # every module's pom
+```
+
+While the pull request is open, [the release workflow](.github/workflows/release.yml) builds, tests, packages and builds the image without publishing anything. When it's merged, the workflow tags `v<version>`, publishes the GitHub Release with the tarball and its checksum, and pushes the images to `ghcr.io` for `linux/amd64` and `linux/arm64`. A version that's already released fails the check, and release pull requests must come from a branch in this repository. Versions ending in `-alpha`, `-beta` or `-rc` are published as pre-releases, without moving `latest`.
 
 ## Status
 

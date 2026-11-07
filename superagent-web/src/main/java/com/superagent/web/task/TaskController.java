@@ -3,7 +3,6 @@ package com.superagent.web.task;
 import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.chat.SendMessageRequest;
-import com.superagent.api.task.ArtifactDto;
 import com.superagent.api.task.CreateTaskRequest;
 import com.superagent.api.task.TaskAgentOptionDto;
 import com.superagent.api.task.TaskDetailDto;
@@ -93,25 +92,6 @@ public class TaskController {
     @GetMapping(ApiPaths.TASKS + "/{id}/status")
     public ApiResponse<TaskDto> status(@PathVariable String id, Authentication auth) {
         return ApiResponse.ok(taskService.status(id, auth.getName()));
-    }
-
-    @GetMapping(ApiPaths.TASKS + "/{id}/artifacts")
-    public ApiResponse<List<ArtifactDto>> artifacts(@PathVariable String id, Authentication auth) {
-        return ApiResponse.ok(taskService.artifacts(id, auth.getName()));
-    }
-
-    @GetMapping(ApiPaths.TASKS + "/{id}/artifacts/{name}")
-    public ResponseEntity<byte[]> downloadArtifact(@PathVariable String id, @PathVariable String name,
-                                                   Authentication auth) {
-        byte[] content = taskService.readArtifact(id, auth.getName(), name);
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + sanitize(name) + "\"")
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .body(content);
-    }
-
-    private static String sanitize(String name) {
-        return name.replaceAll("[\"\\r\\n]", "_");
     }
 
     @PostMapping(ApiPaths.TASKS + "/{id}/messages")

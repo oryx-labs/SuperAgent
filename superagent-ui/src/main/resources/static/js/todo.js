@@ -178,7 +178,11 @@ function todoActions(n) {
     case "confirm":
       return n.linkType === "superagent"
         ? [[L("todo.review"), openSuperAgentPlan, true], ignore]
-        : [[L("todo.handle"), () => openTaskFromTodo(n.linkId), true], ignore];
+        // Saying yes needs no page: the task carries on. Looking first is a click away.
+        : [[L("todo.confirmGo"), async () => {
+            await confirmTaskFromTodo(n.linkId);
+            await api.noticeAction(n.id, "done");
+          }, true], [L("todo.handle"), () => openTaskFromTodo(n.linkId)], ignore];
     case "action":
       return [[L("todo.toTask"), async () => { await api.todoToTask(n.linkId); showToast(L("ib.tasked"), false); }, true],
         [L("todo.markDone"), () => api.todoStatus(n.linkId, "done")], ignore];
@@ -189,6 +193,15 @@ function todoActions(n) {
         ? [[L("todo.open"), async () => { await api.noticeAction(n.id, "done"); await openAgentFromTodo(n.linkId); }, true], read]
         : [read];
   }
+}
+
+async function confirmTaskFromTodo(taskId) {
+  const res = await api.taskMessage(taskId, L("tasks.confirmReply"), [], []);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error((body && body.message) || L("tasks.steerFailed"));
+  }
+  showToast(L("todo.confirmed"), false);
 }
 
 function openTaskFromTodo(taskId) {

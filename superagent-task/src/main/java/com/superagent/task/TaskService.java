@@ -3,7 +3,6 @@ package com.superagent.task;
 import com.superagent.api.ApiPaths;
 import com.superagent.api.chat.ImageUploadDto;
 import com.superagent.api.chat.MessageDto;
-import com.superagent.api.task.ArtifactDto;
 import com.superagent.api.task.CreateTaskRequest;
 import com.superagent.api.task.TaskDetailDto;
 import com.superagent.api.task.TaskDto;
@@ -27,7 +26,6 @@ import com.superagent.core.task.Task;
 import com.superagent.platform.provider.CredentialService;
 import com.superagent.core.task.TaskAgentStore;
 import com.superagent.core.task.TaskKind;
-import com.superagent.core.task.TaskKindClassifier;
 import com.superagent.core.task.TaskPhase;
 import com.superagent.core.task.TaskPhaseStatus;
 import com.superagent.core.task.TaskPhaseStore;
@@ -52,7 +50,6 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -411,58 +408,6 @@ public class TaskService implements TaskRecovery {
         return toDto(require(id, owner));
     }
 
-    /** Top-level files in the task workspace, offered as downloadable artifacts. */
-    public List<ArtifactDto> artifacts(String id, String owner) {
-        Task task = require(id, owner);
-        if (task.workspaceDir() == null) {
-            return List.of();
-        }
-        Path dir = Path.of(task.workspaceDir());
-        if (!Files.isDirectory(dir)) {
-            return List.of();
-        }
-        try (java.util.stream.Stream<Path> files = Files.list(dir)) {
-            return files.filter(Files::isRegularFile)
-                    .map(p -> new ArtifactDto(p.getFileName().toString(), sizeOf(p)))
-                    .sorted((a, b) -> a.name().compareToIgnoreCase(b.name()))
-                    .toList();
-        } catch (IOException e) {
-            return List.of();
-        }
-    }
-
-    /** Reads one artifact by name, guarding against path traversal out of the workspace. */
-    public byte[] readArtifact(String id, String owner, String name) {
-        Path file = artifactFile(id, owner, name);
-        try {
-            return Files.readAllBytes(file);
-        } catch (IOException e) {
-            throw new ArtifactNotFoundException(name);
-        }
-    }
-
-    /** An artifact's path, confined to the task workspace (no traversal, no symlink out of it). */
-    public Path artifactFile(String id, String owner, String name) {
-        Task task = require(id, owner);
-        if (task.workspaceDir() == null || name == null) {
-            throw new ArtifactNotFoundException(name);
-        }
-        Path dir = Path.of(task.workspaceDir()).toAbsolutePath().normalize();
-        Path file = dir.resolve(name).normalize();
-        if (!file.startsWith(dir) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
-            throw new ArtifactNotFoundException(name);
-        }
-        return file;
-    }
-
-    private static long sizeOf(Path p) {
-        try {
-            return Files.size(p);
-        } catch (IOException e) {
-            return 0;
-        }
-    }
-
     // --- lifecycle ---
 
     public TaskDto create(CreateTaskRequest request) {
@@ -523,13 +468,17 @@ public class TaskService implements TaskRecovery {
         return toDto(task);
     }
 
-    /** Explicit kind wins; "auto"/blank falls back to the keyword classifier. */
-    private static TaskKind resolveKind(CreateTaskRequest request) {
+    /**
+     * The kind the creator named; else coding only when it names a repository. Never guessed from the wording:
+     * "实现", "接口" or "测试" turn up in all sorts of work, and a general task put through the coding flow's three
+     * gated steps just stalls.
+     */
+    static TaskKind resolveKind(CreateTaskRequest request) {
         String k = request.kind();
         if (k != null && !k.isBlank() && !k.equalsIgnoreCase("auto")) {
             return TaskKind.fromStorage(k);
         }
-        return TaskKindClassifier.classify(request.title(), request.brief());
+        return request.repo() != null && !request.repo().isBlank() ? TaskKind.CODING : TaskKind.GENERAL;
     }
 
     /**
@@ -1158,10 +1107,11 @@ public class TaskService implements TaskRecovery {
 
     private String wrapBrief(String brief) {
         return """
-                你在执行一个任务。请先理解下面的任务说明，然后完成它：实现，并自行验证（例如运行测试 / 构建）。
+                你在执行一个任务。请先理解下面的任务说明，然后直接完成它；交付前自己检查一遍是否满足要求。
                 如果说明存在歧义，或有需要用户拍板才能继续的关键决策，不要擅自假设——请输出一行以 \
                 """ + CONFIRM_MARKER + """
-                : 开头、后接你的具体问题，然后停止等待用户答复。否则请直接完成，并在结尾给出交付总结。
+: 开头、后接你的具体问题，然后停止等待用户答复。用户会看到一个「确认继续」按钮，所以问题要写成能直接点确认的样子：\
+                写清你打算怎么做；有几个选项时列出来，并标出你推荐的那个（确认就按推荐的做）。否则请直接完成，并在结尾给出交付总结。
 
                 任务说明：
                 """ + (brief == null ? "" : brief);

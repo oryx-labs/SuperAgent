@@ -50,6 +50,7 @@ const fileSource = f => [f.agentName ? (f.agentAvatar ? f.agentAvatar + " " : ""
 // ---------- the Files page ----------
 async function loadFiles() {
   try { files = (await api.listFiles()) || []; } catch (e) { files = []; showToast(e.message, true); }
+  await ffLoad();
   renderFileAgents();
   renderFileTable();
 }
@@ -66,7 +67,8 @@ function renderFileAgents() {
 function renderFileTable() {
   const q = flel.search.value.trim().toLowerCase();
   const agent = flel.agent.value;
-  const scoped = files.filter(f => (!agent || f.agentId === agent)
+  ffRenderTree();
+  const scoped = files.filter(f => ffInScope(f) && (!agent || f.agentId === agent)
     && (!q || [f.name, f.agentName, f.taskTitle, ...(f.tags || [])].some(v => (v || "").toLowerCase().includes(q))));
   renderTagBar(scoped);
   const base = scoped.filter(f => [...flTags].every(t => (f.tags || []).includes(t)));
@@ -77,7 +79,7 @@ function renderFileTable() {
   const shown = base.filter(f => !flKind || f.kind === flKind);
   flel.rows.replaceChildren(...shown.map(fileRow));
   flel.empty.hidden = shown.length > 0;
-  flel.empty.textContent = L(files.length ? "fl.noMatch" : "fl.empty");
+  flel.empty.textContent = L(files.length ? (ffChosen === FF_ALL ? "fl.noMatch" : "ff.empty") : "fl.empty");
 }
 
 // The tags on the files in view, most used first, each with its count; picked ones stay visible even at zero.
@@ -131,6 +133,7 @@ function fileRow(f) {
   const tr = document.createElement("tr");
   tr.className = "sk-row fl-row";
   tr.tabIndex = 0;
+  ffMakeDraggable(tr, f);
   const cell = (text, cls) => {
     const td = document.createElement("td");
     if (cls) td.className = cls;
@@ -185,6 +188,7 @@ async function openFile(fileOrId) {
   flel.download.hidden = link; // a link has no content of its own
   flel.rename.hidden = flel.del.hidden = !f.canManage;
   renderDrawerTags(f);
+  ffFillMove(f);
   flel.drawer.hidden = false;
   renderFilePreview(f);
 }

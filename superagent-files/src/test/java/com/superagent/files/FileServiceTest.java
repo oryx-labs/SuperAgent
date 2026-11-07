@@ -27,6 +27,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -97,11 +98,28 @@ class FileServiceTest {
         when(tasks.findTask(any())).thenReturn(Optional.empty());
         UserStore users = mock(UserStore.class);
         when(users.findByUsername(any())).thenReturn(Optional.empty());
-        return new FileService(store, agents, members, tasks, taskAgents, users, localStorage(store),
+        return new FileService(store, agents, members, tasks, taskAgents, users, localStorage(store), folderStore,
                 tmp.resolve("files").toString(), 1);
     }
 
     private final Map<String, String> settingRows = new LinkedHashMap<>();
+    private final InMemoryFolders folderStore = new InMemoryFolders();
+
+    private static final class InMemoryFolders implements com.superagent.core.file.FileFolderStore {
+        final Map<String, com.superagent.core.file.FileFolder> rows = new LinkedHashMap<>();
+        final Map<String, Map<String, String>> placed = new HashMap<>();
+        @Override public void save(com.superagent.core.file.FileFolder f) { rows.put(f.id(), f); }
+        @Override public Optional<com.superagent.core.file.FileFolder> find(String id) {
+            return Optional.ofNullable(rows.get(id)).filter(f -> !f.deleted()); }
+        @Override public List<com.superagent.core.file.FileFolder> list(String owner) {
+            return rows.values().stream().filter(f -> !f.deleted() && f.owner().equals(owner)).toList(); }
+        @Override public List<String> owners() {
+            return rows.values().stream().filter(f -> !f.deleted()).map(com.superagent.core.file.FileFolder::owner).distinct().toList(); }
+        @Override public Map<String, String> placements(String owner) { return new HashMap<>(placed.getOrDefault(owner, Map.of())); }
+        @Override public void place(String owner, String fileId, String folderId, String by) {
+            placed.computeIfAbsent(owner, k -> new HashMap<>()).put(fileId, folderId); }
+    }
+
     private FileStorageService storage;
     /** An in-memory "cloud" store, to see files go there once it's chosen; keys are bucket/id. */
     private final Map<String, byte[]> cloud = new LinkedHashMap<>();
@@ -314,10 +332,124 @@ class FileServiceTest {
         assertThat(read(svc, f.id())).isEqualTo("老配置");
     }
 
+    @Test
+    void foldersArePerPersonAndNeverCostAFile() throws Exception {
+        InMemoryFiles store = new InMemoryFiles();
+        FileService svc = service(store);
+        FileFolderService folders = new FileFolderService(folderStore, svc);
+        var project = folders.create("ada", "项目", null);
+        var q4 = folders.create("ada", "Q4", project.id());
+        assertThat(q4.path()).isEqualTo("项目/Q4");
+        var deep = folders.create("ada", "第三层", q4.id());
+        assertThatThrownBy(() -> folders.create("ada", "第四层", deep.id())).hasMessageContaining("3 层");
+        assertThatThrownBy(() -> folders.create("ada", "项目", null)).hasMessageContaining("已经有");
+        assertThatThrownBy(() -> folders.create("ada", "a/b", null)).hasMessageContaining("/");
+        assertThatThrownBy(() -> folders.rename("bob", q4.id(), "偷看")).hasMessageContaining("没有这个目录");
+
+        // Bob made it; Ada sees it through the agent and keeps it in her own tree, without moving it for Bob.
+        WorkFile f = svc.writeText(chat("bob", "dev", "m1"), "报告.md", "内容", null);
+        folders.move("ada", f.id(), q4.id());
+        assertThat(svc.get(f.id(), "ada").folderId()).isEqualTo(q4.id());
+        assertThat(svc.get(f.id(), "bob").folderId()).isNull();
+        assertThatThrownBy(() -> folders.move("ada", f.id(), "nope")).hasMessageContaining("没有这个目录");
+
+        // Deleting a folder takes nothing with it: files and subfolders go up a level.
+        folders.delete("ada", q4.id());
+        assertThat(svc.get(f.id(), "ada").folderId()).isEqualTo(project.id());
+        assertThat(folders.paths("ada")).containsExactly("项目", "项目/第三层");
+        folders.delete("ada", project.id());
+        assertThat(svc.get(f.id(), "ada").folderId()).isNull();
+        assertThat(read(svc, f.id())).isEqualTo("内容");
+    }
+
+    @Test
+    void anAgentNamesAnExistingFolderAndTheAutoFilerOnlySortsWhatsNew() throws Exception {
+        InMemoryFiles store = new InMemoryFiles();
+        FileService svc = service(store);
+        FileFolderService folders = new FileFolderService(folderStore, svc);
+        WorkFile before = svc.writeText(chat("bob", "dev", "m0"), "早就有.md", "x", null);
+        Thread.sleep(5);
+        assertThat(folders.unfiled("bob", 10)).isEmpty(); // no folders: nothing to ask about
+
+        assertThat(folders.createPath("bob", "项目/ Q4 ")).isEqualTo("项目/Q4");
+        assertThat(folders.createPath("bob", "项目/Q4")).isEqualTo("项目/Q4"); // already there
+        Thread.sleep(5);
+        WorkFile named = svc.writeText(chat("bob", "dev", "m1"), "a.md", "x", null);
+        assertThat(folders.placeByAgent("bob", named.id(), "项目/Q4")).isTrue();
+        assertThat(folders.placeByAgent("bob", named.id(), "没这个目录")).isFalse();
+
+        WorkFile fresh = svc.writeText(chat("bob", "dev", "m2"), "b.md", "x", null);
+        WorkFile unsure = svc.writeText(chat("bob", "dev", "m3"), "c.md", "x", null);
+        assertThat(folders.unfiled("bob", 10)).extracting(u -> u.file().id())
+                .containsExactlyInAnyOrder(fresh.id(), unsure.id()).doesNotContain(before.id(), named.id());
+
+        folders.autoFile("bob", fresh.id(), "项目/Q4");
+        folders.autoFile("bob", unsure.id(), "模型编的目录"); // not a folder: unfiled, and not asked about again
+        assertThat(svc.get(fresh.id(), "bob").folderId()).isNotNull();
+        assertThat(svc.get(unsure.id(), "bob").folderId()).isNull();
+        assertThat(folders.unfiled("bob", 10)).isEmpty();
+
+        folders.move("bob", fresh.id(), null); // a person's move stands: a late answer doesn't undo it
+        folders.autoFile("bob", fresh.id(), "项目/Q4");
+        assertThat(svc.get(fresh.id(), "bob").folderId()).isNull();
+    }
+
+    @Test
+    void conversationsKeepFilesInOrderAndTheSuperAgentReachesAsFarAsItsUserOnly() throws Exception {
+        InMemoryFiles store = new InMemoryFiles();
+        FileService svc = service(store);
+        FileFolderService folders = new FileFolderService(folderStore, svc);
+        FileFolderMcpTools tidy = new FileFolderMcpTools(svc, folders);
+        FileManageMcpTools manage = new FileManageMcpTools(svc);
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        var chat = new com.superagent.runtime.mcp.McpGrants.Grant("t", com.superagent.runtime.mcp.McpGrants.Kind.CHAT, "bob", null, "dev", "s", "m", null);
+        var sa = new com.superagent.runtime.mcp.McpGrants.Grant("t", com.superagent.runtime.mcp.McpGrants.Kind.SUPER, "bob", null, "sa", "s", "m", null);
+        var background = new com.superagent.runtime.mcp.McpGrants.Grant("t", com.superagent.runtime.mcp.McpGrants.Kind.SUPER, "bob", null, "sa", null, null, null);
+        WorkFile f = svc.writeText(chat("bob", "dev", "m1"), "竞品分析.md", "正文内容", null);
+
+        tidy.call(chat, "file_create_folder", json.readTree("{\"path\":\"项目/Q4\"}"));
+        tidy.call(chat, "file_create_folder", json.readTree("{\"path\":\"调研\"}"));
+        tidy.call(chat, "file_move", json.readTree("{\"file_id\":\"" + f.id() + "\",\"folder\":\"项目/Q4\"}"));
+        assertThat(tidy.call(chat, "file_find", json.readTree("{\"query\":\"竞品\",\"folder\":\"项目\"}")).toString()).contains(f.id());
+        assertThat(tidy.call(chat, "file_folders", json.readTree("{}")).toString()).contains("项目/Q4（1 个文件）");
+
+        // A folder moves with what's in it, within the limits.
+        tidy.call(chat, "file_move_folder", json.readTree("{\"path\":\"项目/Q4\",\"parent\":\"调研\"}"));
+        assertThat(folders.paths("bob")).contains("调研/Q4");
+        assertThatThrownBy(() -> tidy.call(chat, "file_move_folder", json.readTree("{\"path\":\"调研\",\"parent\":\"调研/Q4\"}")))
+                .hasMessageContaining("它自己里面");
+
+        // The SuperAgent's chat works on the file; its background rounds touch nothing.
+        assertThat(manage.call(sa, "file_read", json.readTree("{\"file_id\":\"" + f.id() + "\"}")).toString()).contains("正文内容");
+        assertThatThrownBy(() -> manage.call(background, "file_delete", json.readTree("{\"file_id\":\"" + f.id() + "\"}")))
+                .hasMessageContaining("聊天");
+        assertThatThrownBy(() -> tidy.call(background, "file_move", json.readTree("{\"file_id\":\"" + f.id() + "\"}")))
+                .hasMessageContaining("聊天");
+        // Bob can only view what Ada made through her agent: his SuperAgent can read it, but not delete it for him.
+        WorkFile hers = svc.writeText(chat("ada", "dev", "m9"), "她的.md", "她的内容", null);
+        assertThat(manage.call(sa, "file_read", json.readTree("{\"file_id\":\"" + hers.id() + "\"}")).toString()).contains("她的内容");
+        assertThatThrownBy(() -> manage.call(sa, "file_delete", json.readTree("{\"file_id\":\"" + hers.id() + "\"}")))
+                .isInstanceOf(com.superagent.runtime.mcp.McpToolException.class);
+        manage.call(sa, "file_delete", json.readTree("{\"file_id\":\"" + f.id() + "\"}"));
+        assertThat(store.find(f.id())).hasValueSatisfying(w -> assertThat(w.deleted()).isTrue());
+    }
+
+    @Test
+    void aMemberFetchesAFileItWasPointedAtIntoItsWorkspace() throws Exception {
+        InMemoryFiles store = new InMemoryFiles();
+        FileService svc = service(store);
+        WorkFile f = svc.writeText(chat("bob", "dev", "m1"), "风格.md", "参考内容", null);
+        Path workspace = tmp.resolve("ws");
+        assertThat(svc.copyToWorkspace(f.id(), "ada", workspace)).isEqualTo("uploads/风格.md");
+        assertThat(Files.readString(workspace.resolve("uploads/风格.md"))).isEqualTo("参考内容");
+        assertThat(svc.copyToWorkspace(f.id(), "ada", workspace)).isNotEqualTo("uploads/风格.md"); // never overwrites
+        assertThatThrownBy(() -> svc.copyToWorkspace(f.id(), "carl", workspace))
+                .isInstanceOf(com.superagent.core.error.NotFoundException.class); // can't see it, can't fetch it
+    }
+
     private static String read(FileService svc, String id) throws Exception {
         try (var in = svc.content(id, "ada").resource().getInputStream()) {
             return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         }
     }
 }
-

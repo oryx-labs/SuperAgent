@@ -16,6 +16,8 @@ const intel = {
   form: document.getElementById("intForm"),
   title: document.getElementById("intModalTitle"),
   hint: document.getElementById("intHint"),
+  help: document.getElementById("intHelp"),
+  helpSummary: document.getElementById("intHelpSummary"),
   callbackField: document.getElementById("intCallbackField"),
   callback: document.getElementById("intCallback"),
   fields: document.getElementById("intFields"),
@@ -104,6 +106,8 @@ function openIntegration(i) {
   intEditing = i;
   intel.title.textContent = i.name;
   intel.hint.textContent = L("int.hint." + i.key);
+  intel.help.open = false;
+  intel.helpSummary.textContent = L(i.callbackUrl ? "int.helpWithCallback" : "int.help");
   intel.callbackField.hidden = !i.callbackUrl;
   intel.callback.value = i.callbackUrl || "";
   intel.fields.innerHTML = "";

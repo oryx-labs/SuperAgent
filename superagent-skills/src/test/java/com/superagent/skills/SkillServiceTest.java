@@ -64,11 +64,46 @@ class SkillServiceTest {
     }
 
     private SkillService service(InMemorySkills store, InMemorySettings settings, Path dir) {
-        return new SkillService(store, settings, new Users(), dir.toString());
+        return new SkillService(store, settings, new Users(), dir.toString(), "admin");
     }
 
     private static SkillRequest req(String name, String space) {
         return new SkillRequest(name, name + "时", null, name + "的规范。", true, space);
+    }
+
+    @Test
+    void anAgentOnlyProposesADeletionAndThePersonWhoAskedConfirmsIt() {
+        InMemorySkills store = new InMemorySkills();
+        SkillService svc = service(store, new InMemorySettings(), tmp.resolve("skills"));
+        Map<String, com.superagent.core.skill.SkillDeletion> rows = new LinkedHashMap<>();
+        SkillDeletionService deletions = new SkillDeletionService(svc, new com.superagent.core.skill.SkillDeletionStore() {
+            @Override public void save(com.superagent.core.skill.SkillDeletion d) { rows.put(d.id(), d); }
+            @Override public Optional<com.superagent.core.skill.SkillDeletion> find(String id) { return Optional.ofNullable(rows.get(id)); }
+            @Override public List<com.superagent.core.skill.SkillDeletion> forAgent(String agentId) {
+                return rows.values().stream().filter(d -> agentId.equals(d.agentId())).toList();
+            }
+        });
+        String mine = svc.create(req("写作", "personal"), "ada").id();
+        String company = svc.list("ada").stream().filter(x -> "company".equals(x.space())).findFirst().orElseThrow().id();
+
+        // Someone who couldn't delete it can't even get a card for it; the built-in administrator (from the
+        // configuration, not the user table) can, like any administrator.
+        assertThatThrownBy(() -> deletions.propose(company, "ada", "a1", "s1", "m1")).isInstanceOf(SkillForbiddenException.class);
+        assertThat(svc.get(company, "admin").canWrite()).isTrue();
+
+        var proposed = deletions.propose(mine, "ada", "a1", "s1", "m1");
+        assertThat(svc.list("ada")).anyMatch(x -> x.id().equals(mine)); // nothing deleted yet
+        assertThat(deletions.list("a1", "ada")).singleElement().satisfies(d -> {
+            assertThat(d.skillName()).isEqualTo("写作");
+            assertThat(d.messageId()).isEqualTo("m1");
+            assertThat(d.status()).isEqualTo("pending");
+        });
+        assertThat(deletions.list("a1", "bob")).isEmpty(); // a collaborator in the same chat doesn't get her card
+        assertThatThrownBy(() -> deletions.confirm(proposed.id(), "bob")).isInstanceOf(SkillNotFoundException.class);
+
+        assertThat(deletions.confirm(proposed.id(), "ada").status()).isEqualTo("confirmed");
+        assertThat(svc.list("ada")).noneMatch(x -> x.id().equals(mine));
+        assertThatThrownBy(() -> deletions.cancel(proposed.id(), "ada")).hasMessageContaining("already");
     }
 
     @Test

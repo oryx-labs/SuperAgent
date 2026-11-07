@@ -42,6 +42,12 @@ class SuperAgentChat implements AgentTurnCustomizer {
         return SuperAgentService.CHAT_TOOLS;
     }
 
+    /** It delegates: no shell to do the work itself with, so a slow job can't keep it from its user. */
+    @Override
+    public boolean runsCommands(Agent agent) {
+        return false;
+    }
+
     @Override
     public McpGrants.Grant openGrant(Agent agent, String user, ChatSession session, String messageId) {
         // The SuperAgent is never shared: its turns always act for its owner.
@@ -58,7 +64,8 @@ class SuperAgentChat implements AgentTurnCustomizer {
             posts.forEach(p -> sb.append("- ").append(p.replace("\n", "\n  ")).append("\n"));
             sb.append("\n");
         }
-        sb.append(service.statusLines(agent.owner())).append("\n## 用户说\n").append(userPrompt);
+        sb.append(service.statusLines(agent.owner())).append("\n").append(SuperAgentPrompts.TURN_CHECK)
+                .append("\n## 用户说\n").append(userPrompt);
         return sb.toString();
     }
 }

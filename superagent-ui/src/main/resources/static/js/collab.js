@@ -231,6 +231,7 @@ async function selectSession(id) {
   scrollToBottom();
   if (activeAgent) attachFileCards(activeAgent); // each reply's files, under it
   if (activeAgent) attachInviteCards(activeAgent); // invitations the agent proposed, under the reply that did
+  if (activeAgent) attachSkillDeletionCards(activeAgent.id); // and skill deletions waiting for a yes
 }
 
 // An agent has many sessions over time (a new model, or a session that kept failing, starts a fresh

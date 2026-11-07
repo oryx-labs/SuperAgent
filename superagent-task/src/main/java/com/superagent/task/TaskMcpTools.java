@@ -42,8 +42,8 @@ public class TaskMcpTools implements McpToolProvider {
                 tool("create_task", "创建并立即执行一个任务（文档驱动的长任务）。",
                         props(req("title", "string", "任务标题"), req("brief", "string", "任务说明：目标、范围、验收标准"),
                                 opt("repo", "string", "可选代码库"), opt("branch", "string", "可选分支"),
-                                opt("kind", "string", "可选任务类型：coding/writing/research/stats/general；不填则自动分类")),
-                        "title", "brief"),
+                                req("kind", "string", TaskKinds.DESCRIPTION)),
+                        "title", "brief", "kind"),
                 tool("list_tasks", "列出当前用户的任务及其状态。", props(), (String[]) null),
                 tool("get_task", "查看某个任务的状态与进度。", props(req("id", "string", "任务 id")), "id"),
                 tool("send_task_message", "给任务发送消息：回答确认、或变更/指挥其执行（任务非运行中时）。",
@@ -59,8 +59,8 @@ public class TaskMcpTools implements McpToolProvider {
                 TaskDto t = tasks.create(new CreateTaskRequest(
                         str(args, "title"), str(args, "brief"), "web_chat",
                         strOrNull(args, "repo"), strOrNull(args, "branch"), null, null, null,
-                        strOrNull(args, "kind")), grant.owner(), grant.agentId()); // the agent's skills go with it
-                yield "已创建任务 " + t.id() + "（" + t.title() + "），状态 " + t.status() + "。可用 get_task 查询进度。";
+                        TaskKinds.require(args)), grant.owner(), grant.agentId()); // the agent's skills go with it
+                yield "已创建" + TaskKinds.label(t.flow()) + "任务 " + t.id() + "（" + t.title() + "），状态 " + t.status() + "。可用 get_task 查询进度。";
             }
             case "list_tasks" -> {
                 List<TaskDto> list = tasks.list(grant.owner());

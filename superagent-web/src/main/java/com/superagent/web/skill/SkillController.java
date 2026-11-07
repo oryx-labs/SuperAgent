@@ -5,6 +5,8 @@ import com.superagent.api.ApiResponse;
 import com.superagent.api.skill.SkillDto;
 import com.superagent.api.skill.SkillImageUpload;
 import com.superagent.api.skill.SkillRequest;
+import com.superagent.api.skill.SkillDeletionDto;
+import com.superagent.skills.SkillDeletionService;
 import com.superagent.skills.SkillService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -23,9 +26,27 @@ import java.util.List;
 public class SkillController {
 
     private final SkillService skills;
+    private final SkillDeletionService deletions;
 
-    public SkillController(SkillService skills) {
+    public SkillController(SkillService skills, SkillDeletionService deletions) {
         this.skills = skills;
+        this.deletions = deletions;
+    }
+
+    /** Deletions the caller asked an agent for in its conversation, for their confirm cards there. */
+    @GetMapping(ApiPaths.SKILLS + "/deletions")
+    public ApiResponse<List<SkillDeletionDto>> deletions(@RequestParam String agentId, Authentication auth) {
+        return ApiResponse.ok(deletions.list(agentId, auth.getName()));
+    }
+
+    @PostMapping(ApiPaths.SKILLS + "/deletions/{deletionId}/confirm")
+    public ApiResponse<SkillDeletionDto> confirmDeletion(@PathVariable String deletionId, Authentication auth) {
+        return ApiResponse.ok(deletions.confirm(deletionId, auth.getName()));
+    }
+
+    @PostMapping(ApiPaths.SKILLS + "/deletions/{deletionId}/cancel")
+    public ApiResponse<SkillDeletionDto> cancelDeletion(@PathVariable String deletionId, Authentication auth) {
+        return ApiResponse.ok(deletions.cancel(deletionId, auth.getName()));
     }
 
     @GetMapping(ApiPaths.SKILLS)

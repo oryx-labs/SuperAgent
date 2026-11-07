@@ -111,6 +111,7 @@ navItems.forEach(a => a.addEventListener("click", e => {
   e.preventDefault();
   setView(a.dataset.view);
   closeUserMenu();
+  if (a.dataset.view === "chat") scrollToBottom();
 }));
 
 // The account menu opens on hover; a click (touch screens) toggles it, and choosing an item or

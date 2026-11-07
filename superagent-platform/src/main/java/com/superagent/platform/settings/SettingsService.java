@@ -17,6 +17,7 @@ public class SettingsService {
     static final String COMPANY_SHORT_NAME = "company.short-name";
     static final String TIERS_ENABLED = "model.tiers-enabled";
     static final String DEFAULT_TIER = "model.default-tier";
+    static final String PUBLIC_URL = "app.public-url";
 
     private final SystemSettingStore store;
     private final ProviderService providerService;
@@ -29,7 +30,8 @@ public class SettingsService {
     public SystemSettingsDto get() {
         Map<String, String> all = store.all();
         return new SystemSettingsDto(trimToNull(all.get(AGENT_DEFAULT_MODEL)), trimToNull(all.get(COMPANY_NAME)),
-                trimToNull(all.get(COMPANY_SHORT_NAME)), "true".equals(all.get(TIERS_ENABLED)), defaultTier(all));
+                trimToNull(all.get(COMPANY_SHORT_NAME)), "true".equals(all.get(TIERS_ENABLED)), defaultTier(all),
+                trimToNull(all.get(PUBLIC_URL)));
     }
 
     /**
@@ -45,6 +47,9 @@ public class SettingsService {
         store.put(AGENT_DEFAULT_MODEL, model);
         store.put(COMPANY_NAME, name(request.companyName(), 100));
         store.put(COMPANY_SHORT_NAME, name(request.companyShortName(), 20));
+        if (request.publicUrl() != null) {
+            store.put(PUBLIC_URL, publicUrl(request.publicUrl()));
+        }
         if (request.tiersEnabled() != null) {
             store.put(TIERS_ENABLED, request.tiersEnabled().toString());
         }
@@ -58,6 +63,34 @@ public class SettingsService {
     /** The model Agents chat with when they don't set their own, or null to fall back further. */
     public String agentDefaultModel() {
         return get().agentDefaultModel();
+    }
+
+    /** How people reach this server from outside, set by the admin; null when it should follow the request. */
+    public String publicUrl() {
+        return trimToNull(store.all().get(PUBLIC_URL));
+    }
+
+    /** Scheme and host required (a path is fine, for a server under a sub-path); no query, no trailing slash. */
+    private static String publicUrl(String value) {
+        String v = trimToNull(value);
+        if (v == null) {
+            return null;
+        }
+        java.net.URI uri;
+        try {
+            uri = new java.net.URI(v);
+        } catch (java.net.URISyntaxException e) {
+            throw new IllegalArgumentException("公网访问地址格式不对：" + v);
+        }
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(java.util.Locale.ROOT);
+        if (!(scheme.equals("http") || scheme.equals("https")) || uri.getHost() == null
+                || uri.getRawQuery() != null || uri.getRawFragment() != null || uri.getRawUserInfo() != null) {
+            throw new IllegalArgumentException("公网访问地址要以 http:// 或 https:// 开头，例如 https://ai.company.com");
+        }
+        while (v.endsWith("/")) {
+            v = v.substring(0, v.length() - 1);
+        }
+        return v;
     }
 
     /** Whether people choose a tier (fast / standard / strong) rather than a model. */

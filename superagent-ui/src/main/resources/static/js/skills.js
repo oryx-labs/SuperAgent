@@ -121,13 +121,32 @@ function renderSkillOwners() {
 }
 
 function skillCard(s) {
-  const card = document.createElement("button");
-  card.type = "button";
+  // A div, not a button: it holds the Edit / Delete buttons. Click or Enter opens the skill.
+  const card = document.createElement("div");
   card.className = "sk-card" + (s.enabled ? "" : " is-off");
+  card.tabIndex = 0;
+  card.setAttribute("role", "button");
+  const head = document.createElement("div");
+  head.className = "sk-card__head";
   const name = document.createElement("h3");
   name.className = "sk-card__name";
   name.textContent = s.name;
   name.title = s.name;
+  head.appendChild(name);
+  if (s.canWrite) {
+    const actions = document.createElement("span");
+    actions.className = "sk-card__actions";
+    const act = (label, cls, fn) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "link-btn " + cls;
+      b.textContent = L(label);
+      b.addEventListener("click", e => { e.stopPropagation(); fn(s); });
+      return b;
+    };
+    actions.append(act("sk.edit", "link-btn--muted", editSkill), act("common.delete", "link-btn--danger", confirmDeleteSkill));
+    head.appendChild(actions);
+  }
   const tags = document.createElement("div");
   tags.className = "sk-card__tags";
   const tag = (text, cls) => {
@@ -159,8 +178,9 @@ function skillCard(s) {
   label.textContent = skPerson(s.createdBy);
   who.append(face, label);
   foot.append(when, who);
-  card.append(name, tags, desc, foot);
+  card.append(head, tags, desc, foot);
   card.addEventListener("click", () => openSkillDrawer(s.id));
+  card.addEventListener("keydown", e => { if (e.key === "Enter" && e.target === card) openSkillDrawer(s.id); });
   return card;
 }
 
@@ -336,9 +356,28 @@ skel.imageInput.addEventListener("change", async () => {
 });
 
 skel.newBtn.addEventListener("click", () => openSkillForm(null));
+/** Edit a skill straight from its card or from the drawer: the form opens in the drawer. */
+function editSkill(skill) {
+  skSelectedId = skill.id;
+  openSkillForm(skill);
+}
+
+function confirmDeleteSkill(skill) {
+  kbOpenModal({
+    title: L("sk.deleteTitle"), submit: L("common.delete"), danger: true,
+    message: L("sk.deleteConfirm", { name: skill.name }),
+    action: async () => {
+      await api.deleteSkill(skill.id);
+      if (skSelectedId === skill.id) closeSkillDrawer();
+      showToast(L("sk.deleted", { name: skill.name }), false);
+      await loadSkills();
+    },
+  });
+}
+
 skel.edit.addEventListener("click", () => {
   const skill = skills.find(s => s.id === skSelectedId);
-  if (skill) openSkillForm(skill);
+  if (skill) editSkill(skill);
 });
 skel.cancel.addEventListener("click", () => {
   if (skEditing === "new") closeSkillDrawer(); else { skEditing = null; renderSkill(); }
@@ -362,12 +401,7 @@ skel.form.addEventListener("submit", async e => {
 });
 skel.del.addEventListener("click", () => {
   const skill = skills.find(s => s.id === skSelectedId);
-  if (!skill) return;
-  kbOpenModal({
-    title: L("sk.deleteTitle"), submit: L("common.delete"), danger: true,
-    message: L("sk.deleteConfirm", { name: skill.name }),
-    action: async () => { await api.deleteSkill(skill.id); closeSkillDrawer(); await loadSkills(); },
-  });
+  if (skill) confirmDeleteSkill(skill);
 });
 
 // Agent form: a multi-select dropdown of skills (enabled ones; a disabled one already attached stays listed).

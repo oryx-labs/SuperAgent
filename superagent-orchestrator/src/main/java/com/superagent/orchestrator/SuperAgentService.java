@@ -105,10 +105,13 @@ public class SuperAgentService {
             SuperAgentTools.NAMES.stream().map(n -> "mcp__superagent__" + n), McpGrants.INBOX_TOOLS.stream()).toList();
     /**
      * The chat answers the user directly, so it has no use for posting into its own conversation; it alone manages
-     * collaborators (a background round reads third-party messages, which must not bring people in).
+     * collaborators, works on files and starts tasks directly (a background round reads third-party messages, which must not bring people
+     * in or touch anyone's files).
      */
     static final List<String> CHAT_TOOLS = Stream.concat(BACKGROUND_TOOLS.stream()
-            .filter(t -> !t.equals("mcp__superagent__" + SuperAgentTools.TELL_USER)), SuperAgentCollabTools.TOOLS.stream()).toList();
+            .filter(t -> !t.equals("mcp__superagent__" + SuperAgentTools.TELL_USER)),
+            Stream.of(SuperAgentCollabTools.TOOLS, SuperAgentTaskTools.TOOLS, McpGrants.SUPER_FILE_TOOLS, McpGrants.SKILL_TOOLS,
+                    McpGrants.SKILL_CHAT_TOOLS, com.superagent.agent.AgentSkillMcpTools.TOOLS).flatMap(List::stream)).toList();
 
     /** Marks a delivery of received messages; such rounds can't touch the team or its tasks. */
     static final String EXTERNAL = "【外部消息】";
@@ -593,29 +596,51 @@ public class SuperAgentService {
         return member(owner, memberId);
     }
 
-    /** Starts a task run by {@code memberId} (their character leads the brief; their skills and model apply). */
+    /** Starts a task run by {@code memberId} under a confirmed plan. */
     String assign(String owner, String memberId, String title, String brief) {
+        return assign(owner, memberId, title, brief, null, null);
+    }
+
+    /** {@code messageId}: the chat reply that hands it out, for its card there (null from a background round). */
+    String assign(String owner, String memberId, String title, String brief, String messageId, String kind) {
         requireApproved(owner);
+        return dispatch(owner, member(owner, memberId), title, brief, messageId, kind);
+    }
+
+    /** Starts what the user just agreed to in the chat: by a member if one was named, else on its own. */
+    String startTask(String owner, String memberId, String title, String brief) {
+        return startTask(owner, memberId, title, brief, null, null);
+    }
+
+    /** {@code kind}: coding or general (null = general unless it names a repository, see TaskService). */
+    String startTask(String owner, String memberId, String title, String brief, String messageId, String kind) {
+        return dispatch(owner, memberId == null || memberId.isBlank() ? null : member(owner, memberId), title, brief,
+                messageId, kind);
+    }
+
+    private String dispatch(String owner, Agent m, String title, String brief, String messageId, String kind) {
         if (title == null || title.isBlank() || brief == null || brief.isBlank()) {
             throw new IllegalArgumentException("A task needs a title and a brief");
         }
-        Agent m = member(owner, memberId);
-        String model = m.model() != null ? m.model() : settings.agentDefaultModel();
-        String character = AgentCharacters.systemPrompt(m);
-        String fullBrief = "你是团队成员「" + m.name() + "」，由 SuperAgent 分派本任务。"
-                + (character == null ? "" : "\n\n## 你的角色\n" + character)
-                + "\n\n## 任务\n" + brief.strip()
+        String model = m != null && m.model() != null ? m.model() : settings.agentDefaultModel();
+        String character = m == null ? null : AgentCharacters.systemPrompt(m);
+        String fullBrief = (m == null ? "" : "你是团队成员「" + m.name() + "」，由 SuperAgent 分派本任务。"
+                + (character == null ? "" : "\n\n## 你的角色\n" + character) + "\n\n")
+                + "## 任务\n" + brief.strip()
                 + "\n\n完成后给出简明的交付总结，说明产出放在哪里。";
         String taskId = taskService.create(new CreateTaskRequest(title.strip(), fullBrief, "web_chat", null, null, null,
-                model, providers.cliFor(model).orElse(null), null, m.tier()), owner, m.id()).id();
+                model, providers.cliFor(model).orElse(null), kind, m == null ? null : m.tier()), owner, m == null ? null : m.id()).id();
+        // A task with no member is still tracked under the SuperAgent, so its result comes back the same way.
+        String doerId = m != null ? m.id() : ensureState(owner).agentId();
+        String doer = m != null ? m.name() : "独立任务";
         synchronized (stateLock) {
             Instant now = Instant.now();
-            works.save(new SuperAgentWork(taskId, owner, ensureState(owner).planId(), title.strip(), m.id(), m.name(),
-                    SuperAgentWork.RUNNING, null, now, null, now));
-            event(taskId, owner, "assigned", "派给 " + m.name());
-            logSuper(owner, "info", "派出任务「" + title.strip() + "」给「" + m.name() + "」", "任务 " + taskId);
+            works.save(new SuperAgentWork(taskId, owner, ensureState(owner).planId(), title.strip(), doerId, doer,
+                    SuperAgentWork.RUNNING, null, now, null, now, messageId));
+            event(taskId, owner, "assigned", "派给 " + doer);
+            logSuper(owner, "info", "派出任务「" + title.strip() + "」给「" + doer + "」", "任务 " + taskId);
         }
-        log.info("superagent of {} assigned task {} to {}", owner, taskId, m.name());
+        log.info("superagent of {} assigned task {} to {}", owner, taskId, doer);
         return taskId;
     }
 
@@ -644,6 +669,7 @@ public class SuperAgentService {
     public List<SuperAgentWorkDto> work(String owner, String status, String memberId, int limit) {
         Map<String, String> avatars = new HashMap<>();
         agents.owned(owner).forEach(a -> avatars.put(a.id(), a.avatar()));
+        Agent sa = agents.ensureSuperAgent(owner); // independent tasks are tracked under it: they have no member
         boolean finishedOnly = "finished".equals(status);
         return works.list(owner).stream()
                 .filter(w -> status == null || status.isBlank() || "all".equals(status)
@@ -654,7 +680,8 @@ public class SuperAgentService {
                         : Comparator.comparing(SuperAgentWork::assignedAt, Comparator.reverseOrder()))
                 .limit(Math.max(1, Math.min(limit, 500)))
                 .map(w -> new SuperAgentWorkDto(w.taskId(), w.planId(), w.title(), w.memberId(), w.memberName(),
-                        avatars.get(w.memberId()), w.status(), w.summary(), w.assignedAt(), w.finishedAt()))
+                        avatars.get(w.memberId()), w.status(), w.summary(), w.assignedAt(), w.finishedAt(), w.messageId(),
+                        w.memberId() != null && !w.memberId().equals(sa.id())))
                 .toList();
     }
 
