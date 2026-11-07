@@ -55,5 +55,6 @@ The to-do page is everyone's home page. It gathers what needs you and what your 
 | Done | Work your agents finished |
 | Notices | Things worth knowing |
 | Ignored | What you set aside, with a way to bring it back |
+| Messages | Messages from Feishu / DingTalk and what your [SuperAgent](./superagent#messages-from-outside) did with each |
 
 The counters at the top show what's open now and how much your agents finished today, this week, this month and in total.

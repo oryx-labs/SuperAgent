@@ -2245,3 +2245,6 @@ small.model-note { display: block; margin-top: 4px; }
 .conn-part + .conn-part { margin-top: 6px; }
 .conn-part__label { flex: none; width: 4.5em; font-size: 12px; color: var(--muted); }
 .conn-part .conn-mine { flex: 1; }
+
+/* The message stream inside the to-do page's "Messages" tab. */
+.ib-sub { margin: 4px 0 12px; }

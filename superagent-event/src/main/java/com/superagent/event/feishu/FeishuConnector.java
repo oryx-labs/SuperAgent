@@ -427,12 +427,15 @@ public class FeishuConnector implements SmartLifecycle {
         return ids;
     }
 
-    /** Display name via the contact API; needs a contact permission, so a failure just falls back to the id. */
+    /**
+     * Display name via the contact API; needs a contact permission, so a failure falls back to the id. Only found
+     * names are kept: one granted later shows up without reconnecting.
+     */
     private static String userName(Connection conn, String openId) {
         if (openId == null) {
             return null;
         }
-        return conn.names.computeIfAbsent(openId, id -> {
+        String name = conn.names.computeIfAbsent(openId, id -> {
             try {
                 GetUserResp resp = conn.api.contact().v3().user().get(GetUserReq.newBuilder()
                         .userId(id).userIdType("open_id").build());
@@ -441,10 +444,11 @@ public class FeishuConnector implements SmartLifecycle {
                     return resp.getData().getUser().getName();
                 }
             } catch (Exception ignored) {
-                // permission missing or transient error: keep the id
+                // permission missing or transient error: show the id this time
             }
-            return id;
+            return null;
         });
+        return name != null ? name : openId;
     }
 
     private static String chatName(Connection conn, String chatId) {

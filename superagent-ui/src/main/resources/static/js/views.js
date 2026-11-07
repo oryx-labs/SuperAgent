@@ -43,6 +43,10 @@ function initialView() {
 }
 
 function setView(view) {
+  if (view === "messages") { // the message stream is a tab of the to-do page (old links still land on it)
+    todoFilter = "messages";
+    view = "todo";
+  }
   if (window.location.hash !== "#" + view) {
     history.replaceState(history.state, document.title, window.location.pathname + window.location.search + "#" + view);
   }
@@ -72,7 +76,6 @@ function setView(view) {
   const isFileStorage = view === "file-storage";
   const isAutomation = view === "automation";
   const isSkills = view === "skills";
-  const isInbox = view === "messages"; // the message stream, opened from the SuperAgent panel
   const isAnalytics = view === "analytics";
   const isUsage = view === "usage" || view === "company-usage"; // one page: mine, or (admins) the company's
   const isTodo = view === "todo";
@@ -94,9 +97,8 @@ function setView(view) {
   fileStoragePane.hidden = !isFileStorage;
   skPane.hidden = !isSkills;
   if (!isSkills && !skel.drawer.hidden) closeSkillDrawer();
-  ibPane.hidden = !isInbox;
   placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isModelPrices || isSettings || isIntegrations
-    || isFileStorage || isAutomation || isSkills || isInbox || isAnalytics || isTodo || isFiles || isUsage;
+    || isFileStorage || isAutomation || isSkills || isAnalytics || isTodo || isFiles || isUsage;
   if (!placeholderPane.hidden) placeholderText.textContent = L(placeholderLabels[view] || "placeholder.default");
   if (isConnectors) loadConnectors();
   if (isUsers) loadUsers();
@@ -104,7 +106,6 @@ function setView(view) {
   if (isIntegrations) loadIntegrations();
   if (isFileStorage) loadFileStorage();
   if (isSkills) loadSkills();
-  if (isInbox) loadInbox();
   if (isAnalytics) loadAnalytics();
   if (isUsage) { usScope = view === "company-usage" ? "all" : "me"; loadUsage(); }
   if (isTodo) loadTodos();

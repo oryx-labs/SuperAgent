@@ -1,5 +1,5 @@
-// SuperAgent UI — Message stream: what outside messages (Feishu) reached the user's SuperAgent, and what it did.
-// Reached from the SuperAgent panel. Classic script sharing one global scope with the others; index.html loads
+// SuperAgent UI — Message stream: what outside messages (Feishu, DingTalk) reached the user's SuperAgent, and what
+// it did. The "Messages" tab of the to-do page (todo.js switches to it). Classic script sharing one global scope with the others; index.html loads
 // them in order.
 "use strict";
 
@@ -11,7 +11,6 @@ Object.assign(api, {
 const IB_SOURCES = { feishu: "ib.source.feishu", dingtalk: "ib.source.dingtalk" };
 const IB_HANDLINGS = ["delivered", "notified", "todo", "task", "read", "ignored"];
 
-const ibPane = document.querySelector('[data-pane="inbox"]');
 const ibel = {
   notLinked: document.getElementById("ibNotLinked"),
   events: document.getElementById("ibEvents"),
@@ -27,6 +26,7 @@ async function loadInbox() {
     api.ibEvents().catch(e => { showToast(e.message, true); return []; }),
   ]);
   ibel.notLinked.hidden = !summary || summary.linked;
+  if (summary) setTodoMessagesCount(summary.today);
   ibEventList = list || [];
   fillIbFilters();
   renderIbEvents();

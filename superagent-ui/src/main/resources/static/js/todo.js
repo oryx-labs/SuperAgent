@@ -20,6 +20,8 @@ const tdel = {
   readAll: document.getElementById("todoReadAll"),
   badge: document.getElementById("todoBadge"),
   stats: document.getElementById("todoStats"),
+  items: document.getElementById("todoItems"),
+  messages: document.getElementById("todoMessages"),
 };
 let notices = [];
 let todoFilter = "all";
@@ -34,6 +36,14 @@ const TODO_KIND = {
 async function loadTodos() {
   try { notices = (await api.listNotices()) || []; } catch (e) { notices = []; showToast(e.message, true); }
   renderTodos();
+  if (todoFilter === "messages") loadInbox();
+  else api.ibSummary().then(s => { if (s) setTodoMessagesCount(s.today); }).catch(() => {});
+}
+
+/** Today's received messages, on the "Messages" tab. */
+function setTodoMessagesCount(today) {
+  const b = tdel.tabs.querySelector('[data-filter="messages"] b');
+  if (b) b.textContent = today || "";
 }
 
 /** Open = still needs the user (or not yet read); the rest is history, kept for good. */
@@ -52,9 +62,20 @@ function renderTodos() {
   tdel.tabs.querySelectorAll(".model-tab").forEach(t => {
     const f = t.dataset.filter;
     t.classList.toggle("is-active", f === todoFilter);
+    if (f === "messages") return; // counted from the message stream (setTodoMessagesCount)
     const items = todoTabItems(f);
     t.querySelector("b").textContent = (f === "ignored" ? items : items.filter(isOpenNotice)).length || "";
   });
+  // The "Messages" tab is the message stream: received messages, not things to do.
+  const onMessages = todoFilter === "messages";
+  tdel.items.hidden = onMessages;
+  tdel.messages.hidden = !onMessages;
+  if (onMessages) {
+    tdel.readAll.hidden = true;
+    renderTodoStats();
+    updateTodoBadge();
+    return;
+  }
   // Open before handled; decisions first, then things to do, then finished work and notices; newest first.
   const order = { confirm: 0, action: 1, done: 2, notice: 3 };
   const items = todoTabItems(todoFilter).sort((a, b) =>
@@ -184,8 +205,10 @@ function todoActions(n) {
             await api.noticeAction(n.id, "done");
           }, true], [L("todo.handle"), () => openTaskFromTodo(n.linkId)], ignore];
     case "action":
+      // To-dos come from received messages: the stream is where to read them in full.
       return [[L("todo.toTask"), async () => { await api.todoToTask(n.linkId); showToast(L("ib.tasked"), false); }, true],
-        [L("todo.markDone"), () => api.todoStatus(n.linkId, "done")], ignore];
+        [L("todo.markDone"), () => api.todoStatus(n.linkId, "done")],
+        [L("todo.sourceMessages"), () => { todoFilter = "messages"; renderTodos(); loadInbox(); }], ignore];
     case "done":
       return [[L("todo.viewResult"), async () => { await api.noticeAction(n.id, "done"); openTaskFromTodo(n.linkId); }, true], read];
     default:
@@ -225,7 +248,10 @@ async function openAgentFromTodo(agentId) {
 
 tdel.tabs.addEventListener("click", e => {
   const t = e.target.closest(".model-tab");
-  if (t) { todoFilter = t.dataset.filter; renderTodos(); }
+  if (!t) return;
+  todoFilter = t.dataset.filter;
+  renderTodos();
+  if (todoFilter === "messages") loadInbox();
 });
 tdel.readAll.addEventListener("click", async () => {
   try { await api.noticesReadAll(); } catch (e) { showToast(e.message, true); }

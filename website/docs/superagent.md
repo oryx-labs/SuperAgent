@@ -33,11 +33,11 @@ Your conversation with the SuperAgent stays a conversation. What it does on its 
 
 When the company's [Feishu app](./connectors#feishu) is on, your messages flow to your SuperAgent:
 
-<Shot name="message-stream" alt="The message stream: each message and what SuperAgent did with it" />
+<Shot name="message-stream" alt="The Messages tab: each message and what SuperAgent did with it" />
 
 - It sorts them: **urgent** ones right away (and it can ping you in Feishu), **important** ones every hour, the rest in a **daily digest**.
 - Sorting needs no setup: it uses the org chart (your manager and direct reports) and a fixed set of urgent signals.
 - For each message it decides what to do: tell you, add a to-do, propose a plan for work the team can take on, or just note it.
 - **Safety:** while handling outside messages it can only use read-only and inbox tools. It can't hire, assign or act on someone else's words; anything that acts goes through a plan you approve.
 
-The **message stream** shows every message and what your SuperAgent did with it. Open it from the SuperAgent's details.
+The **Messages** tab on your [to-do](./agents#to-do) page shows every message and what your SuperAgent did with it (it opens from the SuperAgent's details too). A to-do taken from a message links back to it.
