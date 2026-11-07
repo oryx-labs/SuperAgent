@@ -76,7 +76,7 @@ public class ConnectorToolsService {
         }
         if (ConnectorService.FEISHU_ID.equals(id)) {
             return new ConnectorToolsDto(id, List.of(), Instant.now(), null,
-                    "飞书把消息带给你的 SuperAgent，本身不给 Agent 提供工具；文档能力在「飞书 / Lark 文档」里。");
+                    "飞书消息本身不给 Agent 提供工具；授权飞书文档后，这里列出文档工具。");
         }
         if (ConnectorService.DINGTALK_ID.equals(id)) {
             if (!integrations.ready(IntegrationService.DINGTALK)) {

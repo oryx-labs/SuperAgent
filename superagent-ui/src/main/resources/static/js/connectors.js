@@ -54,8 +54,21 @@ async function loadConnectors() {
   let list = [];
   try { list = (await api.listConnectors()) || []; } catch (e) { showToast(e.message, true); }
   cel.rows.innerHTML = "";
+  list = mergeFeishuDocs(list);
   cel.empty.hidden = list.length > 0;
   list.forEach(c => cel.rows.appendChild(connectorRow(c)));
+}
+
+/**
+ * Feishu messages and Feishu / Lark docs run on the same company app, so they are one row: messages are the bot's
+ * (each employee linked), docs are the employee's own authorization. The docs connector rides along as {@code docs}.
+ */
+function mergeFeishuDocs(list) {
+  const feishu = list.find(c => c.kind === "feishu");
+  const docs = list.find(c => c.id === "feishu-docs");
+  if (!feishu || !docs) return list;
+  feishu.docs = docs;
+  return list.filter(c => c !== docs);
 }
 
 // A recognisable mark per known service (matched on kind, name or command); anything else gets its initial.
@@ -98,7 +111,7 @@ function connectorRow(c) {
   name.className = "c-name c-name--icon";
   const text = document.createElement("div");
   text.className = "c-name__text";
-  text.appendChild(document.createTextNode(c.name));
+  text.appendChild(document.createTextNode(c.docs ? L("conn.feishuMergedName") : c.name));
   const builtin = c.kind === "builtin"; // SuperAgent's own MCP: shown, never edited
   if (builtin || c.system) {
     const tag = document.createElement("span");
@@ -106,7 +119,7 @@ function connectorRow(c) {
     tag.textContent = L("conn.builtin");
     text.appendChild(tag);
   }
-  const desc = builtin ? L("conn.builtinDesc") : c.description;
+  const desc = builtin ? L("conn.builtinDesc") : c.docs ? L("conn.feishuMergedDesc") : c.description;
   if (desc) { const d = document.createElement("small"); d.textContent = desc; text.appendChild(d); }
   const config = c.endpoint; // admins only: null for everyone else
   if (config) {
@@ -123,6 +136,12 @@ function connectorRow(c) {
 
   const use = document.createElement("td");
   use.textContent = L("conn.use." + c.kind);
+  if (c.docs) {
+    const more = document.createElement("small");
+    more.className = "conn-count";
+    more.textContent = L("conn.use.docs");
+    use.appendChild(more);
+  }
 
   const status = document.createElement("td");
   const state = connState(c);
@@ -139,33 +158,32 @@ function connectorRow(c) {
     n.textContent = L(isMessaging(c) ? "conn.linkedCount" : "conn.authorizedCount", { n: c.authorizedCount });
     status.appendChild(n);
   }
+  if (c.docs) {
+    const d = document.createElement("small");
+    d.className = "conn-count";
+    d.textContent = L("conn.part.docs") + " · " + L("conn.status." + connState(c.docs))
+      + (isAdmin ? " · " + L("conn.authorizedCount", { n: c.docs.authorizedCount }) : "");
+    status.appendChild(d);
+  }
 
   const mine = document.createElement("td");
-  mine.appendChild(myAuthorization(c));
+  if (c.docs) {
+    mine.append(connPart(L("conn.part.messages"), myAuthorization(c)), connPart(L("conn.part.docs"), myAuthorization(c.docs)));
+  } else {
+    mine.appendChild(myAuthorization(c));
+  }
 
   const actions = document.createElement("td");
   const cell = document.createElement("div");
   cell.className = "cell-actions";
   actions.appendChild(cell);
-  if (canSeeTools(c)) cell.appendChild(linkBtn(L("conn.tools"), () => openConnTools(c)));
-  if (isAdmin && c.kind === "mcp" && c.system) {
-    // Comes with the system: not edited or deleted, only turned on and off.
-    const sw = document.createElement("label");
-    sw.className = "conn-switch";
-    sw.title = L(c.enabled ? "conn.disable" : "conn.enable");
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.setAttribute("role", "switch");
-    box.checked = box.defaultChecked = c.enabled;
-    box.setAttribute("aria-label", L("conn.enabledLabel"));
-    box.addEventListener("change", async () => {
-      try { await api.setConnectorEnabled(c.id, box.checked); await loadConnectors(); }
-      catch (e) { box.checked = !box.checked; showToast(e.message, true); }
-    });
-    const word = document.createElement("span");
-    word.textContent = L(c.enabled ? "conn.on" : "conn.off");
-    sw.append(box, word);
-    cell.appendChild(sw);
+  // The merged Feishu row's tools are the docs' (the bot itself gives agents none).
+  const toolsOf = c.docs || c;
+  if (canSeeTools(toolsOf)) cell.appendChild(linkBtn(L("conn.tools"), () => openConnTools(toolsOf)));
+  if (isAdmin && c.docs) {
+    cell.appendChild(systemSwitch(c.docs, L("conn.part.docs")));
+  } else if (isAdmin && c.kind === "mcp" && c.system) {
+    cell.appendChild(systemSwitch(c));
   } else if (isAdmin && c.kind === "mcp") { // SuperAgent's own and Feishu are set up elsewhere
     const edit = linkBtn("✎", () => openConnectorModal(c), "link-btn--muted");
     edit.title = L("common.edit");
@@ -175,6 +193,37 @@ function connectorRow(c) {
   }
   tr.append(name, use, status, mine, actions);
   return tr;
+}
+
+/** On/off for a connector that comes with the system: it isn't edited or deleted, only turned on and off. */
+function systemSwitch(c, label) {
+  const sw = document.createElement("label");
+  sw.className = "conn-switch";
+  sw.title = L(c.enabled ? "conn.disable" : "conn.enable");
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.setAttribute("role", "switch");
+  box.checked = box.defaultChecked = c.enabled;
+  box.setAttribute("aria-label", label ? label + " " + L("conn.enabledLabel") : L("conn.enabledLabel"));
+  box.addEventListener("change", async () => {
+    try { await api.setConnectorEnabled(c.id, box.checked); await loadConnectors(); }
+    catch (e) { box.checked = !box.checked; showToast(e.message, true); }
+  });
+  const word = document.createElement("span");
+  word.textContent = (label ? label + " " : "") + L(c.enabled ? "conn.on" : "conn.off");
+  sw.append(box, word);
+  return sw;
+}
+
+/** One labelled part of a merged row's "mine" cell (messages, docs). */
+function connPart(label, body) {
+  const part = document.createElement("div");
+  part.className = "conn-part";
+  const head = document.createElement("span");
+  head.className = "conn-part__label";
+  head.textContent = label;
+  part.append(head, body);
+  return part;
 }
 
 /** Feishu and DingTalk: messaging apps the company sets up once; each employee is linked, not authorized. */

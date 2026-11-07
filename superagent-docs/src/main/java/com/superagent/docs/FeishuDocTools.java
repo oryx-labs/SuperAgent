@@ -87,7 +87,7 @@ public class FeishuDocTools implements McpToolProvider {
         String owner = requireOwner(grant, "飞书文档");
         McpGrants.requireDocAccess(grant, name);
         String token = connectors.userToken(ConnectorService.FEISHU_DOCS_ID, owner).orElseThrow(() -> new McpToolException(
-                "用户还没有授权飞书文档。请让他在 SuperAgent 的「连接」页找到「飞书 / Lark 文档」点授权，然后再试。"));
+                "用户还没有授权飞书文档。请让他在 SuperAgent 的「连接」页找到「飞书 / Lark」，在「文档」那里点授权，然后再试。"));
         Map<String, String> auth = Map.of("Authorization", "Bearer " + token);
         String base = oauth.base();
         return McpToolResult.ok(switch (name) {
