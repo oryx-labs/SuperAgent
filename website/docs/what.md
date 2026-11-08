@@ -5,45 +5,49 @@ description: SuperAgent is an AI collaborative work system for companies. Everyo
 
 # What is SuperAgent
 
-**SuperAgent is an AI collaborative work system for companies, not a personal assistant.** Everyone in the company does their work in one system, and that work automatically becomes company assets that stay when people change.
+**SuperAgent is an AI collaborative work system for companies, not a personal assistant.** Everyone in the company works with AI in one system, and that work becomes company assets that stay when people change.
 
-## Not a personal assistant
+## Where it starts
 
-Most AI agents today are personal assistants. They make one person faster, keep the work in that person's account, and leave with them. Each employee pays for a subscription, nobody watches the tokens, and the company can't see what's happening.
+AI can do real work now. Models write code, documents and analyses, and official agents such as Claude Code and Codex carry a job through on their own. Employees are already using them: they buy their own tokens, install agents on their own laptops, and get faster.
 
-SuperAgent starts from the company and its employees instead. Companies need AI that actually gets used: it has to be useful, affordable, and able to do any kind of work. So SuperAgent is designed as something the company deploys once for everyone:
+But all of it happens in personal places. The accounts, the spending and the results belong to each person. The company can't see what was done, can't build on it, and loses it when people leave. Everyone gets faster, and the company doesn't get any better at its work. SuperAgent gathers that scattered use into one system the company runs.
 
-| | Personal AI assistants | SuperAgent |
-| --- | --- | --- |
-| Who it serves | One person | The whole company and its employees |
-| Where the work goes | A personal account; leaves with the person | Company assets that accumulate automatically |
-| Working together | Everyone separately | Share Agents; a SuperAgent that runs a team |
-| Cost | Every employee subscribes; tokens wasted | Ready on day one on the company's keys; spend visible per task and model |
-| Control | Invisible to the company | Company-controlled; people approve; run logs |
+| Today | With SuperAgent |
+| --- | --- |
+| Only people who tinker get AI working | Employees have AI from their first day; nothing to buy or set up |
+| Results stay in personal accounts and leave with the person | Work happens in the company's system and becomes company assets |
+| Nobody can pick up where someone else left off | Several people work with the same agent; agents and their context stay with the company |
+| Good methods stay with whoever found them | Methods become skills, personal first, then company-wide |
+| Everyone pays separately and uses the most expensive model | One set of company keys; each task gets the cheapest model that can do it |
+| The company can't see or control what AI does | Usage, run logs and analytics; people decide at key points |
+| Personal agents can't reach company systems | Feishu, DingTalk, Git and docs connected once, used with each person's own authorization |
 
 ## How it fits together
 
-Work comes in from employees, Feishu and automations. Each person's SuperAgent plans it and hands it to agents and tasks, which run on the company's models and tools; the results stay as company assets. Governance runs through all of it.
+SuperAgent drives the official agent CLIs instead of rebuilding them, and works at the company level: who does the work, where it runs, which model it uses, what it costs, and where the results go. The **control plane** holds the interface, the business logic, the data and the secrets; the agents do the work in **sandboxes**, one per employee.
 
-![SuperAgent architecture](/diagrams/architecture-en.svg)
+![SuperAgent layered architecture](/diagrams/architecture-layers-en.jpg)
+
+This is the target architecture. Today's release runs the control plane and the agent CLIs on one server; see [Architecture](./architecture) for the details and what's still being built.
 
 ## What it does, in priority order
 
-1. **Work becomes assets.** Everyone works in one system. What agents produce and what people send them is kept in Files, and each agent builds long-term memory.
-2. **Collaboration.** Several people work on the same agent; your SuperAgent forms a team and hands out the work.
+1. **Work becomes assets.** Everyone works in one system. What agents produce and what people send them is filed in Files, and each agent builds long-term memory.
+2. **Collaboration.** Several people work with the same agent; your SuperAgent breaks work down and hands it to agents and tasks.
 3. **Reusable methods.** Personal and company skills, and agents whose setup, memory and files belong to the company.
-4. **Cost and models.** No personal subscriptions; the company's keys with failover; spend per task and model; any of the major coding CLIs.
-5. **Visible and safe.** People approve plans and decisions; permissions, run logs and encrypted secrets.
+4. **Model-neutral and cost-efficient.** No personal subscriptions; the company's keys with failover; each task gets the cheapest model that can do it; spend per person, task and model.
+5. **Visible and safe.** People approve plans and decisions; analytics, permissions, run logs and encrypted secrets.
 
 See the [capability map](./features) for everything it does today, and the [roadmap](./roadmap) for what's coming.
 
 ## In short
 
-**Company-controlled. Cost-efficient. Accumulates assets automatically. Easy to use.**
+**Kept under control, kept by the company, cheaper to run, and finished reliably.**
 
 ## Status
 
-SuperAgent is source available, free to use, self-hosted and iterating fast. The docs describe what works today; what isn't built yet is on the [roadmap](./roadmap).
+SuperAgent is open source, self-hosted and iterating fast. The docs describe what works today; what isn't built yet is on the [roadmap](./roadmap).
 
 ## License
 
@@ -56,6 +60,7 @@ Versions released before this license change remain under the plain Apache Licen
 
 ## Next
 
-- [Why SuperAgent](./why): why companies need this rather than more assistants.
+- [Why SuperAgent](./why): the judgments behind it, who it's for, and where it's going.
+- [Architecture](./architecture): how it's built.
 - [Capability map](./features): everything it can do, area by area.
 - [Quick Start](./getting-started): deploy it for your company.

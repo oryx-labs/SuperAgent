@@ -1195,3 +1195,64 @@ body {
   width: 100%;
   margin: 20px 0 28px;
 }
+
+
+/* ─── Home: beliefs, figures ──────────────────────────────────── */
+.sa-alt {
+  background: var(--vp-c-bg-alt);
+}
+.sa-beliefs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  max-width: var(--sa-max);
+  margin: 0 auto 36px;
+}
+.sa-belief {
+  border-top: 2px solid #2563eb;
+  padding-top: 14px;
+}
+.sa-belief h4 {
+  margin: 0 0 6px;
+  font-family: var(--sa-display);
+  font-size: 1.08rem;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+.sa-belief p {
+  margin: 0;
+  color: var(--vp-c-text-2);
+  line-height: 1.6;
+  font-size: 0.95rem;
+}
+.sa-figure {
+  margin: 0 auto;
+  max-width: var(--sa-max);
+  border-radius: 16px;
+  border: 1px solid var(--vp-c-border);
+  background: #fff;
+  box-shadow: var(--sa-shadow-md);
+  overflow: hidden;
+}
+.sa-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.sa-more-link {
+  text-align: center;
+  margin: 28px 0 0;
+  font-weight: 600;
+}
+.sa-more-link a {
+  color: #2563eb;
+  text-decoration: none;
+}
+.sa-more-link a:hover {
+  text-decoration: underline;
+}
+@media (max-width: 760px) {
+  .sa-beliefs {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,6 +1,6 @@
 ---
 title: Models & cost
-description: The coding-agent CLIs SuperAgent runs, the company's API keys, model tiers and where the money goes.
+description: The coding-agent CLIs SuperAgent runs, the company's API keys, how models are chosen and where the money goes.
 ---
 
 # Models & cost
@@ -30,17 +30,14 @@ Each CLI has a pool of endpoints and keys, in priority order:
 - **Keys already on the server** are found at startup and imported.
 - Keys are stored encrypted and only ever shown masked.
 
-## Model tiers (preview)
+## How models are chosen
 
-When an administrator turns tiers on, people pick a **tier** instead of a model name:
+SuperAgent doesn't tie the company to one model vendor. Every model the company has keys for can be used, and each piece of work goes to the one that fits it.
 
-| Tier | For |
-| --- | --- |
-| **Fast** | Quick, cheap work; also used for the system's own chores (tagging files, distilling memory) |
-| **Standard** | Everyday work |
-| **Strong** | Hard problems |
-
-Tiers are worked out from model prices and what can actually run, and administrators can move a model between tiers. Agents, tasks and automations can each have a tier. Tiers are off by default; with them off, models are chosen as before.
+- **Chats** use the company's **default model** (Admin → System Settings → Basic). If it fails with a model problem (a bad key, no quota, the endpoint down), the chat moves to the next model on the backup list without the user noticing, and goes back once the default recovers. Administrators are told when that happens.
+- **Tasks pick their own model.** Before a task runs, the default model judges how hard it is, and the task gets the **cheapest model that can do it**. If it fails, it moves up a level. The task's **Model choice** tab shows what was picked and why.
+- **Background chores** (tagging files, distilling memory) use the cheapest model that works.
+- **Model prices** (Admin → Models → Prices) lists the models that can run with their official prices. Administrators can enter the price they actually pay (for a relay, say) and switch a model off for tasks. Cost estimates and model choice both use these prices.
 
 ## Seeing the cost
 

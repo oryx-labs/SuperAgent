@@ -1,8 +1,8 @@
-"""Draws SuperAgent's architecture and capability diagrams as SVG, in English and Chinese.
+"""Draws SuperAgent's capability map (capabilities-en.svg / capabilities-zh.svg) as SVG.
 
 Run from the website directory:  python3 scripts/diagrams.py public/diagrams
-then copy public/diagrams/architecture-en.svg to ../docs/images/superagent-architecture.svg (used by the README).
-A box whose text may not fit is reported as "overflow"; widen the box or shorten the text."""
+A box whose text may not fit is reported as "overflow"; widen the box or shorten the text.
+The architecture diagrams are images in public/diagrams (architecture-*.jpg), not drawn here."""
 import sys, os
 from xml.sax.saxutils import escape
 
@@ -155,6 +155,5 @@ def capabilities(t, path):
     s.save(path)
 
 for lang, t in T.items():
-    architecture(t, os.path.join(OUT, f"architecture-{lang}.svg"))
     capabilities(t, os.path.join(OUT, f"capabilities-{lang}.svg"))
 print("written")

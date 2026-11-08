@@ -14,28 +14,46 @@ const docsFeatures = computed(() =>
 const docsStart = computed(() =>
   withBase(isZh.value ? '/zh/docs/getting-started' : '/docs/getting-started')
 )
+const docsWhy = computed(() => withBase(isZh.value ? '/zh/docs/why' : '/docs/why'))
+const docsArch = computed(() => withBase(isZh.value ? '/zh/docs/architecture' : '/docs/architecture'))
+const img = (name) => withBase(`/diagrams/${name}-${isZh.value ? 'zh' : 'en'}.jpg`)
 
 const check = 'M20 6L9 17l-5-5'
 const cross = 'M18 6L6 18M6 6l12 12'
 
 const pillars = computed(() => [
-  t('公司可控', 'Company-controlled'),
-  t('节省成本', 'Saves cost'),
-  t('自动沉淀资产', 'Assets accumulate'),
-  t('好用', 'Easy to use'),
+  t('工作沉淀为资产', 'Work becomes assets'),
+  t('协作与交接', 'Collaboration & handover'),
+  t('模型中立,越用越省', 'Model-neutral, lower cost'),
+  t('看得清,管得住', 'Visible and controlled'),
 ])
 
 const personal = computed(() => [
-  t('只帮一个人', 'Helps one person'),
-  t('人走了,工作就没了', 'Work leaves with the person'),
-  t('每人自费,token 浪费', 'Everyone pays; tokens wasted'),
-  t('公司看不见', 'Invisible to the company'),
+  t('账号、花费、成果都在个人手里', 'Accounts, spending and results stay personal'),
+  t('人一走,工作就没了', 'Work leaves with the person'),
+  t('各自付费,什么都用最贵的模型', 'Everyone pays; the priciest model for everything'),
+  t('公司看不见、管不住', 'The company can\'t see or control it'),
 ])
 const company = computed(() => [
-  t('全公司一个系统', 'One system for the whole company'),
+  t('全公司一个系统,入职就能用', 'One system for everyone, ready on day one'),
   t('工作沉淀为公司资产', 'Work becomes company assets'),
-  t('入职即用,按量付费', 'Ready on day one, pay per use'),
-  t('公司可控,可审计', 'Controlled and auditable'),
+  t('模型中立,按任务选最划算的模型', 'Model-neutral; each task gets the best-value model'),
+  t('审计、分析、管控', 'Audit, analytics and control'),
+])
+
+const beliefs = computed(() => [
+  {
+    title: t('智能交给官方 Agent', 'Leave the intelligence to official agents'),
+    desc: t('直接驱动 Claude Code、Codex 等官方 Agent,模型和 Agent 越强,SuperAgent 越强。', 'SuperAgent drives Claude Code, Codex and other official agents, so it gets better as they do.'),
+  },
+  {
+    title: t('价值在组织层', 'The value is at the company level'),
+    desc: t('成果归谁、谁能看、怎么交接、谁来做、花了多少,这些只有公司级的系统能承担。', 'Who owns the results, who sees them, handover, who does what, what it costs: only a company-wide system can carry these.'),
+  },
+  {
+    title: t('对模型厂商中立', 'Neutral about model vendors'),
+    desc: t('各家模型都能用,不同任务用不同模型,公司攒下的东西不属于任何一家模型。', 'Any vendor\'s models; each task gets the one that fits; what the company builds belongs to the company.'),
+  },
 ])
 
 const soon = () => t('即将推出', 'Soon')
@@ -75,22 +93,22 @@ const features = computed(() => [
   },
   {
     icon: 'M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
-    eyebrow: t('成本与模型', 'Cost & models'),
-    title: t('入职就有 AI,只为用量付费', 'AI from day one. Pay for usage.'),
+    eyebrow: t('模型中立与成本', 'Model-neutral & cost'),
+    title: t('入职就有 AI,越用越省', 'AI from day one, and cheaper as you go'),
     bullets: [
-      { text: t('员工不用自费订阅', 'No personal subscriptions') },
-      { text: t('按任务、按模型看花费', 'Spend per task and per model') },
-      { text: t('按难度自动选模型', 'Model picked by task difficulty'), soon: true },
+      { text: t('各家模型都能用,不绑定厂商,员工不用自费订阅', 'Any vendor\'s models, no lock-in, no personal subscriptions') },
+      { text: t('每个任务自动选够用的最便宜的模型', 'Each task gets the cheapest model that can do it') },
+      { text: t('按人、按任务、按模型看花费', 'Spend per person, task and model') },
     ],
     shot: { src: '/shots/analytics.jpg', label: 'analytics', w: 1643, h: 840, alt: t('用量与花费', 'Usage and spend') },
   },
   {
     icon: 'M12 3l8 3v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-3zM9 12l2 2 4-4',
-    eyebrow: t('审计与安全', 'Audit & security'),
-    title: t('AI 怎么用,公司看得见', 'See how AI is used'),
+    eyebrow: t('审计与管控', 'Audit & control'),
+    title: t('AI 怎么用,公司看得清、管得住', 'See and control how AI is used'),
     bullets: [
       { text: t('关键决策等人确认', 'Key decisions wait for a person') },
-      { text: t('身份、权限、运行日志', 'Identity, permissions, run logs') },
+      { text: t('全公司的使用分析、权限和运行日志', 'Company-wide analytics, permissions and run logs') },
       { text: t('对接企业审批', 'Enterprise approvals'), soon: true },
     ],
     shot: { src: '/shots/todo.jpg', label: 'to-do', w: 1655, h: 751, alt: t('等待确认的决策', 'Decisions awaiting confirmation') },
@@ -101,8 +119,8 @@ const more = computed(() => [
   { icon: 'M12 3l8 3v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-3z', title: t('每人一个 SuperAgent', 'A SuperAgent each'), desc: t('接活、计划、派活、回报', 'Plans, assigns, reports back') },
   { icon: 'M4 5h16v10H4zM2 19h20M9 9l2 2 4-4', title: t('编码 Agent', 'Coding agents'), desc: t('Claude Code、Codex、DeepSeek、Kimi、Qwen、GLM', 'Claude Code, Codex, DeepSeek, Kimi, Qwen, GLM') },
   { icon: 'M12 7V3m0 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM12 12h4', title: t('自动化', 'Automation'), desc: t('定时、一次性、API 触发', 'Scheduled, one-off, API') },
-  { icon: 'M9 3v18M3 9h12M15 15h6M18 12v6', title: t('连接外部系统', 'Connectors'), desc: t('飞书、GitHub、Gitee、MCP', 'Feishu, GitHub, Gitee, MCP') },
-  { icon: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z', title: t('模型无关', 'Model-agnostic'), desc: t('不被厂商锁定', 'No vendor lock-in') },
+  { icon: 'M9 3v18M3 9h12M15 15h6M18 12v6', title: t('连接外部系统', 'Connectors'), desc: t('飞书、钉钉、Notion、Confluence、GitHub、MCP', 'Feishu, DingTalk, Notion, Confluence, GitHub, MCP') },
+  { icon: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z', title: t('模型中立', 'Model-neutral'), desc: t('按任务选模型,不被厂商锁定', 'A model per task, no vendor lock-in') },
   { icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 7v5l3 3', title: t('运行日志', 'Run logs'), desc: t('每一步都有记录', 'Every step recorded') },
 ])
 </script>
@@ -159,11 +177,12 @@ const more = computed(() => [
     <section class="sa-section">
       <div class="sa-wrap">
         <div class="sa-head">
-          <h2>{{ t('个人助手帮一个人,SuperAgent 帮整个公司', 'Assistants help a person. SuperAgent helps the company.') }}</h2>
+          <h2>{{ t('AI 已经能干活了,公司却还没有一个让 AI 干活的地方', 'AI can do the work. Companies still need a place for it.') }}</h2>
+          <p>{{ t('员工在自己的电脑上、用自己的 token 用 AI。SuperAgent 把这些分散的使用收拢到公司的一个系统里。', 'Employees use AI on their own laptops with their own tokens. SuperAgent gathers that use into one system the company runs.') }}</p>
         </div>
         <div class="sa-vs">
           <div class="sa-vs__card">
-            <h3>{{ t('个人 AI 助手', 'Personal AI assistants') }}</h3>
+            <h3>{{ t('今天:各自用 AI', 'Today: everyone on their own') }}</h3>
             <ul>
               <li v-for="x in personal" :key="x"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path :d="cross"/></svg>{{ x }}</li>
             </ul>
@@ -232,6 +251,55 @@ const more = computed(() => [
       </div>
     </section>
 
+    <!-- How it works: division of labour -->
+    <section class="sa-section sa-alt">
+      <div class="sa-wrap">
+        <div class="sa-head">
+          <div class="sa-eyebrow">{{ t('我们的判断', 'What we believe') }}</div>
+          <h2>{{ t('Agent 负责把事做好,SuperAgent 负责让公司用好 Agent', 'Agents do the job well. SuperAgent helps the company use them well.') }}</h2>
+        </div>
+        <div class="sa-beliefs">
+          <div class="sa-belief" v-for="b in beliefs" :key="b.title">
+            <h4>{{ b.title }}</h4>
+            <p>{{ b.desc }}</p>
+          </div>
+        </div>
+        <figure class="sa-figure">
+          <img :src="img('core-division-of-labour')" :alt="t('分工:模型和官方 Agent 负责把一件事做好,SuperAgent 负责让公司用好 Agent', 'Division of labour: models and official agents do each job well; SuperAgent helps the company use agents well')" width="2560" height="962" loading="lazy" />
+        </figure>
+        <p class="sa-more-link"><a :href="docsWhy">{{ t('读完整的判断 →', 'Read the full reasoning →') }}</a></p>
+      </div>
+    </section>
+
+    <!-- Architecture -->
+    <section class="sa-section">
+      <div class="sa-wrap">
+        <div class="sa-head">
+          <div class="sa-eyebrow">{{ t('架构', 'Architecture') }}</div>
+          <h2>{{ t('控制面决定做什么,沙箱里干活', 'The control plane decides. Sandboxes do the work.') }}</h2>
+          <p>{{ t('业务、数据和密钥留在控制面;Agent 在隔离的沙箱里运行,每个员工一个。运行时插件化,SaaS 和私有化是同一套代码。', 'Business logic, data and secrets stay in the control plane; agents run in isolated sandboxes, one per employee. The runtime is pluggable, and SaaS and self-hosted run the same code.') }}</p>
+        </div>
+        <figure class="sa-figure">
+          <img :src="img('architecture-layers')" :alt="t('SuperAgent 分层架构', 'SuperAgent layered architecture')" width="2560" height="2472" loading="lazy" />
+        </figure>
+        <p class="sa-more-link"><a :href="docsArch">{{ t('查看技术架构 →', 'See the architecture →') }}</a></p>
+      </div>
+    </section>
+
+    <!-- Where it's going -->
+    <section class="sa-section">
+      <div class="sa-wrap">
+        <div class="sa-head">
+          <div class="sa-eyebrow">{{ t('要走向哪里', 'Where it\'s going') }}</div>
+          <h2>{{ t('自动化 · 智能化 · 全天候', 'Automated, intelligent, always on') }}</h2>
+          <p>{{ t('模型变强、软件成熟、公司的知识越积越多,需要人介入的地方越来越少。同样的人,做更多的事。', 'As models get stronger, the software matures and the company\'s knowledge builds up, people need to step in less and less. The same people do more.') }}</p>
+        </div>
+        <figure class="sa-figure">
+          <img :src="img('product-automation-trend')" :alt="t('随着使用时间增加,Agent 自己完成的工作越来越多,需要人介入的越来越少,每件事的成本越来越低', 'Over time, agents finish more on their own, people step in less, and each job costs less')" width="2560" height="962" loading="lazy" />
+        </figure>
+      </div>
+    </section>
+
     <!-- Any kind of work -->
     <section class="sa-more">
       <div class="sa-wrap sa-section">
@@ -258,7 +326,7 @@ const more = computed(() => [
       <div class="sa-wrap">
         <div class="sa-cta__panel">
           <h2>{{ t('给公司一个真正用得起来的 AI', 'Give your company AI it will actually use') }}</h2>
-          <p>{{ t('源码公开、免费使用、自托管,部署一次,全员可用。', 'Source available, free to use and self-hosted. Deploy once for everyone.') }}</p>
+          <p>{{ t('开源、自托管,部署一次,全员可用。', 'Open source and self-hosted. Deploy once for everyone.') }}</p>
           <div class="sa-actions">
             <a class="sa-btn sa-btn--white" :href="demo" target="_blank" rel="noreferrer">{{ t('在线体验', 'Try the live demo') }}</a>
             <a class="sa-btn sa-btn--clear" :href="docsStart">{{ t('部署指南', 'Deployment guide') }}</a>

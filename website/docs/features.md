@@ -16,7 +16,7 @@ SuperAgent is built from the company's side: the company and its employees, not 
 | **Work becomes company assets** | Files for everything agents make and people send; long-term memory per agent; run logs | [Files & skills](./files), [Agents & collaboration](./agents) |
 | **Collaboration and continuity** | Several people on one agent; invitations from chat; a SuperAgent that hires a team and hands out work | [Agents & collaboration](./agents), [SuperAgent](./superagent) |
 | **Reusable methods** | Skills at the personal and company level, mounted on agents and inherited by tasks | [Files & skills](./files) |
-| **Cost under control** | One key pool per model with failover; spend per task and model; model tiers (preview) | [Models & cost](./models) |
+| **Model-neutral, cost under control** | Any vendor's models; each task gets the cheapest model that can do it; one key pool per CLI with failover; spend per person, task and model | [Models & cost](./models) |
 | **Visible and safe** | Human confirmation for key decisions, permissions, run logs, encrypted secrets | [Administration & security](./admin) |
 
 ## By area

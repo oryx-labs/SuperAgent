@@ -10,7 +10,7 @@ An agent is a colleague the company keeps. Its setup, memory and the files it pr
 ## Creating an agent
 
 - **Persona** — pick one of 24 built-in characters, or write your own. It shapes how the agent works and talks.
-- **Model** — a specific model, or a [tier](./models#model-tiers-preview) (fast / standard / strong) when tiers are turned on. Without either, the system default applies.
+- **Model** — chats use the company's default model, and tasks pick their own; see [how models are chosen](./models#how-models-are-chosen).
 - **Skills** — mount [skills](./files#skills) the agent should follow. You can mount any skill you can see: your own and the company's.
 - **Avatar and name** — so people can tell agents apart.
 

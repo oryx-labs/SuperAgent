@@ -3,47 +3,75 @@
   <img src="docs/images/superagent-logo.png" alt="SuperAgent logo" style="max-width: 50%;" />
 </p>
 
-**AI collaborative work system for companies, not personal assistants.** Everyone works with AI in one system, and the work becomes the company's assets. Source available, free to use and self-hosted.
+**AI collaborative work system for companies, not personal assistants.** Everyone works with AI in one system, and the work becomes the company's assets. Open source and self-hosted.
 
 [Website](https://oryx-labs.github.io/SuperAgent/) · [Live demo](http://117.72.92.117:18081/login) · [中文](https://oryx-labs.github.io/SuperAgent/zh/)
 
-## What is SuperAgent?
+## Why SuperAgent
 
-Most AI agents today are personal assistants. They make one person faster, keep the work in that person's account, and leave with them.
+AI can do real work now. Models write code, documents and analyses, and official agents such as Claude Code and Codex carry a job through for tens of minutes on their own. Employees are already using them: they buy their own tokens, install agents on their own laptops, and get faster.
 
-SuperAgent is designed from the company's side instead: the company and its employees. Companies need AI that actually gets used. It has to be useful, affordable, and able to do any kind of work. SuperAgent is a system the company deploys once for everyone. Employees get AI from their first day, everyone works in the same place, and that work automatically becomes company assets that don't disappear when people change.
+But all of it happens in personal places. The accounts, the spending and the results belong to each person; the company can't see what was done, can't build on it, and loses it when people leave. Everyone gets faster, and the company doesn't get any better at its work.
 
-| | Personal AI assistants | SuperAgent |
-| --- | --- | --- |
-| Who it serves | One person | The whole company and its employees |
-| Where the work goes | A personal account; leaves with the person | Company assets that accumulate automatically |
-| Working together | Everyone separately | Share Agents; a SuperAgent that runs a team |
-| Cost | Every employee subscribes; tokens wasted | Ready on day one on the company's keys; spend visible per task and model |
-| Control | Invisible to the company | Company-controlled; people approve; run logs |
+| Today | What SuperAgent does |
+| --- | --- |
+| Only people who tinker get AI working | Employees have AI from their first day; nothing to buy or set up |
+| Results stay in personal accounts and leave with the person | Work happens in the company's system and becomes company assets |
+| Nobody can pick up where someone else left off | Several people work with the same agent; agents and their context are handed over |
+| Good methods stay with whoever found them | Methods become skills, personal first, then company-wide |
+| Everyone pays separately and uses the most expensive model | One set of company keys; each task gets the cheapest model that can do it |
+| The company can't see or control what AI does | Audit, analytics, control and governance; people decide at key points |
+| Personal agents can't reach company systems | Feishu, DingTalk, Git and docs connected once, used with each person's own authorization |
+| Long tasks break on a laptop and nobody notices | Tasks are assigned, scheduled, tracked and run to completion |
 
-## Why SuperAgent?
+## What we believe
 
-Handing every employee a personal assistant doesn't make AI work for a company. The work leaves with the person, colleagues can't build on each other, nothing accumulates, costs are scattered and wasteful, and the company can't see any of it.
-
-**In short, SuperAgent is company-controlled, cost-efficient, accumulates assets automatically, and is easy to use.**
+1. **Scattered AI use will be gathered up by companies.** Every technology that enters a company starts with individuals and ends with the company managing it. The lasting value is control, accumulation and cost.
+2. **Leave the intelligence to the models and official agents.** A home-made agent loop can't keep up with official agents that are tuned together with their models. SuperAgent drives the official CLIs (Claude Code, Codex, Qwen Code, Kimi and more) instead of rebuilding them, so every improvement in models and agents becomes an improvement in SuperAgent.
+3. **The value is at the company level.** Who owns the results, who can see them, how work is handed over, who does what, what it costs, which systems it touches: these span people, time and systems, and only a company-wide system can handle them.
+4. **Stay neutral about model vendors.** Any vendor's models, a company's own model gateway and self-hosted models can all be used. Each task goes to the model that fits it best, which keeps cost down; the assets a company builds belong to the company, not to any model.
+5. **Agents must follow the rules before companies let them work.** Agents run in isolation, touch only what they should, leave a record of what they did, and stop for people at the decisions that matter.
+6. **The more complex the work, the more it needs a system to run it.** As tasks grow from minutes to hours and run every day, companies need something to assign, schedule, track and finish them reliably and cheaply.
 
 ## Core capabilities
 
-In priority order. The [website docs](https://oryx-labs.github.io/SuperAgent/docs/features) cover each one in detail; what isn't built yet is on the [roadmap](https://oryx-labs.github.io/SuperAgent/docs/roadmap).
+In priority order.
 
-1. **Work becomes company assets.** Everyone works in one system. Everything agents produce, and everything people send them (files and links), is kept in Files, in personal folders with topic tags, and each agent builds its own long-term memory. When people change, the agent stays with its memory and files.
-2. **Collaboration.** A Share Agent lets several people work with the same agent on the same job; colleagues can be invited right from the chat. Each person's SuperAgent plans work, forms a small team of agents and hands it out.
-3. **Reusable methods.** Skills at the personal and company levels turn good practice into company practice. Agents are team assets too: their setup, memory and files belong to the company.
-4. **Cost and models.** Employees get AI on day one on the company's keys: one key pool per CLI with failover, spend per task and per model, and model tiers (preview). Claude Code, Codex, DeepSeek, Kimi, Qwen and GLM run the work.
-5. **Visible and safe.** People approve plans and key decisions; permissions, per-agent run logs, and secrets encrypted at rest.
+1. **Work becomes company assets.** Everyone works in one system. What agents produce and what people send them (files and links) is filed automatically in Files, and each agent keeps its own long-term memory. When people change, the agents stay with their memory and files.
+2. **Collaboration and handover.** Several people work with the same agent on the same job, and colleagues can be invited from the chat. Each person has a SuperAgent that breaks work down, hands it to agents or tasks, and follows up. When someone leaves, the next person picks up their agents and carries on.
+3. **Reusable methods.** Skills at the personal and company levels turn one person's good practice into everyone's default.
+4. **Model-neutral and cost-efficient.** Claude Code, Codex, DeepSeek, Kimi, Qwen and GLM run the work, on the company's keys, with failover across several keys. Each task picks the cheapest model that can do it and moves up a level when it fails. Every model call is recorded against a person, a task and a model.
+5. **Audit, control and governance.** People approve plans and key decisions. Company-wide analytics and usage per person, per-agent run logs, permissions per person, and secrets encrypted at rest.
 
-Also included: tasks from requirement to delivery, scheduled / cron / one-off / API-triggered automations, connectors (GitHub, Gitee, Feishu / Lark, DingTalk, your own MCP servers), and an admin console for users, models, analytics, integrations and file storage (on the server or S3-compatible).
+Also included:
+- Tasks from requirement to delivery, with a coding flow (PRD, development, verification).
+- Scheduled, one-off and API-triggered automations.
+- Feishu / Lark and DingTalk messages triaged into a to-do home page.
+- Connectors: GitHub, Gitee, Feishu / Lark docs, DingTalk docs and tools, Notion, Confluence, and your own MCP servers.
+- An admin console for users, models and prices, analytics, integrations and file storage (on the server or S3-compatible).
+
+## Where it's going
+
+**Automated, intelligent, always on.** Today SuperAgent helps people and AI finish work together. As models get stronger, the software matures and each company's knowledge builds up, people need to step in less and less: first AI finishes the work and people confirm key points, then processes run on their own and people check the results, and finally the system runs around the clock while people set direction. Every file, memory and skill kept today is fuel for the automation of tomorrow.
 
 ## Architecture
 
+SuperAgent has three layers. The **control plane** is the trusted part: the interface, all business logic, scheduling, the model gateway, data and secrets. **Workers**, one per machine, start sandboxes and relay their output. **Sandboxes**, one per employee, run the agent CLIs in isolation, holding no long-lived secrets. The runtime is pluggable (microVM, gVisor or Docker), and SaaS and on-premises deployments run the same code.
+
 <p align="center">
-  <img src="docs/images/superagent-architecture.svg" alt="SuperAgent architecture" width="100%" />
+  <img src="docs/images/architecture-layers-en.jpg" alt="SuperAgent layered architecture" width="100%" />
 </p>
+
+This is the target architecture. Today's release runs the control plane and the agent CLIs on one server; the sandboxes, Workers and model gateway are being built.
+
+## Documents
+
+The thinking behind SuperAgent, in `docs/prd/` (HTML; open them in a browser):
+
+- [Core judgments](docs/prd/superagent-core-thesis.html): why SuperAgent should exist, who it's for, and what it aims to become.
+- [Product thinking](docs/prd/superagent-product-thinking.html): positioning, product principles, value and scenarios.
+- [Technical architecture](docs/prd/superagent-architecture.html): layers, modules, key designs and data flows.
+- Architecture diagrams: [English](docs/prd/architecture-diagram-en.html) · [中文](docs/prd/architecture-diagram-zh.html)
 
 ## Install
 
