@@ -11,6 +11,9 @@ import com.superagent.core.provider.ModelProviderStore;
 import com.superagent.core.provider.ProviderCredential;
 import com.superagent.core.provider.ProviderCredentialStore;
 import com.superagent.core.security.SecretCipher;
+import com.superagent.core.tenant.Company;
+import com.superagent.core.tenant.CompanyStarted;
+import com.superagent.core.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -85,9 +88,15 @@ public class CredentialService {
     /**
      * Startup: bring what the machine already has into the console (so it's managed in one place), then tell the
      * listeners — the CLI config writer among them — which entry each pool uses.
+     *
+     * <p>The machine's own keys and CLI config are the host's, so only the company that runs the host (the
+     * default one) takes them; other companies bring their own keys.
      */
-    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
-    void onReady() {
+    @org.springframework.context.event.EventListener(CompanyStarted.class)
+    void onReady(CompanyStarted started) {
+        if (!Company.DEFAULT_ID.equals(started.companyId())) {
+            return;
+        }
         for (String key : POOLED) {
             try {
                 importMachine(key);
@@ -265,13 +274,13 @@ public class CredentialService {
     }
 
     private void checkSoon(String id) {
-        checker.execute(() -> store.find(id).ifPresent(c -> {
+        checker.execute(TenantContext.wrap(() -> store.find(id).ifPresent(c -> {
             String before = current(c.providerKey()).id();
             check(c);
             if (!current(c.providerKey()).id().equals(before)) {
                 notifySwitch(c.providerKey());
             }
-        }));
+        })));
     }
 
     public CredentialDto checkNow(String providerKey, String id) {

@@ -20,17 +20,17 @@ abstract class AbstractJdbcNoticeStore implements NoticeStore {
 
     protected AbstractJdbcNoticeStore(JdbcTemplate jdbc, String ddl) {
         this.jdbc = jdbc;
-        jdbc.execute(ddl);
+        TenantSchema.create(jdbc, ddl);
     }
 
     /** "" for MySQL, " FINAL" for ClickHouse. */
     protected abstract String readFinal();
 
-    protected static final String INSERT = "(id, owner, notice_key, kind, state, title, body, actor, link_type, link_id, "
-            + "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String INSERT = "(company_id, id, owner, notice_key, kind, state, title, body, actor, link_type, "
+            + "link_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(Notice n) {
-        return new Object[]{n.id(), n.owner(), n.key(), n.kind().name(), n.state().name(), nn(n.title()), nn(n.body()),
+        return new Object[]{TenantSchema.company(), n.id(), n.owner(), n.key(), n.kind().name(), n.state().name(), nn(n.title()), nn(n.body()),
                 nn(n.actor()), nn(n.linkType()), nn(n.linkId()), utc(n.createdAt()), utc(n.updatedAt())};
     }
 
@@ -41,19 +41,21 @@ abstract class AbstractJdbcNoticeStore implements NoticeStore {
 
     @Override
     public Optional<Notice> find(String id) {
-        return jdbc.query("SELECT * FROM notice" + readFinal() + " WHERE id = ?", mapper, id).stream().findFirst();
+        return jdbc.query("SELECT * FROM notice" + readFinal() + " WHERE company_id = ? AND id = ?", mapper,
+                TenantSchema.company(), id).stream().findFirst();
     }
 
     @Override
     public Optional<Notice> findByKey(String owner, String key) {
-        return jdbc.query("SELECT * FROM notice" + readFinal() + " WHERE owner = ? AND notice_key = ?", mapper, owner, key)
+        return jdbc.query("SELECT * FROM notice" + readFinal() + " WHERE company_id = ? AND owner = ? AND notice_key = ?", mapper,
+                        TenantSchema.company(), owner, key)
                 .stream().findFirst();
     }
 
     @Override
     public List<Notice> list(String owner, int limit) {
-        return jdbc.query("SELECT * FROM notice" + readFinal() + " WHERE owner = ? AND kind <> 'TRACK' "
-                + "ORDER BY updated_at DESC LIMIT ?", mapper, owner, limit);
+        return jdbc.query("SELECT * FROM notice" + readFinal() + " WHERE company_id = ? AND owner = ? AND kind <> 'TRACK' "
+                + "ORDER BY updated_at DESC LIMIT ?", mapper, TenantSchema.company(), owner, limit);
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

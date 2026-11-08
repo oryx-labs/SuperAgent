@@ -9,6 +9,7 @@ public class MysqlSkillDeletionStore extends AbstractJdbcSkillDeletionStore {
     public MysqlSkillDeletionStore(JdbcTemplate jdbc) {
         super(jdbc, """
                 CREATE TABLE IF NOT EXISTS skill_deletion (
+                  company_id VARCHAR(64)   NOT NULL,
                   id         VARCHAR(64)   NOT NULL,
                   skill_id   VARCHAR(64)   NOT NULL,
                   skill_name VARCHAR(255),
@@ -19,8 +20,8 @@ public class MysqlSkillDeletionStore extends AbstractJdbcSkillDeletionStore {
                   status     VARCHAR(16)   NOT NULL,
                   created_at DATETIME(3)   NOT NULL,
                   updated_at DATETIME(3)   NOT NULL,
-                  PRIMARY KEY (id),
-                  KEY idx_skill_deletion_agent (agent_id, created_at)
+                  PRIMARY KEY (company_id, id),
+                  KEY idx_skill_deletion_agent (company_id, agent_id, created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
     }

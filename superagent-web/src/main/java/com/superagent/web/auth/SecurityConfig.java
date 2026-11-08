@@ -1,6 +1,7 @@
 package com.superagent.web.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.superagent.platform.tenant.CompanyService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,6 +16,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 
@@ -45,8 +47,9 @@ public class SecurityConfig {
     }
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http, CompanyService companies) throws Exception {
         http
+                .addFilterAfter(new TenantFilter(companies), AuthorizationFilter.class)
                 .csrf(csrf -> csrf.disable())
                 // The Files drawer shows a PDF in a frame of this same site; other sites still can't frame any page.
                 .headers(h -> h.frameOptions(f -> f.sameOrigin()))

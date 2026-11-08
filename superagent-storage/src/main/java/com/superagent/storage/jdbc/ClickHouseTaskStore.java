@@ -6,7 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.util.List;
 
 /**
- * ClickHouse task store: {@code ReplacingMergeTree(updated_at)} keyed by id, so
+ * ClickHouse task store: {@code ReplacingMergeTree(updated_at)} keyed by (company_id, id), so
  * save re-inserts a newer version and reads use {@code FINAL}; delete is an
  * {@code ALTER TABLE ... DELETE} mutation. Apply {@code db/clickhouse/schema.sql} first.
  */
@@ -31,6 +31,6 @@ public class ClickHouseTaskStore extends AbstractJdbcTaskStore {
 
     @Override
     public void delete(String id) {
-        jdbc.update("ALTER TABLE task DELETE WHERE id = ?", id);
+        jdbc.update("ALTER TABLE task DELETE WHERE company_id = ? AND id = ?", TenantSchema.company(), id);
     }
 }

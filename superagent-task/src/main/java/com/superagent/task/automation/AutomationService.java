@@ -13,6 +13,7 @@ import com.superagent.core.automation.AutomationStore;
 import com.superagent.core.automation.AutomationType;
 import com.superagent.core.automation.OverlapPolicy;
 import com.superagent.core.task.TaskStatus;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.platform.provider.ProviderService;
 import com.superagent.platform.settings.SettingsService;
 import org.slf4j.Logger;
@@ -160,6 +161,14 @@ public class AutomationService {
 
     /** External trigger: only an API automation, only with its token, and only while enabled. */
     public AutomationRunDto trigger(String id, String token, String input) {
+        int dot = token == null ? -1 : token.indexOf('.');
+        if (dot <= 0) {
+            throw new AutomationForbiddenException("Invalid automation id or token");
+        }
+        return TenantContext.call(token.substring(0, dot), () -> triggerInCompany(id, token, input));
+    }
+
+    private AutomationRunDto triggerInCompany(String id, String token, String input) {
         synchronized (lock) {
             Automation a = store.find(id).orElse(null);
             // One answer for "no such automation" and "wrong token", so ids can't be probed.
@@ -381,10 +390,14 @@ public class AutomationService {
         return a;
     }
 
+    /**
+     * {@code <company>.<random>}: the trigger endpoint is open (the token authenticates), so the token names the
+     * company to look the automation up in. The whole token is still checked against its hash.
+     */
     private String newToken() {
         byte[] bytes = new byte[32];
         random.nextBytes(bytes);
-        return HexFormat.of().formatHex(bytes);
+        return TenantContext.require() + "." + HexFormat.of().formatHex(bytes);
     }
 
     /** SHA-256 is enough: tokens are 256 random bits, so there's nothing to brute-force from the hash. */

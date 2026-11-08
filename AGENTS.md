@@ -38,6 +38,11 @@ existing module fits, create a new one at the right layer (register it in the pa
 downward, keep packages under `com.superagent.*`) rather than bending an ill-fitting module. Aim for a sensible
 distribution of code across modules.
 
+Everything belongs to one company (multi-tenant): new tables carry `company_id` and every query filters by
+`TenantContext.require()` (fail-closed); background and cross-thread work runs inside `TenantContext.run(companyId, …)`.
+Settings are per company — don't add new global settings (only CLI install, price catalog and the built-in MCP address are
+platform-wide).
+
 ## Deployment
 
 `scripts/package.sh` packages only changed files, syncs them to a remote host over SSH, commits/pushes on both ends (commit message `dev`), and opens/updates a GitHub PR for non-`main` branches. It is an outward-facing, hard-to-reverse action — don't run it incidentally.

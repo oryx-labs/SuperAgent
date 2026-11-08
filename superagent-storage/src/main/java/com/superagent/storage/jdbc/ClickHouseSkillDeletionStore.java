@@ -9,10 +9,10 @@ public class ClickHouseSkillDeletionStore extends AbstractJdbcSkillDeletionStore
     public ClickHouseSkillDeletionStore(JdbcTemplate jdbc) {
         super(jdbc, """
                 CREATE TABLE IF NOT EXISTS skill_deletion (
-                  id String, skill_id String, skill_name String, agent_id String, requester String, session_id String,
+                  company_id String, id String, skill_id String, skill_name String, agent_id String, requester String, session_id String,
                   message_id String, status String, created_at DateTime64(3, 'UTC'), updated_at DateTime64(3, 'UTC')
                 ) ENGINE = ReplacingMergeTree(updated_at)
-                ORDER BY id
+                ORDER BY (company_id, id)
                 """);
     }
 

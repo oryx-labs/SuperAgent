@@ -1,5 +1,6 @@
 package com.superagent.orchestrator;
 
+import com.superagent.platform.tenant.CompanyService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,9 +33,12 @@ public class SuperAgentLoop {
         return t;
     });
 
-    public SuperAgentLoop(SuperAgentService service,
+    private final CompanyService companies;
+
+    public SuperAgentLoop(CompanyService companies, SuperAgentService service,
                           @Value("${superagent.superagent.enabled:true}") boolean enabled,
                           @Value("${superagent.superagent.tick-seconds:3}") long tickSeconds) {
+        this.companies = companies;
         this.service = service;
         this.enabled = enabled;
         this.tickSeconds = Math.max(1, tickSeconds);
@@ -46,7 +50,7 @@ public class SuperAgentLoop {
             log.info("superagent loop disabled");
             return;
         }
-        scheduler.scheduleWithFixedDelay(this::tick, tickSeconds, tickSeconds, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(() -> companies.forEach(this::tick), tickSeconds, tickSeconds, TimeUnit.SECONDS);
         log.info("superagent loop started (every {}s)", tickSeconds);
     }
 

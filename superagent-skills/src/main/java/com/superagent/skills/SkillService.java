@@ -6,11 +6,14 @@ import com.superagent.api.skill.SkillRequest;
 import com.superagent.core.settings.SystemSettingStore;
 import com.superagent.core.skill.Skill;
 import com.superagent.core.skill.SkillStore;
+import com.superagent.core.tenant.CompanyStarted;
+import com.superagent.core.tenant.TenantPaths;
 import com.superagent.core.user.UserStore;
 import com.superagent.runtime.attachment.ImageAttachmentStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -38,7 +41,7 @@ import java.util.stream.Stream;
 /**
  * Skills: working standards agents follow. Each is either the user's own (only they see and change it) or the
  * company's (everyone sees it, only administrators change it). Skill text lives in the DB; images on disk
- * under {@code superagent.skill.dir/<skillId>/images/}.
+ * under {@code superagent.skill.dir/<companyId>/<skillId>/images/}.
  *
  * <p>At run time skills are offered by <em>progressive disclosure</em>: {@link #install} copies the
  * run's skills into its workspace ({@code .superagent/skills/<id>/SKILL.md} + images) and returns a
@@ -68,8 +71,6 @@ public class SkillService {
         this.users = users;
         this.adminUsername = adminUsername;
         this.root = Path.of(dir).toAbsolutePath().normalize();
-        seedOnce();
-        retireTeamSkills();
     }
 
     // --- CRUD ---
@@ -380,7 +381,7 @@ public class SkillService {
         if (!ID.matcher(id).matches()) {
             throw new SkillNotFoundException(id);
         }
-        return root.resolve(id).resolve("images");
+        return TenantPaths.of(root).resolve(id).resolve("images");
     }
 
     private Path imageFile(String id, String name) {
@@ -455,20 +456,9 @@ public class SkillService {
                 writable.test(s), images(s.id()), s.createdBy(), s.updatedBy(), s.createdAt(), s.updatedAt());
     }
 
-    /** Team skills were dropped: each one left over becomes its creator's own, so nothing is lost or widened. */
-    private void retireTeamSkills() {
-        for (Skill s : store.list()) {
-            if (s.space() != null && s.space().startsWith("team:")) {
-                String owner = s.createdBy() == null || s.createdBy().isBlank() ? "system" : s.createdBy();
-                store.save(new Skill(s.id(), s.name(), s.description(), s.category(), s.content(), "personal:" + owner,
-                        s.enabled(), s.deleted(), s.createdBy(), s.updatedBy(), s.createdAt(), Instant.now()));
-                log.info("team skill {} ({}) moved to {}'s personal skills", s.id(), s.name(), owner);
-            }
-        }
-    }
-
     /** Examples on first start only; deleting them later doesn't bring them back. */
-    private void seedOnce() {
+    @EventListener(CompanyStarted.class)
+    void seedOnce() {
         if (settings.all().containsKey(SEEDED)) {
             return;
         }

@@ -21,6 +21,7 @@ const filesPane = document.querySelector('[data-pane="files"]');
 const flel = {
   tabs: document.getElementById("flTabs"),
   agent: document.getElementById("flAgent"),
+  project: document.getElementById("flProject"),
   search: document.getElementById("flSearch"),
   rows: document.getElementById("flRows"),
   empty: document.getElementById("flEmpty"),
@@ -49,10 +50,22 @@ const fileSource = f => [f.agentName ? (f.agentAvatar ? f.agentAvatar + " " : ""
 
 // ---------- the Files page ----------
 async function loadFiles() {
-  try { files = (await api.listFiles()) || []; } catch (e) { files = []; showToast(e.message, true); }
+  await renderFileProjects();
+  // A project shows every file made in it, whoever asked for it; otherwise the files the user can see.
+  const project = flel.project.value;
+  try { files = (await (project ? api.projectFiles(project) : api.listFiles())) || []; } catch (e) { files = []; showToast(e.message, true); }
   await ffLoad();
   renderFileAgents();
   renderFileTable();
+}
+
+async function renderFileProjects() {
+  const current = flel.project.value;
+  const list = await refreshProjects();
+  flel.project.replaceChildren(new Option(L("proj.filterAll"), ""),
+    ...list.map(p => new Option(p.name + (p.status === "archived" ? " · " + L("proj.archived") : ""), p.id)));
+  flel.project.value = list.some(p => p.id === current) ? current : "";
+  flel.project.hidden = !list.length;
 }
 
 function renderFileAgents() {
@@ -167,6 +180,7 @@ function fileRow(f) {
 
 flel.search.addEventListener("input", renderFileTable);
 flel.agent.addEventListener("change", renderFileTable);
+flel.project.addEventListener("change", loadFiles);
 flel.tabs.addEventListener("click", e => {
   const t = e.target.closest(".model-tab");
   if (t) { flKind = t.dataset.kind; renderFileTable(); }

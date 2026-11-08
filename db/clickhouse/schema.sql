@@ -2,6 +2,9 @@
 -- Backend selected by superagent.storage.type=clickhouse.
 -- Apply with: clickhouse client --queries-file db/clickhouse/schema.sql
 --
+-- Every table belongs to a company: company_id leads each key, and every query filters on it. Tables from
+-- before companies (no company_id) are not migrated: drop them and apply this file again.
+--
 -- Sessions use ReplacingMergeTree keyed by id with updated_at as the version,
 -- so an updated session is written as a new row and reads use FINAL to collapse
 -- to the latest version. Messages and events are append-only (MergeTree).
@@ -9,6 +12,7 @@
 CREATE DATABASE IF NOT EXISTS superagent;
 
 CREATE TABLE IF NOT EXISTS superagent.chat_session (
+  company_id       String,
   id               String,
   title            String,
   agent_type       String,
@@ -19,11 +23,12 @@ CREATE TABLE IF NOT EXISTS superagent.chat_session (
   created_at       DateTime64(3, 'UTC'),
   updated_at       DateTime64(3, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)
-ORDER BY id;
+ORDER BY (company_id, id);
 
 -- Agents (personas): a named role with free-text persona, commanded through chat.
 -- ReplacingMergeTree keyed by id with updated_at as the version; reads use FINAL.
 CREATE TABLE IF NOT EXISTS superagent.agent (
+  company_id       String,
   id         String,
   name       String,
   avatar     String,
@@ -38,9 +43,10 @@ CREATE TABLE IF NOT EXISTS superagent.agent (
   created_at DateTime64(3, 'UTC'),
   updated_at DateTime64(3, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)
-ORDER BY id;
+ORDER BY (company_id, id);
 
 CREATE TABLE IF NOT EXISTS superagent.chat_message (
+  company_id       String,
   id         String,
   session_id String,
   role       String,
@@ -48,9 +54,10 @@ CREATE TABLE IF NOT EXISTS superagent.chat_message (
   created_at DateTime64(3, 'UTC'),
   author     String
 ) ENGINE = MergeTree
-ORDER BY (session_id, created_at);
+ORDER BY (company_id, session_id, created_at);
 
 CREATE TABLE IF NOT EXISTS superagent.agent_event (
+  company_id       String,
   session_id String,
   message_id String,
   seq        Int64,
@@ -58,11 +65,12 @@ CREATE TABLE IF NOT EXISTS superagent.agent_event (
   payload    String,
   created_at DateTime64(3, 'UTC')
 ) ENGINE = MergeTree
-ORDER BY (session_id, created_at, seq);
+ORDER BY (company_id, session_id, created_at, seq);
 
 -- Connectors use ReplacingMergeTree keyed by id with updated_at as the version,
 -- mirroring chat_session: save re-inserts a newer row and reads use FINAL.
 CREATE TABLE IF NOT EXISTS superagent.connector (
+  company_id       String,
   id          String,
   name        String,
   description String,
@@ -75,10 +83,11 @@ CREATE TABLE IF NOT EXISTS superagent.connector (
   created_at  DateTime64(3, 'UTC'),
   updated_at  DateTime64(3, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)
-ORDER BY id;
+ORDER BY (company_id, id);
 
 -- Connector secrets, encrypted: per employee (owner = username) or the company's own (owner = '').
 CREATE TABLE IF NOT EXISTS superagent.connector_credential (
+  company_id       String,
   connector_id  String,
   owner         String,
   secret_cipher String,
@@ -87,10 +96,11 @@ CREATE TABLE IF NOT EXISTS superagent.connector_credential (
   refresh_cipher String,
   expires_at    Nullable(DateTime64(3, 'UTC'))
 ) ENGINE = ReplacingMergeTree(updated_at)
-ORDER BY (connector_id, owner);
+ORDER BY (company_id, connector_id, owner);
 
 -- Provisioned users who may sign in (preprovision-only). The admin comes from config.
 CREATE TABLE IF NOT EXISTS superagent.app_user (
+  company_id       String,
   id            String,
   username      String,
   display_name  String,
@@ -103,11 +113,12 @@ CREATE TABLE IF NOT EXISTS superagent.app_user (
   created_at    DateTime64(3, 'UTC'),
   updated_at    DateTime64(3, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)
-ORDER BY id;
+ORDER BY (company_id, id);
 
 -- Document-driven agent runs; execution stream/steering messages live in
 -- agent_event / chat_message keyed by the task id.
 CREATE TABLE IF NOT EXISTS superagent.task (
+  company_id       String,
   id            String,
   title         String,
   brief         String,
@@ -129,13 +140,14 @@ CREATE TABLE IF NOT EXISTS superagent.task (
   finished_at   Nullable(DateTime64(3, 'UTC')),
   updated_at    DateTime64(3, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)
-ORDER BY id;
+ORDER BY (company_id, id);
 
 -- One row per task holding its flow phase array as JSON (PRD markdown, per-step
 -- status, verification evidence). ReplacingMergeTree keyed by task_id; reads use FINAL.
 CREATE TABLE IF NOT EXISTS superagent.task_phase (
+  company_id       String,
   task_id     String,
   phases_json String,
   updated_at  DateTime64(3, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)
-ORDER BY task_id;
+ORDER BY (company_id, task_id);

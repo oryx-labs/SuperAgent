@@ -10,7 +10,9 @@ import com.superagent.platform.connector.FeishuDocsOAuthClient;
 import com.superagent.platform.integration.IntegrationService;
 import com.superagent.runtime.mcp.McpGrants;
 import com.superagent.runtime.mcp.McpToolException;
+import com.superagent.core.tenant.TenantContext;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -53,8 +55,14 @@ class DocToolsTest {
         return "http://127.0.0.1:" + server.getAddress().getPort();
     }
 
+    @BeforeEach
+    void inCompany() {
+        TenantContext.set("acme");
+    }
+
     @AfterEach
     void stop() {
+        TenantContext.clear();
         if (server != null) {
             server.stop(0);
         }

@@ -4,7 +4,9 @@ import com.superagent.core.inbox.EventPriority;
 import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.InboxEvent;
 import com.superagent.core.inbox.InboxTodo;
+import com.superagent.core.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -15,6 +17,7 @@ import java.time.LocalDate;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Round-trips inbox events, to-dos and source settings through H2 in MySQL mode. */
+@ExtendWith(InCompany.class)
 class InboxStoreTest {
 
     private static InboxEvent event(String id, EventPriority p, Instant at) {
@@ -57,5 +60,19 @@ class InboxStoreTest {
         });
         assertThat(store.listEnabled(EventSource.FEISHU)).hasSize(1);
         assertThat(store.list()).hasSize(1);
+
+        // Another company sees none of it, and the same ids / (owner, type) there are its own rows.
+        TenantContext.run(InCompany.OTHER, () -> {
+            assertThat(store.findEvent("e2")).isEmpty();
+            assertThat(store.recent("ada", 10)).isEmpty();
+            assertThat(store.list("ada")).isEmpty();
+            assertThat(store.list()).isEmpty();
+            assertThat(store.insertIfAbsent(event("e2", EventPriority.P1, now))).isTrue();
+            store.save(s);
+            assertThat(store.deleteBefore(now.plusSeconds(60))).isEqualTo(1);
+        });
+        assertThat(store.recent("ada", 10)).extracting(InboxEvent::id).containsExactlyInAnyOrder("e2", "e3");
+        assertThat(store.find("ada", EventSource.FEISHU)).hasValueSatisfying(got ->
+                assertThat(got.ownerExternalId()).isEqualTo("ou_ada"));
     }
 }

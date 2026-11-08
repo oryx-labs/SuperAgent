@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.superagent.core.chat.RunCredential;
+import com.superagent.core.tenant.Company;
+import com.superagent.core.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -65,13 +67,19 @@ public class CliConfigWriter {
         this.machine = machine;
         this.enabled = enabled;
         if (enabled) {
-            credentials.onSwitch("cli-config", key -> writer.execute(() -> apply(key)));
+            // The CLI config files are the host's, so only the company that owns the host (the default one) writes
+            // them; another company's key switch must never land in the machine's config.
+            credentials.onSwitch("cli-config", key -> {
+                if (Company.DEFAULT_ID.equals(TenantContext.require())) {
+                    writer.execute(TenantContext.wrap(() -> apply(key)));
+                }
+            });
         }
     }
 
     /** Writes the pool's current entry into the CLI's config (or restores the original when there's none). */
     void apply(String providerKey) {
-        if (!enabled) {
+        if (!enabled || !Company.DEFAULT_ID.equals(TenantContext.require())) {
             return;
         }
         CredentialService.Choice choice = credentials.current(providerKey);

@@ -11,6 +11,7 @@ SuperAgent iterates fast. This is what isn't built yet, so the rest of the docs 
 
 - **Handover when someone leaves** — move a person's agents, their context and their files to a successor, who carries on from there.
 - **Company-wide folders** — shared folders beyond each person's own.
+- **Projects, further** — spend per project on the analytics page, and your SuperAgent setting up a project as part of a plan.
 
 ## Knowledge
 

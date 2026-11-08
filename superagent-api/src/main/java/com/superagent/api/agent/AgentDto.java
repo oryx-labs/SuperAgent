@@ -35,5 +35,8 @@ public record AgentDto(
         /** Whether others can be invited (not the SuperAgent, its hired members, or the inbox secretary). */
         boolean shareable,
         /** The chosen tier (when tiers are on), or null for the system's default tier. */
-        String tier) {
+        String tier,
+        /** The agent it reports to (its parent agent), or null. */
+        String parentId,
+        String parentName) {
 }

@@ -27,7 +27,7 @@ abstract class AbstractJdbcAgentStore implements AgentStore {
     protected AbstractJdbcAgentStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -49,13 +49,13 @@ abstract class AbstractJdbcAgentStore implements AgentStore {
             instant(rs, "updated_at"),
             emptyToNull(rs.getString("tier")));
 
-    protected static final String COLUMNS = "(id, name, avatar, character_key, persona, model, status, owner, kind, "
+    protected static final String COLUMNS = "(company_id, id, name, avatar, character_key, persona, model, status, owner, kind, "
             + "managed_by, created_at, updated_at, tier)";
-    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(Agent a) {
         return new Object[]{
-                a.id(), nn(a.name()), nn(a.avatar()), nn(a.character()), nn(a.persona()), nn(a.model()), a.status().name(),
+                TenantSchema.company(), a.id(), nn(a.name()), nn(a.avatar()), nn(a.character()), nn(a.persona()), nn(a.model()), a.status().name(),
                 nn(a.owner()), a.kind().name(), nn(a.managedBy()), utc(a.createdAt()), utc(a.updatedAt()), nn(a.tier())};
     }
 
@@ -76,13 +76,14 @@ abstract class AbstractJdbcAgentStore implements AgentStore {
 
     @Override
     public Optional<Agent> find(String id) {
-        return jdbc.query("SELECT * FROM agent" + agentFinal() + " WHERE id = ?", mapper, id)
+        return jdbc.query("SELECT * FROM agent" + agentFinal() + " WHERE company_id = ? AND id = ?", mapper, TenantSchema.company(), id)
                 .stream().findFirst();
     }
 
     @Override
     public List<Agent> list() {
-        return jdbc.query("SELECT * FROM agent" + agentFinal() + " ORDER BY updated_at DESC", mapper);
+        return jdbc.query("SELECT * FROM agent" + agentFinal() + " WHERE company_id = ? ORDER BY updated_at DESC", mapper,
+                TenantSchema.company());
     }
 
     // update is backend-specific (MySQL UPDATE vs ClickHouse re-insert).

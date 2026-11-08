@@ -24,12 +24,19 @@ abstract class AbstractJdbcAgentLogStore implements AgentLogStore {
     protected AbstractJdbcAgentLogStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
     /** Deletes rows matching {@code where} (MySQL DELETE vs ClickHouse ALTER ... DELETE). */
     protected abstract void deleteWhere(String where, Object... args);
+
+    private void deleteInCompany(String where, Object... args) {
+        Object[] scoped = new Object[args.length + 1];
+        scoped[0] = TenantSchema.company();
+        System.arraycopy(args, 0, scoped, 1, args.length);
+        deleteWhere("company_id = ? AND " + where, scoped);
+    }
 
     private final RowMapper<AgentLogEntry> mapper = (rs, n) -> new AgentLogEntry(
             rs.getString("id"),
@@ -43,40 +50,42 @@ abstract class AbstractJdbcAgentLogStore implements AgentLogStore {
 
     @Override
     public void append(AgentLogEntry e) {
-        jdbc.update("INSERT INTO agent_log (id, agent_id, owner, at_time, level, category, summary, detail) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                e.id(), e.agentId(), e.owner() == null ? "" : e.owner(), utc(e.at()), e.level(), e.category(),
+        jdbc.update("INSERT INTO agent_log (company_id, id, agent_id, owner, at_time, level, category, summary, detail) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                TenantSchema.company(), e.id(), e.agentId(), e.owner() == null ? "" : e.owner(), utc(e.at()), e.level(), e.category(),
                 e.summary(), e.detail() == null ? "" : e.detail());
     }
 
     @Override
     public List<AgentLogEntry> list(String agentId, String category, int limit) {
         if (category == null || category.isBlank()) {
-            return jdbc.query("SELECT * FROM agent_log WHERE agent_id = ? ORDER BY at_time DESC LIMIT ?",
-                    mapper, agentId, limit);
+            return jdbc.query("SELECT * FROM agent_log WHERE company_id = ? AND agent_id = ? ORDER BY at_time DESC LIMIT ?",
+                    mapper, TenantSchema.company(), agentId, limit);
         }
-        return jdbc.query("SELECT * FROM agent_log WHERE agent_id = ? AND category = ? ORDER BY at_time DESC LIMIT ?",
-                mapper, agentId, category, limit);
+        return jdbc.query("SELECT * FROM agent_log WHERE company_id = ? AND agent_id = ? AND category = ? ORDER BY at_time DESC LIMIT ?",
+                mapper, TenantSchema.company(), agentId, category, limit);
     }
 
     @Override
     public void prune(Instant before, int keepPerAgent) {
-        deleteWhere("at_time < ?", utc(before));
+        String company = TenantSchema.company();
+        deleteInCompany("at_time < ?", utc(before));
         List<String> overFull = jdbc.queryForList(
-                "SELECT agent_id FROM agent_log GROUP BY agent_id HAVING COUNT(*) > ?", String.class, keepPerAgent);
+                "SELECT agent_id FROM agent_log WHERE company_id = ? GROUP BY agent_id HAVING COUNT(*) > ?", String.class,
+                company, keepPerAgent);
         for (String agentId : overFull) {
             List<LocalDateTime> cutoff = jdbc.queryForList(
-                    "SELECT at_time FROM agent_log WHERE agent_id = ? ORDER BY at_time DESC LIMIT 1 OFFSET ?",
-                    LocalDateTime.class, agentId, keepPerAgent - 1);
+                    "SELECT at_time FROM agent_log WHERE company_id = ? AND agent_id = ? ORDER BY at_time DESC LIMIT 1 OFFSET ?",
+                    LocalDateTime.class, company, agentId, keepPerAgent - 1);
             if (!cutoff.isEmpty()) {
-                deleteWhere("agent_id = ? AND at_time < ?", agentId, cutoff.get(0));
+                deleteInCompany("agent_id = ? AND at_time < ?", agentId, cutoff.get(0));
             }
         }
     }
 
     @Override
     public void deleteAgent(String agentId) {
-        deleteWhere("agent_id = ?", agentId);
+        deleteInCompany("agent_id = ?", agentId);
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

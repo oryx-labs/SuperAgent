@@ -35,7 +35,7 @@ abstract class AbstractJdbcChatStore implements ChatStore {
     protected AbstractJdbcChatStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -103,28 +103,30 @@ abstract class AbstractJdbcChatStore implements ChatStore {
 
     protected void insertSession(ChatSession s) {
         jdbc.update("INSERT INTO chat_session "
-                        + "(id, title, agent_type, agent_session_id, workspace_dir, agent_id, status, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                s.id(), nn(s.title()), s.agentType().name(), nn(s.agentSessionId()),
+                        + "(company_id, id, title, agent_type, agent_session_id, workspace_dir, agent_id, status, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                TenantSchema.company(), s.id(), nn(s.title()), s.agentType().name(), nn(s.agentSessionId()),
                 nn(s.workspaceDir()), nn(s.agentId()), s.status().name(), utc(s.createdAt()), utc(s.updatedAt()));
     }
 
     @Override
     public Optional<ChatSession> findSession(String sessionId) {
         List<ChatSession> rows = jdbc.query(
-                "SELECT * FROM chat_session" + sessionFinal() + " WHERE id = ?", sessionMapper, sessionId);
+                "SELECT * FROM chat_session" + sessionFinal() + " WHERE company_id = ? AND id = ?", sessionMapper,
+                TenantSchema.company(), sessionId);
         return rows.stream().findFirst();
     }
 
     @Override
     public List<ChatSession> listSessions() {
-        return jdbc.query("SELECT * FROM chat_session" + sessionFinal() + " ORDER BY updated_at DESC", sessionMapper);
+        return jdbc.query("SELECT * FROM chat_session" + sessionFinal() + " WHERE company_id = ? ORDER BY updated_at DESC",
+                sessionMapper, TenantSchema.company());
     }
 
     @Override
     public List<ChatSession> listSessionsByAgent(String agentId) {
-        return jdbc.query("SELECT * FROM chat_session" + sessionFinal() + " WHERE agent_id = ? ORDER BY updated_at DESC",
-                sessionMapper, agentId);
+        return jdbc.query("SELECT * FROM chat_session" + sessionFinal() + " WHERE company_id = ? AND agent_id = ? "
+                + "ORDER BY updated_at DESC", sessionMapper, TenantSchema.company(), agentId);
     }
 
     // updateSession is backend-specific (MySQL UPDATE vs ClickHouse re-insert).
@@ -133,35 +135,36 @@ abstract class AbstractJdbcChatStore implements ChatStore {
 
     @Override
     public ChatMessage appendMessage(ChatMessage m) {
-        jdbc.update("INSERT INTO chat_message (id, session_id, role, content, created_at, author) VALUES (?, ?, ?, ?, ?, ?)",
-                m.id(), m.sessionId(), m.role().name(), nn(m.content()), utc(m.createdAt()), nn(m.author()));
+        jdbc.update("INSERT INTO chat_message (company_id, id, session_id, role, content, created_at, author) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                TenantSchema.company(), m.id(), m.sessionId(), m.role().name(), nn(m.content()), utc(m.createdAt()), nn(m.author()));
         return m;
     }
 
     @Override
     public List<ChatMessage> listMessages(String sessionId) {
-        return jdbc.query("SELECT * FROM chat_message WHERE session_id = ? ORDER BY created_at",
-                messageMapper, sessionId);
+        return jdbc.query("SELECT * FROM chat_message WHERE company_id = ? AND session_id = ? ORDER BY created_at",
+                messageMapper, TenantSchema.company(), sessionId);
     }
 
     @Override
     public void updateMessage(String sessionId, String messageId, String content) {
-        jdbc.update("UPDATE chat_message SET content = ? WHERE id = ? AND session_id = ?",
-                content == null ? "" : content, messageId, sessionId);
+        jdbc.update("UPDATE chat_message SET content = ? WHERE company_id = ? AND id = ? AND session_id = ?",
+                content == null ? "" : content, TenantSchema.company(), messageId, sessionId);
     }
 
     // --- events ---
 
     @Override
     public void appendEvent(AgentEvent e) {
-        jdbc.update("INSERT INTO agent_event (session_id, message_id, seq, type, payload, created_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?)",
-                e.sessionId(), nn(e.messageId()), e.seq(), e.type().name(), nn(e.payload()), utc(e.createdAt()));
+        jdbc.update("INSERT INTO agent_event (company_id, session_id, message_id, seq, type, payload, created_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                TenantSchema.company(), e.sessionId(), nn(e.messageId()), e.seq(), e.type().name(), nn(e.payload()), utc(e.createdAt()));
     }
 
     @Override
     public List<AgentEvent> listEvents(String sessionId) {
-        return jdbc.query("SELECT * FROM agent_event WHERE session_id = ? ORDER BY created_at, seq",
-                eventMapper, sessionId);
+        return jdbc.query("SELECT * FROM agent_event WHERE company_id = ? AND session_id = ? ORDER BY created_at, seq",
+                eventMapper, TenantSchema.company(), sessionId);
     }
 }

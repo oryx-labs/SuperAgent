@@ -20,7 +20,7 @@ class FileTaggerTest {
         String prompt = FileTagger.prompt(List.of(new FileService.Untagged(f, "本周完成了讲义", List.of("课程", "周报"))));
         assertThat(prompt).contains("已在用的标签：课程，周报").contains("id: f1").contains("本周完成了讲义");
 
-        FileTagger tagger = new FileTagger(null, null, null, List.of(), false);
+        FileTagger tagger = new FileTagger(null, null, null, null, List.of(), false);
         assertThat(tagger.parse("好的：\n```json\n{\"f1\": [\"周报\", \"#讲义\", \"进展\", \"多余\"]}\n```"))
                 .containsEntry("f1", List.of("周报", "讲义", "进展"));
         assertThatThrownBy(() -> tagger.parse("没法判断")).isInstanceOf(IllegalStateException.class);
@@ -34,7 +34,7 @@ class FileTaggerTest {
         String prompt = FileTagger.folderPrompt(List.of("项目/Q4"),
                 List.of(new com.superagent.files.FileFolderService.Unfiled(f, "第四季度")));
         assertThat(prompt).contains("- 项目/Q4").contains("id: f1").contains("标签：复盘").contains("第四季度");
-        FileTagger tagger = new FileTagger(null, null, null, List.of(), false);
+        FileTagger tagger = new FileTagger(null, null, null, null, List.of(), false);
         assertThat(tagger.parseFolders("```json\n{\"f1\": \"项目/Q4\", \"f2\": null}\n```"))
                 .containsEntry("f1", "项目/Q4").doesNotContainKey("f2");
     }

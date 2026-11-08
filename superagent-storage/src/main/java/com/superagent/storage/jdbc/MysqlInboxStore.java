@@ -14,6 +14,7 @@ public class MysqlInboxStore extends AbstractJdbcInboxStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS inbox_event (
+              company_id    VARCHAR(64)  NOT NULL,
               id            VARCHAR(64)  NOT NULL,
               owner         VARCHAR(128) NOT NULL,
               source        VARCHAR(32)  NOT NULL,
@@ -34,13 +35,14 @@ public class MysqlInboxStore extends AbstractJdbcInboxStore {
               occurred_at   DATETIME(3),
               received_at   DATETIME(3)  NOT NULL,
               updated_at    DATETIME(3)  NOT NULL,
-              PRIMARY KEY (id),
-              KEY idx_inbox_pending (owner, priority, processed, received_at),
-              KEY idx_inbox_received (received_at)
+              PRIMARY KEY (company_id, id),
+              KEY idx_inbox_pending (company_id, owner, priority, processed, received_at),
+              KEY idx_inbox_received (company_id, received_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
             """
             CREATE TABLE IF NOT EXISTS inbox_todo (
+              company_id VARCHAR(64)  NOT NULL,
               id         VARCHAR(64)  NOT NULL,
               owner      VARCHAR(128) NOT NULL,
               title      VARCHAR(500) NOT NULL,
@@ -53,12 +55,13 @@ public class MysqlInboxStore extends AbstractJdbcInboxStore {
               task_id    VARCHAR(64),
               created_at DATETIME(3)  NOT NULL,
               updated_at DATETIME(3)  NOT NULL,
-              PRIMARY KEY (id),
-              KEY idx_todo_owner (owner, created_at)
+              PRIMARY KEY (company_id, id),
+              KEY idx_todo_owner (company_id, owner, created_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
             """
             CREATE TABLE IF NOT EXISTS event_source (
+              company_id         VARCHAR(64)  NOT NULL,
               owner              VARCHAR(128) NOT NULL,
               type               VARCHAR(32)  NOT NULL,
               app_id             VARCHAR(128),
@@ -77,7 +80,7 @@ public class MysqlInboxStore extends AbstractJdbcInboxStore {
               last_error         VARCHAR(1024),
               created_at         DATETIME(3)  NOT NULL,
               updated_at         DATETIME(3)  NOT NULL,
-              PRIMARY KEY (owner, type)
+              PRIMARY KEY (company_id, owner, type)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 
@@ -107,7 +110,7 @@ public class MysqlInboxStore extends AbstractJdbcInboxStore {
 
     @Override
     public int deleteBefore(Instant cutoff) {
-        return jdbc.update("DELETE FROM inbox_event WHERE received_at < ?", utc(cutoff));
+        return jdbc.update("DELETE FROM inbox_event WHERE company_id = ? AND received_at < ?", TenantSchema.company(), utc(cutoff));
     }
 
     @Override

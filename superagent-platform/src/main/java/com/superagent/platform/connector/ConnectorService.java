@@ -14,10 +14,12 @@ import com.superagent.core.error.ForbiddenException;
 import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.security.SecretCipher;
+import com.superagent.core.tenant.CompanyStarted;
 import com.superagent.platform.integration.IntegrationService;
 import com.superagent.runtime.mcp.McpGrants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
@@ -79,7 +81,6 @@ public class ConnectorService {
         this.integrations = integrations;
         this.settings = settings;
         this.confluence = confluence;
-        seedDefaults();
     }
 
     public List<ConnectorDto> list(String viewer, boolean admin) {
@@ -384,7 +385,8 @@ public class ConnectorService {
      * A fresh install offers GitHub; every install gets Gitee once (its official remote MCP server). Both are
      * authorized by each employee with their own account. A built-in an administrator deleted stays deleted.
      */
-    private void seedDefaults() {
+    @EventListener(CompanyStarted.class)
+    void seedDefaults() {
         Instant now = Instant.now();
         if (store.listConnectors().isEmpty()) {
             store.save(new Connector(ConnectorOAuthService.GITHUB, "GitHub",

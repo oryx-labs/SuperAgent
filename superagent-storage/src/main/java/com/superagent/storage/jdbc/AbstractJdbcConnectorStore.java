@@ -23,16 +23,16 @@ import java.util.Optional;
  */
 abstract class AbstractJdbcConnectorStore implements ConnectorStore {
 
-    protected static final String COLUMNS = "(id, name, description, kind, auth_method, enabled, transport, endpoint, "
+    protected static final String COLUMNS = "(company_id, id, name, description, kind, auth_method, enabled, transport, endpoint, "
             + "token_env, created_at, updated_at)";
-    protected static final String VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected final JdbcTemplate jdbc;
 
     protected AbstractJdbcConnectorStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -54,17 +54,19 @@ abstract class AbstractJdbcConnectorStore implements ConnectorStore {
 
     @Override
     public List<Connector> listConnectors() {
-        return jdbc.query("SELECT * FROM connector" + connectorFinal() + " ORDER BY created_at", mapper);
+        return jdbc.query("SELECT * FROM connector" + connectorFinal() + " WHERE company_id = ? ORDER BY created_at", mapper,
+                TenantSchema.company());
     }
 
     @Override
     public Optional<Connector> findConnector(String id) {
-        return jdbc.query("SELECT * FROM connector" + connectorFinal() + " WHERE id = ?", mapper, id)
+        return jdbc.query("SELECT * FROM connector" + connectorFinal() + " WHERE company_id = ? AND id = ?", mapper,
+                        TenantSchema.company(), id)
                 .stream().findFirst();
     }
 
     protected Object[] params(Connector c) {
-        return new Object[]{c.id(), c.name(), nn(c.description()), c.kind().name(), c.authMethod().name(),
+        return new Object[]{TenantSchema.company(), c.id(), c.name(), nn(c.description()), c.kind().name(), c.authMethod().name(),
                 c.enabled() ? 1 : 0, c.transport().name(), nn(c.endpoint()), nn(c.tokenEnv()),
                 utc(c.createdAt()), utc(c.updatedAt())};
     }
@@ -84,19 +86,5 @@ abstract class AbstractJdbcConnectorStore implements ConnectorStore {
 
     private static String emptyToNull(String value) {
         return value == null || value.isEmpty() ? null : value;
-    }
-
-    /**
-     * Connectors and their credentials changed shape (kinds, per-employee secrets) with no migration: an
-     * older table is dropped so the new one can be created.
-     */
-    static void dropIfOld(JdbcTemplate jdbc, String table, String newColumn) {
-        Integer exists = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = SCHEMA() "
-                + "AND LOWER(table_name) = ?", Integer.class, table);
-        Integer current = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
-                + "AND LOWER(table_name) = ? AND LOWER(column_name) = ?", Integer.class, table, newColumn);
-        if (exists != null && exists > 0 && (current == null || current == 0)) {
-            jdbc.execute("DROP TABLE " + table);
-        }
     }
 }

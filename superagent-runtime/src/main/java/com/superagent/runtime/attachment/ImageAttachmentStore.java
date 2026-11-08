@@ -2,6 +2,7 @@ package com.superagent.runtime.attachment;
 
 import com.superagent.api.chat.ImageUploadDto;
 import com.superagent.core.chat.ImageAttachment;
+import com.superagent.core.tenant.TenantPaths;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
@@ -22,7 +23,7 @@ import java.util.stream.Stream;
 
 /**
  * Images attached to chat and task messages, stored on local disk as
- * {@code <dir>/<ownerId>/<messageId>/<n>.<ext>} (owner = chat session or task). Kept apart
+ * {@code <dir>/<companyId>/<ownerId>/<messageId>/<n>.<ext>} (owner = chat session or task). Kept apart
  * from workspaces because a task has no workspace until it is scheduled, and so the agent
  * can't overwrite them. The format is sniffed from the bytes — the declared type is not
  * trusted — and only raster formats are accepted, so serving them back can't run script.
@@ -146,7 +147,7 @@ public class ImageAttachmentStore {
         if (!valid(ownerId) || !valid(messageId)) {
             throw new IllegalArgumentException("Invalid id");
         }
-        return root.resolve(ownerId).resolve(messageId);
+        return TenantPaths.of(root).resolve(ownerId).resolve(messageId);
     }
 
     private static boolean valid(String id) {

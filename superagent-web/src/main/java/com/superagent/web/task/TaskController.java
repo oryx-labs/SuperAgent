@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -64,13 +65,38 @@ public class TaskController {
                 .toList());
     }
 
-    /** The signed-in user's own tasks; {@code status}: all | active | a task status. */
+    /**
+     * The signed-in user's own tasks; {@code status}: all | active | a task status; {@code tag}, {@code agent} and
+     * {@code source} narrow it further. Subtasks are listed under their complex task, not here.
+     */
     @GetMapping(ApiPaths.TASKS)
     public ApiResponse<TaskPageDto> list(@RequestParam(defaultValue = "1") int page,
                                          @RequestParam(defaultValue = "20") int size,
                                          @RequestParam(required = false) String status,
+                                         @RequestParam(required = false) String tag,
+                                         @RequestParam(required = false) String agent,
+                                         @RequestParam(required = false) String source,
+                                         @RequestParam(required = false) String project,
                                          Authentication auth) {
-        return ApiResponse.ok(taskService.page(auth.getName(), status, page, size));
+        return ApiResponse.ok(taskService.page(auth.getName(), status, tag, agent, source, project, page, size));
+    }
+
+    /** What the user's tasks can be filtered by (tags, agents, sources), each with its count and cost. */
+    @GetMapping(ApiPaths.TASKS + "/facets")
+    public ApiResponse<com.superagent.api.task.TaskFacetsDto> facets(Authentication auth) {
+        return ApiResponse.ok(taskService.facets(auth.getName()));
+    }
+
+    /** The complex task it's part of, its subtasks, and the tasks it carries on from or that carry on from it. */
+    @GetMapping(ApiPaths.TASKS + "/{id}/relations")
+    public ApiResponse<com.superagent.api.task.TaskRelationsDto> relations(@PathVariable String id, Authentication auth) {
+        return ApiResponse.ok(taskService.relations(id, auth.getName()));
+    }
+
+    @PutMapping(ApiPaths.TASKS + "/{id}/tags")
+    public ApiResponse<TaskDto> tags(@PathVariable String id, @RequestBody java.util.Map<String, java.util.List<String>> body,
+                                     Authentication auth) {
+        return ApiResponse.ok(taskService.setTags(id, auth.getName(), body.get("tags")));
     }
 
     @GetMapping(ApiPaths.TASKS + "/stats")

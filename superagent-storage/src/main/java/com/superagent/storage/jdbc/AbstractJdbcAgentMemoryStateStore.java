@@ -24,7 +24,7 @@ abstract class AbstractJdbcAgentMemoryStateStore implements AgentMemoryStateStor
     protected AbstractJdbcAgentMemoryStateStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -42,16 +42,17 @@ abstract class AbstractJdbcAgentMemoryStateStore implements AgentMemoryStateStor
 
     @Override
     public Optional<AgentMemoryState> find(String agentId) {
-        return jdbc.query("SELECT * FROM agent_memory" + stateFinal() + " WHERE agent_id = ?", mapper, agentId)
+        return jdbc.query("SELECT * FROM agent_memory" + stateFinal() + " WHERE company_id = ? AND agent_id = ?", mapper,
+                        TenantSchema.company(), agentId)
                 .stream().findFirst();
     }
 
     protected static final String COLUMNS =
-            "(agent_id, owner, summarized_until, last_model, session_failures, memory, updated_at)";
-    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?)";
+            "(company_id, agent_id, owner, summarized_until, last_model, session_failures, memory, updated_at)";
+    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(AgentMemoryState s) {
-        return new Object[]{s.agentId(), nn(s.owner()), utc(s.summarizedUntil()), nn(s.lastModel()),
+        return new Object[]{TenantSchema.company(), s.agentId(), nn(s.owner()), utc(s.summarizedUntil()), nn(s.lastModel()),
                 s.sessionFailures(), nn(s.memory()), utc(s.updatedAt())};
     }
 

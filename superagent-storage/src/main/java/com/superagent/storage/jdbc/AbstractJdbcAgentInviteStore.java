@@ -19,17 +19,17 @@ abstract class AbstractJdbcAgentInviteStore implements AgentInviteStore {
 
     protected AbstractJdbcAgentInviteStore(JdbcTemplate jdbc, String ddl) {
         this.jdbc = jdbc;
-        jdbc.execute(ddl);
+        TenantSchema.create(jdbc, ddl);
     }
 
     /** "" for MySQL, " FINAL" for ClickHouse. */
     protected abstract String readFinal();
 
-    protected static final String INSERT = "(id, agent_id, owner, usernames, session_id, message_id, status, created_at, "
-            + "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String INSERT = "(company_id, id, agent_id, owner, usernames, session_id, message_id, status, created_at, "
+            + "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(AgentInvite i) {
-        return new Object[]{i.id(), i.agentId(), i.owner(), String.join(",", i.usernames()), nn(i.sessionId()),
+        return new Object[]{TenantSchema.company(), i.id(), i.agentId(), i.owner(), String.join(",", i.usernames()), nn(i.sessionId()),
                 nn(i.messageId()), i.status().name(), utc(i.createdAt()), utc(i.updatedAt())};
     }
 
@@ -45,13 +45,14 @@ abstract class AbstractJdbcAgentInviteStore implements AgentInviteStore {
 
     @Override
     public Optional<AgentInvite> find(String id) {
-        return jdbc.query("SELECT * FROM agent_invite" + readFinal() + " WHERE id = ?", mapper, id).stream().findFirst();
+        return jdbc.query("SELECT * FROM agent_invite" + readFinal() + " WHERE company_id = ? AND id = ?", mapper,
+                TenantSchema.company(), id).stream().findFirst();
     }
 
     @Override
     public List<AgentInvite> forAgent(String agentId) {
-        return jdbc.query("SELECT * FROM agent_invite" + readFinal() + " WHERE agent_id = ? ORDER BY created_at DESC",
-                mapper, agentId);
+        return jdbc.query("SELECT * FROM agent_invite" + readFinal() + " WHERE company_id = ? AND agent_id = ? ORDER BY created_at DESC",
+                mapper, TenantSchema.company(), agentId);
     }
 
     private static LocalDateTime utc(Instant i) {

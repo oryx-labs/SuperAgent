@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * ClickHouse automation store: self-creating tables. Automations are a
- * {@code ReplacingMergeTree(updated_at)} keyed by id (save re-inserts, reads use {@code FINAL},
+ * {@code ReplacingMergeTree(updated_at)} keyed by (company_id, id) (save re-inserts, reads use {@code FINAL},
  * delete is an {@code ALTER ... DELETE}); runs are a plain append-only {@code MergeTree}.
  */
 public class ClickHouseAutomationStore extends AbstractJdbcAutomationStore {
@@ -15,6 +15,7 @@ public class ClickHouseAutomationStore extends AbstractJdbcAutomationStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS automation (
+              company_id     String,
               id             String,
               name           String,
               prompt         String,
@@ -34,11 +35,12 @@ public class ClickHouseAutomationStore extends AbstractJdbcAutomationStore {
               created_at     DateTime64(3, 'UTC'),
               updated_at     DateTime64(3, 'UTC')
             ) ENGINE = ReplacingMergeTree(updated_at)
-            ORDER BY id
+            ORDER BY (company_id, id)
             """,
             "ALTER TABLE automation ADD COLUMN IF NOT EXISTS tier String",
             """
             CREATE TABLE IF NOT EXISTS automation_run (
+              company_id     String,
               id             String,
               automation_id  String,
               trigger_kind   String,
@@ -46,7 +48,7 @@ public class ClickHouseAutomationStore extends AbstractJdbcAutomationStore {
               skipped_reason String,
               fired_at       DateTime64(3, 'UTC')
             ) ENGINE = MergeTree
-            ORDER BY (automation_id, fired_at)
+            ORDER BY (company_id, automation_id, fired_at)
             """);
 
     public ClickHouseAutomationStore(JdbcTemplate jdbc) {
@@ -66,6 +68,6 @@ public class ClickHouseAutomationStore extends AbstractJdbcAutomationStore {
 
     @Override
     public void delete(String id) {
-        jdbc.update("ALTER TABLE automation DELETE WHERE id = ?", id);
+        jdbc.update("ALTER TABLE automation DELETE WHERE company_id = ? AND id = ?", TenantSchema.company(), id);
     }
 }

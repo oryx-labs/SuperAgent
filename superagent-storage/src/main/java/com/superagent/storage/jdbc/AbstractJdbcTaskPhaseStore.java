@@ -21,7 +21,7 @@ abstract class AbstractJdbcTaskPhaseStore implements TaskPhaseStore {
     protected AbstractJdbcTaskPhaseStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -30,8 +30,8 @@ abstract class AbstractJdbcTaskPhaseStore implements TaskPhaseStore {
 
     @Override
     public Optional<String> findPhasesJson(String taskId) {
-        return jdbc.query("SELECT phases_json FROM task_phase" + phaseFinal() + " WHERE task_id = ?",
-                        (rs, n) -> rs.getString("phases_json"), taskId)
+        return jdbc.query("SELECT phases_json FROM task_phase" + phaseFinal() + " WHERE company_id = ? AND task_id = ?",
+                        (rs, n) -> rs.getString("phases_json"), TenantSchema.company(), taskId)
                 .stream().findFirst();
     }
 

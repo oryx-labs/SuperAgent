@@ -26,7 +26,7 @@ abstract class AbstractJdbcSkillStore implements SkillStore {
     protected AbstractJdbcSkillStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -34,7 +34,7 @@ abstract class AbstractJdbcSkillStore implements SkillStore {
     protected abstract String readFinal();
 
     protected static final String COLUMNS =
-            "(id, name, description, category, content, space, enabled, deleted, created_by, updated_by, created_at, updated_at)";
+            "(company_id, id, name, description, category, content, space, enabled, deleted, created_by, updated_by, created_at, updated_at)";
 
     private final RowMapper<Skill> mapper = (rs, n) -> new Skill(
             rs.getString("id"), rs.getString("name"), emptyToNull(rs.getString("description")),
@@ -44,25 +44,27 @@ abstract class AbstractJdbcSkillStore implements SkillStore {
             instant(rs, "created_at"), instant(rs, "updated_at"));
 
     protected Object[] params(Skill s) {
-        return new Object[]{s.id(), nn(s.name()), nn(s.description()), nn(s.category()), nn(s.content()), nn(s.space()),
+        return new Object[]{TenantSchema.company(), s.id(), nn(s.name()), nn(s.description()), nn(s.category()), nn(s.content()), nn(s.space()),
                 s.enabled() ? 1 : 0, s.deleted() ? 1 : 0, nn(s.createdBy()), nn(s.updatedBy()),
                 utc(s.createdAt()), utc(s.updatedAt())};
     }
 
     @Override
     public List<Skill> list() {
-        return jdbc.query("SELECT * FROM skill" + readFinal() + " ORDER BY name", mapper);
+        return jdbc.query("SELECT * FROM skill" + readFinal() + " WHERE company_id = ? ORDER BY name", mapper,
+                TenantSchema.company());
     }
 
     @Override
     public Optional<Skill> find(String id) {
-        return jdbc.query("SELECT * FROM skill" + readFinal() + " WHERE id = ?", mapper, id).stream().findFirst();
+        return jdbc.query("SELECT * FROM skill" + readFinal() + " WHERE company_id = ? AND id = ?", mapper,
+                TenantSchema.company(), id).stream().findFirst();
     }
 
     @Override
     public Optional<List<String>> binding(String ownerType, String ownerId) {
-        return jdbc.query("SELECT skill_ids FROM skill_binding" + readFinal() + " WHERE owner_type = ? AND owner_id = ?",
-                        (rs, n) -> nn(rs.getString("skill_ids")), ownerType, ownerId)
+        return jdbc.query("SELECT skill_ids FROM skill_binding" + readFinal() + " WHERE company_id = ? AND owner_type = ? AND owner_id = ?",
+                        (rs, n) -> nn(rs.getString("skill_ids")), TenantSchema.company(), ownerType, ownerId)
                 .stream().findFirst()
                 .map(csv -> csv.isEmpty() ? List.of() : Arrays.stream(csv.split(",")).toList());
     }

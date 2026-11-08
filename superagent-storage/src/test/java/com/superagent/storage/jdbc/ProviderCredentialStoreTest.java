@@ -1,7 +1,9 @@
 package com.superagent.storage.jdbc;
 
 import com.superagent.core.provider.ProviderCredential;
+import com.superagent.core.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -9,6 +11,7 @@ import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ExtendWith(InCompany.class)
 class ProviderCredentialStoreTest {
 
     private static ProviderCredential cred(String id, String provider, int priority) {
@@ -34,5 +37,13 @@ class ProviderCredentialStoreTest {
         assertThat(store.list("claude")).extracting(ProviderCredential::id).containsExactly("backup");
         assertThat(store.find("main")).isEmpty();
         assertThat(store.knownKeyHashes("claude")).containsExactlyInAnyOrder("hash-main", "hash-backup"); // deleted too
+
+        TenantContext.run(InCompany.OTHER, () -> {
+            assertThat(store.list("claude")).isEmpty();
+            assertThat(store.knownKeyHashes("claude")).isEmpty();
+            store.save(cred("backup", "claude", 9));
+            store.delete("backup");
+        });
+        assertThat(store.find("backup").orElseThrow().priority()).isEqualTo(2);
     }
 }

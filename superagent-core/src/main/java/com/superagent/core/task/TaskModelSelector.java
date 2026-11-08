@@ -19,4 +19,12 @@ public interface TaskModelSelector {
 
     /** The next model up after the task failed on its current one; empty when there's nothing stronger to try. */
     Optional<TaskModelChoice> escalate(Task task, String failure);
+
+    /**
+     * The model for work that has to be done well rather than cheaply (a complex task's plan and conclusion): the
+     * default model, without judging. Empty when there's nothing to say (then {@link #choose} runs as usual).
+     */
+    default Optional<TaskModelChoice> strongest(Task task) {
+        return Optional.empty();
+    }
 }

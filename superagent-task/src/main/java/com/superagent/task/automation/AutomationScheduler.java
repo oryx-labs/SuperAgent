@@ -1,5 +1,6 @@
 package com.superagent.task.automation;
 
+import com.superagent.platform.tenant.CompanyService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,10 +33,13 @@ public class AutomationScheduler {
         return t;
     });
 
-    public AutomationScheduler(
+    private final CompanyService companies;
+
+    public AutomationScheduler(CompanyService companies,
             AutomationService service,
             @Value("${superagent.automation.scheduler.enabled:true}") boolean enabled,
             @Value("${superagent.automation.scheduler.interval-seconds:30}") long intervalSeconds) {
+        this.companies = companies;
         this.service = service;
         this.enabled = enabled;
         this.intervalSeconds = Math.max(5, intervalSeconds);
@@ -47,7 +51,7 @@ public class AutomationScheduler {
             log.info("automation scheduler disabled");
             return;
         }
-        scheduler.scheduleWithFixedDelay(this::tick, 0, intervalSeconds, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(() -> companies.forEach(this::tick), 0, intervalSeconds, TimeUnit.SECONDS);
         log.info("automation scheduler started (every {}s)", intervalSeconds);
     }
 

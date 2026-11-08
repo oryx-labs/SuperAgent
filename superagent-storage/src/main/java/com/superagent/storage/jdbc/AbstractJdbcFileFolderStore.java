@@ -20,17 +20,17 @@ abstract class AbstractJdbcFileFolderStore implements FileFolderStore {
 
     protected AbstractJdbcFileFolderStore(JdbcTemplate jdbc, List<String> ddl) {
         this.jdbc = jdbc;
-        ddl.forEach(jdbc::execute);
+        ddl.forEach(d -> TenantSchema.create(jdbc, d));
     }
 
     /** "" for MySQL, " FINAL" for ClickHouse. */
     protected abstract String readFinal();
 
-    protected static final String FOLDER = "(id, owner, name, parent_id, deleted, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
-    protected static final String PLACEMENT = "(owner, file_id, folder_id, placed_by, updated_at) VALUES (?, ?, ?, ?, ?)";
+    protected static final String FOLDER = "(company_id, id, owner, name, parent_id, deleted, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String PLACEMENT = "(company_id, owner, file_id, folder_id, placed_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(FileFolder f) {
-        return new Object[]{f.id(), f.owner(), f.name(), f.parentId() == null ? "" : f.parentId(), f.deleted() ? 1 : 0,
+        return new Object[]{TenantSchema.company(), f.id(), f.owner(), f.name(), f.parentId() == null ? "" : f.parentId(), f.deleted() ? 1 : 0,
                 utc(f.createdAt()), utc(f.updatedAt())};
     }
 
@@ -48,24 +48,27 @@ abstract class AbstractJdbcFileFolderStore implements FileFolderStore {
 
     @Override
     public Optional<FileFolder> find(String id) {
-        return jdbc.query("SELECT * FROM file_folder" + readFinal() + " WHERE id = ? AND deleted = 0", mapper, id).stream().findFirst();
+        return jdbc.query("SELECT * FROM file_folder" + readFinal() + " WHERE company_id = ? AND id = ? AND deleted = 0", mapper,
+                TenantSchema.company(), id).stream().findFirst();
     }
 
     @Override
     public List<FileFolder> list(String owner) {
-        return jdbc.query("SELECT * FROM file_folder" + readFinal() + " WHERE owner = ? AND deleted = 0 ORDER BY name", mapper, owner);
+        return jdbc.query("SELECT * FROM file_folder" + readFinal() + " WHERE company_id = ? AND owner = ? AND deleted = 0 ORDER BY name",
+                mapper, TenantSchema.company(), owner);
     }
 
     @Override
     public List<String> owners() {
-        return jdbc.queryForList("SELECT DISTINCT owner FROM file_folder" + readFinal() + " WHERE deleted = 0", String.class);
+        return jdbc.queryForList("SELECT DISTINCT owner FROM file_folder" + readFinal() + " WHERE company_id = ? AND deleted = 0",
+                String.class, TenantSchema.company());
     }
 
     @Override
     public Map<String, String> placements(String owner) {
         Map<String, String> out = new LinkedHashMap<>();
-        jdbc.query("SELECT file_id, folder_id FROM file_placement" + readFinal() + " WHERE owner = ?",
-                rs -> { out.put(rs.getString("file_id"), rs.getString("folder_id")); }, owner);
+        jdbc.query("SELECT file_id, folder_id FROM file_placement" + readFinal() + " WHERE company_id = ? AND owner = ?",
+                rs -> { out.put(rs.getString("file_id"), rs.getString("folder_id")); }, TenantSchema.company(), owner);
         return out;
     }
 }

@@ -5,9 +5,12 @@ import com.superagent.api.skill.SkillRequest;
 import com.superagent.core.settings.SystemSettingStore;
 import com.superagent.core.skill.Skill;
 import com.superagent.core.skill.SkillStore;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserSource;
 import com.superagent.core.user.UserStore;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -46,6 +49,16 @@ class SkillServiceTest {
     @TempDir
     Path tmp;
 
+    @BeforeEach
+    void company() {
+        TenantContext.set("acme");
+    }
+
+    @AfterEach
+    void clear() {
+        TenantContext.clear();
+    }
+
     private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0};
 
     /** Everyone exists; only "root" is an administrator. */
@@ -57,6 +70,7 @@ class SkillServiceTest {
             return Optional.of(new User(name, name, name, "root".equals(name) ? Set.of("ADMIN") : Set.of("USER"), true,
                     null, null, null, UserSource.LOCAL, now, now));
         }
+        @Override public Optional<String> companyOfUsername(String name) { return Optional.empty(); }
         @Override public Optional<User> findByPhone(String phone) { return Optional.empty(); }
         @Override public Optional<User> findByExternalId(String id) { return Optional.empty(); }
         @Override public User save(User u) { return u; }
@@ -64,7 +78,9 @@ class SkillServiceTest {
     }
 
     private SkillService service(InMemorySkills store, InMemorySettings settings, Path dir) {
-        return new SkillService(store, settings, new Users(), dir.toString(), "admin");
+        SkillService svc = new SkillService(store, settings, new Users(), dir.toString(), "admin");
+        svc.seedOnce(); // what each company's start does
+        return svc;
     }
 
     private static SkillRequest req(String name, String space) {
@@ -122,7 +138,7 @@ class SkillServiceTest {
     }
 
     @Test
-    void personalSkillsAreTheOwnersAndTeamSkillsAreRetired() {
+    void personalSkillsAreTheOwnersAndTeamSkillsAreGone() {
         InMemorySkills store = new InMemorySkills();
         InMemorySettings settings = new InMemorySettings();
         SkillService svc = service(store, settings, tmp.resolve("skills"));
@@ -141,12 +157,6 @@ class SkillServiceTest {
         svc.setAgentSkills("agent-b", List.of(mine, company), "bob");
         assertThat(svc.forAgent("agent-b", "bob")).extracting(Skill::id).containsExactly(mine, company);
 
-        // A team skill from before becomes its creator's own on the next start.
-        Instant now = Instant.now();
-        store.save(new Skill("00000000-0000-0000-0000-000000000001", "接口", null, null, "x", "team:技术中心", true,
-                false, "dan", "dan", now, now));
-        service(store, settings, tmp.resolve("skills"));
-        assertThat(store.rows.get("00000000-0000-0000-0000-000000000001").space()).isEqualTo("personal:dan");
     }
 
     @Test

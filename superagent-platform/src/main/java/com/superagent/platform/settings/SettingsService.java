@@ -16,6 +16,10 @@ public class SettingsService {
     static final String COMPANY_SHORT_NAME = "company.short-name";
     static final String PUBLIC_URL = "app.public-url";
     static final String BACKUP_MODELS = "agent.backup-models";
+    static final String COMPLEX_MAX_SUBTASKS = "task.complex.max-subtasks";
+    static final String COMPLEX_MAX_PARALLEL = "task.complex.max-parallel";
+    public static final int DEFAULT_MAX_SUBTASKS = 10;
+    public static final int DEFAULT_MAX_PARALLEL = 5;
 
     private final SystemSettingStore store;
     private final ProviderService providerService;
@@ -28,7 +32,8 @@ public class SettingsService {
     public SystemSettingsDto get() {
         Map<String, String> all = store.all();
         return new SystemSettingsDto(trimToNull(all.get(AGENT_DEFAULT_MODEL)), trimToNull(all.get(COMPANY_NAME)),
-                trimToNull(all.get(COMPANY_SHORT_NAME)), trimToNull(all.get(PUBLIC_URL)), backupModels(all));
+                trimToNull(all.get(COMPANY_SHORT_NAME)), trimToNull(all.get(PUBLIC_URL)), backupModels(all),
+                number(all, COMPLEX_MAX_SUBTASKS, DEFAULT_MAX_SUBTASKS), number(all, COMPLEX_MAX_PARALLEL, DEFAULT_MAX_PARALLEL));
     }
 
     /**
@@ -62,7 +67,39 @@ public class SettingsService {
         if (request.publicUrl() != null) {
             store.put(PUBLIC_URL, publicUrl(request.publicUrl()));
         }
+        if (request.complexMaxSubtasks() != null) {
+            store.put(COMPLEX_MAX_SUBTASKS, String.valueOf(bounded(request.complexMaxSubtasks(), 1, 50, "子任务上限")));
+        }
+        if (request.complexMaxParallel() != null) {
+            store.put(COMPLEX_MAX_PARALLEL, String.valueOf(bounded(request.complexMaxParallel(), 1, 20, "同时运行的子任务数")));
+        }
         return get();
+    }
+
+    /** The most subtasks a complex task may hand out. */
+    public int complexMaxSubtasks() {
+        return number(store.all(), COMPLEX_MAX_SUBTASKS, DEFAULT_MAX_SUBTASKS);
+    }
+
+    /** How many of a complex task's subtasks run at once. */
+    public int complexMaxParallel() {
+        return number(store.all(), COMPLEX_MAX_PARALLEL, DEFAULT_MAX_PARALLEL);
+    }
+
+    private static int number(Map<String, String> all, String key, int fallback) {
+        try {
+            String v = trimToNull(all.get(key));
+            return v == null ? fallback : Integer.parseInt(v);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static int bounded(int value, int min, int max, String what) {
+        if (value < min || value > max) {
+            throw new IllegalArgumentException(what + "要在 " + min + " 到 " + max + " 之间");
+        }
+        return value;
     }
 
     /** The model conversations run on (and that judges each task's model), or null for the CLI's own default. */

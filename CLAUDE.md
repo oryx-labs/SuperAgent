@@ -35,7 +35,7 @@ superagent-server's pom), so front-end edits show on a browser refresh. Java cha
 
 ## Module architecture
 
-Sixteen Maven modules, layered; a module may only depend on modules below it (Maven enforces this — a
+Seventeen Maven modules, layered; a module may only depend on modules below it (Maven enforces this — a
 module only sees what its pom declares):
 
 ```text
@@ -49,6 +49,7 @@ L3  superagent-cost         cost optimisation: model tiers worked out from price
 L3  superagent-agent         conversations: agents, chat turns, memory, characters, collaboration, run log
 L3  superagent-task          execution: tasks, session pool, watchdog, the coding flow, automations
 L2  superagent-skills        skills: the working standards agents follow (personal or company-wide)
+L2  superagent-project       projects: a set of agents and the people who use them, and the tasks and files they produce
 L2  superagent-files         work files: what agents produce (documents, images, videos), their storage (local disk, S3-compatible) and agent tools
 L2  superagent-platform      administration: users, system settings, model providers, connectors (and the MCP servers runs get)
 L1  superagent-runtime       driving the coding-agent CLIs (Claude Code, Codex, DeepSeek, Kimi, Qwen; GLM via Claude Code), per-turn MCP grants, image attachments
@@ -85,4 +86,8 @@ keep packages under `com.superagent.*`.
 - Put code in the module it belongs to, by that module's responsibility and layer (`com.superagent.<module>[.<area>]`) — not wherever is nearest or currently open. If no existing module is a good fit, create a new module at the right layer (add it to the parent `pom.xml`, declare only downward dependencies, keep packages under `com.superagent.*`) rather than bending an ill-fitting one. The goal is a sensible distribution of code across modules; prefer a new module over piling unrelated concerns into an existing one.
 - Keep tests convergent — cover the behaviour with a few meaningful cases, not one per permutation.
 - Keep comments sparse — prefer self-documenting code; don't document every field/parameter. Comment the non-obvious (why, invariants, gotchas), not the obvious.
+- Everything belongs to one company (multi-tenant). A new table carries `company_id`, and every query on it filters by
+  `TenantContext.require()` (fail-closed: no company, no query). Work on another thread or in a background loop runs
+  inside `TenantContext.run(companyId, …)`. Settings and config are per company; don't add a new global setting
+  (only platform-wide things are global: the CLI install, the model price catalog, the built-in MCP address).
 - Let exceptions propagate. Don't catch-and-log at the throw site; a single central handler (`GlobalExceptionHandler`) catches, logs, and returns a specific error to the client. (For streamed/async work that can't reach that handler, the stream's terminal error event is the equivalent central point.)

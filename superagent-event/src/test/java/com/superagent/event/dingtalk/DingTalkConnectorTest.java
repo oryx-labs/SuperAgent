@@ -2,18 +2,30 @@ package com.superagent.event.dingtalk;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.superagent.core.tenant.TenantContext;
+import com.superagent.platform.integration.IntegrationService;
 import org.junit.jupiter.api.Test;
 
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
-/** DingTalk Stream frames: every one is acknowledged with its message id, pings echo their data, text is read out. */
+/**
+ * DingTalk Stream frames: every one is acknowledged with its message id, pings echo their data, text is read out.
+ * Each company has its own connection and status.
+ */
 class DingTalkConnectorTest {
 
     private final ObjectMapper json = new ObjectMapper();
@@ -43,7 +55,7 @@ class DingTalkConnectorTest {
     void framesAreAcknowledgedAndPingsEchoed() throws Exception {
         DingTalkConnector c = connector();
         FakeSocket ws = new FakeSocket();
-        DingTalkConnector.Connection conn = c.new Connection("ding-app", "s");
+        DingTalkConnector.Connection conn = c.new Connection("acme", "ding-app", "s");
         c.handleFrame(conn, ws, "{\"type\":\"SYSTEM\",\"headers\":{\"topic\":\"ping\",\"messageId\":\"p1\"},\"data\":\"{\\\"opaque\\\":1}\"}");
         c.handleFrame(conn, ws, "{\"type\":\"CALLBACK\",\"headers\":{\"topic\":\"" + DingTalkConnector.BOT_TOPIC
                 + "\",\"messageId\":\"m1\"},\"data\":\"{}\"}");
@@ -57,6 +69,36 @@ class DingTalkConnectorTest {
         c.handleFrame(conn, ws, "{\"type\":\"SYSTEM\",\"headers\":{\"topic\":\"disconnect\",\"messageId\":\"d1\"}}");
         assertThat(ws.aborted).isTrue();
         c.stop();
+    }
+
+    @Test
+    void eachCompanyHasItsOwnConnectionAndStatus() {
+        IntegrationService integrations = mock(IntegrationService.class);
+        when(integrations.ready(IntegrationService.DINGTALK)).thenReturn(true);
+        when(integrations.value(IntegrationService.DINGTALK, "clientId"))
+                .thenAnswer(i -> Optional.of("app-" + TenantContext.require()));
+        when(integrations.value(IntegrationService.DINGTALK, "clientSecret")).thenReturn(Optional.of("s"));
+        List<String> reported = new CopyOnWriteArrayList<>();
+        doAnswer(i -> reported.add(TenantContext.require() + ":" + i.getArgument(1)))
+                .when(integrations).setStatus(eq(IntegrationService.DINGTALK), anyString(), any());
+        DingTalkConnector c = new DingTalkConnector(integrations, mock(com.superagent.core.inbox.EventSourceStore.class),
+                mock(com.superagent.core.user.UserStore.class), mock(com.superagent.event.InboxService.class),
+                "http://127.0.0.1:1", "http://127.0.0.1:1");
+
+        TenantContext.run("acme", c::reconnect);
+        TenantContext.run("globex", c::reconnect);
+        DingTalkConnector.Connection globex = TenantContext.call("globex", c::connection);
+        TenantContext.run("acme", c::reconnect); // acme changed its app: globex's connection is untouched
+
+        assertThat(TenantContext.call("acme", c::connection).clientId).isEqualTo("app-acme");
+        assertThat(TenantContext.call("globex", c::connection)).isSameAs(globex);
+        assertThat(globex.clientId).isEqualTo("app-globex");
+        assertThat(globex.closed).isFalse();
+        assertThat(reported).contains("acme:error", "globex:error"); // nothing listens on port 1
+
+        c.stop();
+        assertThat(globex.closed).isTrue();
+        assertThat(TenantContext.call("acme", c::connection)).isNull();
     }
 
     @Test

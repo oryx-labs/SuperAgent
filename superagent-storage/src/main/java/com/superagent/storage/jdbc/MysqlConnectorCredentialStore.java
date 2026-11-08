@@ -11,6 +11,7 @@ public class MysqlConnectorCredentialStore extends AbstractJdbcConnectorCredenti
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS connector_credential (
+              company_id    VARCHAR(64)   NOT NULL,
               connector_id  VARCHAR(64)   NOT NULL,
               owner         VARCHAR(128)  NOT NULL,
               secret_cipher VARCHAR(4096) NOT NULL,
@@ -18,12 +19,12 @@ public class MysqlConnectorCredentialStore extends AbstractJdbcConnectorCredenti
               updated_at    DATETIME(3)   NOT NULL,
               refresh_cipher VARCHAR(4096),
               expires_at    DATETIME(3),
-              PRIMARY KEY (connector_id, owner)
+              PRIMARY KEY (company_id, connector_id, owner)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 
     public MysqlConnectorCredentialStore(JdbcTemplate jdbc) {
-        super(dropOld(jdbc), SCHEMA);
+        super(jdbc, SCHEMA);
         // Tables from before expiring tokens (Gitee): add the columns.
         for (String[] col : new String[][]{{"refresh_cipher", "VARCHAR(4096)"}, {"expires_at", "DATETIME(3)"}}) {
             Integer present = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
@@ -32,11 +33,6 @@ public class MysqlConnectorCredentialStore extends AbstractJdbcConnectorCredenti
                 jdbc.execute("ALTER TABLE connector_credential ADD COLUMN " + col[0] + " " + col[1]);
             }
         }
-    }
-
-    private static JdbcTemplate dropOld(JdbcTemplate jdbc) {
-        AbstractJdbcConnectorStore.dropIfOld(jdbc, "connector_credential", "owner");
-        return jdbc;
     }
 
     @Override
@@ -52,11 +48,13 @@ public class MysqlConnectorCredentialStore extends AbstractJdbcConnectorCredenti
 
     @Override
     public void delete(String connectorId, String owner) {
-        jdbc.update("DELETE FROM connector_credential WHERE connector_id = ? AND owner = ?", connectorId, owner);
+        jdbc.update("DELETE FROM connector_credential WHERE company_id = ? AND connector_id = ? AND owner = ?",
+                TenantSchema.company(), connectorId, owner);
     }
 
     @Override
     public void deleteAll(String connectorId) {
-        jdbc.update("DELETE FROM connector_credential WHERE connector_id = ?", connectorId);
+        jdbc.update("DELETE FROM connector_credential WHERE company_id = ? AND connector_id = ?",
+                TenantSchema.company(), connectorId);
     }
 }

@@ -20,15 +20,15 @@ import java.util.Optional;
  */
 abstract class AbstractJdbcConnectorCredentialStore implements ConnectorCredentialStore {
 
-    protected static final String INSERT = "(connector_id, owner, secret_cipher, account_label, updated_at, refresh_cipher, expires_at)"
-            + " VALUES (?, ?, ?, ?, ?, ?, ?)";
+    protected static final String INSERT = "(company_id, connector_id, owner, secret_cipher, account_label, updated_at, refresh_cipher, "
+            + "expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected final JdbcTemplate jdbc;
 
     protected AbstractJdbcConnectorCredentialStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -46,18 +46,19 @@ abstract class AbstractJdbcConnectorCredentialStore implements ConnectorCredenti
 
     @Override
     public Optional<ConnectorCredential> find(String connectorId, String owner) {
-        return jdbc.query("SELECT * FROM connector_credential" + credentialFinal() + " WHERE connector_id = ? AND owner = ?",
-                mapper, connectorId, owner).stream().findFirst();
+        return jdbc.query("SELECT * FROM connector_credential" + credentialFinal()
+                        + " WHERE company_id = ? AND connector_id = ? AND owner = ?",
+                mapper, TenantSchema.company(), connectorId, owner).stream().findFirst();
     }
 
     @Override
     public List<ConnectorCredential> list(String connectorId) {
-        return jdbc.query("SELECT * FROM connector_credential" + credentialFinal() + " WHERE connector_id = ?",
-                mapper, connectorId);
+        return jdbc.query("SELECT * FROM connector_credential" + credentialFinal() + " WHERE company_id = ? AND connector_id = ?",
+                mapper, TenantSchema.company(), connectorId);
     }
 
     protected Object[] params(ConnectorCredential c) {
-        return new Object[]{c.connectorId(), c.owner(), nn(c.secretCipher()), nn(c.accountLabel()), utc(c.updatedAt()),
+        return new Object[]{TenantSchema.company(), c.connectorId(), c.owner(), nn(c.secretCipher()), nn(c.accountLabel()), utc(c.updatedAt()),
                 nn(c.refreshCipher()), c.expiresAt() == null ? null : utc(c.expiresAt())};
     }
 

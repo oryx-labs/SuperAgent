@@ -2,6 +2,7 @@ package com.superagent.files;
 
 import com.superagent.core.file.FileStore;
 import com.superagent.core.file.FileStoreProvider;
+import com.superagent.core.tenant.TenantContext;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -25,7 +26,8 @@ import java.util.Map;
 
 /**
  * S3-compatible object storage: AWS S3, and anything speaking its API given an endpoint — MinIO, Cloudflare R2,
- * Tencent COS, Huawei OBS, …. Objects are {@code <prefix>/<file id>}; the bucket should be private, since every
+ * Tencent COS, Huawei OBS, …. Objects are {@code <prefix><company>/<file id>}, so companies sharing a bucket
+ * and prefix still keep apart; the bucket should be private, since every
  * download goes through SuperAgent's own permission checks.
  */
 @Component
@@ -90,7 +92,7 @@ public class S3FileStoreProvider implements FileStoreProvider {
             if (id.isBlank() || id.contains("/") || id.contains("..")) {
                 throw new IllegalArgumentException("Bad file id: " + id);
             }
-            return prefix + id;
+            return prefix + TenantContext.require() + "/" + id;
         }
 
         @Override
@@ -105,7 +107,7 @@ public class S3FileStoreProvider implements FileStoreProvider {
             try {
                 return s3.getObject(GetObjectRequest.builder().bucket(bucket).key(key(id)).build());
             } catch (NoSuchKeyException e) {
-                throw new NoSuchFileException(prefix + id);
+                throw new NoSuchFileException(key(id));
             }
         }
 

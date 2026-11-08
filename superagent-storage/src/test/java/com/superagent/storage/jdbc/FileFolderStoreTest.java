@@ -1,7 +1,9 @@
 package com.superagent.storage.jdbc;
 
 import com.superagent.core.file.FileFolder;
+import com.superagent.core.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -9,6 +11,7 @@ import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ExtendWith(InCompany.class)
 class FileFolderStoreTest {
 
     @Test
@@ -35,5 +38,15 @@ class FileFolderStoreTest {
         store.place("bob", "f1", "c", "user");
         assertThat(store.placements("ada")).containsEntry("f1", "");
         assertThat(store.placements("bob")).containsEntry("f1", "c");
+
+        TenantContext.run(InCompany.OTHER, () -> {
+            assertThat(store.find("b")).isEmpty();
+            assertThat(store.owners()).isEmpty();
+            assertThat(store.placements("ada")).isEmpty();
+            store.save(new FileFolder("b", "ada", "别家", null, false, t, t));
+            store.place("ada", "f1", "b", "user");
+        });
+        assertThat(store.find("b")).hasValueSatisfying(f -> assertThat(f.name()).isEqualTo("Q4"));
+        assertThat(store.placements("ada")).containsEntry("f1", "");
     }
 }

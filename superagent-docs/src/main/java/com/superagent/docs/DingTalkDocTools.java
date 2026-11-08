@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.platform.integration.IntegrationService;
 import com.superagent.runtime.mcp.McpGrants;
 import com.superagent.runtime.mcp.McpToolException;
@@ -45,9 +46,13 @@ public class DingTalkDocTools implements McpToolProvider {
     private final String apiUrl;
     private final String oapiUrl;
     private final DocApi api = new DocApi("钉钉");
+    // Each company has its own DingTalk app, and a userid only means something inside one org: both are keyed by
+    // company + app key.
     private final Map<String, String> unionIds = new ConcurrentHashMap<>();
-    private volatile String appToken;
-    private volatile Instant appTokenUntil = Instant.EPOCH;
+    private final Map<String, AppToken> appTokens = new ConcurrentHashMap<>();
+
+    private record AppToken(String token, Instant until) {
+    }
 
     public DingTalkDocTools(IntegrationService integrations, EventSourceStore links,
                             @Value("${superagent.dingtalk.api-url:https://api.dingtalk.com}") String apiUrl,
@@ -185,19 +190,27 @@ public class DingTalkDocTools implements McpToolProvider {
         String appId = integrations.value(IntegrationService.DINGTALK, "clientId").orElse(null);
         String userId = links.find(owner, EventSource.DINGTALK).filter(s -> s.linkedTo(appId)).map(EventSource::ownerExternalId)
                 .orElseThrow(() -> new McpToolException("用户的钉钉账号还没有关联 SuperAgent。请让他在「连接」页找到钉钉，按提示关联后再试。"));
-        return unionIds.computeIfAbsent(userId, id -> api.send("POST", oapiUrl + "/topapi/v2/user/get?access_token=" + enc(appToken()),
-                Map.of(), DocApi.JSON.createObjectNode().put("userid", id)).path("result").path("unionid").asText());
+        return unionIds.computeIfAbsent(appKey(appId) + "/" + userId, k -> api.send("POST", oapiUrl + "/topapi/v2/user/get?access_token=" + enc(appToken()),
+                Map.of(), DocApi.JSON.createObjectNode().put("userid", userId)).path("result").path("unionid").asText());
+    }
+
+    private static String appKey(String clientId) {
+        return TenantContext.require() + "/" + (clientId == null ? "" : clientId);
     }
 
     private synchronized String appToken() {
-        if (appToken == null || Instant.now().isAfter(appTokenUntil)) {
+        String clientId = integrations.value(IntegrationService.DINGTALK, "clientId").orElse("");
+        String key = appKey(clientId);
+        AppToken t = appTokens.get(key);
+        if (t == null || Instant.now().isAfter(t.until())) {
             JsonNode r = api.send("POST", apiUrl + "/v1.0/oauth2/accessToken", Map.of(), DocApi.JSON.createObjectNode()
-                    .put("appKey", integrations.value(IntegrationService.DINGTALK, "clientId").orElse(""))
+                    .put("appKey", clientId)
                     .put("appSecret", integrations.value(IntegrationService.DINGTALK, "clientSecret").orElse("")));
-            appToken = r.path("accessToken").asText();
-            appTokenUntil = Instant.now().plusSeconds(Math.max(60, r.path("expireIn").asLong(7200) - 300));
+            t = new AppToken(r.path("accessToken").asText(),
+                    Instant.now().plusSeconds(Math.max(60, r.path("expireIn").asLong(7200) - 300)));
+            appTokens.put(key, t);
         }
-        return appToken;
+        return t.token();
     }
 
     private static String enc(String v) {

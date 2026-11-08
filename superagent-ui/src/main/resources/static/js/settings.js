@@ -19,6 +19,8 @@ const sel = {
   logoReset: document.getElementById("sfLogoReset"),
   companyShortName: document.getElementById("sfCompanyShortName"),
   publicUrl: document.getElementById("sfPublicUrl"),
+  complexMaxSubtasks: document.getElementById("sfComplexMaxSubtasks"),
+  complexMaxParallel: document.getElementById("sfComplexMaxParallel"),
   missing: document.getElementById("sfAgentModelMissing"),
   filtered: document.getElementById("sfAgentModelFiltered"),
   status: document.getElementById("sfStatus"),
@@ -37,6 +39,8 @@ async function loadSettingsForm() {
   refreshLogo();
   sel.companyShortName.value = systemSettings.companyShortName || "";
   sel.publicUrl.value = systemSettings.publicUrl || "";
+  sel.complexMaxSubtasks.value = systemSettings.complexMaxSubtasks || 10;
+  sel.complexMaxParallel.value = systemSettings.complexMaxParallel || 5;
 
   sel.agentModel.innerHTML = "";
   const def = document.createElement("option");
@@ -120,6 +124,8 @@ sel.form.addEventListener("submit", async e => {
       companyShortName: sel.companyShortName.value.trim() || null,
       publicUrl: sel.publicUrl.value.trim(), // "" clears it
       backupModels,
+      complexMaxSubtasks: Number(sel.complexMaxSubtasks.value) || null,
+      complexMaxParallel: Number(sel.complexMaxParallel.value) || null,
     });
     if (!res || !res.data) throw new Error((res && res.message) || "no data");
     systemSettings = res.data;

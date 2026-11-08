@@ -14,6 +14,7 @@ import com.superagent.files.FileService;
 import com.superagent.platform.provider.CredentialService;
 import com.superagent.platform.provider.ProviderService;
 import com.superagent.platform.settings.SettingsService;
+import com.superagent.platform.tenant.CompanyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -66,10 +67,14 @@ public class FileTagger {
         return t;
     });
     private CredentialService credentials;
-    private volatile Instant pausedUntil = Instant.MIN;
+    /** Per company: one company's broken model setup doesn't hold up another's tagging. */
+    private final Map<String, Instant> pausedUntil = new java.util.concurrent.ConcurrentHashMap<>();
 
-    public FileTagger(FileService files, ProviderService providers, SettingsService settings, List<AgentRunner> runners,
+    private final CompanyService companies;
+
+    public FileTagger(CompanyService companies, FileService files, ProviderService providers, SettingsService settings, List<AgentRunner> runners,
                       @Value("${superagent.files.auto-tag:true}") boolean enabled) {
+        this.companies = companies;
         this.files = files;
         this.providers = providers;
         this.settings = settings;
@@ -92,12 +97,13 @@ public class FileTagger {
     @EventListener(ApplicationReadyEvent.class)
     void start() {
         if (enabled) {
-            scheduler.scheduleWithFixedDelay(this::tick, 90, 60, TimeUnit.SECONDS);
+            scheduler.scheduleWithFixedDelay(() -> companies.forEach(this::tick), 90, 60, TimeUnit.SECONDS);
         }
     }
 
     void tick() {
-        if (Instant.now().isBefore(pausedUntil)) {
+        String company = com.superagent.core.tenant.TenantContext.require();
+        if (Instant.now().isBefore(pausedUntil.getOrDefault(company, Instant.MIN))) {
             return;
         }
         try {
@@ -119,7 +125,7 @@ public class FileTagger {
             }
         } catch (RuntimeException e) {
             log.warn("file tagging failed, retrying in {} min: {}", RETRY_AFTER_FAILURE.toMinutes(), e.getMessage());
-            pausedUntil = Instant.now().plus(RETRY_AFTER_FAILURE);
+            pausedUntil.put(company, Instant.now().plus(RETRY_AFTER_FAILURE));
         }
     }
 

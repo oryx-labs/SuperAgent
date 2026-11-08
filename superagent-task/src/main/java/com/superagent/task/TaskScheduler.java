@@ -1,5 +1,6 @@
 package com.superagent.task;
 
+import com.superagent.platform.tenant.CompanyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,7 +15,8 @@ import java.util.concurrent.TimeUnit;
  * Runs new tasks. Creating a task only records it; this picks waiting tasks up in the order they were made and
  * hands each to {@link TaskService#admit}, which chooses its model and gets it a session. Woken at once when a task
  * is recorded, and looks anyway every {@code sweep-seconds}, so nothing waits forever (after a restart, say).
- * Tasks that wait for others will be held back here.
+ * A complex task's subtasks are held back to its parallel limit, and a complex task whose subtasks have all finished
+ * is set to sum them up.
  */
 @Component
 class TaskScheduler {
@@ -26,7 +28,10 @@ class TaskScheduler {
     private final Semaphore wake = new Semaphore(0);
     private volatile boolean running = true;
 
-    TaskScheduler(TaskService tasks, @Value("${superagent.task.scheduler.sweep-seconds:30}") long sweepSeconds) {
+    private final CompanyService companies;
+
+    TaskScheduler(CompanyService companies, TaskService tasks, @Value("${superagent.task.scheduler.sweep-seconds:30}") long sweepSeconds) {
+        this.companies = companies;
         this.tasks = tasks;
         this.sweepSeconds = Math.max(1, sweepSeconds);
     }
@@ -43,9 +48,12 @@ class TaskScheduler {
     private void loop() {
         while (running) {
             try {
-                for (var task : tasks.awaitingAdmission()) {
-                    tasks.admit(task);
-                }
+                companies.forEach(() -> {
+                    tasks.sumUpFinished(); // complex tasks whose subtasks are all done carry on
+                    for (var task : tasks.awaitingAdmission()) {
+                        tasks.admit(task);
+                    }
+                });
             } catch (RuntimeException e) {
                 log.warn("task scheduler pass failed", e);
             }

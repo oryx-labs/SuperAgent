@@ -107,6 +107,7 @@ class ConnectorServiceTest {
                 cipher, integrations);
         service = new ConnectorService(store, creds, sources, oauth, cipher,
                 new McpGrants("http://127.0.0.1:18080/mcp"), integrations, settingStore, new ConfluenceSite());
+        service.seedDefaults(); // what each company's start does
     }
 
     @Test

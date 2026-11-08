@@ -31,7 +31,7 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
     protected AbstractJdbcInboxStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -40,13 +40,13 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
 
     // --- events ---
 
-    protected static final String EVENT_COLUMNS = "(id, owner, source, external_id, chat_id, chat_name, chat_type, "
+    protected static final String EVENT_COLUMNS = "(company_id, id, owner, source, external_id, chat_id, chat_name, chat_type, "
             + "thread_id, sender_id, sender_name, text, mentions_me, raw, priority, triage_reason, processed, handling, "
             + "occurred_at, received_at, updated_at)";
-    protected static final String EVENT_VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String EVENT_VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] eventParams(InboxEvent e) {
-        return new Object[]{e.id(), e.owner(), e.source(), e.externalId(), nn(e.chatId()), nn(e.chatName()),
+        return new Object[]{TenantSchema.company(), e.id(), e.owner(), e.source(), e.externalId(), nn(e.chatId()), nn(e.chatName()),
                 nn(e.chatType()), nn(e.threadId()), nn(e.senderId()), nn(e.senderName()), nn(e.text()),
                 e.mentionsMe() ? 1 : 0, nn(e.raw()), e.priority().name(), nn(e.triageReason()), e.processed() ? 1 : 0,
                 nn(e.handling()), utc(e.occurredAt()), utc(e.receivedAt()), utc(e.updatedAt())};
@@ -64,34 +64,36 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
     @Override
     public List<InboxEvent> pending(String owner, EventPriority priority, int limit) {
         return jdbc.query("SELECT * FROM inbox_event" + readFinal()
-                        + " WHERE owner = ? AND priority = ? AND processed = 0 ORDER BY received_at LIMIT ?",
-                eventMapper, owner, priority.name(), limit);
+                        + " WHERE company_id = ? AND owner = ? AND priority = ? AND processed = 0 ORDER BY received_at LIMIT ?",
+                eventMapper, TenantSchema.company(), owner, priority.name(), limit);
     }
 
     @Override
     public List<InboxEvent> recent(String owner, int limit) {
-        return jdbc.query("SELECT * FROM inbox_event" + readFinal() + " WHERE owner = ? ORDER BY received_at DESC LIMIT ?",
-                eventMapper, owner, limit);
+        return jdbc.query("SELECT * FROM inbox_event" + readFinal() + " WHERE company_id = ? AND owner = ? ORDER BY received_at DESC LIMIT ?",
+                eventMapper, TenantSchema.company(), owner, limit);
     }
 
     @Override
     public Optional<InboxEvent> findEvent(String id) {
-        return jdbc.query("SELECT * FROM inbox_event" + readFinal() + " WHERE id = ?", eventMapper, id).stream().findFirst();
+        return jdbc.query("SELECT * FROM inbox_event" + readFinal() + " WHERE company_id = ? AND id = ?", eventMapper,
+                TenantSchema.company(), id).stream().findFirst();
     }
 
     protected boolean eventExists(String id) {
-        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM inbox_event" + readFinal() + " WHERE id = ?", Integer.class, id);
+        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM inbox_event" + readFinal() + " WHERE company_id = ? AND id = ?",
+                Integer.class, TenantSchema.company(), id);
         return n != null && n > 0;
     }
 
     // --- to-dos ---
 
-    protected static final String TODO_COLUMNS = "(id, owner, title, detail, requester, due, event_ids, source, status, "
+    protected static final String TODO_COLUMNS = "(company_id, id, owner, title, detail, requester, due, event_ids, source, status, "
             + "task_id, created_at, updated_at)";
-    protected static final String TODO_VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String TODO_VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] todoParams(InboxTodo t) {
-        return new Object[]{t.id(), t.owner(), nn(t.title()), nn(t.detail()), nn(t.requester()), nn(t.due()),
+        return new Object[]{TenantSchema.company(), t.id(), t.owner(), nn(t.title()), nn(t.detail()), nn(t.requester()), nn(t.due()),
                 nn(t.eventIds()), nn(t.source()), t.status().name(), nn(t.taskId()), utc(t.createdAt()), utc(t.updatedAt())};
     }
 
@@ -103,26 +105,27 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
 
     @Override
     public Optional<InboxTodo> find(String id) {
-        return jdbc.query("SELECT * FROM inbox_todo" + readFinal() + " WHERE id = ?", todoMapper, id).stream().findFirst();
+        return jdbc.query("SELECT * FROM inbox_todo" + readFinal() + " WHERE company_id = ? AND id = ?", todoMapper,
+                TenantSchema.company(), id).stream().findFirst();
     }
 
     @Override
     public List<InboxTodo> list(String owner) {
-        return jdbc.query("SELECT * FROM inbox_todo" + readFinal() + " WHERE owner = ? ORDER BY created_at DESC",
-                todoMapper, owner);
+        return jdbc.query("SELECT * FROM inbox_todo" + readFinal() + " WHERE company_id = ? AND owner = ? ORDER BY created_at DESC",
+                todoMapper, TenantSchema.company(), owner);
     }
 
     // --- sources ---
 
     // Left over and written empty: vip_names / urgent_keywords (user-set triage rules), and secret_cipher /
     // status / last_error from when each user ran their own bot (the company app's live in the connector now).
-    protected static final String SOURCE_COLUMNS = "(owner, type, app_id, secret_cipher, enabled, owner_external_id, "
+    protected static final String SOURCE_COLUMNS = "(company_id, owner, type, app_id, secret_cipher, enabled, owner_external_id, "
             + "bind_code, vip_names, urgent_keywords, digest_time, timezone, secretary_agent_id, last_digest_date, "
             + "last_hourly_at, status, last_error, created_at, updated_at)";
-    protected static final String SOURCE_VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String SOURCE_VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] sourceParams(EventSource s) {
-        return new Object[]{s.owner(), s.type(), nn(s.appId()), "", s.enabled() ? 1 : 0,
+        return new Object[]{TenantSchema.company(), s.owner(), s.type(), nn(s.appId()), "", s.enabled() ? 1 : 0,
                 nn(s.ownerExternalId()), nn(s.bindCode()), "", "", nn(s.digestTime()),
                 nn(s.timezone()), nn(s.secretaryAgentId()), s.lastDigestDate() == null ? "" : s.lastDigestDate().toString(),
                 utc(s.lastHourlyAt() == null ? Instant.EPOCH : s.lastHourlyAt()), "", "",
@@ -144,19 +147,20 @@ abstract class AbstractJdbcInboxStore implements InboxEventStore, InboxTodoStore
 
     @Override
     public Optional<EventSource> find(String owner, String type) {
-        return jdbc.query("SELECT * FROM event_source" + readFinal() + " WHERE owner = ? AND type = ?",
-                sourceMapper, owner, type).stream().findFirst();
+        return jdbc.query("SELECT * FROM event_source" + readFinal() + " WHERE company_id = ? AND owner = ? AND type = ?",
+                sourceMapper, TenantSchema.company(), owner, type).stream().findFirst();
     }
 
     @Override
     public List<EventSource> listEnabled(String type) {
-        return jdbc.query("SELECT * FROM event_source" + readFinal() + " WHERE type = ? AND enabled = 1",
-                sourceMapper, type);
+        return jdbc.query("SELECT * FROM event_source" + readFinal() + " WHERE company_id = ? AND type = ? AND enabled = 1",
+                sourceMapper, TenantSchema.company(), type);
     }
 
     @Override
     public List<EventSource> list() {
-        return jdbc.query("SELECT * FROM event_source" + readFinal(), sourceMapper);
+        return jdbc.query("SELECT * FROM event_source" + readFinal() + " WHERE company_id = ?", sourceMapper,
+                TenantSchema.company());
     }
 
     // --- helpers ---

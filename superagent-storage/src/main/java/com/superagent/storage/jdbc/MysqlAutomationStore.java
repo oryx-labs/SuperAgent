@@ -11,6 +11,7 @@ public class MysqlAutomationStore extends AbstractJdbcAutomationStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS automation (
+              company_id     VARCHAR(64)   NOT NULL,
               id             VARCHAR(64)   NOT NULL,
               name           VARCHAR(255)  NOT NULL,
               prompt         MEDIUMTEXT    NOT NULL,
@@ -29,20 +30,21 @@ public class MysqlAutomationStore extends AbstractJdbcAutomationStore {
               last_task_id   VARCHAR(64),
               created_at     DATETIME(3)   NOT NULL,
               updated_at     DATETIME(3)   NOT NULL,
-              PRIMARY KEY (id),
-              KEY idx_automation_next (next_run_at)
+              PRIMARY KEY (company_id, id),
+              KEY idx_automation_next (company_id, next_run_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
             """
             CREATE TABLE IF NOT EXISTS automation_run (
+              company_id     VARCHAR(64)   NOT NULL,
               id             VARCHAR(64)   NOT NULL,
               automation_id  VARCHAR(64)   NOT NULL,
               trigger_kind   VARCHAR(16)   NOT NULL,
               task_id        VARCHAR(64),
               skipped_reason VARCHAR(512),
               fired_at       DATETIME(3)   NOT NULL,
-              PRIMARY KEY (id),
-              KEY idx_automation_run (automation_id, fired_at)
+              PRIMARY KEY (company_id, id),
+              KEY idx_automation_run (company_id, automation_id, fired_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 
@@ -79,6 +81,6 @@ public class MysqlAutomationStore extends AbstractJdbcAutomationStore {
 
     @Override
     public void delete(String id) {
-        jdbc.update("DELETE FROM automation WHERE id = ?", id);
+        jdbc.update("DELETE FROM automation WHERE company_id = ? AND id = ?", TenantSchema.company(), id);
     }
 }

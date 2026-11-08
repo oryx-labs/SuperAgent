@@ -34,7 +34,7 @@ public class ClickHouseChatStore extends AbstractJdbcChatStore {
 
     @Override
     public void updateMessage(String sessionId, String messageId, String content) {
-        jdbc.update("ALTER TABLE chat_message UPDATE content = ? WHERE id = ? AND session_id = ?",
-                content == null ? "" : content, messageId, sessionId);
+        jdbc.update("ALTER TABLE chat_message UPDATE content = ? WHERE company_id = ? AND id = ? AND session_id = ?",
+                content == null ? "" : content, TenantSchema.company(), messageId, sessionId);
     }
 }

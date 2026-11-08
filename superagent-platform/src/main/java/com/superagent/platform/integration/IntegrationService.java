@@ -6,6 +6,7 @@ import com.superagent.core.error.NotFoundException;
 import com.superagent.core.integration.IntegrationChanged;
 import com.superagent.core.security.SecretCipher;
 import com.superagent.core.settings.SystemSettingStore;
+import com.superagent.core.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -79,7 +80,10 @@ public class IntegrationService {
             new Definition(CONFLUENCE, "Confluence", null, List.of(
                     new FieldDef("url", "站点地址", false))));
 
-    /** Live connection state reported by whatever runs an integration (Feishu's long connection); not stored. */
+    /**
+     * Live connection state reported by whatever runs an integration (Feishu's long connection), per company; not
+     * stored.
+     */
     private record Status(String state, String error) {
     }
 
@@ -130,7 +134,7 @@ public class IntegrationService {
         next.forEach((field, value) -> store.put(name(key, field), value));
         store.put(name(key, "enabled"), enabled ? "true" : "false");
         if (!enabled) {
-            statuses.remove(key);
+            statuses.remove(statusKey(key));
         }
         log.info("integration {} saved ({})", key, enabled ? "enabled" : "disabled");
         publisher.publishEvent(new IntegrationChanged(key));
@@ -167,19 +171,25 @@ public class IntegrationService {
         }
     }
 
+    /** Reported by the connection of the current company. */
     public void setStatus(String key, String state, String error) {
-        statuses.put(key, new Status(state, error));
+        statuses.put(statusKey(key), new Status(state, error));
     }
 
-    /** connecting | connected | error, or null when nothing has reported. */
+    /** The current company's: connecting | connected | error, or null when nothing has reported. */
     public String status(String key) {
-        Status s = statuses.get(key);
+        Status s = statuses.get(statusKey(key));
         return s == null ? null : s.state();
     }
 
     public String lastError(String key) {
-        Status s = statuses.get(key);
+        Status s = statuses.get(statusKey(key));
         return s == null ? null : s.error();
+    }
+
+    /** Outside any company (tests, start-up) reads find nothing a company's connection reported. */
+    private static String statusKey(String key) {
+        return TenantContext.current().orElse("") + "/" + key;
     }
 
     /**

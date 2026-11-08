@@ -2,7 +2,9 @@ package com.superagent.storage.jdbc;
 
 import com.superagent.core.skill.Skill;
 import com.superagent.core.skill.SkillStore;
+import com.superagent.core.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -12,6 +14,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Round-trips skills and bindings through H2 in MySQL mode. */
+@ExtendWith(InCompany.class)
 class SkillStoreTest {
 
     @Test
@@ -36,5 +39,15 @@ class SkillStoreTest {
         assertThat(store.binding(SkillStore.AGENT, "a1")).contains(List.of("s2"));
         store.bind(SkillStore.TASK, "t1", List.of());
         assertThat(store.binding(SkillStore.TASK, "t1")).contains(List.of()); // empty, not absent
+
+        TenantContext.run(InCompany.OTHER, () -> {
+            assertThat(store.list()).isEmpty();
+            assertThat(store.find("s1")).isEmpty();
+            assertThat(store.binding(SkillStore.AGENT, "a1")).isEmpty();
+            store.save(new Skill("s1", "别家", null, null, "", null, true, false, "eve", "eve", now, now));
+            store.bind(SkillStore.AGENT, "a1", List.of("s9"));
+        });
+        assertThat(store.find("s1").orElseThrow().name()).isEqualTo("写作规范");
+        assertThat(store.binding(SkillStore.AGENT, "a1")).contains(List.of("s2"));
     }
 }

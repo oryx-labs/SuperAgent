@@ -43,6 +43,16 @@ import static org.mockito.Mockito.when;
 
 class FileServiceTest {
 
+    @org.junit.jupiter.api.BeforeEach
+    void inCompany() {
+        com.superagent.core.tenant.TenantContext.set("acme"); // work handed to other threads carries the company
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void leaveCompany() {
+        com.superagent.core.tenant.TenantContext.clear();
+    }
+
     private static final class InMemoryFiles implements WorkFileStore {
         final Map<String, WorkFile> rows = new LinkedHashMap<>();
         final Map<String, Set<String>> refs = new LinkedHashMap<>();
@@ -315,20 +325,6 @@ class FileServiceTest {
         assertThat(storage.save("mem", Map.of("bucket", "a")).active()).isEqualTo(channelA);
         svc.delete(inB.id(), "bob");
         assertThat(cloud).doesNotContainKey("b/" + inB.id());
-    }
-
-    @Test
-    void settingsSavedBeforeChannelsBecomeAChannelFilesStillFind() throws Exception {
-        settingRows.put("files.storage.type", "mem");
-        settingRows.put("files.storage.mem.bucket", "old");
-        settingRows.put("files.storage.mem.secret", new SecretCipher("", tmp.resolve("secret.key").toString()).encrypt("s"));
-        InMemoryFiles store = new InMemoryFiles();
-        FileService svc = service(store);
-        assertThat(storage.activeChannel()).isEqualTo("mem"); // existing files say storage = "mem"
-        WorkFile f = svc.writeText(chat("bob", "dev", "m1"), "x.md", "老配置", null);
-        assertThat(f.storage()).isEqualTo("mem");
-        assertThat(cloud).containsKey("old/" + f.id());
-        assertThat(read(svc, f.id())).isEqualTo("老配置");
     }
 
     @Test

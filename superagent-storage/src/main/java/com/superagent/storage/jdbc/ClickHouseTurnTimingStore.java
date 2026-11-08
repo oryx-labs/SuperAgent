@@ -9,12 +9,12 @@ public class ClickHouseTurnTimingStore extends AbstractJdbcTurnTimingStore {
     public ClickHouseTurnTimingStore(JdbcTemplate jdbc) {
         super(jdbc, """
                 CREATE TABLE IF NOT EXISTS turn_timing (
-                  message_id String, session_id String, label String,
+                  company_id String, message_id String, session_id String, label String,
                   started_at DateTime64(3, 'UTC'), finished_at DateTime64(3, 'UTC'),
                   prep_ms Int64, startup_ms Int64, model_ms Int64, tools_ms Int64, output_ms Int64, retry_ms Int64,
                   save_ms Int64, attempts Int32, tools String
                 ) ENGINE = ReplacingMergeTree(finished_at)
-                ORDER BY message_id
+                ORDER BY (company_id, message_id)
                 """);
     }
 

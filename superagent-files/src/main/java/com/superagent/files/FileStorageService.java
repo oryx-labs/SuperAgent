@@ -7,6 +7,7 @@ import com.superagent.core.file.WorkFile;
 import com.superagent.core.file.WorkFileStore;
 import com.superagent.core.security.SecretCipher;
 import com.superagent.core.settings.SystemSettingStore;
+import com.superagent.core.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -50,6 +51,7 @@ public class FileStorageService {
     private final SystemSettingStore settings;
     private final SecretCipher cipher;
     private final WorkFileStore files;
+    /** Open stores by company and channel: channel ids (a kind's name, at first) repeat across companies. */
     private final Map<String, FileStore> open = new ConcurrentHashMap<>();
     private final Object lock = new Object();
 
@@ -60,7 +62,6 @@ public class FileStorageService {
         this.settings = settings;
         this.cipher = cipher;
         this.files = files;
-        adoptEarlierSettings();
     }
 
     /** One storage channel as saved. */
@@ -89,7 +90,8 @@ public class FileStorageService {
 
     /** The store a channel's content is in, opened with that channel's own settings. */
     public FileStore store(String channelId) {
-        return open.computeIfAbsent(channelId, id -> {
+        return open.computeIfAbsent(openKey(channelId), k -> {
+            String id = channelId;
             Channel c = channel(id).orElseThrow(() -> new IllegalStateException("没有这个文件存储渠道：" + id));
             FileStoreProvider p = providers.get(c.type());
             if (p == null) {
@@ -146,7 +148,7 @@ public class FileStorageService {
             write(new Channel(id, p.type(), stored, base.filter(b -> b.id().equals(id)).map(Channel::createdAt)
                     .orElse(Instant.now())));
             settings.put(ACTIVE, id);
-            open.remove(id); // reopened with the new settings
+            open.remove(openKey(id)); // reopened with the new settings
             log.info("new files now go to storage channel {} ({})", id, p.type());
         }
         return view();
@@ -265,33 +267,8 @@ public class FileStorageService {
         return out;
     }
 
-    /** Settings saved before channels existed (one per kind) become that kind's first channel, under the kind's name. */
-    private void adoptEarlierSettings() {
-        Map<String, String> all = settings.all();
-        if (blank(all.get(CHANNELS)) != null) {
-            return;
-        }
-        List<String> ids = new ArrayList<>(List.of(WorkFile.INTERNAL));
-        for (FileStoreProvider p : providers.values()) {
-            Map<String, String> values = new LinkedHashMap<>();
-            p.fields().forEach(f -> {
-                String v = blank(all.get("files.storage." + p.type() + "." + f.key()));
-                if (v != null) {
-                    values.put(f.key(), v);
-                }
-            });
-            if (!values.isEmpty()) {
-                settings.put(key(p.type(), "type"), p.type());
-                settings.put(key(p.type(), "created"), Instant.now().toString());
-                values.forEach((k, v) -> settings.put(key(p.type(), k), v));
-                ids.add(p.type());
-            }
-        }
-        settings.put(CHANNELS, String.join(",", ids));
-        String earlier = blank(all.get("files.storage.type"));
-        if (earlier != null && ids.contains(earlier)) {
-            settings.put(ACTIVE, earlier);
-        }
+    private static String openKey(String channelId) {
+        return TenantContext.require() + "/" + channelId;
     }
 
     private FileStoreProvider provider(String type) {

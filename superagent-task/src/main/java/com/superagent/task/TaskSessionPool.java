@@ -1,6 +1,7 @@
 package com.superagent.task;
 
 import com.superagent.core.chat.AgentType;
+import com.superagent.core.tenant.TenantPaths;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,8 +73,11 @@ class TaskSessionPool {
     /** Reuse an idle session of this CLI, else mint one under the cap, else {@code null} (caller should queue). */
     Lease acquire(String owner, AgentType agentType, String taskId) {
         List<Session> sessions = sessionsOf(owner);
+        Path company = TenantPaths.of(workspaceRoot);
         for (Session s : sessions) {
-            if (s.state == State.IDLE && s.agentType == agentType) {
+            // the company check is a backstop: owners are usernames, unique across companies
+            if (s.state == State.IDLE && s.agentType == agentType
+                    && s.workspaceDir != null && Path.of(s.workspaceDir).startsWith(company)) {
                 bind(s, taskId, State.BUSY);
                 log.info("task {} reusing session {} ({}, owner {})", taskId, s.id, agentType, owner);
                 return new Lease(s, !s.initialized);
@@ -230,7 +234,7 @@ class TaskSessionPool {
     }
 
     private String createWorkspace(String sessionId) {
-        Path dir = workspaceRoot.resolve(sessionId);
+        Path dir = TenantPaths.of(workspaceRoot).resolve(sessionId);
         try {
             Files.createDirectories(dir);
         } catch (IOException e) {

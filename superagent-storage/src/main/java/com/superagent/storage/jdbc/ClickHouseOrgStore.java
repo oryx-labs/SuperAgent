@@ -13,18 +13,20 @@ public class ClickHouseOrgStore extends AbstractJdbcOrgStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS user_manager (
+              company_id String,
               username   String,
               manager    String,
               updated_at DateTime64(3, 'UTC')
             ) ENGINE = ReplacingMergeTree(updated_at)
-            ORDER BY username
+            ORDER BY (company_id, username)
             """,
             """
             CREATE TABLE IF NOT EXISTS user_team (
-              username  String,
-              team_path String
+              company_id String,
+              username   String,
+              team_path  String
             ) ENGINE = MergeTree
-            ORDER BY (username, team_path)
+            ORDER BY (company_id, username, team_path)
             """);
 
     public ClickHouseOrgStore(JdbcTemplate jdbc) {

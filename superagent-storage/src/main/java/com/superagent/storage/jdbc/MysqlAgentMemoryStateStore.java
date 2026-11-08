@@ -11,6 +11,7 @@ public class MysqlAgentMemoryStateStore extends AbstractJdbcAgentMemoryStateStor
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS agent_memory (
+              company_id       VARCHAR(64)  NOT NULL,
               agent_id         VARCHAR(64)  NOT NULL,
               owner            VARCHAR(255),
               summarized_until DATETIME(3),
@@ -18,7 +19,7 @@ public class MysqlAgentMemoryStateStore extends AbstractJdbcAgentMemoryStateStor
               session_failures INT          NOT NULL DEFAULT 0,
               memory           MEDIUMTEXT,
               updated_at       DATETIME(3)  NOT NULL,
-              PRIMARY KEY (agent_id)
+              PRIMARY KEY (company_id, agent_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 
@@ -54,6 +55,6 @@ public class MysqlAgentMemoryStateStore extends AbstractJdbcAgentMemoryStateStor
 
     @Override
     public void delete(String agentId) {
-        jdbc.update("DELETE FROM agent_memory WHERE agent_id = ?", agentId);
+        jdbc.update("DELETE FROM agent_memory WHERE company_id = ? AND agent_id = ?", TenantSchema.company(), agentId);
     }
 }

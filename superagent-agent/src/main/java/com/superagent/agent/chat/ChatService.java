@@ -30,6 +30,8 @@ import com.superagent.core.chat.ChatStore;
 import com.superagent.core.chat.ImageAttachment;
 import com.superagent.core.chat.MessageRole;
 import com.superagent.core.chat.SessionStatus;
+import com.superagent.core.tenant.TenantContext;
+import com.superagent.core.tenant.TenantPaths;
 import com.superagent.core.user.UserStore;
 import com.superagent.files.FileService;
 import com.superagent.skills.SkillService;
@@ -226,6 +228,12 @@ public class ChatService {
     }
 
     private com.superagent.platform.connector.ConnectorService connectors; // null in tests: no company connectors
+    private com.superagent.core.project.ProjectAccess projects; // null in tests: no projects
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setProjects(com.superagent.core.project.ProjectAccess projects) {
+        this.projects = projects;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setConnectors(com.superagent.platform.connector.ConnectorService connectors) {
@@ -237,7 +245,7 @@ public class ChatService {
     public SessionDto createSession(CreateSessionRequest request) {
         String id = UUID.randomUUID().toString();
         AgentType agentType = AgentType.fromString(request == null ? null : request.agentType());
-        Path workspace = workspaceRoot.resolve(id);
+        Path workspace = TenantPaths.of(workspaceRoot).resolve(id);
         try {
             Files.createDirectories(workspace);
         } catch (IOException e) {
@@ -283,7 +291,7 @@ public class ChatService {
      */
     public ChatSession ensureDetachedSession(String id, String title) {
         return store.findSession(id).orElseGet(() -> {
-            Path workspace = workspaceRoot.resolve(id);
+            Path workspace = TenantPaths.of(workspaceRoot).resolve(id);
             try {
                 Files.createDirectories(workspace);
             } catch (IOException e) {
@@ -448,7 +456,8 @@ public class ChatService {
         }
         return agentStore.find(session.agentId())
                 .filter(a -> user.equals(a.owner())
-                        || members.members(a.id()).stream().anyMatch(m -> m.username().equals(user)))
+                        || members.members(a.id()).stream().anyMatch(m -> m.username().equals(user))
+                        || (projects != null && projects.sharesProject(a.id(), user)))
                 .isPresent();
     }
 
@@ -472,6 +481,9 @@ public class ChatService {
                 : customizers.orderedStream().filter(c -> c.handles(agent)).findFirst().orElse(null);
         if (agent != null && agent.isSuper() && special == null) {
             throw new IllegalStateException("SuperAgent chat is not available");
+        }
+        if (agent != null && projects != null && projects.archived(agent.id())) {
+            throw new IllegalArgumentException("这个 Agent 所在的项目已归档，只能查看，不能再对话");
         }
         // One turn at a time: in a shared agent, another member's turn may be running.
         String liveKey = agent != null ? agent.id() : sessionId;
@@ -541,7 +553,7 @@ public class ChatService {
         String agentMemory = agent == null ? null
                 : session.agentSessionId() == null ? memory.context(agent, Set.of(userMessageId)) : memory.read(agent);
         String turnPrompt = prompt;
-        executor.execute(() -> {
+        executor.execute(TenantContext.wrap(() -> {
             try {
                 runTurn(agent, turn, agentType, runner, model, systemPrompt, agentMemory, turnPrompt, attached,
                         user, userMessageId, assistantMessageId, new TurnStream(emitter, live, agent, special, timer), cancellation);
@@ -549,7 +561,7 @@ public class ChatService {
                 liveTurns.remove(liveKey, live);
                 live.end();
             }
-        });
+        }));
         return emitter;
     }
 

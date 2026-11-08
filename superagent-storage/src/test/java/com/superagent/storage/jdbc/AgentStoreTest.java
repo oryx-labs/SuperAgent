@@ -6,7 +6,9 @@ import com.superagent.core.agent.AgentStatus;
 import com.superagent.core.chat.AgentType;
 import com.superagent.core.chat.ChatSession;
 import com.superagent.core.chat.SessionStatus;
+import com.superagent.core.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -15,6 +17,7 @@ import java.time.Instant;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Round-trips the Agent entity and the session→agent link through H2 in MySQL mode. */
+@ExtendWith(InCompany.class)
 class AgentStoreTest {
 
     private static JdbcTemplate h2() {
@@ -51,6 +54,23 @@ class AgentStoreTest {
         // Soft delete keeps the row with DELETED status; the service, not the store, filters it out.
         store.update(store.find("a1").orElseThrow().deleted());
         assertThat(store.find("a1")).hasValueSatisfying(got -> assertThat(got.status()).isEqualTo(AgentStatus.DELETED));
+        assertThat(store.list()).hasSize(1);
+    }
+
+    @Test
+    void anotherCompanyNeitherSeesNorOverwritesAnAgent() {
+        MysqlAgentStore store = new MysqlAgentStore(h2());
+        Instant now = Instant.now();
+        store.create(new Agent("a1", "Researcher", null, null, null, null, AgentStatus.ACTIVE, "alice",
+                AgentKind.STANDARD, null, now, now));
+
+        TenantContext.run(InCompany.OTHER, () -> {
+            assertThat(store.find("a1")).isEmpty();
+            assertThat(store.list()).isEmpty();
+            store.update(new Agent("a1", "Intruder", null, null, null, null, AgentStatus.ACTIVE, "eve",
+                    AgentKind.STANDARD, null, now, now));
+        });
+        assertThat(store.find("a1")).hasValueSatisfying(got -> assertThat(got.name()).isEqualTo("Researcher"));
         assertThat(store.list()).hasSize(1);
     }
 

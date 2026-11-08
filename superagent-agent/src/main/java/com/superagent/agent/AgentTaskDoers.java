@@ -26,6 +26,11 @@ class AgentTaskDoers implements TaskDoers {
         return agentId == null ? Optional.empty() : agents.find(agentId).filter(a -> !a.isSuper()).map(this::doer);
     }
 
+    @Override
+    public Optional<String> name(String agentId) {
+        return agentId == null ? Optional.empty() : agents.find(agentId).map(Agent::name);
+    }
+
     private Doer doer(Agent a) {
         return new Doer(a.name(), AgentCharacters.systemPrompt(a), memory.read(a));
     }

@@ -37,6 +37,20 @@ An agent is a colleague the company keeps. Its setup, memory and the files it pr
 
 <Shot name="agent-collab" alt="Several people working with the same agent" />
 
+## Projects
+
+A project brings together the agents and the people working on one piece of work, so everyone sees the same agents, tasks and files.
+
+- **Anyone can start one** and becomes its owner. Only the owner renames it, adds or removes people, and archives or reopens it.
+- **Members use every agent in the project**, with no need to invite them to each agent, and see every task and file made in it, whoever started it.
+- **Agents** — an agent belongs to at most one project; only the agent's owner puts it in or takes it out. Your SuperAgent is never in a project.
+- **Filed automatically** — a task goes to the project of the agent that started it, and a file to its task's project (or its agent's).
+- **Archiving** keeps everything; the project's agents become read-only (no new conversations) until it's reopened.
+
+Find projects under **Workspace → Projects**, with Active and Archived tabs; each project has Agents, Tasks, Files and Members tabs. The agent list groups agents under their project, and Tasks and Files each have a project filter.
+
+<Shot name="projects" alt="A project: its agents, tasks, files and members" />
+
 ## Run log
 
 Every agent has a run log: its sessions, each turn, memory changes, and what a SuperAgent did. The owner can review it. Entries are kept for 30 days.

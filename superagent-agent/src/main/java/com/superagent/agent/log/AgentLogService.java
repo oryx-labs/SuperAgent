@@ -4,6 +4,7 @@ import com.superagent.api.agent.AgentLogDto;
 import com.superagent.core.agent.Agent;
 import com.superagent.core.agent.AgentLogEntry;
 import com.superagent.core.agent.AgentLogStore;
+import com.superagent.platform.tenant.CompanyService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,9 +49,12 @@ public class AgentLogService {
         return t;
     });
 
-    public AgentLogService(AgentLogStore store,
+    private final CompanyService companies;
+
+    public AgentLogService(CompanyService companies, AgentLogStore store,
                            @Value("${superagent.agent-log.retention-days:30}") long retentionDays,
                            @Value("${superagent.agent-log.max-per-agent:5000}") int maxPerAgent) {
+        this.companies = companies;
         this.store = store;
         this.retention = Duration.ofDays(Math.max(1, retentionDays));
         this.maxPerAgent = Math.max(100, maxPerAgent);
@@ -89,7 +93,7 @@ public class AgentLogService {
 
     @EventListener(ApplicationReadyEvent.class)
     void startPruning() {
-        pruner.scheduleWithFixedDelay(this::prune, 1, 60, TimeUnit.MINUTES);
+        pruner.scheduleWithFixedDelay(() -> companies.forEach(this::prune), 1, 60, TimeUnit.MINUTES);
     }
 
     private void prune() {

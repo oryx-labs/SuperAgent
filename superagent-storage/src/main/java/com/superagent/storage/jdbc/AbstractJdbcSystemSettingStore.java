@@ -21,7 +21,7 @@ abstract class AbstractJdbcSystemSettingStore implements SystemSettingStore {
     protected AbstractJdbcSystemSettingStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -31,10 +31,11 @@ abstract class AbstractJdbcSystemSettingStore implements SystemSettingStore {
     @Override
     public Map<String, String> all() {
         Map<String, String> out = new LinkedHashMap<>();
-        jdbc.query("SELECT setting_key, setting_value FROM system_setting" + settingFinal() + " ORDER BY setting_key",
+        jdbc.query("SELECT setting_key, setting_value FROM system_setting" + settingFinal()
+                        + " WHERE company_id = ? ORDER BY setting_key",
                 rs -> {
                     out.put(rs.getString("setting_key"), rs.getString("setting_value"));
-                });
+                }, TenantSchema.company());
         return out;
     }
 

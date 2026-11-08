@@ -8,6 +8,8 @@ import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.inbox.InboxEvent;
 import com.superagent.core.integration.IntegrationChanged;
+import com.superagent.core.tenant.CompanyStarted;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
 import com.superagent.event.InboxService;
@@ -55,6 +57,9 @@ import java.util.regex.Pattern;
  * <p>DingTalk only hands a bot the messages meant for it: a one-to-one chat with the bot, or a group message that
  * @-mentions it. Such a message is the sender talking to their SuperAgent; anyone else it @-mentions who is linked
  * gets it too. Every message must be acknowledged at once, or DingTalk sends it again.
+ *
+ * <p>Each company has its own app and so its own connection, kept by company; everything a connection does runs
+ * as its company.
  */
 @Component
 public class DingTalkConnector implements SmartLifecycle {
@@ -87,11 +92,14 @@ public class DingTalkConnector implements SmartLifecycle {
         t.setDaemon(true);
         return t;
     });
-    private volatile Connection current;
+    /** companyId → that company's live connection. */
+    private final Map<String, Connection> connections = new ConcurrentHashMap<>();
+    private final Map<String, Object> reconnecting = new ConcurrentHashMap<>();
     private volatile boolean running;
 
-    /** The live app: its credentials, an access token kept fresh, and the stream socket. */
+    /** A company's live app: its credentials, an access token kept fresh, and the stream socket. */
     final class Connection {
+        final String companyId;
         final String clientId;
         final String clientSecret;
         volatile WebSocket socket;
@@ -100,7 +108,8 @@ public class DingTalkConnector implements SmartLifecycle {
         volatile boolean closed;
         int attempts;
 
-        Connection(String clientId, String clientSecret) {
+        Connection(String companyId, String clientId, String clientSecret) {
+            this.companyId = companyId;
             this.clientId = clientId;
             this.clientSecret = clientSecret;
         }
@@ -136,30 +145,49 @@ public class DingTalkConnector implements SmartLifecycle {
     }
 
     @EventListener
+    public void onCompanyStarted(CompanyStarted started) {
+        if (running) {
+            work.execute(TenantContext.wrap(this::reconnect));
+        }
+    }
+
+    /** Published inside the company whose app changed: only that company's connection is redone. */
+    @EventListener
     public void onChanged(IntegrationChanged changed) {
-        if (IntegrationService.DINGTALK.equals(changed.key()) && running) {
-            work.execute(this::reconnect);
+        if (IntegrationService.DINGTALK.equals(changed.key()) && running && TenantContext.current().isPresent()) {
+            work.execute(TenantContext.wrap(this::reconnect));
         }
     }
 
-    private synchronized void reconnect() {
-        disconnect();
-        if (integrations.ready(IntegrationService.DINGTALK)) {
-            String id = integrations.value(IntegrationService.DINGTALK, "clientId").orElse(null);
-            String secret = integrations.value(IntegrationService.DINGTALK, "clientSecret").orElse(null);
-            if (id == null || secret == null) {
-                setStatus("error", "Client Secret 无法读取，请在系统设置里重新填写");
-                return;
+    /** The current company's connection: closes the old one and opens one if its app is set up. */
+    void reconnect() {
+        String companyId = TenantContext.require();
+        synchronized (reconnecting.computeIfAbsent(companyId, k -> new Object())) {
+            disconnect(connections.remove(companyId));
+            if (integrations.ready(IntegrationService.DINGTALK)) {
+                String id = integrations.value(IntegrationService.DINGTALK, "clientId").orElse(null);
+                String secret = integrations.value(IntegrationService.DINGTALK, "clientSecret").orElse(null);
+                if (id == null || secret == null) {
+                    setStatus(companyId, "error", "Client Secret 无法读取，请在系统设置里重新填写");
+                    return;
+                }
+                Connection conn = new Connection(companyId, id, secret);
+                connections.put(companyId, conn);
+                open(conn);
             }
-            Connection conn = new Connection(id, secret);
-            current = conn;
-            open(conn);
         }
     }
 
-    private void disconnect() {
-        Connection conn = current;
-        current = null;
+    /** The current company's connection, if it has one. */
+    Connection connection() {
+        return connections.get(TenantContext.require());
+    }
+
+    private boolean live(Connection conn) {
+        return connections.get(conn.companyId) == conn;
+    }
+
+    private static void disconnect(Connection conn) {
         if (conn != null) {
             conn.closed = true;
             WebSocket s = conn.socket;
@@ -171,10 +199,10 @@ public class DingTalkConnector implements SmartLifecycle {
 
     /** Checks the credentials, asks for a stream endpoint, and opens the socket; retries with backoff on failure. */
     private void open(Connection conn) {
-        if (conn.closed || current != conn) {
+        if (conn.closed || !live(conn)) {
             return;
         }
-        setStatus("connecting", null);
+        setStatus(conn.companyId, "connecting", null);
         try {
             conn.token();
             ObjectNode req = JSON.createObjectNode().put("clientId", conn.clientId).put("clientSecret", conn.clientSecret)
@@ -190,23 +218,23 @@ public class DingTalkConnector implements SmartLifecycle {
                     .buildAsync(URI.create(endpoint + "?ticket=" + URLEncoder.encode(ticket, StandardCharsets.UTF_8)),
                             new Listener(conn)).get(20, TimeUnit.SECONDS);
             conn.attempts = 0;
-            setStatus("connected", null);
-            log.info("dingtalk app {} connected", conn.clientId);
-            work.execute(() -> syncIdentities(conn));
+            setStatus(conn.companyId, "connected", null);
+            log.info("dingtalk app {} connected for company {}", conn.clientId, conn.companyId);
+            work.execute(() -> TenantContext.run(conn.companyId, () -> syncIdentities(conn)));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
-            setStatus("error", describe(e));
+            setStatus(conn.companyId, "error", describe(e));
             retry(conn);
         }
     }
 
     private void retry(Connection conn) {
-        if (conn.closed || current != conn || !running) {
+        if (conn.closed || !live(conn) || !running) {
             return;
         }
         long wait = Math.min(300, 5L << Math.min(conn.attempts++, 6)); // 5s, 10s, … up to 5 min
-        ticker.schedule(() -> open(conn), wait, TimeUnit.SECONDS);
+        ticker.schedule(() -> TenantContext.run(conn.companyId, () -> open(conn)), wait, TimeUnit.SECONDS);
     }
 
     /** Frames arrive as text, possibly in parts; each whole one is acknowledged and handled off the socket thread. */
@@ -232,9 +260,9 @@ public class DingTalkConnector implements SmartLifecycle {
 
         @Override
         public CompletionStage<?> onClose(WebSocket ws, int status, String reason) {
-            if (!conn.closed && current == conn) {
-                log.info("dingtalk stream closed ({} {}), reconnecting", status, reason);
-                setStatus("connecting", null);
+            if (!conn.closed && live(conn)) {
+                log.info("dingtalk stream closed for company {} ({} {}), reconnecting", conn.companyId, status, reason);
+                setStatus(conn.companyId, "connecting", null);
                 retry(conn);
             }
             return CompletableFuture.completedFuture(null);
@@ -242,8 +270,8 @@ public class DingTalkConnector implements SmartLifecycle {
 
         @Override
         public void onError(WebSocket ws, Throwable error) {
-            if (!conn.closed && current == conn) {
-                setStatus("error", "连接中断：" + error.getMessage());
+            if (!conn.closed && live(conn)) {
+                setStatus(conn.companyId, "error", "连接中断：" + error.getMessage());
                 retry(conn);
             }
         }
@@ -273,7 +301,7 @@ public class DingTalkConnector implements SmartLifecycle {
         ack(ws, messageId, "{\"response\":null}"); // at once: DingTalk resends what isn't acknowledged in time
         if (BOT_TOPIC.equals(topic)) {
             String data = f.path("data").asText("");
-            work.execute(() -> receive(conn, data));
+            work.execute(() -> TenantContext.run(conn.companyId, () -> receive(conn, data)));
         }
     }
 
@@ -290,7 +318,7 @@ public class DingTalkConnector implements SmartLifecycle {
         int linked = 0;
         for (User u : users.listUsers()) {
             String mobile = mobile(u.phone());
-            if (!u.enabled() || mobile == null || current != conn) {
+            if (!u.enabled() || mobile == null || !live(conn)) {
                 continue;
             }
             EventSource cur = links.find(u.username(), EventSource.DINGTALK).orElse(null);
@@ -343,7 +371,7 @@ public class DingTalkConnector implements SmartLifecycle {
 
     void receive(Connection conn, String data) {
         try {
-            if (current != conn) {
+            if (!live(conn)) {
                 return;
             }
             JsonNode m = JSON.readTree(data);
@@ -422,7 +450,8 @@ public class DingTalkConnector implements SmartLifecycle {
         if (!m.matches()) {
             return false;
         }
-        if (bindFailures.getOrDefault(userId, 0) >= MAX_BIND_FAILURES) {
+        String tries = conn.companyId + "/" + userId;
+        if (bindFailures.getOrDefault(tries, 0) >= MAX_BIND_FAILURES) {
             send(conn, userId, "绑定码错误次数过多，请联系管理员。");
             return true;
         }
@@ -430,28 +459,30 @@ public class DingTalkConnector implements SmartLifecycle {
                 .filter(s -> EventSource.DINGTALK.equals(s.type()) && m.group(1).equalsIgnoreCase(s.bindCode()))
                 .findFirst();
         if (match.isPresent()) {
-            bindFailures.remove(userId);
+            bindFailures.remove(tries);
             link(conn, match.get().owner(), userId, true);
             log.info("dingtalk: {} linked by bind code", match.get().owner());
             send(conn, userId, "已关联。私聊我或在群里 @我 的消息会交给你的 SuperAgent，紧急的事会私聊提醒你。");
         } else {
-            bindFailures.merge(userId, 1, Integer::sum);
+            bindFailures.merge(tries, 1, Integer::sum);
             send(conn, userId, "绑定码不正确或已失效，请在 SuperAgent 的「连接」页面重新生成。");
         }
         return true;
     }
 
     private void hint(Connection conn, String userId) {
-        Instant last = hinted.get(userId);
+        String who = conn.companyId + "/" + userId;
+        Instant last = hinted.get(who);
         if (last != null && Instant.now().isBefore(last.plus(HINT_EVERY))) {
             return;
         }
-        hinted.put(userId, Instant.now());
+        hinted.put(who, Instant.now());
         send(conn, userId, "你的钉钉账号还没有关联 SuperAgent。请在 SuperAgent 的「连接」页面找到钉钉，按提示把绑定码发给我。");
     }
 
+    /** Called inside the owner's company: sends through that company's app. */
     private void notifyOwner(EventSource source, String text) {
-        Connection conn = current;
+        Connection conn = connection();
         if (conn == null || !source.linkedTo(conn.clientId)) {
             return;
         }
@@ -512,35 +543,36 @@ public class DingTalkConnector implements SmartLifecycle {
         return m;
     }
 
-    private void setStatus(String status, String error) {
-        integrations.setStatus(IntegrationService.DINGTALK, status, error);
+    /** Socket callbacks run on the HTTP client's threads, so the company is set here rather than assumed. */
+    private void setStatus(String companyId, String status, String error) {
+        TenantContext.run(companyId, () -> integrations.setStatus(IntegrationService.DINGTALK, status, error));
         if (error != null) {
-            log.warn("dingtalk: {}", error);
+            log.warn("dingtalk ({}): {}", companyId, error);
         }
     }
 
     // --- lifecycle ---
 
+    /** Connections open per company as each starts ({@link CompanyStarted}, after this). */
     @Override
     public void start() {
         running = true;
-        work.execute(this::reconnect);
-        ticker.scheduleWithFixedDelay(() -> {
-            Connection conn = current;
-            if (conn != null && conn.socket != null) {
-                try {
-                    syncIdentities(conn);
-                } catch (RuntimeException e) {
-                    log.warn("dingtalk: phone matching failed: {}", e.getMessage());
-                }
+        ticker.scheduleWithFixedDelay(() -> connections.values().forEach(conn -> {
+            if (conn.socket == null) {
+                return;
             }
-        }, 1, 1, TimeUnit.HOURS);
+            try {
+                TenantContext.run(conn.companyId, () -> syncIdentities(conn));
+            } catch (RuntimeException e) {
+                log.warn("dingtalk: phone matching failed for company {}: {}", conn.companyId, e.getMessage());
+            }
+        }), 1, 1, TimeUnit.HOURS);
     }
 
     @Override
     public void stop() {
         running = false;
-        disconnect();
+        connections.keySet().forEach(id -> disconnect(connections.remove(id)));
         ticker.shutdownNow();
         work.shutdownNow();
     }

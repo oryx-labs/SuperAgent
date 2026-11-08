@@ -14,6 +14,7 @@ public class ClickHouseSuperAgentStateStore extends AbstractJdbcSuperAgentStateS
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS superagent_state (
+              company_id      String,
               owner           String,
               agent_id        String,
               processed_until Nullable(DateTime64(3, 'UTC')),
@@ -23,7 +24,7 @@ public class ClickHouseSuperAgentStateStore extends AbstractJdbcSuperAgentStateS
               tracked_json    String,
               updated_at      DateTime64(3, 'UTC')
             ) ENGINE = ReplacingMergeTree(updated_at)
-            ORDER BY owner
+            ORDER BY (company_id, owner)
             """);
 
     public ClickHouseSuperAgentStateStore(JdbcTemplate jdbc) {

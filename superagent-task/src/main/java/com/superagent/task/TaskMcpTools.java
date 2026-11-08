@@ -42,7 +42,8 @@ public class TaskMcpTools implements McpToolProvider {
                 tool("create_task", "把要做的事作为任务异步执行：由你自己执行（带着你的人设、记忆和技能），不占住对话；完成、失败或需要用户确认时，结果会自动发回这个对话。",
                         props(req("title", "string", "任务标题"), req("brief", "string", "任务说明：目标、范围、验收标准"),
                                 opt("repo", "string", "可选代码库"), opt("branch", "string", "可选分支"),
-                                req("kind", "string", TaskKinds.DESCRIPTION)),
+                                req("kind", "string", TaskKinds.DESCRIPTION),
+                                opt("continues_from", "string", "接着哪个任务做（任务 id，用 list_tasks 查）：新任务会拿到它的结论，在它的基础上继续，而不是从头来")),
                         "title", "brief", "kind"),
                 tool("list_tasks", "列出当前用户的任务及其状态。", props(), (String[]) null),
                 tool("get_task", "查看某个任务的状态与进度。", props(req("id", "string", "任务 id")), "id"),
@@ -59,9 +60,12 @@ public class TaskMcpTools implements McpToolProvider {
                 TaskDto t = tasks.create(new CreateTaskRequest(
                         str(args, "title"), str(args, "brief"), "web_chat",
                         strOrNull(args, "repo"), strOrNull(args, "branch"), null, null, null,
-                        TaskKinds.require(args)), grant.owner(), grant.agentId(), grant.sessionId(), grant.messageId());
+                        TaskKinds.require(args), null, strOrNull(args, "continues_from")),
+                        grant.owner(), grant.agentId(), grant.sessionId(), grant.messageId());
                 // The agent does it itself (its character, memory, skills); the result comes back to this chat.
-                yield "已创建" + TaskKinds.label(t.flow()) + "任务 " + t.id() + "（" + t.title() + "），状态 " + t.status() + "。结果出来后会自动发到这个对话里。现在用一两句话告诉用户任务名和要做什么，然后结束这一轮，不要在对话里接着做。";
+                String how = "complex".equals(t.flow()) ? "它会先拆成子任务同时执行，全部完成后自动汇总。" : "";
+                yield "已创建" + TaskKinds.label(t.flow()) + "任务 " + t.id() + "（" + t.title() + "），状态 " + t.status() + "。" + how
+                        + "结果出来后会自动发到这个对话里。现在用一两句话告诉用户任务名和要做什么，然后结束这一轮，不要在对话里接着做。";
             }
             case "list_tasks" -> {
                 List<TaskDto> list = tasks.list(grant.owner());

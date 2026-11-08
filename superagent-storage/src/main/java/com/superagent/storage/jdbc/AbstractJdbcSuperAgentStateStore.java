@@ -24,7 +24,7 @@ abstract class AbstractJdbcSuperAgentStateStore implements SuperAgentStateStore 
     protected AbstractJdbcSuperAgentStateStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -43,21 +43,23 @@ abstract class AbstractJdbcSuperAgentStateStore implements SuperAgentStateStore 
 
     @Override
     public List<SuperAgentState> list() {
-        return jdbc.query("SELECT * FROM superagent_state" + stateFinal(), mapper);
+        return jdbc.query("SELECT * FROM superagent_state" + stateFinal() + " WHERE company_id = ?", mapper,
+                TenantSchema.company());
     }
 
     @Override
     public Optional<SuperAgentState> find(String owner) {
-        return jdbc.query("SELECT * FROM superagent_state" + stateFinal() + " WHERE owner = ?", mapper, owner)
+        return jdbc.query("SELECT * FROM superagent_state" + stateFinal() + " WHERE company_id = ? AND owner = ?", mapper,
+                        TenantSchema.company(), owner)
                 .stream().findFirst();
     }
 
     protected static final String COLUMNS =
-            "(owner, agent_id, processed_until, plan_id, plan_status, plan_json, tracked_json, updated_at)";
-    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+            "(company_id, owner, agent_id, processed_until, plan_id, plan_status, plan_json, tracked_json, updated_at)";
+    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(SuperAgentState s) {
-        return new Object[]{s.owner(), s.agentId(), utc(s.processedUntil()), nn(s.planId()), nn(s.planStatus()),
+        return new Object[]{TenantSchema.company(), s.owner(), s.agentId(), utc(s.processedUntil()), nn(s.planId()), nn(s.planStatus()),
                 nn(s.planJson()), nn(s.trackedJson()), utc(s.updatedAt())};
     }
 

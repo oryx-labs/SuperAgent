@@ -10,13 +10,14 @@ public class MysqlTaskAgentStore extends AbstractJdbcTaskAgentStore {
     public MysqlTaskAgentStore(JdbcTemplate jdbc) {
         super(jdbc, """
                 CREATE TABLE IF NOT EXISTS task_agent (
+                  company_id VARCHAR(64) NOT NULL,
                   task_id    VARCHAR(64) NOT NULL,
                   agent_id   VARCHAR(64) NOT NULL,
                   session_id VARCHAR(64),
                   message_id VARCHAR(64),
                   created_at DATETIME(3) NOT NULL,
-                  PRIMARY KEY (task_id),
-                  KEY idx_task_agent (agent_id, created_at)
+                  PRIMARY KEY (company_id, task_id),
+                  KEY idx_task_agent (company_id, agent_id, created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
         // Tables from before tasks remembered the chat reply that set them off.
@@ -34,7 +35,8 @@ public class MysqlTaskAgentStore extends AbstractJdbcTaskAgentStore {
 
     @Override
     protected void upsert(String taskId, String agentId, String sessionId, String messageId, LocalDateTime at) {
-        jdbc.update("REPLACE INTO task_agent (task_id, agent_id, session_id, message_id, created_at) VALUES (?, ?, ?, ?, ?)",
-                taskId, agentId, sessionId, messageId, at);
+        jdbc.update("REPLACE INTO task_agent (company_id, task_id, agent_id, session_id, message_id, created_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?)",
+                TenantSchema.company(), taskId, agentId, sessionId, messageId, at);
     }
 }

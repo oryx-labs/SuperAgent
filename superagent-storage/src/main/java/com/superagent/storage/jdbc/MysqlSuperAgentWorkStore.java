@@ -11,6 +11,7 @@ public class MysqlSuperAgentWorkStore extends AbstractJdbcSuperAgentWorkStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS superagent_work (
+              company_id  VARCHAR(64)  NOT NULL,
               task_id     VARCHAR(64)  NOT NULL,
               owner       VARCHAR(255) NOT NULL,
               plan_id     VARCHAR(64),
@@ -23,20 +24,21 @@ public class MysqlSuperAgentWorkStore extends AbstractJdbcSuperAgentWorkStore {
               finished_at DATETIME(3),
               updated_at  DATETIME(3)  NOT NULL,
               message_id  VARCHAR(64),
-              PRIMARY KEY (task_id),
-              KEY idx_superagent_work_owner (owner, assigned_at)
+              PRIMARY KEY (company_id, task_id),
+              KEY idx_superagent_work_owner (company_id, owner, assigned_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
             """
             CREATE TABLE IF NOT EXISTS superagent_work_event (
+              company_id VARCHAR(64) NOT NULL,
               id      VARCHAR(64)  NOT NULL,
               task_id VARCHAR(64)  NOT NULL,
               owner   VARCHAR(255) NOT NULL,
               kind    VARCHAR(32)  NOT NULL,
               detail  TEXT,
               at_time DATETIME(3)  NOT NULL,
-              PRIMARY KEY (id),
-              KEY idx_superagent_work_event (task_id, at_time)
+              PRIMARY KEY (company_id, id),
+              KEY idx_superagent_work_event (company_id, task_id, at_time)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 

@@ -2,7 +2,8 @@ package com.superagent.core.task;
 
 /**
  * The kind of work a task is, which picks how it runs. {@link #CODING} goes through a fixed flow (PRD → develop →
- * verify, each with its own gate); {@link #GENERAL} runs in one pass. A new scenario with steps of its own is a new
+ * verify, each with its own gate); {@link #GENERAL} runs in one pass; {@link #COMPLEX} plans, waits for the subtasks it
+ * hands out, then writes the conclusion. A new scenario with steps of its own is a new
  * constant here plus its flow next to the coding one in superagent-task.
  *
  * <p>Whoever creates the task says which kind it is (the agent or SuperAgent knows what it's asking for); a task
@@ -10,7 +11,9 @@ package com.superagent.core.task;
  * {@code flow} column, so {@link #storageName()} / {@link #fromStorage(String)} are the only conversion points.
  */
 public enum TaskKind {
-    CODING, GENERAL;
+    CODING, GENERAL,
+    /** Splits itself into subtasks that run side by side, then sums up what they found. */
+    COMPLEX;
 
     public String storageName() {
         return name().toLowerCase();

@@ -31,6 +31,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AutomationServiceTest {
 
+    @org.junit.jupiter.api.BeforeEach
+    void inCompany() {
+        com.superagent.core.tenant.TenantContext.set("acme"); // work handed to other threads carries the company
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void leaveCompany() {
+        com.superagent.core.tenant.TenantContext.clear();
+    }
+
     private static final class InMemoryStore implements AutomationStore {
         final Map<String, Automation> rows = new LinkedHashMap<>();
         final List<AutomationRun> runs = new ArrayList<>();
@@ -154,7 +164,7 @@ class AutomationServiceTest {
     void apiTriggerNeedsTheTokenAndOnlyTheOwnerOrAnAdminCanChangeIt() {
         AutomationDto a = service.create(new SaveAutomationRequest("Hook", "Handle the event", "api", null, null,
                 null, null, null, null), "alice", "manual");
-        assertThat(a.apiToken()).hasSize(64);
+        assertThat(a.apiToken()).matches("acme\\.[0-9a-f]{64}"); // names the company: the trigger endpoint is open
         assertThat(a.triggerPath()).isEqualTo("/api/v1/automations/" + a.id() + "/trigger");
         assertThat(store.rows.get(a.id()).apiTokenHash()).isNotEqualTo(a.apiToken()); // only the hash is kept
 

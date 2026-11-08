@@ -8,8 +8,10 @@ import com.superagent.core.inbox.InboxEventStore;
 import com.superagent.core.inbox.InboxNotifyRequested;
 import com.superagent.core.inbox.InboxProcessor;
 import com.superagent.core.org.OrgStore;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
+import com.superagent.platform.tenant.CompanyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -66,11 +68,15 @@ public class InboxService implements SmartLifecycle {
     private final Map<String, BiConsumer<EventSource, String>> notifiers = new ConcurrentHashMap<>();
     private final ExecutorService urgent = Executors.newFixedThreadPool(2, daemon("inbox-urgent"));
     private final ScheduledExecutorService ticker = Executors.newSingleThreadScheduledExecutor(daemon("inbox-tick"));
-    private volatile LocalDate lastCleanup;
+    /** Per company: the day its old messages were last cleared. */
+    private final Map<String, LocalDate> lastCleanup = new ConcurrentHashMap<>();
     private volatile boolean running;
 
-    public InboxService(InboxEventStore events, EventSourceStore sources, InboxProcessor processor, OrgStore org,
+    private final CompanyService companies;
+
+    public InboxService(CompanyService companies, InboxEventStore events, EventSourceStore sources, InboxProcessor processor, OrgStore org,
                         UserStore users, @Value("${superagent.inbox.retention-days:30}") int retentionDays) {
+        this.companies = companies;
         this.events = events;
         this.sources = sources;
         this.processor = processor;
@@ -99,7 +105,7 @@ public class InboxService implements SmartLifecycle {
         log.info("inbox {}: {} from {} in {} → {} ({})", source.owner(), triaged.source(), triaged.senderName(),
                 triaged.chatName(), d.priority(), d.reason());
         if (d.priority() == EventPriority.P0 && running) {
-            urgent.execute(() -> runWindow(source.owner(), source.type(), EventPriority.P0));
+            urgent.execute(TenantContext.wrap(() -> runWindow(source.owner(), source.type(), EventPriority.P0)));
         }
         return triaged;
     }
@@ -162,8 +168,7 @@ public class InboxService implements SmartLifecycle {
             }
         }
         LocalDate today = LocalDate.now(ZoneId.systemDefault());
-        if (!today.equals(lastCleanup)) {
-            lastCleanup = today;
+        if (!today.equals(lastCleanup.put(TenantContext.require(), today))) {
             int n = events.deleteBefore(now.minus(Duration.ofDays(retentionDays)));
             if (n > 0) {
                 log.info("inbox: removed {} messages older than {} days", n, retentionDays);
@@ -242,13 +247,13 @@ public class InboxService implements SmartLifecycle {
     @Override
     public void start() {
         running = true;
-        ticker.scheduleWithFixedDelay(() -> {
+        ticker.scheduleWithFixedDelay(() -> companies.forEach(() -> {
             try {
                 tick(Instant.now());
             } catch (RuntimeException e) {
                 log.warn("inbox tick failed: {}", e.getMessage());
             }
-        }, 30, 60, TimeUnit.SECONDS);
+        }), 30, 60, TimeUnit.SECONDS);
     }
 
     @Override

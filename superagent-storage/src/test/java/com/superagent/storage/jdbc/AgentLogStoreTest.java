@@ -1,7 +1,9 @@
 package com.superagent.storage.jdbc;
 
 import com.superagent.core.agent.AgentLogEntry;
+import com.superagent.core.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -12,6 +14,7 @@ import java.time.temporal.ChronoUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** The run log through H2 in MySQL mode: newest first, filtered by category, and both retention rules. */
+@ExtendWith(InCompany.class)
 class AgentLogStoreTest {
 
     @Test
@@ -31,6 +34,14 @@ class AgentLogStoreTest {
 
         store.prune(now.minus(Duration.ofDays(30)), 3); // 30 days, at most 3 lines per agent
         assertThat(store.list("a1", null, 10)).extracting(AgentLogEntry::id).containsExactly("e4", "e3", "e2");
+        assertThat(store.list("b1", null, 10)).hasSize(1);
+
+        TenantContext.run(InCompany.OTHER, () -> {
+            assertThat(store.list("a1", null, 10)).isEmpty();
+            store.prune(now.plusSeconds(1), 1);
+            store.deleteAgent("b1");
+        });
+        assertThat(store.list("a1", null, 10)).hasSize(3);
         assertThat(store.list("b1", null, 10)).hasSize(1);
     }
 }

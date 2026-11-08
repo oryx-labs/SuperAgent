@@ -16,7 +16,7 @@ const awel = {
 };
 
 // Tasks still under way come first (what needs watching), then the rest; newest first within each.
-const ACTIVE_TASK = new Set(["pending", "running", "needs_confirmation"]);
+const ACTIVE_TASK = new Set(["pending", "running", "needs_confirmation", "waiting"]);
 
 async function renderAgentWork(agent) {
   awel.wrap.hidden = !agent || agent.kind === "super";

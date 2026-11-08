@@ -55,7 +55,7 @@ public class ConnectorToolsService {
     }
 
     public ConnectorToolsDto tools(String id, String viewer, boolean refresh) {
-        String key = id + "|" + viewer;
+        String key = com.superagent.core.tenant.TenantContext.require() + "|" + id + "|" + viewer;
         ConnectorToolsDto cached = cache.get(key);
         if (!refresh && cached != null && cached.fetchedAt().plus(FRESH).isAfter(Instant.now())) {
             return cached;

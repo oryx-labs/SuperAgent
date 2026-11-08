@@ -8,6 +8,7 @@ public class MysqlWorkFileStore extends AbstractJdbcWorkFileStore {
     public MysqlWorkFileStore(JdbcTemplate jdbc) {
         super(jdbc, """
                 CREATE TABLE IF NOT EXISTS work_file (
+                  company_id VARCHAR(64)  NOT NULL,
                   id         VARCHAR(64)  NOT NULL,
                   name       VARCHAR(255) NOT NULL,
                   kind       VARCHAR(16)  NOT NULL,
@@ -24,18 +25,19 @@ public class MysqlWorkFileStore extends AbstractJdbcWorkFileStore {
                   updated_at DATETIME(3)  NOT NULL,
                   tags       VARCHAR(512) NOT NULL DEFAULT '',
                   tag_state  VARCHAR(8)   NOT NULL DEFAULT '',
-                  PRIMARY KEY (id),
-                  KEY idx_work_file_owner (owner, deleted, updated_at),
-                  KEY idx_work_file_agent (agent_id, deleted, updated_at),
-                  KEY idx_work_file_task (task_id)
+                  PRIMARY KEY (company_id, id),
+                  KEY idx_work_file_owner (company_id, owner, deleted, updated_at),
+                  KEY idx_work_file_agent (company_id, agent_id, deleted, updated_at),
+                  KEY idx_work_file_task (company_id, task_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """, """
                 CREATE TABLE IF NOT EXISTS work_file_ref (
+                  company_id VARCHAR(64) NOT NULL,
                   file_id    VARCHAR(64) NOT NULL,
                   session_id VARCHAR(64) NOT NULL,
                   message_id VARCHAR(64) NOT NULL,
                   created_at DATETIME(3) NOT NULL,
-                  PRIMARY KEY (file_id, message_id)
+                  PRIMARY KEY (company_id, file_id, message_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
         // Tables from before tags: add the columns; existing files start untagged, so the tagger fills them in.

@@ -9,10 +9,10 @@ public class ClickHouseAgentInviteStore extends AbstractJdbcAgentInviteStore {
     public ClickHouseAgentInviteStore(JdbcTemplate jdbc) {
         super(jdbc, """
                 CREATE TABLE IF NOT EXISTS agent_invite (
-                  id String, agent_id String, owner String, usernames String, session_id String, message_id String,
+                  company_id String, id String, agent_id String, owner String, usernames String, session_id String, message_id String,
                   status String, created_at DateTime64(3, 'UTC'), updated_at DateTime64(3, 'UTC')
                 ) ENGINE = ReplacingMergeTree(updated_at)
-                ORDER BY id
+                ORDER BY (company_id, id)
                 """);
     }
 

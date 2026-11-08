@@ -17,16 +17,16 @@ abstract class AbstractJdbcAgentMemberStore implements AgentMemberStore {
 
     protected AbstractJdbcAgentMemberStore(JdbcTemplate jdbc, String ddl) {
         this.jdbc = jdbc;
-        jdbc.execute(ddl);
+        TenantSchema.create(jdbc, ddl);
     }
 
     /** "" for MySQL, " FINAL" for ClickHouse. */
     protected abstract String readFinal();
 
-    protected static final String INSERT = "(agent_id, username, added_by, active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)";
+    protected static final String INSERT = "(company_id, agent_id, username, added_by, active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(AgentMember m) {
-        return new Object[]{m.agentId(), m.username(), m.addedBy() == null ? "" : m.addedBy(), m.active() ? 1 : 0,
+        return new Object[]{TenantSchema.company(), m.agentId(), m.username(), m.addedBy() == null ? "" : m.addedBy(), m.active() ? 1 : 0,
                 utc(m.createdAt()), utc(m.updatedAt())};
     }
 
@@ -37,14 +37,14 @@ abstract class AbstractJdbcAgentMemberStore implements AgentMemberStore {
 
     @Override
     public List<AgentMember> members(String agentId) {
-        return jdbc.query("SELECT * FROM agent_member" + readFinal() + " WHERE agent_id = ? AND active = 1 ORDER BY created_at",
-                mapper, agentId);
+        return jdbc.query("SELECT * FROM agent_member" + readFinal() + " WHERE company_id = ? AND agent_id = ? AND active = 1 ORDER BY created_at",
+                mapper, TenantSchema.company(), agentId);
     }
 
     @Override
     public List<String> agentsOf(String username) {
-        return jdbc.query("SELECT agent_id FROM agent_member" + readFinal() + " WHERE username = ? AND active = 1",
-                (rs, n) -> rs.getString("agent_id"), username);
+        return jdbc.query("SELECT agent_id FROM agent_member" + readFinal() + " WHERE company_id = ? AND username = ? AND active = 1",
+                (rs, n) -> rs.getString("agent_id"), TenantSchema.company(), username);
     }
 
     private static LocalDateTime utc(Instant i) {

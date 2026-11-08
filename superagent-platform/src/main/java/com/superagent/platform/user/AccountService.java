@@ -1,5 +1,6 @@
 package com.superagent.platform.user;
 
+import com.superagent.core.tenant.TenantPaths;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
 import com.superagent.runtime.attachment.ImageAttachmentStore;
@@ -23,7 +24,7 @@ import java.util.Optional;
 
 /**
  * What a signed-in user changes about their own account: their avatar and their password. Avatars are small
- * images on disk, one per username (file named by its hash, so any username is a safe file name); their
+ * images on disk under the company's directory, one per username (file named by its hash, so any username is a safe file name); their
  * modification time is the version clients use to refresh a cached picture.
  */
 @Service
@@ -89,8 +90,8 @@ public class AccountService {
         }
         Path file = avatarFile(username);
         try {
-            Files.createDirectories(avatars);
-            Path tmp = Files.createTempFile(avatars, "avatar-", ".tmp");
+            Files.createDirectories(file.getParent());
+            Path tmp = Files.createTempFile(file.getParent(), "avatar-", ".tmp");
             Files.write(tmp, bytes);
             Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             return Files.getLastModifiedTime(file).toMillis();
@@ -151,7 +152,7 @@ public class AccountService {
         try {
             byte[] hash = MessageDigest.getInstance("SHA-256").digest((username == null ? "" : username)
                     .getBytes(StandardCharsets.UTF_8));
-            return avatars.resolve(HexFormat.of().formatHex(hash));
+            return TenantPaths.of(avatars).resolve(HexFormat.of().formatHex(hash));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }

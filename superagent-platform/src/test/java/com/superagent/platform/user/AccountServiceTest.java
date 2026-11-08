@@ -1,8 +1,11 @@
 package com.superagent.platform.user;
 
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserSource;
 import com.superagent.core.user.UserStore;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -26,6 +29,7 @@ class AccountServiceTest {
         @Override public List<User> listUsers() { return List.copyOf(rows.values()); }
         @Override public Optional<User> findById(String id) { return Optional.empty(); }
         @Override public Optional<User> findByUsername(String name) { return Optional.ofNullable(rows.get(name)); }
+        @Override public Optional<String> companyOfUsername(String name) { return Optional.empty(); }
         @Override public Optional<User> findByPhone(String phone) { return Optional.empty(); }
         @Override public Optional<User> findByExternalId(String id) { return Optional.empty(); }
         @Override public User save(User u) { rows.put(u.username(), u); return u; }
@@ -33,6 +37,16 @@ class AccountServiceTest {
     }
 
     private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0};
+
+    @BeforeEach
+    void company() {
+        TenantContext.set("acme");
+    }
+
+    @AfterEach
+    void clear() {
+        TenantContext.clear();
+    }
 
     @Test
     void usersChangeTheirOwnPasswordAndAvatar(@TempDir Path dir) {

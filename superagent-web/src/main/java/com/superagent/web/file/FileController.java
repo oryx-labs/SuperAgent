@@ -88,7 +88,11 @@ public class FileController {
     /** Everything the caller can see, newest first; {@code agent} narrows to one agent's files, {@code task} to one task's. */
     @GetMapping(ApiPaths.FILES)
     public ApiResponse<List<WorkFileDto>> list(@RequestParam(required = false) String agent,
-                                               @RequestParam(required = false) String task, Authentication auth) {
+                                               @RequestParam(required = false) String task,
+                                               @RequestParam(required = false) String project, Authentication auth) {
+        if (project != null && !project.isBlank()) {
+            return ApiResponse.ok(files.listForProject(auth.getName(), project.strip()));
+        }
         if (task != null && !task.isBlank()) {
             return ApiResponse.ok(files.listForTask(auth.getName(), task.strip()));
         }

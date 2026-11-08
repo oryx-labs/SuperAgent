@@ -4,6 +4,7 @@ import com.superagent.agent.AgentNotFoundException;
 import com.superagent.agent.AgentService;
 import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
+import com.superagent.core.tenant.CompanyStarted;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -27,7 +28,7 @@ class SecretaryCleanup {
         this.agents = agents;
     }
 
-    @EventListener(ApplicationReadyEvent.class)
+    @EventListener(CompanyStarted.class)
     void removeSecretaries() {
         for (EventSource s : sources.list()) {
             if (s.secretaryAgentId() == null) {

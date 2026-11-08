@@ -25,9 +25,9 @@ import java.util.Optional;
  */
 abstract class AbstractJdbcWorkFileStore implements WorkFileStore {
 
-    protected static final String COLUMNS = "(id, name, kind, mime_type, size, storage, location, owner, agent_id, "
+    protected static final String COLUMNS = "(company_id, id, name, kind, mime_type, size, storage, location, owner, agent_id, "
             + "task_id, origin, deleted, created_at, updated_at, tags, tag_state)";
-    protected static final String VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String VALUES = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected final JdbcTemplate jdbc;
 
@@ -42,7 +42,7 @@ abstract class AbstractJdbcWorkFileStore implements WorkFileStore {
     protected AbstractJdbcWorkFileStore(JdbcTemplate jdbc, String... ddl) {
         this.jdbc = jdbc;
         for (String statement : ddl) {
-            jdbc.execute(statement);
+            TenantSchema.create(jdbc, statement);
         }
     }
 
@@ -55,7 +55,7 @@ abstract class AbstractJdbcWorkFileStore implements WorkFileStore {
     @Override
     public void save(WorkFile f) {
         jdbc.update(upsert() + " work_file " + COLUMNS + " VALUES " + VALUES,
-                f.id(), f.name(), f.kind().name().toLowerCase(), nz(f.mimeType()), f.size(), f.storage(),
+                TenantSchema.company(), f.id(), f.name(), f.kind().name().toLowerCase(), nz(f.mimeType()), f.size(), f.storage(),
                 nz(f.location()), f.owner(), nz(f.agentId()), nz(f.taskId()), f.origin(), f.deleted() ? 1 : 0,
                 utc(f.createdAt()), utc(f.updatedAt()), String.join("\n", f.tags()), f.tagState());
     }
@@ -63,15 +63,15 @@ abstract class AbstractJdbcWorkFileStore implements WorkFileStore {
     @Override
     public Map<String, Long> countByStorage() {
         Map<String, Long> out = new java.util.LinkedHashMap<>();
-        jdbc.query("SELECT storage, COUNT(*) AS n FROM work_file" + readFinal() + " WHERE deleted = 0 GROUP BY storage",
-                rs -> { out.put(rs.getString("storage"), rs.getLong("n")); });
+        jdbc.query("SELECT storage, COUNT(*) AS n FROM work_file" + readFinal() + " WHERE company_id = ? AND deleted = 0 GROUP BY storage",
+                rs -> { out.put(rs.getString("storage"), rs.getLong("n")); }, TenantSchema.company());
         return out;
     }
 
     @Override
     public List<WorkFile> untagged(int limit) {
-        return jdbc.query("SELECT * FROM work_file" + readFinal() + " WHERE deleted = 0 AND tag_state = '' "
-                + "ORDER BY created_at LIMIT " + Math.max(1, limit), mapper);
+        return jdbc.query("SELECT * FROM work_file" + readFinal() + " WHERE company_id = ? AND deleted = 0 AND tag_state = '' "
+                + "ORDER BY created_at LIMIT " + Math.max(1, limit), mapper, TenantSchema.company());
     }
 
     /** Tags are stored newline-separated (a tag never contains one). */
@@ -81,32 +81,35 @@ abstract class AbstractJdbcWorkFileStore implements WorkFileStore {
 
     @Override
     public Optional<WorkFile> find(String id) {
-        return jdbc.query("SELECT * FROM work_file" + readFinal() + " WHERE id = ?", mapper, id).stream().findFirst();
+        return jdbc.query("SELECT * FROM work_file" + readFinal() + " WHERE company_id = ? AND id = ?", mapper,
+                TenantSchema.company(), id).stream().findFirst();
     }
 
     @Override
     public List<WorkFile> listFor(String owner, Collection<String> agentIds) {
         List<Object> args = new ArrayList<>();
+        args.add(TenantSchema.company());
         args.add(owner);
         String byAgent = "";
         if (!agentIds.isEmpty()) {
             byAgent = " OR agent_id IN (" + String.join(", ", agentIds.stream().map(a -> "?").toList()) + ")";
             args.addAll(agentIds);
         }
-        return jdbc.query("SELECT * FROM work_file" + readFinal() + " WHERE deleted = 0 AND (owner = ?" + byAgent
+        return jdbc.query("SELECT * FROM work_file" + readFinal() + " WHERE company_id = ? AND deleted = 0 AND (owner = ?" + byAgent
                 + ") ORDER BY updated_at DESC", mapper, args.toArray());
     }
 
     /** Insert-if-absent, so a reply that revises a file twice keeps its first position in the order. */
     @Override
     public void link(String fileId, String sessionId, String messageId) {
+        String company = TenantSchema.company();
         Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM work_file_ref" + readFinal()
-                + " WHERE file_id = ? AND message_id = ?", Integer.class, fileId, messageId);
+                + " WHERE company_id = ? AND file_id = ? AND message_id = ?", Integer.class, company, fileId, messageId);
         if (n != null && n > 0) {
             return;
         }
-        jdbc.update("INSERT INTO work_file_ref (file_id, session_id, message_id, created_at) VALUES (?, ?, ?, ?)",
-                fileId, nz(sessionId), messageId, utc(Instant.now()));
+        jdbc.update("INSERT INTO work_file_ref (company_id, file_id, session_id, message_id, created_at) VALUES (?, ?, ?, ?, ?)",
+                company, fileId, nz(sessionId), messageId, utc(Instant.now()));
     }
 
     @Override
@@ -115,11 +118,14 @@ abstract class AbstractJdbcWorkFileStore implements WorkFileStore {
         if (fileIds.isEmpty()) {
             return out;
         }
-        jdbc.query("SELECT file_id, message_id FROM work_file_ref" + readFinal() + " WHERE file_id IN ("
+        List<Object> args = new ArrayList<>();
+        args.add(TenantSchema.company());
+        args.addAll(fileIds);
+        jdbc.query("SELECT file_id, message_id FROM work_file_ref" + readFinal() + " WHERE company_id = ? AND file_id IN ("
                         + String.join(", ", fileIds.stream().map(f -> "?").toList()) + ") ORDER BY created_at",
                 rs -> {
                     out.computeIfAbsent(rs.getString("file_id"), k -> new ArrayList<>()).add(rs.getString("message_id"));
-                }, fileIds.toArray());
+                }, args.toArray());
         return out;
     }
 

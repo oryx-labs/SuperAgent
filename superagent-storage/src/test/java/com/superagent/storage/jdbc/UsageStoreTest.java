@@ -1,7 +1,9 @@
 package com.superagent.storage.jdbc;
 
 import com.superagent.core.usage.UsageRecord;
+import com.superagent.core.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -9,6 +11,7 @@ import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ExtendWith(InCompany.class)
 class UsageStoreTest {
 
     @Test
@@ -27,5 +30,10 @@ class UsageStoreTest {
         assertThat(store.between("ada", t, t.plusSeconds(3600))).extracting(UsageRecord::id).containsExactly("a", "b");
         assertThat(store.between(null, t.plusSeconds(1), t.plusSeconds(3600))).extracting(UsageRecord::id).containsExactly("b", "c");
         assertThat(store.between("ada", t, t.plusSeconds(3600)).get(1).costUsd()).isNull();
+
+        TenantContext.run(InCompany.OTHER, () -> {
+            assertThat(store.forTask("t1")).isEmpty();
+            assertThat(store.between(null, t, t.plusSeconds(3600))).isEmpty();
+        });
     }
 }

@@ -54,6 +54,36 @@ class SuperAgentDelegatesTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> com.superagent.task.TaskKinds.require(json.readTree("{}")))
                 .isInstanceOf(com.superagent.runtime.mcp.McpToolException.class);
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> com.superagent.task.TaskKinds.require(json.readTree("{\"kind\":\"writing\"}")))
-                .hasMessageContaining("coding 或 general");
+                .hasMessageContaining("coding、general 或 complex");
+    }
+
+    @Test
+    void theUserCanSayWhichProjectAndWhichAgentANewMemberBelongsTo() throws Exception {
+        SuperAgentService service = org.mockito.Mockito.mock(SuperAgentService.class);
+        SuperAgentTools tools = new SuperAgentTools(service, null);
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        var chat = new McpGrants.Grant("t", McpGrants.Kind.SUPER, "ada", null, "sa", "s", "m", null);
+        com.superagent.core.agent.Agent hired = org.mockito.Mockito.mock(com.superagent.core.agent.Agent.class);
+        org.mockito.Mockito.when(hired.id()).thenReturn("a2");
+        org.mockito.Mockito.when(hired.name()).thenReturn("小张");
+        org.mockito.Mockito.when(service.hire("ada", "小张", "做调研", null, null, java.util.List.of(), "p1", "a1")).thenReturn(hired);
+        org.mockito.Mockito.when(service.describePlace("ada", "a2")).thenReturn("项目：增长；上级：组长");
+
+        var hire = json.readTree("{\"name\":\"小张\",\"persona\":\"做调研\",\"project_id\":\"p1\",\"parent_id\":\"a1\"}");
+        assertThat(tools.call(chat, "hire_member", hire).text()).contains("小张", "项目：增长；上级：组长");
+
+        // An existing member moves without a plan; "none" takes it out again.
+        org.mockito.Mockito.when(service.place("ada", "a2", "none", null)).thenReturn(hired);
+        assertThat(tools.call(chat, "place_member", json.readTree("{\"id\":\"a2\",\"project_id\":\"none\"}")).text()).contains("已调整");
+        assertThat(tools.call(chat, "place_member", json.readTree("{\"id\":\"a2\"}")).error()).isTrue();
+        // A project that isn't the user's comes back as an error the agent can read, not a failure of the round.
+        org.mockito.Mockito.when(service.place("ada", "a2", "nope", null))
+                .thenThrow(new com.superagent.core.error.NotFoundException("没有这个项目") { });
+        var missing = tools.call(chat, "place_member", json.readTree("{\"id\":\"a2\",\"project_id\":\"nope\"}"));
+        assertThat(missing.error()).isTrue();
+        assertThat(missing.text()).contains("没有这个项目");
+
+        assertThat(SuperAgentService.CHAT_TOOLS).contains("mcp__superagent__place_member", "mcp__superagent__list_projects");
+        assertThat(SuperAgentService.EXTERNAL_ROUND_TOOLS).doesNotContain("mcp__superagent__place_member"); // messages can't reorganize the team
     }
 }

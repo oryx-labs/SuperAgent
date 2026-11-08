@@ -105,6 +105,19 @@ public class TaskModelRouter implements TaskModelSelector {
                 + " 重新执行。", Instant.now()));
     }
 
+    @Override
+    public Optional<TaskModelChoice> strongest(Task task) {
+        List<Candidate> forTasks = prices.candidates().stream().filter(Candidate::forTasks).toList();
+        Candidate top = defaultFor(forTasks);
+        if (top == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new TaskModelChoice(task.id(), 0, TaskModelChoice.BY_DEFAULT, "hard", null, top.id(), top.cli(),
+                null, describe(forTasks), "复杂任务：拆分子任务和最后汇总决定整体质量，不按难度省钱，直接用"
+                + (top.id().equals(defaultModel()) ? "默认模型 " : "最贵的 ") + top.id() + "；子任务各自按难度选最便宜够用的模型。",
+                Instant.now()));
+    }
+
     // --- judging ---
 
     private String defaultModel() {

@@ -8,6 +8,7 @@ public class MysqlProviderCredentialStore extends AbstractJdbcProviderCredential
     public MysqlProviderCredentialStore(JdbcTemplate jdbc) {
         super(jdbc, """
                 CREATE TABLE IF NOT EXISTS provider_credential (
+                  company_id   VARCHAR(64)   NOT NULL,
                   id           VARCHAR(64)   NOT NULL,
                   provider_key VARCHAR(32)   NOT NULL,
                   label        VARCHAR(100)  NOT NULL,
@@ -24,8 +25,8 @@ public class MysqlProviderCredentialStore extends AbstractJdbcProviderCredential
                   updated_at   DATETIME(3)   NOT NULL,
                   source       VARCHAR(16)   NOT NULL DEFAULT 'console',
                   key_hash     VARCHAR(64)   NOT NULL DEFAULT '',
-                  PRIMARY KEY (id),
-                  KEY idx_provider_credential (provider_key, deleted, priority)
+                  PRIMARY KEY (company_id, id),
+                  KEY idx_provider_credential (company_id, provider_key, deleted, priority)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
         // Pools from before machine import: add the columns (existing entries were all added on the page).

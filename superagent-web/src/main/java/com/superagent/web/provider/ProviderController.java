@@ -11,6 +11,7 @@ import com.superagent.api.provider.NodeRuntimeDto;
 import com.superagent.platform.provider.CredentialService;
 import com.superagent.platform.provider.NodeRuntimeService;
 import com.superagent.platform.provider.ProviderService;
+import com.superagent.platform.tenant.CompanyService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -28,8 +29,11 @@ public class ProviderController {
     private final ProviderService service;
     private final NodeRuntimeService node;
     private final CredentialService credentials;
+    private final CompanyService companies;
 
-    public ProviderController(ProviderService service, NodeRuntimeService node, CredentialService credentials) {
+    public ProviderController(ProviderService service, NodeRuntimeService node, CredentialService credentials,
+                              CompanyService companies) {
+        this.companies = companies;
         this.service = service;
         this.node = node;
         this.credentials = credentials;
@@ -49,6 +53,7 @@ public class ProviderController {
     /** Installs (or replaces) SuperAgent's private Node LTS; runs in the background, poll {@link #node()}. */
     @PostMapping(ApiPaths.PROVIDERS + "/node/install")
     public ApiResponse<NodeRuntimeDto> installNode() {
+        companies.requireHostCompany();
         return ApiResponse.ok(node.install());
     }
 
@@ -87,11 +92,13 @@ public class ProviderController {
 
     @PostMapping(ApiPaths.PROVIDERS + "/{id}/install")
     public ApiResponse<ProviderDto> install(@PathVariable String id) {
+        companies.requireHostCompany();
         return ApiResponse.ok(service.install(id));
     }
 
     @PostMapping(ApiPaths.PROVIDERS + "/{id}/upgrade")
     public ApiResponse<ProviderDto> upgrade(@PathVariable String id) {
+        companies.requireHostCompany();
         return ApiResponse.ok(service.upgrade(id));
     }
 

@@ -14,6 +14,7 @@ public class ClickHouseAgentMemoryStateStore extends AbstractJdbcAgentMemoryStat
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS agent_memory (
+              company_id       String,
               agent_id         String,
               owner            String,
               summarized_until Nullable(DateTime64(3, 'UTC')),
@@ -22,7 +23,7 @@ public class ClickHouseAgentMemoryStateStore extends AbstractJdbcAgentMemoryStat
               memory           String,
               updated_at       DateTime64(3, 'UTC')
             ) ENGINE = ReplacingMergeTree(updated_at)
-            ORDER BY agent_id
+            ORDER BY (company_id, agent_id)
             """,
             // Older tables predate failure counting.
             "ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS session_failures Int32 DEFAULT 0",
@@ -45,6 +46,6 @@ public class ClickHouseAgentMemoryStateStore extends AbstractJdbcAgentMemoryStat
 
     @Override
     public void delete(String agentId) {
-        jdbc.update("ALTER TABLE agent_memory DELETE WHERE agent_id = ?", agentId);
+        jdbc.update("ALTER TABLE agent_memory DELETE WHERE company_id = ? AND agent_id = ?", TenantSchema.company(), agentId);
     }
 }

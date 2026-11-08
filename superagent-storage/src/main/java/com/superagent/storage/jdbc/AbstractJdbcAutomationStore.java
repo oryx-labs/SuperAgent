@@ -28,7 +28,7 @@ abstract class AbstractJdbcAutomationStore implements AutomationStore {
     protected AbstractJdbcAutomationStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -66,43 +66,45 @@ abstract class AbstractJdbcAutomationStore implements AutomationStore {
 
     @Override
     public List<Automation> list() {
-        return jdbc.query("SELECT * FROM automation" + automationFinal() + " ORDER BY created_at DESC", mapper);
+        return jdbc.query("SELECT * FROM automation" + automationFinal() + " WHERE company_id = ? ORDER BY created_at DESC", mapper,
+                TenantSchema.company());
     }
 
     @Override
     public Optional<Automation> find(String id) {
-        return jdbc.query("SELECT * FROM automation" + automationFinal() + " WHERE id = ?", mapper, id)
+        return jdbc.query("SELECT * FROM automation" + automationFinal() + " WHERE company_id = ? AND id = ?", mapper,
+                        TenantSchema.company(), id)
                 .stream().findFirst();
     }
 
     @Override
     public void appendRun(AutomationRun r) {
-        jdbc.update("INSERT INTO automation_run (id, automation_id, trigger_kind, task_id, skipped_reason, fired_at) "
-                + "VALUES (?, ?, ?, ?, ?, ?)",
-                r.id(), r.automationId(), r.trigger(), nn(r.taskId()), nn(r.skippedReason()), utc(r.firedAt()));
+        jdbc.update("INSERT INTO automation_run (company_id, id, automation_id, trigger_kind, task_id, skipped_reason, fired_at) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                TenantSchema.company(), r.id(), r.automationId(), r.trigger(), nn(r.taskId()), nn(r.skippedReason()), utc(r.firedAt()));
     }
 
     @Override
     public List<AutomationRun> listRuns(String automationId, int limit) {
-        return jdbc.query("SELECT * FROM automation_run WHERE automation_id = ? ORDER BY fired_at DESC LIMIT ?",
-                runMapper, automationId, limit);
+        return jdbc.query("SELECT * FROM automation_run WHERE company_id = ? AND automation_id = ? ORDER BY fired_at DESC LIMIT ?",
+                runMapper, TenantSchema.company(), automationId, limit);
     }
 
     @Override
     public Optional<AutomationRun> findRunByTask(String taskId) {
-        return jdbc.query("SELECT * FROM automation_run WHERE task_id = ? ORDER BY fired_at DESC LIMIT 1",
-                runMapper, taskId).stream().findFirst();
+        return jdbc.query("SELECT * FROM automation_run WHERE company_id = ? AND task_id = ? ORDER BY fired_at DESC LIMIT 1",
+                runMapper, TenantSchema.company(), taskId).stream().findFirst();
     }
 
     protected static final String COLUMNS =
-            "(id, name, prompt, type, cron, run_at, timezone, model, overlap_policy, enabled, source, owner, "
+            "(company_id, id, name, prompt, type, cron, run_at, timezone, model, overlap_policy, enabled, source, owner, "
                     + "api_token_hash, next_run_at, last_run_at, last_task_id, created_at, updated_at, tier)";
 
-    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(Automation a) {
         return new Object[]{
-                a.id(), a.name(), a.prompt(), a.type().name(), nn(a.cron()), utc(a.runAt()), a.timezone(),
+                TenantSchema.company(), a.id(), a.name(), a.prompt(), a.type().name(), nn(a.cron()), utc(a.runAt()), a.timezone(),
                 nn(a.model()), a.overlap().name(), a.enabled(), a.source(), nn(a.owner()), nn(a.apiTokenHash()),
                 utc(a.nextRunAt()), utc(a.lastRunAt()), nn(a.lastTaskId()), utc(a.createdAt()), utc(a.updatedAt()), nn(a.tier())};
     }

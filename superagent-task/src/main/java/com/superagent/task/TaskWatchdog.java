@@ -3,6 +3,7 @@ package com.superagent.task;
 import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskStatus;
 import com.superagent.core.task.TaskStore;
+import com.superagent.platform.tenant.CompanyService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,12 +55,15 @@ public class TaskWatchdog {
         return t;
     });
 
-    public TaskWatchdog(
+    private final CompanyService companies;
+
+    public TaskWatchdog(CompanyService companies,
             TaskStore tasks,
             ObjectProvider<TaskRecovery> recoveryProvider,
             @Value("${superagent.task.watchdog.enabled:true}") boolean enabled,
             @Value("${superagent.task.watchdog.interval-seconds:30}") long intervalSeconds,
             @Value("${superagent.task.watchdog.stall-seconds:120}") long stallSeconds) {
+        this.companies = companies;
         this.tasks = tasks;
         this.recoveryProvider = recoveryProvider;
         this.enabled = enabled;
@@ -78,8 +82,8 @@ public class TaskWatchdog {
             log.info("task watchdog dormant: no TaskRecovery wired yet");
             return;
         }
-        recoverInterruptedAfterRestart();
-        scheduler.scheduleWithFixedDelay(this::scanSafely, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
+        companies.forEach(this::recoverInterruptedAfterRestart);
+        scheduler.scheduleWithFixedDelay(() -> companies.forEach(this::scanSafely), intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
         log.info("task watchdog started (interval={}s, stall={}s)", intervalSeconds, stall.toSeconds());
     }
 

@@ -14,6 +14,7 @@ public class MysqlAgentStore extends AbstractJdbcAgentStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS agent (
+              company_id VARCHAR(64)  NOT NULL,
               id         VARCHAR(64)  NOT NULL,
               name       VARCHAR(255) NOT NULL,
               avatar     VARCHAR(32),
@@ -26,8 +27,8 @@ public class MysqlAgentStore extends AbstractJdbcAgentStore {
               managed_by VARCHAR(64),
               created_at DATETIME(3)  NOT NULL,
               updated_at DATETIME(3)  NOT NULL,
-              PRIMARY KEY (id),
-              KEY idx_agent_updated (updated_at)
+              PRIMARY KEY (company_id, id),
+              KEY idx_agent_updated (company_id, updated_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 

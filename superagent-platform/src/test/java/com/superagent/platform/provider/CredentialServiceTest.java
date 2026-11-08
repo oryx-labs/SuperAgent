@@ -30,6 +30,16 @@ import static org.mockito.Mockito.when;
 
 class CredentialServiceTest {
 
+    @org.junit.jupiter.api.BeforeEach
+    void inCompany() {
+        com.superagent.core.tenant.TenantContext.set("acme"); // work handed to other threads carries the company
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void leaveCompany() {
+        com.superagent.core.tenant.TenantContext.clear();
+    }
+
     private static final class InMemoryPool implements ProviderCredentialStore {
         final Map<String, ProviderCredential> rows = new LinkedHashMap<>();
         @Override public List<ProviderCredential> list(String key) {

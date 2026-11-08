@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.superagent.core.connector.ConnectorTransport;
 import com.superagent.core.connector.McpServerSpec;
+import com.superagent.core.tenant.Company;
+import com.superagent.core.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -131,6 +133,8 @@ public class McpGrants {
     private static final Logger log = LoggerFactory.getLogger(McpGrants.class);
 
     private final Map<String, Grant> grants = new ConcurrentHashMap<>();
+    /** The company each open grant's run belongs to; its tool calls run as that company. */
+    private final Map<String, String> companies = new ConcurrentHashMap<>();
     private final SecureRandom random = new SecureRandom();
     private final ObjectMapper mapper = new ObjectMapper();
     /** Set explicitly (a proxy, another host); otherwise found from the port the server actually listens on. */
@@ -181,7 +185,9 @@ public class McpGrants {
     @EventListener(ApplicationReadyEvent.class)
     public void selfCheck() {
         Thread t = new Thread(() -> {
-            Grant probe = open(Kind.CHAT, "__selfcheck__", null, null, null, null, null);
+            // A ping touches no company's data; the grant still needs one.
+            Grant probe = TenantContext.call(Company.DEFAULT_ID,
+                    () -> open(Kind.CHAT, "__selfcheck__", null, null, null, null, null));
             try {
                 HttpRequest req = HttpRequest.newBuilder(URI.create(selfUrl)).timeout(Duration.ofSeconds(10))
                         .header("Content-Type", "application/json").header("Authorization", "Bearer " + probe.token())
@@ -237,6 +243,7 @@ public class McpGrants {
         byte[] bytes = new byte[24];
         random.nextBytes(bytes);
         Grant grant = new Grant(HexFormat.of().formatHex(bytes), kind, owner, taskId, agentId, sessionId, messageId, workspace);
+        companies.put(grant.token(), TenantContext.require());
         grants.put(grant.token(), grant);
         return grant;
     }
@@ -244,11 +251,21 @@ public class McpGrants {
     public void close(Grant grant) {
         if (grant != null) {
             grants.remove(grant.token());
+            companies.remove(grant.token());
         }
     }
 
     public Optional<Grant> find(String token) {
         return token == null ? Optional.empty() : Optional.ofNullable(grants.get(token));
+    }
+
+    /** The company {@code grant}'s run belongs to. */
+    public String companyOf(Grant grant) {
+        String company = companies.get(grant.token());
+        if (company == null) {
+            throw new IllegalStateException("MCP grant has no company: it was closed or not opened here");
+        }
+        return company;
     }
 
     /** Claude-style {@code --mcp-config} JSON; the Codex runner translates it to {@code -c mcp_servers.*}. */

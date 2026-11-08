@@ -32,6 +32,10 @@
     </dependency>
     <dependency>
       <groupId>com.superagent</groupId>
+      <artifactId>superagent-project</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.superagent</groupId>
       <artifactId>superagent-cost</artifactId>
     </dependency>
 

@@ -2,7 +2,10 @@ package com.superagent.cost;
 
 import com.superagent.api.provider.ProviderModelDto;
 import com.superagent.core.settings.SystemSettingStore;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.platform.provider.ProviderService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -35,7 +38,17 @@ class ModelPriceServiceTest {
             @Override public Map<String, String> all() { return new HashMap<>(rows); }
             @Override public void put(String key, String value) { if (value == null) rows.remove(key); else rows.put(key, value); }
         };
-        prices = new ModelPriceService(providers, store, "http://unused", 600);
+        prices = new ModelPriceService(null, providers, store, "http://unused", 600);
+    }
+
+    @BeforeEach
+    void inCompany() {
+        TenantContext.set("acme");
+    }
+
+    @AfterEach
+    void leaveCompany() {
+        TenantContext.clear();
     }
 
     @Test
@@ -95,6 +108,9 @@ class ModelPriceServiceTest {
             assertThat(d.inUse()).isEqualTo("fast");
             assertThat(d.reason()).contains("503");
         }); // told once, not on every turn
+        // Another company's runs of the same model are its own: acme's failure doesn't move them.
+        assertThat(TenantContext.call("globex", prices::chatModels).get(0)).isEqualTo("mid");
+        assertThat(told).hasSize(1);
 
         // Its time out is up: the default is tried again, and the admins hear it's back.
         prices.forgetFailures();

@@ -19,7 +19,7 @@ import java.util.Optional;
  */
 abstract class AbstractJdbcProviderCredentialStore implements ProviderCredentialStore {
 
-    private static final String COLUMNS = "(id, provider_key, label, base_url, key_cipher, bearer, priority, enabled, "
+    private static final String COLUMNS = "(company_id, id, provider_key, label, base_url, key_cipher, bearer, priority, enabled, "
             + "status, last_error, checked_at, deleted, created_at, updated_at, source, key_hash)";
 
     protected final JdbcTemplate jdbc;
@@ -35,7 +35,7 @@ abstract class AbstractJdbcProviderCredentialStore implements ProviderCredential
     protected AbstractJdbcProviderCredentialStore(JdbcTemplate jdbc, String... ddl) {
         this.jdbc = jdbc;
         for (String statement : ddl) {
-            jdbc.execute(statement);
+            TenantSchema.create(jdbc, statement);
         }
     }
 
@@ -48,19 +48,20 @@ abstract class AbstractJdbcProviderCredentialStore implements ProviderCredential
     @Override
     public List<ProviderCredential> list(String providerKey) {
         return jdbc.query("SELECT * FROM provider_credential" + readFinal()
-                + " WHERE provider_key = ? AND deleted = 0 ORDER BY priority, created_at", mapper, providerKey);
+                + " WHERE company_id = ? AND provider_key = ? AND deleted = 0 ORDER BY priority, created_at", mapper,
+                TenantSchema.company(), providerKey);
     }
 
     @Override
     public Optional<ProviderCredential> find(String id) {
-        return jdbc.query("SELECT * FROM provider_credential" + readFinal() + " WHERE id = ? AND deleted = 0",
-                mapper, id).stream().findFirst();
+        return jdbc.query("SELECT * FROM provider_credential" + readFinal() + " WHERE company_id = ? AND id = ? AND deleted = 0",
+                mapper, TenantSchema.company(), id).stream().findFirst();
     }
 
     @Override
     public java.util.Set<String> knownKeyHashes(String providerKey) {
         return new java.util.HashSet<>(jdbc.queryForList("SELECT key_hash FROM provider_credential" + readFinal()
-                + " WHERE provider_key = ? AND key_hash <> ''", String.class, providerKey));
+                + " WHERE company_id = ? AND provider_key = ? AND key_hash <> ''", String.class, TenantSchema.company(), providerKey));
     }
 
     @Override
@@ -74,8 +75,8 @@ abstract class AbstractJdbcProviderCredentialStore implements ProviderCredential
     }
 
     private void write(ProviderCredential c, boolean deleted) {
-        jdbc.update(upsert() + " provider_credential " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                c.id(), c.providerKey(), c.label(), nz(c.baseUrl()), c.keyCipher(), c.bearer() ? 1 : 0, c.priority(),
+        jdbc.update(upsert() + " provider_credential " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                TenantSchema.company(), c.id(), c.providerKey(), c.label(), nz(c.baseUrl()), c.keyCipher(), c.bearer() ? 1 : 0, c.priority(),
                 c.enabled() ? 1 : 0, c.status(), nz(c.lastError()), utc(c.checkedAt()), deleted ? 1 : 0,
                 utc(c.createdAt()), utc(deleted ? Instant.now() : c.updatedAt()), c.source(), nz(c.keyHash()));
     }

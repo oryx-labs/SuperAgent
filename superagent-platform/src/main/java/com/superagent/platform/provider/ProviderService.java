@@ -10,6 +10,7 @@ import com.superagent.api.provider.ProviderModelDto;
 import com.superagent.core.provider.ModelProvider;
 import com.superagent.core.provider.ModelProviderStore;
 import com.superagent.core.provider.ProviderCatalog;
+import com.superagent.core.tenant.TenantContext;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -99,20 +100,20 @@ public class ProviderService {
             // A switch to another endpoint can change which models answer: re-check them against it.
             // Only when the entry actually changed (the first one seen is startup, which the checker sweeps anyway):
             // a model check is one inference per model.
-            Map<String, String> seen = new java.util.concurrent.ConcurrentHashMap<>();
+            Map<String, String> seen = new java.util.concurrent.ConcurrentHashMap<>(); // company + "/" + CLI key
             credentials.onSwitch("models", key -> {
                 String now = credentials.current(key).id();
-                String before = seen.put(key, now);
+                String before = seen.put(TenantContext.require() + "/" + key, now);
                 // The first event per CLI is usually startup, except a CLI's first key: its list is still empty.
                 boolean firstKey = before == null && store.findByKey(key)
                         .map(p -> parseModels(p.modelsJson()).isEmpty()).orElse(false);
                 if (!firstKey && (before == null || before.equals(now))) {
                     return;
                 }
-                store.findByKey(key).ifPresent(p -> lookup.execute(() -> {
+                store.findByKey(key).ifPresent(p -> lookup.execute(TenantContext.wrap(() -> {
                     refreshModels(p);
                     store.findById(p.id()).ifPresent(x -> refreshInference(x, true)); // another endpoint: check them all
-                }));
+                })));
             });
         }
     }
@@ -188,12 +189,12 @@ public class ProviderService {
         ModelProvider refreshed = entry.installable() ? refreshLocal(p) : p;
         if (entry.installable()) {
             // Network lookups off the request thread, so version and models show up without waiting for the slow cadence.
-            lookup.execute(() -> {
+            lookup.execute(TenantContext.wrap(() -> {
                 refreshLatest(p);
                 refreshLocal(p);
                 refreshModels(p);
                 refreshInference(p, true); // so a newly added CLI's models get a status without waiting a full cycle
-            });
+            }));
         }
         return toDto(refreshed);
     }
@@ -209,7 +210,7 @@ public class ProviderService {
     /** The list now; whether each model answers follows in the background (one inference per model). */
     public ProviderDto refreshModelsNow(String id) {
         ModelProvider refreshed = refreshModels(require(id));
-        lookup.execute(() -> store.findById(id).ifPresent(x -> refreshInference(x, MANUAL_RECHECK_AFTER)));
+        lookup.execute(TenantContext.wrap(() -> store.findById(id).ifPresent(x -> refreshInference(x, MANUAL_RECHECK_AFTER))));
         return toDto(refreshed);
     }
 
@@ -246,7 +247,7 @@ public class ProviderService {
         // One install at a time (npm's global folder isn't safe to write concurrently): a second one waits.
         InstallJob job = new InstallJob(upgrade ? "upgrade" : "install", "排队中：等前一个安装结束");
         jobs.put(id, job);
-        installer.execute(() -> {
+        installer.execute(TenantContext.wrap(() -> {
             lastError.remove(id);
             log.info("provider {}: {} started", entry.key(), upgrade ? "upgrade" : "install");
             // Dependencies first: a missing or too-old Node is installed (privately) before the CLI.
@@ -265,7 +266,7 @@ public class ProviderService {
                 }
             }
             execute(id, entry, command, job);
-        });
+        }));
         return toDto(p);
     }
 
@@ -546,7 +547,8 @@ public class ProviderService {
             return true;
         }
         log.info("provider {}: checking {} model(s)", entry.key(), due.size());
-        List<java.util.concurrent.Callable<Void>> jobs = due.stream().<java.util.concurrent.Callable<Void>>map(m -> () -> {
+        String company = TenantContext.require(); // the checks book their tokens to this company
+        List<java.util.concurrent.Callable<Void>> jobs = due.stream().<java.util.concurrent.Callable<Void>>map(m -> () -> TenantContext.callChecked(company, () -> {
             try {
                 inferenceProbe.check(entry.key(), m.id(), credential);
                 results.put(m.id(), m.withInference(ProviderModelDto.INFER_OK, null, Instant.now()));
@@ -558,7 +560,7 @@ public class ProviderService {
                 results.put(m.id(), m.withInference(ProviderModelDto.INFER_ERROR, reason, Instant.now()));
             }
             return null;
-        }).toList();
+        })).toList();
         try {
             checks.invokeAll(jobs);
         } catch (InterruptedException e) {

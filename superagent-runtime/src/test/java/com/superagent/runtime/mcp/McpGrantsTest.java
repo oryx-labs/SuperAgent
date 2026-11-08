@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.superagent.core.connector.ConnectorTransport;
 import com.superagent.core.connector.McpServerSpec;
+import com.superagent.core.tenant.TenantContext;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -16,6 +19,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class McpGrantsTest {
+
+    @BeforeEach
+    void inCompany() {
+        TenantContext.set("acme"); // a grant records the company of the run that opens it
+    }
+
+    @AfterEach
+    void leaveCompany() {
+        TenantContext.clear();
+    }
 
     @TempDir
     Path tmp;

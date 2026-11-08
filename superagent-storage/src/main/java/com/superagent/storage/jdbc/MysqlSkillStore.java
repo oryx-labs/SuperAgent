@@ -11,6 +11,7 @@ public class MysqlSkillStore extends AbstractJdbcSkillStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS skill (
+              company_id  VARCHAR(64)  NOT NULL,
               id          VARCHAR(64)  NOT NULL,
               name        VARCHAR(255) NOT NULL,
               description VARCHAR(1024),
@@ -23,16 +24,17 @@ public class MysqlSkillStore extends AbstractJdbcSkillStore {
               updated_by  VARCHAR(128),
               created_at  DATETIME(3)  NOT NULL,
               updated_at  DATETIME(3)  NOT NULL,
-              PRIMARY KEY (id)
+              PRIMARY KEY (company_id, id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
             """
             CREATE TABLE IF NOT EXISTS skill_binding (
+              company_id VARCHAR(64) NOT NULL,
               owner_type VARCHAR(16) NOT NULL,
               owner_id   VARCHAR(64) NOT NULL,
               skill_ids  TEXT        NOT NULL,
               updated_at DATETIME(3) NOT NULL,
-              PRIMARY KEY (owner_type, owner_id)
+              PRIMARY KEY (company_id, owner_type, owner_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 
@@ -52,7 +54,7 @@ public class MysqlSkillStore extends AbstractJdbcSkillStore {
 
     @Override
     public void save(Skill s) {
-        jdbc.update("INSERT INTO skill " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        jdbc.update("INSERT INTO skill " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 + "ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description), category=VALUES(category), "
                 + "content=VALUES(content), space=VALUES(space), enabled=VALUES(enabled), deleted=VALUES(deleted), "
                 + "updated_by=VALUES(updated_by), updated_at=VALUES(updated_at)", params(s));
@@ -60,8 +62,8 @@ public class MysqlSkillStore extends AbstractJdbcSkillStore {
 
     @Override
     public void bind(String ownerType, String ownerId, List<String> skillIds) {
-        jdbc.update("INSERT INTO skill_binding (owner_type, owner_id, skill_ids, updated_at) VALUES (?, ?, ?, ?) "
+        jdbc.update("INSERT INTO skill_binding (company_id, owner_type, owner_id, skill_ids, updated_at) VALUES (?, ?, ?, ?, ?) "
                         + "ON DUPLICATE KEY UPDATE skill_ids=VALUES(skill_ids), updated_at=VALUES(updated_at)",
-                ownerType, ownerId, csv(skillIds), now());
+                TenantSchema.company(), ownerType, ownerId, csv(skillIds), now());
     }
 }

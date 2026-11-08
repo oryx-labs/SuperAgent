@@ -2,6 +2,7 @@ package com.superagent.task;
 
 import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskStore;
+import com.superagent.core.tenant.CompanyStarted;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,7 +34,7 @@ class TaskOwnership {
         this.adminUsername = adminUsername;
     }
 
-    @EventListener(ApplicationReadyEvent.class)
+    @EventListener(CompanyStarted.class)
     void claimUnownedTasks() {
         List<Task> orphans = tasks.listTasks().stream()
                 .filter(t -> t.createdBy() == null || t.createdBy().isBlank() || t.createdBy().equals(placeholderOwner))

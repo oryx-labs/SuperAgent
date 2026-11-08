@@ -25,6 +25,8 @@ import com.superagent.core.integration.IntegrationChanged;
 import com.superagent.core.inbox.EventSource;
 import com.superagent.core.inbox.EventSourceStore;
 import com.superagent.core.inbox.InboxEvent;
+import com.superagent.core.tenant.CompanyStarted;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
 import com.superagent.event.InboxService;
@@ -69,6 +71,9 @@ import java.util.regex.Pattern;
  * <p>Who is who: employees are matched to their Feishu account by phone number (contact API, on connect and
  * hourly); anyone it can't match DMs the bot "绑定 &lt;code&gt;" with the code shown on the Connectors page.
  * Its connection state is reported to {@link IntegrationService}, which shows it to administrators.
+ *
+ * <p>Each company has its own app and so its own connection, kept by company (two companies may even use the same
+ * app id). Everything a connection does — receiving, matching, sending — runs as its company.
  * Routing: a DM to the bot belongs to its sender; a group message goes to every linked member of the chat
  * (triage decides how much it matters to each of them).
  */
@@ -102,11 +107,14 @@ public class FeishuConnector implements SmartLifecycle {
         t.setDaemon(true);
         return t;
     });
-    private volatile Connection current;
+    /** companyId → that company's live connection. */
+    private final Map<String, Connection> connections = new ConcurrentHashMap<>();
+    private final Map<String, Object> reconnecting = new ConcurrentHashMap<>();
     private volatile boolean running;
 
-    /** The live app: the API client, the long connection, and lookups cached for its lifetime. */
+    /** A company's live app: the API client, the long connection, and lookups cached for its lifetime. */
     private static final class Connection {
+        final String companyId;
         final String appId;
         final Client api;
         volatile com.lark.oapi.ws.Client ws;
@@ -114,7 +122,8 @@ public class FeishuConnector implements SmartLifecycle {
         final Map<String, String> chats = new ConcurrentHashMap<>();
         final Map<String, Members> members = new ConcurrentHashMap<>();
 
-        Connection(String appId, Client api) {
+        Connection(String companyId, String appId, Client api) {
+            this.companyId = companyId;
             this.appId = appId;
             this.api = api;
         }
@@ -132,21 +141,33 @@ public class FeishuConnector implements SmartLifecycle {
     }
 
     @EventListener
-    public void onChanged(IntegrationChanged changed) {
-        if (IntegrationService.FEISHU.equals(changed.key()) && running) {
-            work.execute(this::reconnect);
+    public void onCompanyStarted(CompanyStarted started) {
+        if (running) {
+            work.execute(TenantContext.wrap(this::reconnect));
         }
     }
 
-    private synchronized void reconnect() {
-        disconnect();
-        if (integrations.ready(IntegrationService.FEISHU)) {
-            connect();
+    /** Published inside the company whose app changed: only that company's connection is redone. */
+    @EventListener
+    public void onChanged(IntegrationChanged changed) {
+        if (IntegrationService.FEISHU.equals(changed.key()) && running && TenantContext.current().isPresent()) {
+            work.execute(TenantContext.wrap(this::reconnect));
+        }
+    }
+
+    /** The current company's connection: closes the old one and opens one if its app is set up. */
+    private void reconnect() {
+        String companyId = TenantContext.require();
+        synchronized (reconnecting.computeIfAbsent(companyId, k -> new Object())) {
+            disconnect(connections.remove(companyId));
+            if (integrations.ready(IntegrationService.FEISHU)) {
+                connect(companyId);
+            }
         }
     }
 
     /** Verifies the credentials (fetching the bot's own id), then opens the long connection on its own thread. */
-    private void connect() {
+    private void connect(String companyId) {
         String appId = integrations.value(IntegrationService.FEISHU, "appId").orElse(null);
         String secret = integrations.value(IntegrationService.FEISHU, "appSecret").orElse(null);
         if (appId == null || secret == null) {
@@ -167,30 +188,30 @@ public class FeishuConnector implements SmartLifecycle {
             setStatus("error", describe(e));
             return;
         }
-        Connection conn = new Connection(appId, api);
+        Connection conn = new Connection(companyId, appId, api);
         EventDispatcher dispatcher = EventDispatcher.newBuilder("", "")
                 .onP2MessageReceiveV1(new ImService.P2MessageReceiveV1Handler() {
                     @Override
                     public void handle(P2MessageReceiveV1 event) {
-                        work.execute(() -> receive(conn, event));
+                        work.execute(() -> TenantContext.run(conn.companyId, () -> receive(conn, event)));
                     }
                 })
                 .build();
         conn.ws = new com.lark.oapi.ws.Client.Builder(appId, secret).domain(base.getUrl())
                 .eventHandler(dispatcher).autoReconnect(true).build();
-        current = conn;
-        Thread t = new Thread(() -> {
+        connections.put(companyId, conn);
+        Thread t = new Thread(() -> TenantContext.run(conn.companyId, () -> {
             try {
                 conn.ws.start(); // connects (retrying itself on failure), then pings on its own executor
-                if (current == conn) {
+                if (live(conn)) {
                     setStatus("connected", null);
-                    log.info("feishu app {} connected (bot {})", appId, botOpenId);
+                    log.info("feishu app {} connected for company {} (bot {})", appId, conn.companyId, botOpenId);
                     syncIdentities(conn);
                 }
             } catch (RuntimeException e) {
                 setStatus("error", "长连接启动失败：" + e.getMessage());
             }
-        }, "feishu-ws");
+        }), "feishu-ws");
         t.setDaemon(true);
         t.start();
     }
@@ -273,7 +294,7 @@ public class FeishuConnector implements SmartLifecycle {
 
     private void receive(Connection conn, P2MessageReceiveV1 event) {
         try {
-            if (current != conn || event.getEvent() == null) {
+            if (!live(conn) || event.getEvent() == null) {
                 return;
             }
             EventMessage m = event.getEvent().getMessage();
@@ -342,7 +363,8 @@ public class FeishuConnector implements SmartLifecycle {
         if (!m.matches()) {
             return false;
         }
-        if (bindFailures.getOrDefault(senderOpenId, 0) >= MAX_BIND_FAILURES) {
+        String tries = conn.companyId + "/" + senderOpenId;
+        if (bindFailures.getOrDefault(tries, 0) >= MAX_BIND_FAILURES) {
             send(conn, senderOpenId, "绑定码错误次数过多，请联系管理员。");
             return true;
         }
@@ -350,12 +372,12 @@ public class FeishuConnector implements SmartLifecycle {
                 .filter(s -> EventSource.FEISHU.equals(s.type()) && m.group(1).equalsIgnoreCase(s.bindCode()))
                 .findFirst();
         if (match.isPresent()) {
-            bindFailures.remove(senderOpenId);
+            bindFailures.remove(tries);
             link(conn, match.get().owner(), senderOpenId, true);
             log.info("feishu: {} linked by bind code", match.get().owner());
             send(conn, senderOpenId, "已关联。发给我的消息和群里与你有关的消息会交给你的 SuperAgent，紧急的事会私聊提醒你。");
         } else {
-            bindFailures.merge(senderOpenId, 1, Integer::sum);
+            bindFailures.merge(tries, 1, Integer::sum);
             send(conn, senderOpenId, "绑定码不正确或已失效，请在 SuperAgent 的「连接」页面重新生成。");
         }
         return true;
@@ -363,17 +385,18 @@ public class FeishuConnector implements SmartLifecycle {
 
     /** Someone the app doesn't know DMed the bot: tell them how to link, now and then. */
     private void hint(Connection conn, String openId) {
-        Instant last = hinted.get(openId);
+        String who = conn.companyId + "/" + openId;
+        Instant last = hinted.get(who);
         if (last != null && Instant.now().isBefore(last.plus(HINT_EVERY))) {
             return;
         }
-        hinted.put(openId, Instant.now());
+        hinted.put(who, Instant.now());
         send(conn, openId, "你的飞书账号还没有关联 SuperAgent。请在 SuperAgent 的「连接」页面找到飞书，按提示把绑定码发给我。");
     }
 
-    /** Pushes a short alert to an employee's Feishu DM (needs them linked under the current app). */
+    /** Pushes a short alert to an employee's Feishu DM (needs them linked under their company's current app). */
     private void notifyOwner(EventSource source, String text) {
-        Connection conn = current;
+        Connection conn = connections.get(TenantContext.require());
         if (conn == null || !source.linkedTo(conn.appId)) {
             return;
         }
@@ -486,10 +509,15 @@ public class FeishuConnector implements SmartLifecycle {
         return s.matches("\\+?\\d{5,20}") ? s : null;
     }
 
+    private boolean live(Connection conn) {
+        return connections.get(conn.companyId) == conn;
+    }
+
+    /** For the current company (every caller runs as the connection's company). */
     private void setStatus(String status, String error) {
         integrations.setStatus(IntegrationService.FEISHU, status, error);
         if (error != null) {
-            log.warn("feishu: {}", error);
+            log.warn("feishu ({}): {}", TenantContext.require(), error);
         }
     }
 
@@ -498,9 +526,7 @@ public class FeishuConnector implements SmartLifecycle {
      * protected disconnect, then stop its ping executor, so an old connection doesn't linger after the
      * administrator changes or disables the app.
      */
-    private void disconnect() {
-        Connection conn = current;
-        current = null;
+    private void disconnect(Connection conn) {
         if (conn == null || conn.ws == null) {
             return;
         }
@@ -540,26 +566,23 @@ public class FeishuConnector implements SmartLifecycle {
 
     // --- lifecycle ---
 
+    /** Connections open per company as each starts ({@link CompanyStarted}, after this). */
     @Override
     public void start() {
         running = true;
-        work.execute(this::reconnect);
-        ticker.scheduleWithFixedDelay(() -> {
-            Connection conn = current;
-            if (conn != null) {
-                try {
-                    syncIdentities(conn);
-                } catch (RuntimeException e) {
-                    log.warn("feishu: phone matching failed: {}", e.getMessage());
-                }
+        ticker.scheduleWithFixedDelay(() -> connections.values().forEach(conn -> {
+            try {
+                TenantContext.run(conn.companyId, () -> syncIdentities(conn));
+            } catch (RuntimeException e) {
+                log.warn("feishu: phone matching failed for company {}: {}", conn.companyId, e.getMessage());
             }
-        }, 1, 1, TimeUnit.HOURS);
+        }), 1, 1, TimeUnit.HOURS);
     }
 
     @Override
     public void stop() {
         running = false;
-        disconnect();
+        connections.keySet().forEach(id -> disconnect(connections.remove(id)));
         ticker.shutdownNow();
         work.shutdownNow();
     }

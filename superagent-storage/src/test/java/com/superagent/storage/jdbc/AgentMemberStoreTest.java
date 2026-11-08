@@ -6,7 +6,9 @@ import com.superagent.core.chat.ChatMessage;
 import com.superagent.core.chat.ChatSession;
 import com.superagent.core.chat.MessageRole;
 import com.superagent.core.chat.SessionStatus;
+import com.superagent.core.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -15,6 +17,7 @@ import java.time.Instant;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Sharing an agent: membership rows and authored chat messages, through H2 in MySQL mode. */
+@ExtendWith(InCompany.class)
 class AgentMemberStoreTest {
 
     @Test
@@ -31,6 +34,12 @@ class AgentMemberStoreTest {
         members.save(new AgentMember("a1", "bob", "ada", false, now, now.plusSeconds(1))); // bob leaves
         assertThat(members.members("a1")).extracting(AgentMember::username).containsExactly("cat");
         assertThat(members.agentsOf("bob")).isEmpty();
+
+        TenantContext.run(InCompany.OTHER, () -> {
+            assertThat(members.members("a1")).isEmpty();
+            members.save(new AgentMember("a1", "cat", "eve", false, now, now.plusSeconds(2))); // same key, other company
+        });
+        assertThat(members.members("a1")).extracting(AgentMember::username).containsExactly("cat");
 
         MysqlChatStore chats = new MysqlChatStore(jdbc);
         chats.createSession(new ChatSession("s1", "t", AgentType.CLAUDE, null, "/w", "a1", SessionStatus.ACTIVE, now, now));

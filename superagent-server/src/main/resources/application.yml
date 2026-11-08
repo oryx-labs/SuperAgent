@@ -34,6 +34,12 @@ logging:
 
 superagent:
   version: @project.version@
+  # Each company's default limits; 0 = unlimited. A company's own limits (company table) override these.
+  tenant:
+    quota:
+      max-users: ${SUPERAGENT_QUOTA_MAX_USERS:0}
+      max-running-tasks: ${SUPERAGENT_QUOTA_MAX_RUNNING_TASKS:0}
+      monthly-tokens: ${SUPERAGENT_QUOTA_MONTHLY_TOKENS:0}
   storage:
     type: mysql
     mysql:

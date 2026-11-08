@@ -30,7 +30,7 @@ abstract class AbstractJdbcTaskStore implements TaskStore {
     protected AbstractJdbcTaskStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -61,29 +61,31 @@ abstract class AbstractJdbcTaskStore implements TaskStore {
 
     @Override
     public List<Task> listTasks() {
-        return jdbc.query("SELECT * FROM task" + taskFinal() + " ORDER BY created_at DESC", mapper);
+        return jdbc.query("SELECT * FROM task" + taskFinal() + " WHERE company_id = ? ORDER BY created_at DESC", mapper,
+                TenantSchema.company());
     }
 
     @Override
     public Optional<Task> findTask(String id) {
-        return jdbc.query("SELECT * FROM task" + taskFinal() + " WHERE id = ?", mapper, id)
+        return jdbc.query("SELECT * FROM task" + taskFinal() + " WHERE company_id = ? AND id = ?", mapper,
+                        TenantSchema.company(), id)
                 .stream().findFirst();
     }
 
     protected static final String COLUMNS =
-            "(id, title, brief, source, repo, branch, flow, status, progress, spend, model, agent_type, "
+            "(company_id, id, title, brief, source, repo, branch, flow, status, progress, spend, model, agent_type, "
                     + "workspace_dir, created_by, error, created_at, started_at, finished_at, updated_at, tier)";
 
     protected Object[] params(Task t) {
         return new Object[]{
-                t.id(), t.title(), nn(t.brief()), t.source().name(), nn(t.repo()), nn(t.branch()), nn(t.flow()),
+                TenantSchema.company(), t.id(), t.title(), nn(t.brief()), t.source().name(), nn(t.repo()), nn(t.branch()), nn(t.flow()),
                 t.status().name(), t.progress(), t.spend() == null ? BigDecimal.ZERO : t.spend(),
                 nn(t.model()), t.agentType().name(), nn(t.workspaceDir()), nn(t.createdBy()), nn(t.error()),
                 utc(t.createdAt()), utc(t.startedAt()), utc(t.finishedAt()), utc(t.updatedAt()), nn(t.tier())};
     }
 
     protected void insert(Task t) {
-        jdbc.update("INSERT INTO task " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        jdbc.update("INSERT INTO task " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params(t));
     }
 

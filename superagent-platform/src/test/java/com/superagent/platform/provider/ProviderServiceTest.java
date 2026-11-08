@@ -24,6 +24,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ProviderServiceTest {
 
+    @org.junit.jupiter.api.BeforeEach
+    void inCompany() {
+        com.superagent.core.tenant.TenantContext.set("acme"); // work handed to other threads carries the company
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void leaveCompany() {
+        com.superagent.core.tenant.TenantContext.clear();
+    }
+
     private static final class InMemoryStore implements ModelProviderStore {
         private final Map<String, ModelProvider> rows = new LinkedHashMap<>();
         @Override public List<ModelProvider> list() { return new ArrayList<>(rows.values()); }

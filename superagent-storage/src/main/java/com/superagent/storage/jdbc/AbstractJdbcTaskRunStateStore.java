@@ -25,7 +25,7 @@ abstract class AbstractJdbcTaskRunStateStore implements TaskRunStateStore {
     protected AbstractJdbcTaskRunStateStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -41,14 +41,15 @@ abstract class AbstractJdbcTaskRunStateStore implements TaskRunStateStore {
 
     @Override
     public Optional<TaskRunState> find(String taskId) {
-        return jdbc.query("SELECT * FROM task_run_state" + stateFinal() + " WHERE task_id = ?", mapper, taskId)
+        return jdbc.query("SELECT * FROM task_run_state" + stateFinal() + " WHERE company_id = ? AND task_id = ?", mapper,
+                        TenantSchema.company(), taskId)
                 .stream().findFirst();
     }
 
     protected void insert(TaskRunState s) {
-        jdbc.update("INSERT INTO task_run_state (task_id, agent_session_id, failure_count, attempt_count, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?)",
-                s.taskId(), nn(s.agentSessionId()), s.failureCount(), s.attemptCount(), utc(s.updatedAt()));
+        jdbc.update("INSERT INTO task_run_state (company_id, task_id, agent_session_id, failure_count, attempt_count, updated_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?)",
+                TenantSchema.company(), s.taskId(), nn(s.agentSessionId()), s.failureCount(), s.attemptCount(), utc(s.updatedAt()));
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

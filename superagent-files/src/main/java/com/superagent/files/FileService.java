@@ -15,6 +15,7 @@ import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskAgentStore;
 import com.superagent.core.task.TaskStore;
+import com.superagent.core.tenant.TenantPaths;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
 import org.slf4j.Logger;
@@ -50,7 +51,7 @@ import java.util.UUID;
 
 /**
  * Work files: what agents produce and what people send them. Content lives on
- * this server under {@code <dir>/<id>/content}; only the latest version is kept, so an agent revising a file
+ * this server under {@code <dir>/<companyId>/<id>/content}; only the latest version is kept, so an agent revising a file
  * overwrites it in place — and only when it names that file explicitly, so two pieces of work that happen to
  * share a name never clobber each other.
  *
@@ -232,7 +233,7 @@ public class FileService {
     private WorkFile store(Origin origin, String name, WorkFile existing, Writer writer) {
         String id = existing != null ? existing.id() : UUID.randomUUID().toString();
         String type = storage.activeChannel();
-        Path staging = root.resolve(".staging");
+        Path staging = TenantPaths.of(root).resolve(".staging");
         Path tmp = null;
         try {
             Files.createDirectories(staging);
@@ -249,6 +250,9 @@ public class FileService {
                     origin.owner(), origin.agentId(), origin.taskId(), origin.origin(), false, Instant.now(), Instant.now(),
                     List.of(), WorkFile.TAGS_PENDING);
             store.save(saved);
+            if (existing == null && projects != null) {
+                projects.recordFile(id, origin.agentId(), origin.taskId());
+            }
             if (origin.messageId() != null) {
                 store.link(id, origin.sessionId(), origin.messageId());
             }
@@ -334,7 +338,7 @@ public class FileService {
     public WorkFileDto upload(String user, String agentId, String taskId, String name, InputStream in) {
         Origin origin = uploadOrigin(user, agentId, taskId);
         String fileName = cleanName(name);
-        Path staging = root.resolve(".staging");
+        Path staging = TenantPaths.of(root).resolve(".staging");
         Path tmp = null;
         try {
             Files.createDirectories(staging);
@@ -506,7 +510,7 @@ public class FileService {
         if (local.isPresent()) {
             return local.get();
         }
-        Path cached = root.resolve(".cache").resolve(f.id() + "-" + f.updatedAt().toEpochMilli());
+        Path cached = TenantPaths.of(root).resolve(".cache").resolve(f.id() + "-" + f.updatedAt().toEpochMilli());
         if (Files.isRegularFile(cached)) {
             return cached;
         }
@@ -560,6 +564,9 @@ public class FileService {
                         WorkFile.LINK, url, user, agentId, taskId, WorkFile.ORIGIN_UPLOAD, false, now, now, List.of(),
                         WorkFile.TAGS_PENDING);
                 store.save(f);
+                if (projects != null) {
+                    projects.recordFile(f.id(), agentId, taskId);
+                }
             }
             if (messageId != null) {
                 store.link(f.id(), sessionId, messageId);
@@ -570,6 +577,18 @@ public class FileService {
     }
 
     // --- people using files ---
+
+    /** The files made in a project, for one of its members (none for anyone else). */
+    public List<WorkFileDto> listForProject(String user, String projectId) {
+        if (projects == null) {
+            return List.of();
+        }
+        List<WorkFile> files = projects.itemsInProject(projectId, com.superagent.core.project.ProjectItemKind.FILE, user).stream()
+                .map(store::find).flatMap(java.util.Optional::stream).filter(f -> !f.deleted()).toList();
+        Map<String, List<String>> refs = store.messages(files.stream().map(WorkFile::id).toList());
+        Map<String, String> placed = folders.placements(user);
+        return files.stream().map(f -> toDto(f, user, refs.getOrDefault(f.id(), List.of()), placed)).toList();
+    }
 
     /** Files the user can see; {@code agentId} narrows to one agent's (which the user must have access to). */
     public List<WorkFileDto> list(String user, String agentId) {
@@ -700,9 +719,17 @@ public class FileService {
         }
     }
 
+    private com.superagent.core.project.ProjectAccess projects; // null in tests: no projects
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setProjects(com.superagent.core.project.ProjectAccess projects) {
+        this.projects = projects;
+    }
+
     private WorkFile visible(String id, String user) {
         WorkFile f = store.find(id).filter(x -> !x.deleted()).orElseThrow(() -> new WorkFileNotFoundException(id));
-        boolean ok = user != null && (user.equals(f.owner()) || (f.agentId() != null && canAccessAgent(f.agentId(), user)));
+        boolean ok = user != null && (user.equals(f.owner()) || (f.agentId() != null && canAccessAgent(f.agentId(), user))
+                || (projects != null && projects.visibleThroughProject(com.superagent.core.project.ProjectItemKind.FILE, id, user)));
         if (!ok) {
             throw new WorkFileNotFoundException(id);
         }
@@ -727,7 +754,8 @@ public class FileService {
             return false;
         }
         return agents.find(agentId).filter(a -> a.status() != AgentStatus.DELETED)
-                .filter(a -> user.equals(a.owner()) || members.members(a.id()).stream().anyMatch(m -> m.username().equals(user)))
+                .filter(a -> user.equals(a.owner()) || members.members(a.id()).stream().anyMatch(m -> m.username().equals(user))
+                        || (projects != null && projects.sharesProject(a.id(), user)))
                 .isPresent();
     }
 
@@ -736,6 +764,9 @@ public class FileService {
         agents.list().stream().filter(a -> a.status() != AgentStatus.DELETED && user.equals(a.owner()))
                 .forEach(a -> ids.add(a.id()));
         ids.addAll(members.agentsOf(user));
+        if (projects != null) {
+            ids.addAll(projects.agentsThroughProjects(user));
+        }
         return new ArrayList<>(ids);
     }
 

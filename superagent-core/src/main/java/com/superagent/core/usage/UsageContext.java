@@ -16,4 +16,5 @@ public record UsageContext(String user, String source, String agentId, String ta
     public static final String SOURCE_MODEL_CHOICE = "model_choice";
     public static final String SOURCE_MEMORY = "memory";
     public static final String SOURCE_FILE_TAGS = "file_tags";
+    public static final String SOURCE_TASK_TAGS = "task_tags";
 }

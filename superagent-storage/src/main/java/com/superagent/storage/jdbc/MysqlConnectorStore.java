@@ -11,6 +11,7 @@ public class MysqlConnectorStore extends AbstractJdbcConnectorStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS connector (
+              company_id  VARCHAR(64)   NOT NULL,
               id          VARCHAR(64)   NOT NULL,
               name        VARCHAR(255)  NOT NULL,
               description VARCHAR(1024),
@@ -22,17 +23,12 @@ public class MysqlConnectorStore extends AbstractJdbcConnectorStore {
               token_env   VARCHAR(128),
               created_at  DATETIME(3)   NOT NULL,
               updated_at  DATETIME(3)   NOT NULL,
-              PRIMARY KEY (id)
+              PRIMARY KEY (company_id, id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 
     public MysqlConnectorStore(JdbcTemplate jdbc) {
-        super(dropOld(jdbc), SCHEMA);
-    }
-
-    private static JdbcTemplate dropOld(JdbcTemplate jdbc) {
-        dropIfOld(jdbc, "connector", "kind");
-        return jdbc;
+        super(jdbc, SCHEMA);
     }
 
     @Override
@@ -48,6 +44,6 @@ public class MysqlConnectorStore extends AbstractJdbcConnectorStore {
 
     @Override
     public void delete(String id) {
-        jdbc.update("DELETE FROM connector WHERE id = ?", id);
+        jdbc.update("DELETE FROM connector WHERE company_id = ? AND id = ?", TenantSchema.company(), id);
     }
 }

@@ -11,6 +11,7 @@ public class ClickHouseSkillStore extends AbstractJdbcSkillStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS skill (
+              company_id  String,
               id          String,
               name        String,
               description String,
@@ -24,16 +25,17 @@ public class ClickHouseSkillStore extends AbstractJdbcSkillStore {
               created_at  DateTime64(3, 'UTC'),
               updated_at  DateTime64(3, 'UTC')
             ) ENGINE = ReplacingMergeTree(updated_at)
-            ORDER BY id
+            ORDER BY (company_id, id)
             """,
             """
             CREATE TABLE IF NOT EXISTS skill_binding (
+              company_id String,
               owner_type String,
               owner_id   String,
               skill_ids  String,
               updated_at DateTime64(3, 'UTC')
             ) ENGINE = ReplacingMergeTree(updated_at)
-            ORDER BY (owner_type, owner_id)
+            ORDER BY (company_id, owner_type, owner_id)
             """,
             "ALTER TABLE skill ADD COLUMN IF NOT EXISTS space String");
 
@@ -48,12 +50,12 @@ public class ClickHouseSkillStore extends AbstractJdbcSkillStore {
 
     @Override
     public void save(Skill s) {
-        jdbc.update("INSERT INTO skill " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params(s));
+        jdbc.update("INSERT INTO skill " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params(s));
     }
 
     @Override
     public void bind(String ownerType, String ownerId, List<String> skillIds) {
-        jdbc.update("INSERT INTO skill_binding (owner_type, owner_id, skill_ids, updated_at) VALUES (?, ?, ?, ?)",
-                ownerType, ownerId, csv(skillIds), now());
+        jdbc.update("INSERT INTO skill_binding (company_id, owner_type, owner_id, skill_ids, updated_at) VALUES (?, ?, ?, ?, ?)",
+                TenantSchema.company(), ownerType, ownerId, csv(skillIds), now());
     }
 }

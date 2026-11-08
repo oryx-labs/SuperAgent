@@ -27,10 +27,10 @@ let modelDetailId = null;
 // View state lives in the URL hash (#tasks, #connectors, …) so a refresh or
 // back/forward restores the same view. Admin-only views fall back to the default
 // for non-admins. See initialView().
-const KNOWN_VIEWS = new Set(["todo", "chat", "files", "tasks", "messages", "skills", "automation", "connectors", "models",
+const KNOWN_VIEWS = new Set(["todo", "chat", "files", "tasks", "messages", "projects", "skills", "automation", "connectors", "models",
   "users", "settings", "integrations", "file-storage", "analytics", "usage", "company-usage", "model-prices"]);
 // The "Workspace" dropdown's pages, and the admin pages (shown with the admin sidebar).
-const WORKSPACE_VIEWS = new Set(["skills", "connectors", "usage"]);
+const WORKSPACE_VIEWS = new Set(["projects", "skills", "connectors", "usage"]);
 const ADMIN_VIEWS = new Set(["settings", "integrations", "file-storage", "analytics", "company-usage", "models", "model-prices", "users"]);
 const DEFAULT_VIEW = "todo"; // the to-do list is home: the first thing to look at each day
 let isAdmin = false;
@@ -76,6 +76,7 @@ function setView(view) {
   const isFileStorage = view === "file-storage";
   const isAutomation = view === "automation";
   const isSkills = view === "skills";
+  const isProjects = view === "projects";
   const isAnalytics = view === "analytics";
   const isUsage = view === "usage" || view === "company-usage"; // one page: mine, or (admins) the company's
   const isTodo = view === "todo";
@@ -96,9 +97,10 @@ function setView(view) {
   integrationsPane.hidden = !isIntegrations;
   fileStoragePane.hidden = !isFileStorage;
   skPane.hidden = !isSkills;
+  projPane.hidden = !isProjects;
   if (!isSkills && !skel.drawer.hidden) closeSkillDrawer();
   placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isModelPrices || isSettings || isIntegrations
-    || isFileStorage || isAutomation || isSkills || isAnalytics || isTodo || isFiles || isUsage;
+    || isFileStorage || isAutomation || isSkills || isProjects || isAnalytics || isTodo || isFiles || isUsage;
   if (!placeholderPane.hidden) placeholderText.textContent = L(placeholderLabels[view] || "placeholder.default");
   if (isConnectors) loadConnectors();
   if (isUsers) loadUsers();
@@ -106,6 +108,7 @@ function setView(view) {
   if (isIntegrations) loadIntegrations();
   if (isFileStorage) loadFileStorage();
   if (isSkills) loadSkills();
+  if (isProjects) loadProjects();
   if (isAnalytics) loadAnalytics();
   if (isUsage) { usScope = view === "company-usage" ? "all" : "me"; loadUsage(); }
   if (isTodo) loadTodos();

@@ -25,7 +25,7 @@ abstract class AbstractJdbcModelProviderStore implements ModelProviderStore {
     protected AbstractJdbcModelProviderStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -49,34 +49,36 @@ abstract class AbstractJdbcModelProviderStore implements ModelProviderStore {
 
     @Override
     public List<ModelProvider> list() {
-        return jdbc.query("SELECT * FROM model_provider" + providerFinal() + " ORDER BY created_at", mapper);
+        return jdbc.query("SELECT * FROM model_provider" + providerFinal() + " WHERE company_id = ? ORDER BY created_at", mapper,
+                TenantSchema.company());
     }
 
     @Override
     public Optional<ModelProvider> findById(String id) {
-        return jdbc.query("SELECT * FROM model_provider" + providerFinal() + " WHERE id = ?", mapper, id)
+        return jdbc.query("SELECT * FROM model_provider" + providerFinal() + " WHERE company_id = ? AND id = ?", mapper,
+                        TenantSchema.company(), id)
                 .stream().findFirst();
     }
 
     @Override
     public Optional<ModelProvider> findByKey(String providerKey) {
-        return jdbc.query("SELECT * FROM model_provider" + providerFinal() + " WHERE provider_key = ?",
-                mapper, providerKey).stream().findFirst();
+        return jdbc.query("SELECT * FROM model_provider" + providerFinal() + " WHERE company_id = ? AND provider_key = ?",
+                mapper, TenantSchema.company(), providerKey).stream().findFirst();
     }
 
     protected static final String COLUMNS =
-            "(id, provider_key, installed, can_infer, current_version, latest_version, status, "
+            "(company_id, id, provider_key, installed, can_infer, current_version, latest_version, status, "
                     + "last_checked_at, models_json, models_error, models_checked_at, created_at, updated_at)";
 
     protected Object[] params(ModelProvider p) {
         return new Object[]{
-                p.id(), p.providerKey(), p.installed(), p.canInfer(), nn(p.currentVersion()), nn(p.latestVersion()),
+                TenantSchema.company(), p.id(), p.providerKey(), p.installed(), p.canInfer(), nn(p.currentVersion()), nn(p.latestVersion()),
                 p.status(), utc(p.lastCheckedAt()), nn(p.modelsJson()), nn(p.modelsError()),
                 utc(p.modelsCheckedAt()), utc(p.createdAt()), utc(p.updatedAt())};
     }
 
     protected void insert(ModelProvider p) {
-        jdbc.update("INSERT INTO model_provider " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        jdbc.update("INSERT INTO model_provider " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params(p));
     }
 

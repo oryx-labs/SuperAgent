@@ -14,6 +14,7 @@ public class ClickHouseSuperAgentWorkStore extends AbstractJdbcSuperAgentWorkSto
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS superagent_work (
+              company_id  String,
               task_id     String,
               owner       String,
               plan_id     String,
@@ -27,10 +28,11 @@ public class ClickHouseSuperAgentWorkStore extends AbstractJdbcSuperAgentWorkSto
               updated_at  DateTime64(3, 'UTC'),
               message_id  String
             ) ENGINE = ReplacingMergeTree(updated_at)
-            ORDER BY task_id
+            ORDER BY (company_id, task_id)
             """,
             """
             CREATE TABLE IF NOT EXISTS superagent_work_event (
+              company_id String,
               id      String,
               task_id String,
               owner   String,
@@ -38,7 +40,7 @@ public class ClickHouseSuperAgentWorkStore extends AbstractJdbcSuperAgentWorkSto
               detail  String,
               at_time DateTime64(3, 'UTC')
             ) ENGINE = MergeTree
-            ORDER BY (task_id, at_time)
+            ORDER BY (company_id, task_id, at_time)
             """);
 
     public ClickHouseSuperAgentWorkStore(JdbcTemplate jdbc) {

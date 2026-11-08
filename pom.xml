@@ -35,6 +35,7 @@
     <module>superagent-platform</module>
     <module>superagent-skills</module>
     <module>superagent-files</module>
+    <module>superagent-project</module>
     <module>superagent-cost</module>
     <module>superagent-docs</module>
     <module>superagent-agent</module>
@@ -93,6 +94,11 @@
       <dependency>
         <groupId>com.superagent</groupId>
         <artifactId>superagent-files</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-project</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

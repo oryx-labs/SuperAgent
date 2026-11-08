@@ -10,6 +10,7 @@ public class ClickHouseAgentLogStore extends AbstractJdbcAgentLogStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS agent_log (
+              company_id String,
               id       String,
               agent_id String,
               owner    String,
@@ -19,7 +20,7 @@ public class ClickHouseAgentLogStore extends AbstractJdbcAgentLogStore {
               summary  String,
               detail   String
             ) ENGINE = MergeTree
-            ORDER BY (agent_id, at_time)
+            ORDER BY (company_id, agent_id, at_time)
             """);
 
     public ClickHouseAgentLogStore(JdbcTemplate jdbc) {

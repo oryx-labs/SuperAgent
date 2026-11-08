@@ -16,6 +16,7 @@ import com.superagent.core.settings.SystemSettingStore;
 import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskStatus;
 import com.superagent.core.task.TaskStore;
+import com.superagent.core.tenant.CompanyStarted;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -147,6 +148,7 @@ public class NoticeService {
                         upsert(e.owner(), key, Notice.Kind.TRACK, e.title(), null, origin(e), "task", e.taskId());
                     }
                 }
+                case "waiting" -> { } // a complex task whose subtasks are running: still in hand
                 case "running" -> existing.filter(n -> n.kind() == Notice.Kind.CONFIRM && n.state() == Notice.State.OPEN)
                         .ifPresent(n -> save(n.with(Notice.Kind.TRACK, Notice.State.OPEN, n.title(), null, n.actor())));
                 case "needs_confirmation" -> upsert(e.owner(), key, Notice.Kind.CONFIRM, e.title(),
@@ -230,7 +232,7 @@ public class NoticeService {
     }
 
     /** One-time import of what was already waiting before the to-do page existed. */
-    @EventListener(ApplicationReadyEvent.class)
+    @EventListener(CompanyStarted.class)
     public void backfill() {
         if (settings.all().containsKey(BACKFILLED)) {
             return;

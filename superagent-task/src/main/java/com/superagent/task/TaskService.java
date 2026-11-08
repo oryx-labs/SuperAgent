@@ -23,6 +23,8 @@ import com.superagent.core.chat.ImageAttachment;
 import com.superagent.core.chat.MessageRole;
 import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.task.Task;
+import com.superagent.core.tenant.CompanyStarted;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.platform.provider.CredentialService;
 import com.superagent.core.task.TaskAgentStore;
 import com.superagent.core.task.TaskKind;
@@ -44,6 +46,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -149,6 +152,13 @@ public class TaskService implements TaskRecovery {
         this.timings = timings;
     }
 
+    private com.superagent.core.project.ProjectAccess projects; // null in tests: no projects
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setProjects(com.superagent.core.project.ProjectAccess projects) {
+        this.projects = projects;
+    }
+
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setModelSelection(com.superagent.core.task.TaskModelSelector selector,
                            com.superagent.core.task.TaskModelChoiceStore choices) {
@@ -162,7 +172,8 @@ public class TaskService implements TaskRecovery {
      */
     private volatile Runnable wakeScheduler;
     /** Tasks handed to admission (being judged, or queued for a session), so a sweep doesn't take them twice. */
-    private final Set<String> admitted = ConcurrentHashMap.newKeySet();
+    // task id -> its company: each company's sweep only forgets its own (the others' tasks aren't in its list).
+    private final Map<String, String> admitted = new ConcurrentHashMap<>();
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setDoers(com.superagent.core.task.TaskDoers doers) {
@@ -174,6 +185,25 @@ public class TaskService implements TaskRecovery {
     void setProviders(com.superagent.platform.provider.ProviderService providers) {
         this.providers = providers;
     }
+    private com.superagent.core.task.TaskLinkStore links; // null in tests: no subtasks or follow-ups
+    private com.superagent.core.task.TaskTagStore tagStore; // null in tests: no tags
+    private com.superagent.platform.settings.SettingsService settings; // null in tests: the default limits
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setLinks(com.superagent.core.task.TaskLinkStore links) {
+        this.links = links;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setTagStore(com.superagent.core.task.TaskTagStore tagStore) {
+        this.tagStore = tagStore;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setSettings(com.superagent.platform.settings.SettingsService settings) {
+        this.settings = settings;
+    }
+
     private final ApplicationEventPublisher events;   // null = no to-do items (tests)
     private final CodingFlow codingFlow;
 
@@ -234,7 +264,6 @@ public class TaskService implements TaskRecovery {
         }
         log.info("TaskService ready: runners={}, workspaceRoot={}, allowedTools={}, skipPermissions={}, maxParallel/owner={}",
                 runners.keySet(), workspaceRoot, this.allowedTools, skipPermissions, maxParallel);
-        restoreSessions();
     }
 
     /**
@@ -243,7 +272,8 @@ public class TaskService implements TaskRecovery {
      * disk. Sessions of tasks waiting on a confirmation stay reserved for them; sessions of
      * RUNNING tasks are left to the watchdog, which resumes those tasks on them.
      */
-    private void restoreSessions() {
+    @EventListener(CompanyStarted.class)
+    void restoreSessions() {
         List<Task> all = tasks.listTasks().stream().filter(t -> t.workspaceDir() != null).toList();
         Set<String> running = new java.util.HashSet<>();
         all.stream().filter(t -> t.status() == TaskStatus.RUNNING).forEach(t -> running.add(boundSessionId(t)));
@@ -251,14 +281,14 @@ public class TaskService implements TaskRecovery {
         synchronized (schedulerLock) {
             for (Task t : all) {
                 String sessionId = boundSessionId(t);
-                if (t.status() != TaskStatus.RUNNING && t.status() != TaskStatus.NEEDS_CONFIRMATION
+                if (t.status() != TaskStatus.RUNNING && !holdsSession(t.status())
                         && !running.contains(sessionId)) {
                     pool.restore(t.createdBy(), t.agentType(), sessionId, t.workspaceDir(), null);
                     restored++;
                 }
             }
             for (Task t : all) {
-                if (t.status() == TaskStatus.NEEDS_CONFIRMATION) {
+                if (holdsSession(t.status())) {
                     pool.restore(t.createdBy(), t.agentType(), boundSessionId(t), t.workspaceDir(), t.id());
                 }
             }
@@ -335,9 +365,10 @@ public class TaskService implements TaskRecovery {
     // (whoever created it — directly, or through their agents, SuperAgent or automations). Someone else's
     // task reads as "not found", so ids can't be probed.
 
-    /** The user's live tasks, newest first. */
+    /** The user's live tasks, newest first (a complex task's subtasks are listed under it, not here). */
     public List<TaskDto> list(String owner) {
-        return owned(owner).map(this::toListDto).toList();
+        Views v = views();
+        return owned(owner).filter(t -> !v.isChild(t.id())).map(t -> toListDto(t, v)).toList();
     }
 
     /** The tasks this agent set off (via its chat MCP tools), newest first, each with the reply that did; excludes deleted. */
@@ -348,7 +379,7 @@ public class TaskService implements TaskRecovery {
         List<TaskDto> out = new ArrayList<>();
         for (com.superagent.core.task.TaskOrigin o : taskAgents.originsForAgent(agentId)) {
             tasks.findTask(o.taskId()).filter(t -> t.status() != TaskStatus.DELETED).ifPresent(t ->
-                    out.add(toDto(t, t.workspaceDir() == null ? null : deriveSessionId(t), o.messageId())));
+                    out.add(toDto(t, t.workspaceDir() == null ? null : deriveSessionId(t), o.messageId(), views())));
         }
         return out;
     }
@@ -364,13 +395,78 @@ public class TaskService implements TaskRecovery {
      * {@code status}: null/all, "active" (pending or running), or one task status (e.g. needs_confirmation).
      */
     public TaskPageDto page(String owner, String status, int page, int size) {
+        return page(owner, status, null, null, null, page, size);
+    }
+
+    public TaskPageDto page(String owner, String status, String tag, String agentId, String source, int page, int size) {
+        return page(owner, status, tag, agentId, source, null, page, size);
+    }
+
+    /**
+     * As {@link #page(String, String, int, int)}, narrowed to a topic {@code tag}, the agent the tasks ran as and where
+     * they came from (each null = any). Subtasks aren't listed; their cost counts towards their complex task.
+     */
+    public TaskPageDto page(String owner, String status, String tag, String agentId, String source, String projectId,
+                            int page, int size) {
         int pageSize = Math.max(1, Math.min(size, 100));
-        List<Task> live = owned(owner).filter(t -> matches(t, status)).toList();
+        Views v = views();
+        // A project shows every task made in it, whoever started it; otherwise the user's own.
+        java.util.stream.Stream<Task> base = projectId == null || projectId.isBlank() || projects == null ? owned(owner)
+                : projects.itemsInProject(projectId, com.superagent.core.project.ProjectItemKind.TASK, owner).stream()
+                .map(tasks::findTask).flatMap(java.util.Optional::stream).filter(t -> t.status() != TaskStatus.DELETED)
+                .sorted(Comparator.comparing(Task::createdAt).reversed());
+        List<Task> live = base.filter(t -> !v.isChild(t.id()) && matches(t, status))
+                .filter(t -> tag == null || tag.isBlank() || v.tags(t.id()).contains(tag))
+                .filter(t -> agentId == null || agentId.isBlank() || agentId.equals(v.agentOf(t.id())))
+                .filter(t -> source == null || source.isBlank() || t.source().name().equalsIgnoreCase(source))
+                .toList();
         int pages = Math.max(1, (live.size() + pageSize - 1) / pageSize);
         int current = Math.min(Math.max(1, page), pages);
         List<TaskDto> items = live.stream().skip((long) (current - 1) * pageSize).limit(pageSize)
-                .map(this::toListDto).toList();
-        return new TaskPageDto(items, live.size(), current, pageSize);
+                .map(t -> toListDto(t, v)).toList();
+        BigDecimal spend = live.stream().map(v::totalSpend).reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new TaskPageDto(items, live.size(), current, pageSize, spend);
+    }
+
+    /** What the user's tasks can be filtered by, with how many tasks each holds and what they cost. */
+    public com.superagent.api.task.TaskFacetsDto facets(String owner) {
+        Views v = views();
+        List<Task> mine = owned(owner).filter(t -> !v.isChild(t.id())).toList();
+        Map<String, Facet> tags = new java.util.TreeMap<>();
+        Map<String, Facet> agents = new java.util.LinkedHashMap<>();
+        Map<String, Facet> sources = new java.util.LinkedHashMap<>();
+        for (Task t : mine) {
+            BigDecimal spend = v.totalSpend(t);
+            v.tags(t.id()).forEach(tag -> tags.computeIfAbsent(tag, k -> new Facet(k, k)).add(spend));
+            String agent = v.agentOf(t.id());
+            if (agent != null) {
+                agents.computeIfAbsent(agent, k -> new Facet(k, v.agentName(k))).add(spend);
+            }
+            String src = t.source().name().toLowerCase(Locale.ROOT);
+            sources.computeIfAbsent(src, k -> new Facet(k, k)).add(spend);
+        }
+        java.util.function.Function<Map<String, Facet>, List<com.superagent.api.task.TaskFacetsDto.Facet>> out = m ->
+                m.values().stream().sorted(Comparator.comparingInt((Facet f) -> -f.count))
+                        .map(f -> new com.superagent.api.task.TaskFacetsDto.Facet(f.key, f.label, f.count, f.spend)).toList();
+        return new com.superagent.api.task.TaskFacetsDto(out.apply(tags), out.apply(agents), out.apply(sources));
+    }
+
+    private static final class Facet {
+        final String key;
+        final String label;
+        int count;
+        BigDecimal spend = BigDecimal.ZERO;
+
+        Facet(String key, String label) {
+            this.key = key;
+            this.label = label;
+        }
+
+        Facet add(BigDecimal s) {
+            count++;
+            spend = spend.add(s);
+            return this;
+        }
     }
 
     private static boolean matches(Task t, String status) {
@@ -378,7 +474,7 @@ public class TaskService implements TaskRecovery {
             return true;
         }
         if ("active".equals(status)) {
-            return t.status() == TaskStatus.PENDING || t.status() == TaskStatus.RUNNING;
+            return t.status() == TaskStatus.PENDING || t.status() == TaskStatus.RUNNING || t.status() == TaskStatus.WAITING;
         }
         return t.status().name().equalsIgnoreCase(status);
     }
@@ -388,19 +484,23 @@ public class TaskService implements TaskRecovery {
         java.time.ZoneId zone = java.time.ZoneId.systemDefault();
         Instant today = java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant();
         Instant month = java.time.LocalDate.now(zone).withDayOfMonth(1).atStartOfDay(zone).toInstant();
-        List<Task> all = owned(owner).toList();
+        List<Task> everything = owned(owner).toList();
+        Views v = views();
+        List<Task> all = everything.stream().filter(t -> !v.isChild(t.id())).toList();
         int active = 0, waiting = 0, doneToday = 0, failed = 0;
         BigDecimal spend = BigDecimal.ZERO;
+        for (Task t : everything) { // subtasks cost money too
+            if (t.spend() != null && !t.createdAt().isBefore(month)) {
+                spend = spend.add(t.spend());
+            }
+        }
         for (Task t : all) {
             switch (t.status()) {
-                case PENDING, RUNNING -> active++;
+                case PENDING, RUNNING, WAITING -> active++;
                 case NEEDS_CONFIRMATION -> waiting++;
                 case DONE -> doneToday += t.finishedAt() != null && !t.finishedAt().isBefore(today) ? 1 : 0;
                 case ERROR -> failed++;
                 default -> { }
-            }
-            if (t.spend() != null && !t.createdAt().isBefore(month)) {
-                spend = spend.add(t.spend());
             }
         }
         return new TaskStatsDto(all.size(), active, waiting, doneToday, failed, spend);
@@ -411,7 +511,7 @@ public class TaskService implements TaskRecovery {
      * session), each turn broken down, and the gaps between turns, waiting for the user's reply or for a slot again.
      */
     public com.superagent.api.timing.TaskTimingDto timing(String id, String owner) {
-        Task task = require(id, owner);
+        Task task = requireVisible(id, owner);
         List<com.superagent.core.timing.TurnTiming> turns = timings == null ? List.of() : timings.forSessions(List.of(id));
         List<Instant> replies = runStore.listMessages(id).stream().filter(m -> m.role() == MessageRole.USER)
                 .map(ChatMessage::createdAt).sorted().toList();
@@ -434,7 +534,7 @@ public class TaskService implements TaskRecovery {
             at = t.finishedAt().isAfter(at) ? t.finishedAt() : at;
         }
         boolean open = task.status() == TaskStatus.PENDING || task.status() == TaskStatus.RUNNING
-                || task.status() == TaskStatus.NEEDS_CONFIRMATION;
+                || holdsSession(task.status());
         Instant end = open ? Instant.now() : task.finishedAt() != null ? task.finishedAt() : at;
         if (end.isAfter(at)) {
             String kind = task.status() == TaskStatus.NEEDS_CONFIRMATION ? com.superagent.api.timing.TaskTimingDto.WAIT_USER
@@ -448,7 +548,7 @@ public class TaskService implements TaskRecovery {
     }
 
     public TaskDetailDto detail(String id, String owner) {
-        Task task = require(id, owner);
+        Task task = requireVisible(id, owner);
         List<MessageDto> messages = runStore.listMessages(id).stream().map(m -> toMessageDto(id, m)).toList();
         List<TaskEventDto> events = runStore.listEvents(id).stream().map(TaskService::toEventDto).toList();
         List<TaskPhaseDto> phases = TaskKind.fromStorage(task.flow()) == TaskKind.CODING
@@ -459,7 +559,7 @@ public class TaskService implements TaskRecovery {
 
     /** Events from {@code offset} onward (chronological), for incremental polling of a running task. */
     public List<TaskEventDto> eventsFrom(String id, String owner, int offset) {
-        require(id, owner);
+        requireVisible(id, owner);
         List<AgentEvent> all = runStore.listEvents(id);
         int from = Math.max(0, offset);
         if (from >= all.size()) {
@@ -470,7 +570,7 @@ public class TaskService implements TaskRecovery {
 
     /** Lightweight status/progress snapshot for polling, without the event stream. */
     public TaskDto status(String id, String owner) {
-        return toDto(require(id, owner));
+        return toDto(requireVisible(id, owner));
     }
 
     // --- lifecycle ---
@@ -497,7 +597,51 @@ public class TaskService implements TaskRecovery {
      * chosen for the job.
      */
     public TaskDto create(CreateTaskRequest request, String owner, String agentId, String sessionId, String messageId) {
+        return create(request, owner, agentId, sessionId, messageId, null);
+    }
+
+    /**
+     * A subtask of the complex task {@code parentId}: it runs as the same agent, side by side with its siblings (as
+     * many at once as the system settings allow), and its result goes to the complex task, not to a chat or a to-do.
+     */
+    public TaskDto createSubtask(String parentId, String owner, String title, String brief) {
+        Task parent = require(parentId, owner);
+        if (TaskKind.fromStorage(parent.flow()) != TaskKind.COMPLEX) {
+            throw new IllegalArgumentException("只有复杂任务能拆子任务");
+        }
+        if (links == null) {
+            throw new IllegalStateException("subtasks need a task link store");
+        }
+        if (summaryRounds(parentId) >= ComplexTaskPrompts.MAX_ROUNDS) {
+            throw new IllegalArgumentException("已经是最后一轮汇总，不能再派子任务了：请直接写出结论，并写明缺失的部分");
+        }
+        if (subtaskRoom(parentId) <= 0) {
+            throw new IllegalArgumentException("子任务已到上限 " + maxSubtasks() + " 个（为失败的子任务补派的不算在内）："
+                    + "请用已有的子任务完成工作");
+        }
+        String agentId = taskAgents == null ? null : taskAgents.agentOf(parentId).orElse(null);
+        return create(new CreateTaskRequest(title, brief, parent.source().name(), null, null, null, null,
+                parent.agentType().cliName(), TaskKind.GENERAL.storageName()), owner, agentId, null, null, parentId);
+    }
+
+    /** How many more subtasks this complex task may hand out: a failed one may be replaced without using up the limit. */
+    int subtaskRoom(String parentId) {
+        List<Task> kids = children(parentId);
+        long failed = kids.stream().filter(k -> k.status() == TaskStatus.ERROR || k.status() == TaskStatus.STOPPED).count();
+        return (int) Math.max(0, maxSubtasks() + failed - kids.size());
+    }
+
+    private TaskDto create(CreateTaskRequest request, String owner, String agentId, String sessionId, String messageId,
+                           String parentId) {
         String id = UUID.randomUUID().toString();
+        String who = owner == null || owner.isBlank() ? defaultOwner : owner;
+        String continuesFrom = blankToNull(request.continuesFrom());
+        if (continuesFrom != null) {
+            Task before = require(continuesFrom, who);
+            if (agentId == null && taskAgents != null) {
+                agentId = taskAgents.agentOf(before.id()).orElse(null); // the same agent carries on its own work
+            }
+        }
         AgentType agentType = AgentType.fromString(request.agentType());
         String model = blankToNull(request.model());
         // A stand-in until just before it runs: then its model is chosen for the job (TaskModelSelector).
@@ -507,7 +651,7 @@ public class TaskService implements TaskRecovery {
                     + runners.keySet().stream().map(AgentType::cliName).sorted().toList());
         }
         TaskSource source = parseSource(request.source());
-        TaskKind kind = resolveKind(request);
+        TaskKind kind = parentId != null ? TaskKind.GENERAL : resolveKind(request); // one level: a subtask doesn't split
         Instant now = Instant.now();
         // No workspace yet: it comes from the session this task is scheduled onto.
         // The kind is stored in the (otherwise unused) flow column — zero migration.
@@ -515,8 +659,12 @@ public class TaskService implements TaskRecovery {
                 source,
                 blankToNull(request.repo()), blankToNull(request.branch()), kind.storageName(),
                 TaskStatus.PENDING, 0, BigDecimal.ZERO, model, agentType,
-                null, owner == null || owner.isBlank() ? defaultOwner : owner, null, now, null, null, now, null);
+                null, who, null, now, null, null, now, null);
         tasks.save(task);
+        if (links != null && (parentId != null || continuesFrom != null)) {
+            // Before the scheduler can see it: admission holds subtasks back to the parallel limit.
+            links.save(new com.superagent.core.task.TaskLink(id, parentId, continuesFrom, now));
+        }
         if (kind == TaskKind.CODING) {
             codingFlow.persist(id, CodingFlow.initialPhases());
         }
@@ -526,11 +674,19 @@ public class TaskService implements TaskRecovery {
         if (agentId != null && taskAgents != null) {
             taskAgents.link(id, agentId, sessionId, messageId); // so the agent's panel and chat can show the work it set off
         }
+        if (projects != null) {
+            // A task belongs to the project of the agent that set it off; a subtask or follow-on, to its origin's.
+            String from = parentId != null ? parentId : continuesFrom;
+            String via = agentId != null ? agentId
+                    : from == null || taskAgents == null ? null : taskAgents.agentOf(from).orElse(null);
+            projects.recordTask(id, via);
+        }
         if ((selector == null || !selector.enabled()) && choices != null) {
             // Nothing will judge this task (admit skips choosing): say now why it runs on what it runs on.
             choices.save(defaultChoice(task, request, agentId, now));
         }
-        log.info("created task {} ({}), kind={}", id, task.title(), kind.storageName());
+        log.info("created task {} ({}), kind={}{}", id, task.title(), kind.storageName(),
+                parentId != null ? ", subtask of " + parentId : continuesFrom != null ? ", carrying on " + continuesFrom : "");
         publish(task, agentId);
         Runnable wake = wakeScheduler;
         if (wake != null) {
@@ -563,13 +719,165 @@ public class TaskService implements TaskRecovery {
 
     /** New tasks waiting to start, oldest first, that nothing has taken up yet. */
     List<Task> awaitingAdmission() {
-        List<Task> waiting = tasks.listTasks().stream()
+        List<Task> all = tasks.listTasks();
+        List<Task> waiting = all.stream()
                 .filter(t -> t.status() == TaskStatus.PENDING && t.workspaceDir() == null)
                 .sorted(Comparator.comparing(Task::createdAt)).toList();
         Set<String> ids = new java.util.HashSet<>();
         waiting.forEach(t -> ids.add(t.id()));
-        admitted.retainAll(ids); // started, stopped or deleted since: forget them
-        return waiting.stream().filter(t -> !admitted.contains(t.id())).toList();
+        String company = TenantContext.require();
+        admitted.entrySet().removeIf(e -> company.equals(e.getValue()) && !ids.contains(e.getKey())); // started, stopped or deleted since
+        Map<String, String> parents = parentsOf();
+        Map<String, Integer> room = new HashMap<>();
+        List<Task> out = new ArrayList<>();
+        for (Task t : waiting) {
+            if (admitted.containsKey(t.id())) {
+                continue;
+            }
+            String parent = parents.get(t.id());
+            if (parent == null) {
+                out.add(t);
+                continue;
+            }
+            // A complex task's subtasks: no more running at once than the system settings allow.
+            int free = room.computeIfAbsent(parent, p -> maxParallel() - (int) all.stream()
+                    .filter(k -> p.equals(parents.get(k.id())))
+                    .filter(k -> k.status() == TaskStatus.RUNNING || admitted.containsKey(k.id())
+                            || (k.status() == TaskStatus.PENDING && k.workspaceDir() != null))
+                    .count());
+            if (free > 0) {
+                out.add(t);
+                room.put(parent, free - 1);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Complex tasks whose subtasks have all finished carry on: they sum up. Run by the scheduler on every pass, so it
+     * happens after a restart too.
+     */
+    void sumUpFinished() {
+        if (links == null) {
+            return;
+        }
+        for (Task t : tasks.listTasks()) {
+            if (t.status() != TaskStatus.WAITING) {
+                continue;
+            }
+            List<Task> kids = children(t.id());
+            if (kids.stream().allMatch(this::finished)) {
+                sumUp(t, kids);
+            }
+        }
+    }
+
+    private void sumUp(Task parent, List<Task> kids) {
+        List<ComplexTaskPrompts.Result> results = kids.stream()
+                .map(k -> new ComplexTaskPrompts.Result(k, lastAnswer(k.id()), k.error())).toList();
+        int round = summaryRounds(parent.id()) + 1;
+        String prompt = ComplexTaskPrompts.summary(results, round, round < ComplexTaskPrompts.MAX_ROUNDS ? subtaskRoom(parent.id()) : 0);
+        log.info("complex task {}: its {} subtasks have finished, summing up (round {})", parent.id(), kids.size(), round);
+        carryOn(parent.id(), prompt);
+    }
+
+    /**
+     * Continues a waiting complex task in its own session with {@code prompt}, kept as its next message (so a restart
+     * that drops the queue resumes from it). Does nothing once the task has moved on.
+     */
+    private void carryOn(String taskId, String prompt) {
+        synchronized (schedulerLock) {
+            Task task = tasks.findTask(taskId).filter(t -> t.status() == TaskStatus.WAITING).orElse(null);
+            if (task == null) {
+                return;
+            }
+            String sessionId = boundSessionId(task);
+            runStore.appendMessage(new ChatMessage(UUID.randomUUID().toString(), taskId, MessageRole.USER, prompt, Instant.now()));
+            TaskSessionPool.Lease lease = pool.acquireSession(task.createdBy(), task.agentType(), taskId, sessionId, task.workspaceDir());
+            if (lease != null) {
+                resumeRun(task, lease, prompt);
+            } else {
+                tasks.save(task.withStatus(TaskStatus.PENDING));
+                queues.computeIfAbsent(task.createdBy(), k -> new ArrayDeque<>())
+                        .addLast(new QueuedRun(taskId, prompt, false, sessionId));
+            }
+        }
+    }
+
+    /** Done with, as far as its complex task is concerned: finished, stopped, or failed with no retries left. */
+    boolean finished(Task t) {
+        return switch (t.status()) {
+            case DONE, STOPPED, DELETED -> true;
+            case ERROR -> runStates.find(t.id()).map(r -> r.attemptCount() >= MAX_ATTEMPTS).orElse(false);
+            default -> false;
+        };
+    }
+
+    /** Whether the complex task handed out subtasks since it last summed up (so this turn was a plan, not a conclusion). */
+    private boolean handedOutWork(Task task) {
+        Instant lastSummary = runStore.listMessages(task.id()).stream()
+                .filter(m -> m.role() == MessageRole.USER && m.content() != null
+                        && m.content().startsWith(ComplexTaskPrompts.SUMMARY_MARK))
+                .map(ChatMessage::createdAt).max(Comparator.naturalOrder()).orElse(Instant.MIN);
+        return children(task.id()).stream().anyMatch(k -> k.createdAt().isAfter(lastSummary));
+    }
+
+    /** The subtasks' results as the complex task's messages count them: one summing-up round per mark. */
+    private int summaryRounds(String taskId) {
+        return (int) runStore.listMessages(taskId).stream()
+                .filter(m -> m.role() == MessageRole.USER && m.content() != null
+                        && m.content().startsWith(ComplexTaskPrompts.SUMMARY_MARK)).count();
+    }
+
+    /** The task's last reply: what it came up with. */
+    String lastAnswer(String taskId) {
+        List<ChatMessage> messages = runStore.listMessages(taskId);
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage m = messages.get(i);
+            if (m.role() == MessageRole.ASSISTANT && m.content() != null && !m.content().isBlank()) {
+                return m.content();
+            }
+        }
+        return null;
+    }
+
+    /** A complex task's subtasks, oldest first, deleted ones left out. */
+    List<Task> children(String parentId) {
+        if (links == null) {
+            return List.of();
+        }
+        return links.children(parentId).stream().map(tasks::findTask).flatMap(java.util.Optional::stream)
+                .filter(t -> t.status() != TaskStatus.DELETED).toList();
+    }
+
+    /** Subtask id → its complex task. */
+    private Map<String, String> parentsOf() {
+        Map<String, String> out = new HashMap<>();
+        if (links != null) {
+            links.all().stream().filter(l -> l.parentId() != null).forEach(l -> out.put(l.taskId(), l.parentId()));
+        }
+        return out;
+    }
+
+    private boolean isSubtask(String taskId) {
+        return links != null && links.find(taskId).map(l -> l.parentId() != null).orElse(false);
+    }
+
+    private static boolean isComplex(Task t) {
+        return TaskKind.fromStorage(t.flow()) == TaskKind.COMPLEX;
+    }
+
+    /** A task that keeps its session between turns: paused on a question, or a complex task waiting on its subtasks. */
+    private static boolean holdsSession(TaskStatus s) {
+        return s == TaskStatus.NEEDS_CONFIRMATION || s == TaskStatus.WAITING;
+    }
+
+    private int maxSubtasks() {
+        return settings == null ? com.superagent.platform.settings.SettingsService.DEFAULT_MAX_SUBTASKS : settings.complexMaxSubtasks();
+    }
+
+    private int maxParallel() {
+        return settings == null ? com.superagent.platform.settings.SettingsService.DEFAULT_MAX_PARALLEL : settings.complexMaxParallel();
     }
 
     /**
@@ -577,7 +885,7 @@ public class TaskService implements TaskRecovery {
      * worker thread), then a session. Where task dependencies will be checked, when there are some.
      */
     void admit(Task task) {
-        if (!admitted.add(task.id())) {
+        if (admitted.putIfAbsent(task.id(), TenantContext.require()) != null) {
             return;
         }
         boolean decided = choices == null || !choices.list(task.id()).isEmpty();
@@ -585,7 +893,7 @@ public class TaskService implements TaskRecovery {
             schedule(task);
             return;
         }
-        executor.execute(() -> {
+        executor.execute(TenantContext.wrap(() -> {
             try {
                 chooseModel(task);
             } catch (RuntimeException e) {
@@ -593,11 +901,12 @@ public class TaskService implements TaskRecovery {
             }
             tasks.findTask(task.id()).filter(t -> t.status() == TaskStatus.PENDING && t.workspaceDir() == null)
                     .ifPresentOrElse(this::schedule, () -> admitted.remove(task.id()));
-        });
+        }));
     }
 
     private void chooseModel(Task task) {
-        var choice = selector.choose(task).orElse(null);
+        // A complex task's plan and conclusion decide everything; its subtasks are each matched to a cheap model.
+        var choice = (isComplex(task) ? selector.strongest(task).or(() -> selector.choose(task)) : selector.choose(task)).orElse(null);
         if (choice == null) {
             return; // nothing can run: the stand-in stays, and fails at the runner with a clear error
         }
@@ -665,7 +974,7 @@ public class TaskService implements TaskRecovery {
 
     /** The decisions about which model runs this task, oldest first. */
     public List<com.superagent.api.task.TaskModelChoiceDto> modelChoices(String id, String owner) {
-        require(id, owner);
+        requireVisible(id, owner);
         return choices == null ? List.of() : choices.list(id).stream().map(c -> new com.superagent.api.task.TaskModelChoiceDto(
                 c.seq(), c.by(), c.difficulty(), c.tier(), c.model(), c.cli(), c.judge(), c.candidates(), c.reasoning(),
                 c.createdAt())).toList();
@@ -737,7 +1046,7 @@ public class TaskService implements TaskRecovery {
         TaskSessionPool.Session session = lease.session();
         Task running = task.withWorkspaceDir(session.workspaceDir).started();
         tasks.save(running);
-        executor.execute(() -> run(running, prompt, session.id, lease.firstTurn(), wrapBrief));
+        executor.execute(TenantContext.wrap(() -> run(running, prompt, session.id, lease.firstTurn(), wrapBrief)));
     }
 
     /** When a session frees up, run every queued task for that owner that can now get its session. */
@@ -845,7 +1154,7 @@ public class TaskService implements TaskRecovery {
         publish(running, null);
         String sessionId = lease.session().id;
         boolean firstTurn = lease.firstTurn();
-        executor.execute(() -> run(running, prompt, sessionId, firstTurn, false));
+        executor.execute(TenantContext.wrap(() -> run(running, prompt, sessionId, firstTurn, false)));
     }
 
     /**
@@ -880,6 +1189,13 @@ public class TaskService implements TaskRecovery {
 
     public void stop(String id, String owner) {
         Task waiting = require(id, owner);
+        if (isComplex(waiting)) {
+            children(id).stream().filter(k -> !finished(k)).forEach(k -> stop(k.id(), owner));
+            if (waiting.status() == TaskStatus.WAITING) {
+                settle(waiting, TaskStatus.STOPPED, waiting.progress(), null, BigDecimal.ZERO);
+                return;
+            }
+        }
         if (waiting.status() == TaskStatus.PENDING && waiting.workspaceDir() == null) {
             synchronized (schedulerLock) { // not started yet: take it out of the queue
                 Deque<QueuedRun> q = queues.get(waiting.createdBy());
@@ -901,6 +1217,7 @@ public class TaskService implements TaskRecovery {
     /** Soft delete: marks the task DELETED so it drops out of the list; the row is kept. */
     public void delete(String id, String owner) {
         Task task = require(id, owner);
+        children(id).forEach(k -> delete(k.id(), owner));
         Cancellation cancellation = activeRuns.get(id);
         if (cancellation != null) {
             cancellation.cancel();   // a running turn will settle to STOPPED and release its session
@@ -989,7 +1306,7 @@ public class TaskService implements TaskRecovery {
         boolean ft = firstTurn;
         log.info("recovering task {} (attempt {}, failures {}, rotate={}, session {})",
                 id, next.attemptCount(), next.failureCount(), rotate, sid);
-        executor.execute(() -> run(running, prompt, sid, ft, false));
+        executor.execute(TenantContext.wrap(() -> run(running, prompt, sid, ft, false)));
     }
 
     /** The pool session id equals the workspace dir's name (see TaskSessionPool), so it is recoverable without extra state. */
@@ -1117,11 +1434,15 @@ public class TaskService implements TaskRecovery {
             }
             tools.addAll(com.superagent.platform.connector.ConnectorService.toolPatterns(connected));
         }
+        if (grant != null && isComplex(task)) {
+            tools = new ArrayList<>(tools);
+            tools.addAll(ComplexTaskMcpTools.ALLOWED);
+        }
         String cli = task.agentType().cliName();
         CredentialService.Choice choice = credentials == null ? new CredentialService.Choice(null) : credentials.current(cli);
         AgentRunRequest request = new AgentRunRequest(
                 agentSessionId, sessionFirstTurn ? null : agentSessionId, task.workspaceDir(),
-                wrapBriefPrompt ? wrapBrief(prompt) : prompt,
+                wrapBriefPrompt ? wrapBrief(task, prompt) : prompt,
                 effectiveModel(task),
                 tools, skipPermissions, McpGrants.withServers(grant == null ? null : mcpGrants.mcpConfig(grant), connected),
                 taskSystemPrompt(task, grant != null),
@@ -1202,12 +1523,23 @@ public class TaskService implements TaskRecovery {
         }
         if (turn.cancelled()) {
             settle(task, TaskStatus.STOPPED, progress.get(), null, turn.cost());
-        } else if (turn.needsConfirmation()) {
+        } else if (turn.needsConfirmation() && !onItsOwn(task)) {
             settle(task, TaskStatus.NEEDS_CONFIRMATION, 50, null, turn.cost());
+        } else if (isComplex(task) && handedOutWork(task)) {
+            // Its subtasks run (some may already be done); it sums up once they all are.
+            settle(task, TaskStatus.WAITING, 50, null, turn.cost());
         } else {
             writeOutput(task, turn.finalText());
             settle(task, TaskStatus.DONE, 100, null, turn.cost());
         }
+    }
+
+    /**
+     * A complex task and its subtasks run without stopping for the user: they were told to go with their recommended
+     * option, and a question one asks anyway is taken as its answer.
+     */
+    private boolean onItsOwn(Task task) {
+        return isComplex(task) || isSubtask(task.id());
     }
 
     /**
@@ -1334,8 +1666,8 @@ public class TaskService implements TaskRecovery {
                 return;
             }
         }
-        Task next = status == TaskStatus.NEEDS_CONFIRMATION
-                ? latest.withStatus(TaskStatus.NEEDS_CONFIRMATION).withProgress(progress)
+        Task next = holdsSession(status)
+                ? latest.withStatus(status).withProgress(progress)
                 : latest.finished(status, progress, error);
         BigDecimal spend = (latest.spend() == null ? BigDecimal.ZERO : latest.spend())
                 .add(turnCost == null ? BigDecimal.ZERO : turnCost);
@@ -1346,7 +1678,7 @@ public class TaskService implements TaskRecovery {
         synchronized (schedulerLock) {
             TaskSessionPool.Session session = pool.sessionForTask(task.id());
             if (session != null) {
-                if (status == TaskStatus.NEEDS_CONFIRMATION) {
+                if (holdsSession(status)) {
                     pool.pause(session);
                 } else {
                     pool.release(session);
@@ -1354,11 +1686,23 @@ public class TaskService implements TaskRecovery {
             }
         }
         tryDispatch(task.createdBy());
+        if (isSubtask(task.id()) || status == TaskStatus.WAITING) {
+            wake(); // a sibling may start now, or the complex task sum up
+        }
+    }
+
+    private void wake() {
+        Runnable w = wakeScheduler;
+        if (w != null) {
+            w.run();
+        } else {
+            sumUpFinished(); // no scheduler (tests): at once
+        }
     }
 
     /** Tells the to-do page (and anyone else listening) the task's status; {@code agentId} only at creation. */
     private void publish(Task t, String agentId) {
-        if (events != null) {
+        if (events != null && !isSubtask(t.id())) {
             boolean settled = t.status() != TaskStatus.PENDING && t.status() != TaskStatus.RUNNING;
             String result = t.status() == TaskStatus.DONE ? lastReply.get(t.id()) : null;
             if (settled) {
@@ -1430,6 +1774,44 @@ public class TaskService implements TaskRecovery {
         }
     }
 
+    /**
+     * The first turn: a complex task is told to split the work, a subtask that it is one part of a bigger job, and a
+     * follow-up first reads what the task it carries on came to.
+     */
+    private String wrapBrief(Task task, String brief) {
+        String body = carryOnFrom(task) + (brief == null ? "" : brief);
+        String parent = links == null ? null : links.find(task.id()).map(com.superagent.core.task.TaskLink::parentId).orElse(null);
+        if (parent != null) {
+            Task p = tasks.findTask(parent).orElse(null);
+            if (p != null) {
+                return ComplexTaskPrompts.subtask(p, body);
+            }
+        }
+        if (isComplex(task)) {
+            return ComplexTaskPrompts.plan(body, maxSubtasks(), maxParallel());
+        }
+        return wrapBrief(body);
+    }
+
+    /** For a follow-up: the task it carries on and the ones before that (up to five back). */
+    private String carryOnFrom(Task task) {
+        if (links == null) {
+            return "";
+        }
+        List<ComplexTaskPrompts.Result> chain = new ArrayList<>();
+        String from = links.find(task.id()).map(com.superagent.core.task.TaskLink::continuesFrom).orElse(null);
+        Set<String> seen = new java.util.HashSet<>();
+        while (from != null && chain.size() < 5 && seen.add(from)) {
+            Task before = tasks.findTask(from).orElse(null);
+            if (before == null) {
+                break;
+            }
+            chain.add(new ComplexTaskPrompts.Result(before, lastAnswer(before.id()), before.error()));
+            from = links.find(before.id()).map(com.superagent.core.task.TaskLink::continuesFrom).orElse(null);
+        }
+        return ComplexTaskPrompts.carryOn(chain);
+    }
+
     private String wrapBrief(String brief) {
         return """
                 你在执行一个任务。请先理解下面的任务说明，然后直接完成它；交付前自己检查一遍是否满足要求。
@@ -1440,6 +1822,18 @@ public class TaskService implements TaskRecovery {
 
                 任务说明：
                 """ + (brief == null ? "" : brief);
+    }
+
+    /**
+     * As {@link #require}, but also for members of the project the task was made in: they can see every task in it,
+     * while acting on one (steering, stopping, deleting) stays with whoever started it.
+     */
+    private Task requireVisible(String id, String user) {
+        return tasks.findTask(id)
+                .filter(t -> t.status() != TaskStatus.DELETED)
+                .filter(t -> (t.createdBy() != null && t.createdBy().equals(user))
+                        || (projects != null && projects.visibleThroughProject(com.superagent.core.project.ProjectItemKind.TASK, id, user)))
+                .orElseThrow(() -> new TaskNotFoundException(id));
     }
 
     /** The live task if it belongs to {@code owner}; anything else — missing or someone else's — is "not found". */
@@ -1466,24 +1860,160 @@ public class TaskService implements TaskRecovery {
     }
 
     private TaskDto toDto(Task t) {
-        return toDto(t, t.workspaceDir() == null ? null : boundSessionId(t));
+        return toDto(t, t.workspaceDir() == null ? null : boundSessionId(t), null, viewsOf(t));
     }
 
     /** List view: session id from the workspace name only, so listing N tasks doesn't cost N run-state reads. */
-    private TaskDto toListDto(Task t) {
-        return toDto(t, t.workspaceDir() == null ? null : deriveSessionId(t));
+    private TaskDto toListDto(Task t, Views v) {
+        return toDto(t, t.workspaceDir() == null ? null : deriveSessionId(t), null, v);
     }
 
-    private TaskDto toDto(Task t, String sessionId) {
-        return toDto(t, sessionId, null);
-    }
-
-    private TaskDto toDto(Task t, String sessionId, String originMessageId) {
+    private TaskDto toDto(Task t, String sessionId, String originMessageId, Views v) {
+        List<Task> kids = v.kids(t.id());
+        String agentId = v.agentOf(t.id());
+        com.superagent.core.task.TaskLink link = v.link(t.id());
         return new TaskDto(t.id(), t.title(), t.source().name().toLowerCase(),
                 t.repo(), t.branch(), t.flow(), t.status().name().toLowerCase(),
                 t.progress(), t.spend(), t.model(), t.createdBy(), t.error(),
                 t.createdAt(), t.startedAt(), t.finishedAt(), t.updatedAt(),
-                t.agentType().name().toLowerCase(), sessionId, t.workspaceDir(), sessionState(t.id(), sessionId), t.tier(), originMessageId);
+                t.agentType().name().toLowerCase(), sessionId, t.workspaceDir(), sessionState(t.id(), sessionId), t.tier(),
+                originMessageId, link == null ? null : link.parentId(), link == null ? null : link.continuesFrom(),
+                v.tags(t.id()), agentId, agentId == null ? null : v.agentName(agentId),
+                kids.size(), (int) kids.stream().filter(this::finished).count());
+    }
+
+    // --- relations and tags ---
+
+    /** The complex task it is part of, what it carries on from and what carries on from it, and its subtasks. */
+    public com.superagent.api.task.TaskRelationsDto relations(String id, String owner) {
+        Task task = requireVisible(id, owner);
+        Views v = views();
+        com.superagent.core.task.TaskLink link = v.link(id);
+        java.util.function.Function<String, TaskDto> dto = other -> other == null ? null
+                : tasks.findTask(other).filter(t -> t.status() != TaskStatus.DELETED).map(t -> toListDto(t, v)).orElse(null);
+        List<TaskDto> followUps = links == null ? List.of()
+                : links.followUps(id).stream().map(dto).filter(java.util.Objects::nonNull).toList();
+        List<TaskDto> subtasks = v.kids(id).stream().map(t -> toListDto(t, v)).toList();
+        return new com.superagent.api.task.TaskRelationsDto(dto.apply(link == null ? null : link.parentId()),
+                dto.apply(link == null ? null : link.continuesFrom()), followUps, subtasks, v.totalSpend(task));
+    }
+
+    /** What a subtask of {@code parentId} came up with, in full (or why it failed). */
+    public String subtaskOutput(String parentId, String childId, String owner) {
+        requireVisible(parentId, owner);
+        Task child = children(parentId).stream().filter(k -> k.id().equals(childId)).findFirst()
+                .orElseThrow(() -> new TaskNotFoundException(childId));
+        String out = lastAnswer(childId);
+        if (out != null) {
+            return out;
+        }
+        return child.status() == TaskStatus.ERROR ? "失败：" + child.error() : "（还没有结果，状态 " + child.status() + "）";
+    }
+
+    /** Replaces the task's topic tags (trimmed, deduplicated, at most {@value #MAX_TAGS}). */
+    public TaskDto setTags(String id, String owner, List<String> given) {
+        Task task = require(id, owner);
+        if (tagStore == null) {
+            throw new IllegalStateException("tags need a tag store");
+        }
+        tagStore.set(id, cleanTags(given));
+        return toDto(task);
+    }
+
+    static final int MAX_TAGS = 8;
+
+    static List<String> cleanTags(List<String> given) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        for (String t : given == null ? List.<String>of() : given) {
+            String c = t == null ? "" : t.strip().replaceAll("[\\s#]+", " ").strip();
+            if (!c.isEmpty() && c.length() <= 20 && out.size() < MAX_TAGS) {
+                out.add(c);
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    /** What a list view needs about many tasks at once, read once per request. */
+    private Views views() {
+        Map<String, com.superagent.core.task.TaskLink> byTask = new HashMap<>();
+        Map<String, List<Task>> kids = new HashMap<>();
+        if (links != null) {
+            List<com.superagent.core.task.TaskLink> all = links.all();
+            all.forEach(l -> byTask.put(l.taskId(), l));
+            if (all.stream().anyMatch(l -> l.parentId() != null)) {
+                Map<String, Task> byId = new HashMap<>();
+                tasks.listTasks().forEach(t -> byId.put(t.id(), t));
+                all.stream().filter(l -> l.parentId() != null).sorted(Comparator.comparing(com.superagent.core.task.TaskLink::createdAt))
+                        .forEach(l -> {
+                            Task k = byId.get(l.taskId());
+                            if (k != null && k.status() != TaskStatus.DELETED) {
+                                kids.computeIfAbsent(l.parentId(), p -> new ArrayList<>()).add(k);
+                            }
+                        });
+            }
+        }
+        return new Views(byTask, kids, tagStore == null ? Map.of() : tagStore.all());
+    }
+
+    /** As {@link #views()}, for one task only (a detail page polling its status). */
+    private Views viewsOf(Task t) {
+        Map<String, com.superagent.core.task.TaskLink> byTask = new HashMap<>();
+        Map<String, List<Task>> kids = new HashMap<>();
+        if (links != null) {
+            links.find(t.id()).ifPresent(l -> byTask.put(t.id(), l));
+            if (isComplex(t)) {
+                kids.put(t.id(), children(t.id()));
+            }
+        }
+        return new Views(byTask, kids, tagStore == null ? Map.of() : Map.of(t.id(), tagStore.tags(t.id())));
+    }
+
+    private final class Views {
+        private final Map<String, com.superagent.core.task.TaskLink> links;
+        private final Map<String, List<Task>> kids;
+        private final Map<String, List<String>> tags;
+        private final Map<String, java.util.Optional<String>> agents = new HashMap<>();
+        private final Map<String, String> names = new HashMap<>();
+
+        Views(Map<String, com.superagent.core.task.TaskLink> links, Map<String, List<Task>> kids, Map<String, List<String>> tags) {
+            this.links = links;
+            this.kids = kids;
+            this.tags = tags;
+        }
+
+        com.superagent.core.task.TaskLink link(String id) {
+            return links.get(id);
+        }
+
+        boolean isChild(String id) {
+            com.superagent.core.task.TaskLink l = links.get(id);
+            return l != null && l.parentId() != null;
+        }
+
+        List<Task> kids(String id) {
+            return kids.getOrDefault(id, List.of());
+        }
+
+        List<String> tags(String id) {
+            return tags.getOrDefault(id, List.of());
+        }
+
+        String agentOf(String id) {
+            return taskAgents == null ? null
+                    : agents.computeIfAbsent(id, k -> taskAgents.agentOf(k)).orElse(null);
+        }
+
+        String agentName(String agentId) {
+            return names.computeIfAbsent(agentId, a -> doers == null ? a : doers.name(a).orElse(a));
+        }
+
+        BigDecimal totalSpend(Task t) {
+            BigDecimal sum = t.spend() == null ? BigDecimal.ZERO : t.spend();
+            for (Task k : kids(t.id())) {
+                sum = sum.add(k.spend() == null ? BigDecimal.ZERO : k.spend());
+            }
+            return sum;
+        }
     }
 
     private String sessionState(String taskId, String sessionId) {

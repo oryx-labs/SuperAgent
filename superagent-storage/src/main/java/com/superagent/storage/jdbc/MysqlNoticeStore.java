@@ -9,6 +9,7 @@ public class MysqlNoticeStore extends AbstractJdbcNoticeStore {
     public MysqlNoticeStore(JdbcTemplate jdbc) {
         super(jdbc, """
                 CREATE TABLE IF NOT EXISTS notice (
+                  company_id VARCHAR(64)   NOT NULL,
                   id         VARCHAR(64)   NOT NULL,
                   owner      VARCHAR(128)  NOT NULL,
                   notice_key VARCHAR(200)  NOT NULL,
@@ -21,9 +22,9 @@ public class MysqlNoticeStore extends AbstractJdbcNoticeStore {
                   link_id    VARCHAR(128),
                   created_at DATETIME(3)   NOT NULL,
                   updated_at DATETIME(3)   NOT NULL,
-                  PRIMARY KEY (id),
-                  UNIQUE KEY uk_notice_key (owner, notice_key),
-                  KEY idx_notice_owner (owner, updated_at)
+                  PRIMARY KEY (company_id, id),
+                  UNIQUE KEY uk_notice_key (company_id, owner, notice_key),
+                  KEY idx_notice_owner (company_id, owner, updated_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
     }

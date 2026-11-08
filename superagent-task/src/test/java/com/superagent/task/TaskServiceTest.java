@@ -44,6 +44,16 @@ import static org.awaitility.Awaitility.await;
 
 class TaskServiceTest {
 
+    @org.junit.jupiter.api.BeforeEach
+    void inCompany() {
+        com.superagent.core.tenant.TenantContext.set("acme"); // work handed to other threads carries the company
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void leaveCompany() {
+        com.superagent.core.tenant.TenantContext.clear();
+    }
+
     private static final ImageAttachmentStore IMAGES =
             new ImageAttachmentStore(System.getProperty("java.io.tmpdir") + "/sa-test-images-" + UUID.randomUUID());
     /** Just the PNG signature: enough for the store's format sniffing. */
@@ -403,6 +413,7 @@ class TaskServiceTest {
         // A new process starts with an empty pool: steering must still resume the same session.
         TaskService restarted = new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES,
                 root, "", "", false, 5, "tester", null, null, null, null, null);
+        restarted.restoreSessions(); // what each company's start does
         restarted.sendMessage(id, "tester", "one more fix");
         awaitStatus(tasks, id, "DONE");
         RecordingRunner.Call afterRestart = runner.calls.get(2);
@@ -484,6 +495,7 @@ class TaskServiceTest {
         awaitStatus(tasks, a, "DONE");
 
         TaskService restarted = new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES, root, "", "", false, 5, "tester", null, null, null, null, null);
+        restarted.restoreSessions(); // what each company's start does
         String b = restarted.create(brief("B")).id();
         awaitStatus(tasks, b, "DONE");
         assertThat(runner.calls.get(1).sessionId()).isEqualTo(runner.calls.get(0).sessionId());
@@ -564,7 +576,8 @@ class TaskServiceTest {
                 com.superagent.core.chat.MessageRole.USER, "please continue", Instant.now()));
         tasks.save(tasks.findTask(a).orElseThrow().withStatus(com.superagent.core.task.TaskStatus.PENDING));
 
-        new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES, root, "", "", false, 5, "tester", null, null, null, null, null);
+        new TaskService(tasks, phases, runStates, runStore, List.of(runner), IMAGES, root, "", "", false, 5, "tester", null, null, null, null, null)
+                .restoreSessions(); // what each company's start does
         awaitStatus(tasks, a, "DONE");
         assertThat(runner.calls).hasSize(2);
         assertThat(runner.calls.get(1).resumeId()).isEqualTo(runner.calls.get(0).sessionId());
@@ -705,5 +718,201 @@ class TaskServiceTest {
             assertThat(s.turn().attempts()).isEqualTo(1);
             assertThat(s.turn().tools()).extracting(com.superagent.api.timing.TurnTimingDto.Tool::name).containsExactly("Bash");
         });
+    }
+
+    // --- complex tasks, follow-ups, tags ---
+
+    private static final class InMemoryLinks implements com.superagent.core.task.TaskLinkStore {
+        private final List<com.superagent.core.task.TaskLink> rows = Collections.synchronizedList(new ArrayList<>());
+        @Override public void save(com.superagent.core.task.TaskLink l) { rows.add(l); }
+        @Override public Optional<com.superagent.core.task.TaskLink> find(String id) {
+            synchronized (rows) { return rows.stream().filter(l -> l.taskId().equals(id)).findFirst(); }
+        }
+        @Override public List<com.superagent.core.task.TaskLink> all() { synchronized (rows) { return new ArrayList<>(rows); } }
+    }
+
+    private static final class InMemoryTags implements com.superagent.core.task.TaskTagStore {
+        private final Map<String, List<String>> rows = new java.util.concurrent.ConcurrentHashMap<>();
+        @Override public void set(String id, List<String> tags) { rows.put(id, tags); }
+        @Override public List<String> tags(String id) { return rows.getOrDefault(id, List.of()); }
+        @Override public Map<String, List<String>> all() { return Map.copyOf(rows); }
+    }
+
+    /** What the scheduler thread does: sum up finished complex tasks, admit what may start. */
+    private static Thread schedulerLoop(TaskService service) {
+        service.useScheduler(() -> { });
+        Thread t = new Thread(com.superagent.core.tenant.TenantContext.wrap(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                service.sumUpFinished();
+                service.awaitingAdmission().forEach(service::admit);
+                try { Thread.sleep(20); } catch (InterruptedException e) { return; }
+            }
+        }));
+        t.setDaemon(true);
+        t.start();
+        return t;
+    }
+
+    private static void reply(AgentRunRequest req, AgentEventSink sink, String text) {
+        sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.RESULT, text, Instant.now()));
+    }
+
+    @Test
+    void aComplexTaskHandsOutSubtasksRunsThemSideBySideAndSumsThemUp() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        java.util.concurrent.atomic.AtomicReference<TaskService> svc = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> parentId = new java.util.concurrent.atomic.AtomicReference<>();
+        AtomicInteger running = new AtomicInteger();
+        AtomicInteger most = new AtomicInteger();
+        List<String> summaries = Collections.synchronizedList(new ArrayList<>());
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                String p = req.prompt();
+                if (p.contains("## 这一轮：拆分")) {
+                    for (int i = 1; i <= 7; i++) {
+                        svc.get().createSubtask(parentId.get(), "tester", "第 " + i + " 块", "调研第 " + i + " 块");
+                    }
+                    reply(req, sink, "计划：分 7 块同时调研");
+                } else if (p.startsWith(ComplexTaskPrompts.SUMMARY_MARK)) {
+                    summaries.add(p);
+                    reply(req, sink, "最终结论：7 块都齐了");
+                } else {
+                    most.accumulateAndGet(running.incrementAndGet(), Math::max);
+                    try { Thread.sleep(150); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    running.decrementAndGet();
+                    String which = p.substring(p.indexOf("调研第 ")).lines().findFirst().orElse("");
+                    reply(req, sink, "结果：" + which + " 查到了");
+                }
+            }
+        };
+        TaskService service = service(runner, tasks);
+        service.setLinks(new InMemoryLinks());
+        svc.set(service);
+        Thread loop = schedulerLoop(service);
+        try {
+            String id = service.create(new CreateTaskRequest("市场全景调研", "分头调研 7 个细分市场，再汇总", null, null, null,
+                    null, null, null, "complex")).id();
+            parentId.set(id);
+            await().atMost(Duration.ofSeconds(15)).until(() -> tasks.findTask(id).orElseThrow().status().name().equals("DONE"));
+
+            assertThat(most.get()).isBetween(2, 5); // side by side, never more than the default limit of 5
+            assertThat(summaries).singleElement().satisfies(sum -> {
+                assertThat(sum).contains("7 个子任务都结束了（完成 7 个）");
+                for (int i = 1; i <= 7; i++) {
+                    assertThat(sum).contains("结果：调研第 " + i + " 块 查到了");
+                }
+            });
+            assertThat(service.lastAnswer(id)).isEqualTo("最终结论：7 块都齐了");
+            // The list shows the complex task; its subtasks sit under it.
+            assertThat(service.list("tester")).singleElement().satisfies(t -> {
+                assertThat(t.id()).isEqualTo(id);
+                assertThat(t.subtasks()).isEqualTo(7);
+                assertThat(t.subtasksFinished()).isEqualTo(7);
+            });
+            var rel = service.relations(id, "tester");
+            assertThat(rel.subtasks()).hasSize(7).allSatisfy(k -> assertThat(k.parentId()).isEqualTo(id));
+            assertThat(service.subtaskRoom(id)).isEqualTo(3); // 10 by default, 7 used
+            assertThatThrownBy(() -> service.createSubtask(rel.subtasks().get(0).id(), "tester", "x", "y"))
+                    .hasMessageContaining("只有复杂任务"); // one level only
+        } finally {
+            loop.interrupt();
+        }
+    }
+
+    @Test
+    void aSubtaskThatKeepsFailingIsRetriedThenReplacedAndTheConclusionNamesTheGap() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        java.util.concurrent.atomic.AtomicReference<TaskService> svc = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> parentId = new java.util.concurrent.atomic.AtomicReference<>();
+        List<String> summaries = Collections.synchronizedList(new ArrayList<>());
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                String p = req.prompt();
+                if (p.contains("## 这一轮：拆分")) {
+                    svc.get().createSubtask(parentId.get(), "tester", "好的一块", "调研能查到的");
+                    svc.get().createSubtask(parentId.get(), "tester", "坏的一块", "调研查不到的");
+                    reply(req, sink, "计划：两块");
+                } else if (p.startsWith(ComplexTaskPrompts.SUMMARY_MARK)) {
+                    summaries.add(p);
+                    if (summaries.size() == 1) {
+                        svc.get().createSubtask(parentId.get(), "tester", "补派", "换个办法调研");
+                        reply(req, sink, "补派了一个");
+                    } else {
+                        reply(req, sink, "结论：齐了，第一次失败的那块已由补派补上");
+                    }
+                } else if (p.contains("调研查不到的") || p.startsWith("服务刚恢复") || p.startsWith("上一个会话")) {
+                    sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.ERROR, "查不到", Instant.now()));
+                } else {
+                    reply(req, sink, "查到了");
+                }
+            }
+        };
+        TaskService service = service(runner, tasks);
+        service.setLinks(new InMemoryLinks());
+        svc.set(service);
+        Thread loop = schedulerLoop(service);
+        try {
+            String id = service.create(new CreateTaskRequest("两块调研", "分两块", null, null, null, null, null, null,
+                    "complex")).id();
+            parentId.set(id);
+            await().atMost(Duration.ofSeconds(10)).until(() -> service.children(id).size() == 2);
+            Task bad = service.children(id).get(1);
+            // What the watchdog does: retry the failed subtask until its retries run out.
+            await().atMost(Duration.ofSeconds(30)).until(() -> {
+                Task now = tasks.findTask(bad.id()).orElseThrow();
+                if (service.finished(now)) {
+                    return true;
+                }
+                if (now.status().name().equals("ERROR")) { // awaitility polls on its own thread
+                    com.superagent.core.tenant.TenantContext.run("acme", () -> service.recover(bad.id()));
+                }
+                return false;
+            });
+            await().atMost(Duration.ofSeconds(15)).until(() -> tasks.findTask(id).orElseThrow().status().name().equals("DONE"));
+
+            assertThat(summaries).hasSize(2);
+            assertThat(summaries.get(0)).contains("完成 1 个，失败 1 个", "失败原因", "可以用 mcp__superagent__create_subtask 补派");
+            assertThat(summaries.get(1)).contains("第 2 轮", "3 个子任务都结束了");
+            assertThat(service.lastAnswer(id)).contains("补派补上");
+            assertThat(service.subtaskRoom(id)).isEqualTo(8); // the replacement didn't use up the limit
+        } finally {
+            loop.interrupt();
+        }
+    }
+
+    @Test
+    void aFollowUpStartsFromWhatTheTaskBeforeCameToAndTasksGatherUnderTags() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        List<String> prompts = Collections.synchronizedList(new ArrayList<>());
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                prompts.add(req.prompt());
+                reply(req, sink, prompts.size() == 1 ? "第一轮结论：市场规模 42 亿" : "第二轮结论");
+            }
+        };
+        TaskService service = service(runner, tasks);
+        service.setLinks(new InMemoryLinks());
+        service.setTagStore(new InMemoryTags());
+
+        String first = service.create(brief("市场规模调研")).id();
+        awaitStatus(tasks, first, "DONE");
+        CreateTaskRequest next = new CreateTaskRequest("接着查增速", "在上次基础上查增速", null, null, null, null, null, null,
+                "general", null, first);
+        assertThatThrownBy(() -> service.create(next, "someone-else")).isInstanceOf(TaskNotFoundException.class);
+        String second = service.create(next).id();
+        awaitStatus(tasks, second, "DONE");
+
+        assertThat(prompts.get(1)).contains("前情", "第一轮结论：市场规模 42 亿", tasks.findTask(first).orElseThrow().workspaceDir(),
+                "在上次基础上查增速");
+        assertThat(service.relations(first, "tester").followUps()).extracting(TaskDto::id).containsExactly(second);
+        assertThat(service.relations(second, "tester").continuesFrom().id()).isEqualTo(first);
+
+        assertThat(service.setTags(first, "tester", List.of(" 竞品 ", "竞品", "#定价", "")).tags()).containsExactly("竞品", "定价");
+        service.setTags(second, "tester", List.of("竞品"));
+        assertThat(service.page("tester", null, "定价", null, null, 1, 20).items()).extracting(TaskDto::id).containsExactly(first);
+        assertThat(service.facets("tester").tags()).extracting(f -> f.key() + "×" + f.count()).containsExactly("竞品×2", "定价×1");
     }
 }

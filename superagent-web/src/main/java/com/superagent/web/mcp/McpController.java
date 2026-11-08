@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.runtime.mcp.McpGrants;
 import com.superagent.runtime.mcp.McpToolException;
 import com.superagent.runtime.mcp.McpToolProvider;
@@ -66,13 +67,14 @@ public class McpController {
             return ResponseEntity.accepted().build();
         }
         try {
-            return switch (method) {
+            // The endpoint is open (the token authenticates), so no company was set for the request: the run's is.
+            return TenantContext.call(grants.companyOf(grant), () -> switch (method) {
                 case "initialize" -> ok(id, initializeResult());
                 case "ping" -> ok(id, mapper.createObjectNode());
                 case "tools/list" -> ok(id, toolsList(grant));
                 case "tools/call" -> ok(id, callTool(grant, body.path("params")));
                 default -> error(id, -32601, "Method not found: " + method);
-            };
+            });
         } catch (McpToolException e) {
             return ok(id, textContent("错误：" + e.getMessage(), true)); // tool-level error, not a protocol error
         } catch (Exception e) {

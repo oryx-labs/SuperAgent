@@ -10,6 +10,7 @@ public class MysqlAgentLogStore extends AbstractJdbcAgentLogStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS agent_log (
+              company_id VARCHAR(64) NOT NULL,
               id       VARCHAR(64)  NOT NULL,
               agent_id VARCHAR(64)  NOT NULL,
               owner    VARCHAR(255),
@@ -18,8 +19,8 @@ public class MysqlAgentLogStore extends AbstractJdbcAgentLogStore {
               category VARCHAR(16)  NOT NULL,
               summary  VARCHAR(1024) NOT NULL,
               detail   TEXT,
-              PRIMARY KEY (id),
-              KEY idx_agent_log (agent_id, at_time)
+              PRIMARY KEY (company_id, id),
+              KEY idx_agent_log (company_id, agent_id, at_time)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 

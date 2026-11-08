@@ -25,7 +25,7 @@ abstract class AbstractJdbcSuperAgentWorkStore implements SuperAgentWorkStore {
     protected AbstractJdbcSuperAgentWorkStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -56,33 +56,35 @@ abstract class AbstractJdbcSuperAgentWorkStore implements SuperAgentWorkStore {
 
     @Override
     public List<SuperAgentWork> list(String owner) {
-        return jdbc.query("SELECT * FROM superagent_work" + workFinal() + " WHERE owner = ? ORDER BY assigned_at DESC",
-                mapper, owner);
+        return jdbc.query("SELECT * FROM superagent_work" + workFinal() + " WHERE company_id = ? AND owner = ? ORDER BY assigned_at DESC",
+                mapper, TenantSchema.company(), owner);
     }
 
     @Override
     public Optional<SuperAgentWork> find(String taskId) {
-        return jdbc.query("SELECT * FROM superagent_work" + workFinal() + " WHERE task_id = ?", mapper, taskId)
+        return jdbc.query("SELECT * FROM superagent_work" + workFinal() + " WHERE company_id = ? AND task_id = ?", mapper,
+                        TenantSchema.company(), taskId)
                 .stream().findFirst();
     }
 
     @Override
     public void appendEvent(SuperAgentWorkEvent e) {
-        jdbc.update("INSERT INTO superagent_work_event (id, task_id, owner, kind, detail, at_time) VALUES (?, ?, ?, ?, ?, ?)",
-                e.id(), e.taskId(), e.owner(), e.kind(), nn(e.detail()), utc(e.at()));
+        jdbc.update("INSERT INTO superagent_work_event (company_id, id, task_id, owner, kind, detail, at_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                TenantSchema.company(), e.id(), e.taskId(), e.owner(), e.kind(), nn(e.detail()), utc(e.at()));
     }
 
     @Override
     public List<SuperAgentWorkEvent> events(String taskId) {
-        return jdbc.query("SELECT * FROM superagent_work_event WHERE task_id = ? ORDER BY at_time", eventMapper, taskId);
+        return jdbc.query("SELECT * FROM superagent_work_event WHERE company_id = ? AND task_id = ? ORDER BY at_time", eventMapper,
+                TenantSchema.company(), taskId);
     }
 
-    protected static final String COLUMNS = "(task_id, owner, plan_id, title, member_id, member_name, status, summary, "
+    protected static final String COLUMNS = "(company_id, task_id, owner, plan_id, title, member_id, member_name, status, summary, "
             + "assigned_at, finished_at, updated_at, message_id)";
-    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(SuperAgentWork w) {
-        return new Object[]{w.taskId(), w.owner(), nn(w.planId()), w.title(), nn(w.memberId()), nn(w.memberName()),
+        return new Object[]{TenantSchema.company(), w.taskId(), w.owner(), nn(w.planId()), w.title(), nn(w.memberId()), nn(w.memberName()),
                 w.status(), nn(w.summary()), utc(w.assignedAt()), utc(w.finishedAt()), utc(w.updatedAt()), nn(w.messageId())};
     }
 

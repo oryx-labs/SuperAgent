@@ -20,7 +20,7 @@ abstract class AbstractJdbcTaskAgentStore implements TaskAgentStore {
 
     protected AbstractJdbcTaskAgentStore(JdbcTemplate jdbc, String ddl) {
         this.jdbc = jdbc;
-        jdbc.execute(ddl);
+        TenantSchema.create(jdbc, ddl);
     }
 
     /** "" for MySQL, " FINAL" for ClickHouse. */
@@ -42,7 +42,7 @@ abstract class AbstractJdbcTaskAgentStore implements TaskAgentStore {
             return List.of();
         }
         return jdbc.queryForList("SELECT task_id FROM task_agent" + readFinal()
-                + " WHERE agent_id = ? ORDER BY created_at DESC", String.class, agentId);
+                + " WHERE company_id = ? AND agent_id = ? ORDER BY created_at DESC", String.class, TenantSchema.company(), agentId);
     }
 
     @Override
@@ -50,8 +50,8 @@ abstract class AbstractJdbcTaskAgentStore implements TaskAgentStore {
         if (taskId == null) {
             return Optional.empty();
         }
-        return jdbc.queryForList("SELECT agent_id FROM task_agent" + readFinal() + " WHERE task_id = ?",
-                String.class, taskId).stream().findFirst();
+        return jdbc.queryForList("SELECT agent_id FROM task_agent" + readFinal() + " WHERE company_id = ? AND task_id = ?",
+                String.class, TenantSchema.company(), taskId).stream().findFirst();
     }
 
     @Override
@@ -59,7 +59,7 @@ abstract class AbstractJdbcTaskAgentStore implements TaskAgentStore {
         if (taskId == null) {
             return Optional.empty();
         }
-        return origins(" WHERE task_id = ?", taskId).stream().findFirst();
+        return origins(" AND task_id = ?", taskId).stream().findFirst();
     }
 
     @Override
@@ -67,13 +67,14 @@ abstract class AbstractJdbcTaskAgentStore implements TaskAgentStore {
         if (agentId == null) {
             return List.of();
         }
-        return origins(" WHERE agent_id = ? ORDER BY created_at DESC", agentId);
+        return origins(" AND agent_id = ? ORDER BY created_at DESC", agentId);
     }
 
-    private List<TaskOrigin> origins(String where, String arg) {
-        return jdbc.query("SELECT task_id, agent_id, session_id, message_id FROM task_agent" + readFinal() + where,
+    private List<TaskOrigin> origins(String condition, String arg) {
+        return jdbc.query("SELECT task_id, agent_id, session_id, message_id FROM task_agent" + readFinal()
+                        + " WHERE company_id = ?" + condition,
                 (rs, i) -> new TaskOrigin(rs.getString(1), rs.getString(2), blankToNull(rs.getString(3)),
-                        blankToNull(rs.getString(4))), arg);
+                        blankToNull(rs.getString(4))), TenantSchema.company(), arg);
     }
 
     private static String blankToNull(String s) {

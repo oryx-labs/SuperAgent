@@ -12,15 +12,15 @@ public class ClickHouseFileFolderStore extends AbstractJdbcFileFolderStore {
     public ClickHouseFileFolderStore(JdbcTemplate jdbc) {
         super(jdbc, List.of("""
                 CREATE TABLE IF NOT EXISTS file_folder (
-                  id String, owner String, name String, parent_id String, deleted UInt8,
+                  company_id String, id String, owner String, name String, parent_id String, deleted UInt8,
                   created_at DateTime64(3, 'UTC'), updated_at DateTime64(3, 'UTC')
                 ) ENGINE = ReplacingMergeTree(updated_at)
-                ORDER BY id
+                ORDER BY (company_id, id)
                 """, """
                 CREATE TABLE IF NOT EXISTS file_placement (
-                  owner String, file_id String, folder_id String, placed_by String, updated_at DateTime64(3, 'UTC')
+                  company_id String, owner String, file_id String, folder_id String, placed_by String, updated_at DateTime64(3, 'UTC')
                 ) ENGINE = ReplacingMergeTree(updated_at)
-                ORDER BY (owner, file_id)
+                ORDER BY (company_id, owner, file_id)
                 """));
     }
 
@@ -36,6 +36,6 @@ public class ClickHouseFileFolderStore extends AbstractJdbcFileFolderStore {
 
     @Override
     public void place(String owner, String fileId, String folderId, String by) {
-        jdbc.update("INSERT INTO file_placement " + PLACEMENT, owner, fileId, folderId, by, utc(Instant.now()));
+        jdbc.update("INSERT INTO file_placement " + PLACEMENT, TenantSchema.company(), owner, fileId, folderId, by, utc(Instant.now()));
     }
 }

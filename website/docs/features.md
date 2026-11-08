@@ -14,7 +14,7 @@ SuperAgent is built from the company's side: the company and its employees, not 
 | What the company gets | What makes it work | Details |
 | --- | --- | --- |
 | **Work becomes company assets** | Files for everything agents make and people send; long-term memory per agent; run logs | [Files & skills](./files), [Agents & collaboration](./agents) |
-| **Collaboration and continuity** | Several people on one agent; invitations from chat; a SuperAgent that hires a team and hands out work | [Agents & collaboration](./agents), [SuperAgent](./superagent) |
+| **Collaboration and continuity** | Several people on one agent; projects that group agents, people, tasks and files; invitations from chat; a SuperAgent that hires a team and hands out work | [Agents & collaboration](./agents), [SuperAgent](./superagent) |
 | **Reusable methods** | Skills at the personal and company level, mounted on agents and inherited by tasks | [Files & skills](./files) |
 | **Model-neutral, cost under control** | Any vendor's models; each task gets the cheapest model that can do it; one key pool per CLI with failover; spend per person, task and model | [Models & cost](./models) |
 | **Visible and safe** | Human confirmation for key decisions, permissions, run logs, encrypted secrets | [Administration & security](./admin) |
@@ -24,9 +24,9 @@ SuperAgent is built from the company's side: the company and its employees, not 
 ### For every employee
 
 - **[To-do](./agents#to-do)** — the home page: what needs you, and what your agents finished.
-- **[Agents](./agents)** — chat with agents that have a persona, a model, skills and long-term memory; send them files, images and links; work on the same agent with colleagues.
+- **[Agents](./agents)** — chat with agents that have a persona, a model, skills and long-term memory; send them files, images and links; work on the same agent with colleagues; group work into [projects](./agents#projects).
 - **[Your SuperAgent](./superagent)** — drop work in; it plans, asks you to approve, forms a team, hands out tasks and reports back.
-- **[Tasks & automation](./tasks)** — long-running work from requirement to delivery, and work that runs on a schedule or an API call.
+- **[Tasks & automation](./tasks)** — long-running work from requirement to delivery; complex tasks that split into parallel subtasks; follow-on tasks; tags and filters; and work that runs on a schedule or an API call.
 - **[Files & skills](./files)** — everything agents produce, in personal folders; reusable working methods.
 - **[Connectors](./connectors)** — the outside systems agents can use (GitHub, Gitee, your own MCP servers), and messages from Feishu.
 

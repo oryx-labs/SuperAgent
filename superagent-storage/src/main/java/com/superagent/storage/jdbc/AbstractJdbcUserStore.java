@@ -30,7 +30,7 @@ abstract class AbstractJdbcUserStore implements UserStore {
     protected AbstractJdbcUserStore(JdbcTemplate jdbc, List<String> schemaDdl) {
         this.jdbc = jdbc;
         for (String ddl : schemaDdl) {
-            jdbc.execute(ddl);
+            TenantSchema.create(jdbc, ddl);
         }
     }
 
@@ -52,48 +52,55 @@ abstract class AbstractJdbcUserStore implements UserStore {
 
     @Override
     public List<User> listUsers() {
-        return jdbc.query("SELECT * FROM app_user" + userFinal() + " ORDER BY created_at", mapper);
+        return jdbc.query("SELECT * FROM app_user" + userFinal() + " WHERE company_id = ? ORDER BY created_at", mapper,
+                TenantSchema.company());
     }
 
     @Override
     public Optional<User> findById(String id) {
-        return one("SELECT * FROM app_user" + userFinal() + " WHERE id = ?", id);
+        return one("SELECT * FROM app_user" + userFinal() + " WHERE company_id = ? AND id = ?", id);
     }
 
     @Override
     public Optional<User> findByUsername(String username) {
-        return one("SELECT * FROM app_user" + userFinal() + " WHERE username = ?", username);
+        return one("SELECT * FROM app_user" + userFinal() + " WHERE company_id = ? AND username = ?", username);
+    }
+
+    @Override
+    public Optional<String> companyOfUsername(String username) {
+        return jdbc.queryForList("SELECT company_id FROM app_user" + userFinal() + " WHERE username = ?",
+                String.class, username).stream().findFirst();
     }
 
     @Override
     public Optional<User> findByPhone(String phone) {
         return phone == null ? Optional.empty()
-                : one("SELECT * FROM app_user" + userFinal() + " WHERE phone = ?", phone);
+                : one("SELECT * FROM app_user" + userFinal() + " WHERE company_id = ? AND phone = ?", phone);
     }
 
     @Override
     public Optional<User> findByExternalId(String externalId) {
         return externalId == null ? Optional.empty()
-                : one("SELECT * FROM app_user" + userFinal() + " WHERE external_id = ?", externalId);
+                : one("SELECT * FROM app_user" + userFinal() + " WHERE company_id = ? AND external_id = ?", externalId);
     }
 
     private Optional<User> one(String sql, Object arg) {
-        return jdbc.query(sql, mapper, arg).stream().findFirst();
+        return jdbc.query(sql, mapper, TenantSchema.company(), arg).stream().findFirst();
     }
 
     protected static final String COLUMNS =
-            "(id, username, display_name, roles, enabled, password_hash, phone, external_id, source, "
+            "(company_id, id, username, display_name, roles, enabled, password_hash, phone, external_id, source, "
                     + "created_at, updated_at)";
 
     protected Object[] params(User u) {
         return new Object[]{
-                u.id(), u.username(), nn(u.displayName()), String.join(",", u.roles()), u.enabled(),
+                TenantSchema.company(), u.id(), u.username(), nn(u.displayName()), String.join(",", u.roles()), u.enabled(),
                 nn(u.passwordHash()), nn(u.phone()), nn(u.externalId()), u.source().name(),
                 utc(u.createdAt()), utc(u.updatedAt())};
     }
 
     protected void insert(User u) {
-        jdbc.update("INSERT INTO app_user " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params(u));
+        jdbc.update("INSERT INTO app_user " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params(u));
     }
 
     private static Set<String> parseRoles(String csv) {

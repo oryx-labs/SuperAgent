@@ -34,8 +34,8 @@ import java.util.Set;
 public class SuperAgentTools implements McpToolProvider {
 
     /** Every tool name, in the order they're listed; the round's CLI allowlist is built from this. */
-    static final List<String> NAMES = List.of("list_team", "list_skills", "propose_plan", "hire_member",
-            "update_member", "assign_task", "list_assigned_tasks", "get_task", "reply_task", "get_current_time",
+    static final List<String> NAMES = List.of("list_team", "list_skills", "list_projects", "propose_plan", "hire_member",
+            "update_member", "place_member", "assign_task", "list_assigned_tasks", "get_task", "reply_task", "get_current_time",
             SuperAgentTools.TELL_USER);
 
     /** Background rounds only: posts into the chat. */
@@ -76,7 +76,9 @@ public class SuperAgentTools implements McpToolProvider {
 
     public ArrayNode list() {
         ArrayNode tools = mapper.createArrayNode();
-        tools.add(tool("list_team", "列出你的团队成员（用户的全部 Agent，不含你自己）：id、名称、人设、模型、技能。派活前先看能否复用。",
+        tools.add(tool("list_team", "列出你的团队成员（用户的全部 Agent，不含你自己）：id、名称、所属项目、上级 Agent、人设、模型、技能。派活前先看能否复用。",
+                props()));
+        tools.add(tool("list_projects", "列出用户所在的项目：id、名称、状态、里面有哪些 Agent。招人或调整成员时要放进项目，先用它查项目 id。",
                 props()));
         tools.add(tool("list_skills", "列出可以绑定给成员的技能（id、名称、说明）。", props()));
 
@@ -97,12 +99,21 @@ public class SuperAgentTools implements McpToolProvider {
                 props(field("name", "string", "成员名称"),
                         field("persona", "string", "人设：角色定位、擅长什么、工作方式、交付标准"),
                         field("model", "string", "可选，模型 id；不填用系统默认"),
-                        stringArray("skill_ids", "可选，要绑定的技能 id")),
+                        stringArray("skill_ids", "可选，要绑定的技能 id"),
+                        field("project_id", "string", "可选，放进哪个项目（项目 id，用 list_projects 查）；用户说了才填"),
+                        field("parent_id", "string", "可选，上级 Agent 的 id（用 list_team 查）：新成员挂在它下面；用户说了才填，不填就直接由你带领")),
                 "name", "persona"));
         tools.add(tool("update_member", "（计划确认后）调整一名已有成员，只传要改的字段。",
                 props(field("id", "string", "成员 id"), field("name", "string", "新名称"),
                         field("persona", "string", "新人设"), field("model", "string", "新模型 id"),
-                        stringArray("skill_ids", "新的技能 id 列表（整体替换）")),
+                        stringArray("skill_ids", "新的技能 id 列表（整体替换）"),
+                        field("project_id", "string", "放进哪个项目（项目 id）；传 none 表示移出项目"),
+                        field("parent_id", "string", "上级 Agent 的 id；传 none 表示不设上级")),
+                "id"));
+        tools.add(tool("place_member", "按用户的明确要求，调整一名已有成员（或用户自建的 Agent）的所属项目或上级 Agent，只传要改的字段；不需要先提交计划。",
+                props(field("id", "string", "成员 id（用 list_team 查）"),
+                        field("project_id", "string", "放进哪个项目（项目 id，用 list_projects 查）；传 none 表示移出项目"),
+                        field("parent_id", "string", "上级 Agent 的 id；传 none 表示不设上级")),
                 "id"));
         tools.add(tool("assign_task", "（计划确认后）把一个任务派给某个成员，立即开始执行。完成、失败或需要确认时你会收到系统消息。",
                 props(field("member_id", "string", "成员 id"), field("title", "string", "任务标题"),
@@ -137,6 +148,8 @@ public class SuperAgentTools implements McpToolProvider {
                     for (SuperAgentService.TeamMember m : team) {
                         sb.append("- ").append(m.id()).append(" | ").append(m.name())
                                 .append(m.hired() ? "（你招的）" : "（用户自建）")
+                                .append(m.project() == null ? "" : " | 项目 " + m.project())
+                                .append(m.parent() == null ? "" : " | 上级 " + m.parent())
                                 .append(" | 模型 ").append(m.model() != null ? m.model() : "系统默认")
                                 .append(m.skillIds().isEmpty() ? "" : " | 技能 " + String.join(",", m.skillIds()))
                                 .append("\n  人设：").append(m.persona() != null ? oneLine(m.persona()) : "（未设置）")
@@ -162,13 +175,38 @@ public class SuperAgentTools implements McpToolProvider {
                 }
                 case "hire_member" -> {
                     Agent a = service.hire(owner, text(args, "name"), text(args, "persona"), null,
-                            text(args, "model"), strings(args.path("skill_ids")));
-                    yield "已招入成员 " + a.name() + "（id " + a.id() + "）。";
+                            text(args, "model"), strings(args.path("skill_ids")), text(args, "project_id"), text(args, "parent_id"));
+                    yield "已招入成员 " + a.name() + "（id " + a.id() + "），" + service.describePlace(owner, a.id()) + "。";
                 }
                 case "update_member" -> {
                     Agent a = service.adjust(owner, required(args, "id"), text(args, "name"), text(args, "persona"),
                             text(args, "model"), args.has("skill_ids") ? strings(args.path("skill_ids")) : null);
-                    yield "已更新成员 " + a.name() + "。";
+                    String project = text(args, "project_id");
+                    String parent = text(args, "parent_id");
+                    if (project != null || parent != null) {
+                        service.place(owner, a.id(), project, parent);
+                    }
+                    yield "已更新成员 " + a.name() + "，" + service.describePlace(owner, a.id()) + "。";
+                }
+                case "place_member" -> {
+                    String project = text(args, "project_id");
+                    String parent = text(args, "parent_id");
+                    if (project == null && parent == null) {
+                        throw new IllegalArgumentException("project_id 和 parent_id 至少给一个");
+                    }
+                    Agent a = service.place(owner, required(args, "id"), project, parent);
+                    yield "已调整「" + a.name() + "」，" + service.describePlace(owner, a.id()) + "。";
+                }
+                case "list_projects" -> {
+                    var list = service.projects(owner);
+                    if (list.isEmpty()) {
+                        yield "用户还不在任何项目里。需要的话请用户先在「项目」页面新建项目。";
+                    }
+                    StringBuilder sb = new StringBuilder();
+                    list.forEach(p -> sb.append("- ").append(p.id()).append(" | ").append(p.name())
+                            .append("archived".equals(p.status()) ? "（已归档，不能放入 Agent）" : "")
+                            .append(" | ").append(p.agentIds().size()).append(" 个 Agent\n"));
+                    yield sb.toString();
                 }
                 case "assign_task" -> {
                     String taskId = service.assign(owner, required(args, "member_id"), text(args, "title"),
@@ -206,7 +244,10 @@ public class SuperAgentTools implements McpToolProvider {
                         + " Asia/Shanghai";
                 default -> throw new IllegalArgumentException("Unknown tool: " + name);
             }, false);
-        } catch (IllegalArgumentException | AgentNotFoundException | TaskNotFoundException | TaskBusyException e) {
+        } catch (IllegalArgumentException | TaskBusyException e) {
+            return new Result("错误：" + e.getMessage(), true);
+        } catch (com.superagent.core.error.NotFoundException | com.superagent.core.error.ForbiddenException e) {
+            // A member, task or project that isn't there (or isn't the user's): the agent reads it and tries another.
             return new Result("错误：" + e.getMessage(), true);
         }
     }

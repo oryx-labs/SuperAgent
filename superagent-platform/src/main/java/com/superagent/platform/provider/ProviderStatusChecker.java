@@ -2,6 +2,8 @@ package com.superagent.platform.provider;
 
 import com.superagent.core.provider.ModelProvider;
 import com.superagent.core.provider.ModelProviderStore;
+import com.superagent.core.tenant.TenantContext;
+import com.superagent.platform.tenant.CompanyService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +46,9 @@ public class ProviderStatusChecker {
         return t;
     });
 
-    public ProviderStatusChecker(
+    private final CompanyService companies;
+
+    public ProviderStatusChecker(CompanyService companies,
             ModelProviderStore store,
             ProviderService service,
             @Value("${superagent.provider.checker.enabled:true}") boolean enabled,
@@ -53,6 +57,7 @@ public class ProviderStatusChecker {
             @Value("${superagent.provider.checker.infer-interval-seconds:3600}") long inferSeconds,
             @Value("${superagent.provider.checker.credential-interval-seconds:600}") long credentialSeconds,
             CredentialService credentials) {
+        this.companies = companies;
         this.store = store;
         this.service = service;
         this.enabled = enabled;
@@ -68,17 +73,17 @@ public class ProviderStatusChecker {
         if (!enabled) {
             return;
         }
-        scheduler.scheduleWithFixedDelay(this::refreshLocal, 0, localSeconds, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(() -> companies.forEach(this::refreshLocal), 0, localSeconds, TimeUnit.SECONDS);
         // Startup: fetch the model list, then probe it right away — waiting a full hourly cycle would leave
         // every model "not checked" (or stale from before the restart) for an hour.
-        scheduler.execute(() -> {
+        scheduler.execute(() -> companies.forEach(() -> {
             refreshLatest();
             refreshInference();
-        });
-        scheduler.scheduleWithFixedDelay(this::refreshLatest, latestSeconds, latestSeconds, TimeUnit.SECONDS);
-        scheduler.scheduleWithFixedDelay(this::refreshInference, inferSeconds, inferSeconds, TimeUnit.SECONDS);
+        }));
+        scheduler.scheduleWithFixedDelay(() -> companies.forEach(this::refreshLatest), latestSeconds, latestSeconds, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(() -> companies.forEach(this::refreshInference), inferSeconds, inferSeconds, TimeUnit.SECONDS);
         // Every key in the pools, failing ones included: a recovered higher-priority key takes over again.
-        scheduler.scheduleWithFixedDelay(this::checkCredentials, 60, credentialSeconds, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(() -> companies.forEach(this::checkCredentials), 60, credentialSeconds, TimeUnit.SECONDS);
         log.info("provider checker started (local={}s, latest={}s, infer={}s)", localSeconds, latestSeconds, inferSeconds);
     }
 
@@ -106,7 +111,8 @@ public class ProviderStatusChecker {
 
     /** After a sweep that couldn't reach a CLI's service: try again this soon rather than at the next hourly one. */
     private static final long RETRY_UNREACHABLE_SECONDS = 300;
-    private final java.util.concurrent.atomic.AtomicBoolean retryPending = new java.util.concurrent.atomic.AtomicBoolean();
+    /** Companies with a retry scheduled: one company's unreachable CLI says nothing about another's keys. */
+    private final java.util.Set<String> retryPending = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private void refreshInference() {
         boolean reached = true;
@@ -117,12 +123,13 @@ public class ProviderStatusChecker {
         } catch (RuntimeException e) {
             log.warn("provider inference check failed (will retry): {}", e.getMessage());
         }
-        if (!reached && retryPending.compareAndSet(false, true)) {
+        String company = TenantContext.require();
+        if (!reached && retryPending.add(company)) {
             log.info("provider inference check will retry in {}s", RETRY_UNREACHABLE_SECONDS);
-            scheduler.schedule(() -> {
-                retryPending.set(false);
+            scheduler.schedule(TenantContext.wrap(() -> {
+                retryPending.remove(company);
                 refreshInference();
-            }, RETRY_UNREACHABLE_SECONDS, TimeUnit.SECONDS);
+            }), RETRY_UNREACHABLE_SECONDS, TimeUnit.SECONDS);
         }
     }
 

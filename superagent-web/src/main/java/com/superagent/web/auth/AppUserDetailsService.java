@@ -1,7 +1,9 @@
 package com.superagent.web.auth;
 
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
+import com.superagent.platform.tenant.CompanyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,15 +28,18 @@ public class AppUserDetailsService implements UserDetailsService {
     private static final Logger log = LoggerFactory.getLogger(AppUserDetailsService.class);
 
     private final UserStore users;
+    private final CompanyService companies;
     private final String adminUsername;
     private final String adminPasswordHash;
 
     public AppUserDetailsService(
             UserStore users,
+            CompanyService companies,
             PasswordEncoder encoder,
             @Value("${superagent.auth.admin.username:admin}") String adminUsername,
             @Value("${superagent.auth.admin.password:}") String adminPassword) {
         this.users = users;
+        this.companies = companies;
         this.adminUsername = adminUsername;
         // No weak default: if the admin password is unset, generate a strong one-time
         // password and log it once, so there is always a way in but never a known default.
@@ -62,7 +67,10 @@ public class AppUserDetailsService implements UserDetailsService {
                     .authorities("ROLE_ADMIN", "ROLE_USER")
                     .build();
         }
-        User u = users.findByUsername(username)
+        // Usernames are global: the username says which company to look the user up in.
+        String company = companies.companyOf(username)
+                .orElseThrow(() -> new UsernameNotFoundException("No such user: " + username));
+        User u = TenantContext.call(company, () -> users.findByUsername(username))
                 .orElseThrow(() -> new UsernameNotFoundException("No such user: " + username));
         if (u.passwordHash() == null || u.passwordHash().isBlank()) {
             // non-local account (phone / SSO / WeChat): cannot sign in with a password

@@ -14,7 +14,10 @@ const ael = {
   character: document.getElementById("afCharacter"),
   characterHint: document.getElementById("afCharacterHint"),
   personaLabel: document.getElementById("afPersonaLabel"),
+  projectField: document.getElementById("afProjectField"),
+  project: document.getElementById("afProject"),
 };
+let editingAgentProject = "";  // the project the edited agent is in now ("" = none)
 let avatarChoices = [];   // built-in emoji avatars, loaded once from the server
 let chosenAvatar = null;
 
@@ -97,6 +100,23 @@ function openAgentModal(agent) {
   // A new agent starts on the first preset; an edit keeps its character (or custom).
   renderCharacterPicker(agent ? agent.character || null : "rigorous-engineer");
   renderSkillPicker(agent ? agent.skillIds : []);
+  renderProjectPicker(agent);
+}
+
+/**
+ * Which project the agent is in: only its owner can choose, and only among the active projects they are in. The
+ * SuperAgent is never in one. An agent already in an archived project keeps it listed, so saving doesn't move it.
+ */
+async function renderProjectPicker(agent) {
+  const own = !agent || (isOwner(agent) && agent.kind !== "super");
+  ael.projectField.hidden = !own;
+  if (!own) return;
+  const list = await refreshProjects();
+  editingAgentProject = agent && agent.id ? ((projectOfAgentId(agent.id) || {}).id || "") : "";
+  const shown = list.filter(p => p.status !== "archived" || p.id === editingAgentProject);
+  ael.project.replaceChildren(new Option(L("proj.fNone"), ""),
+    ...shown.map(p => new Option(p.name + (p.status === "archived" ? " · " + L("proj.archived") : ""), p.id)));
+  ael.project.value = editingAgentProject;
 }
 function closeAgentModal() { ael.modal.hidden = true; }
 
@@ -111,6 +131,10 @@ ael.form.addEventListener("submit", async e => {
   const res = editingAgentId
     ? await api.updateAgent(editingAgentId, body)
     : await api.createAgent(body);
+  const projectId = ael.projectField.hidden ? editingAgentProject : ael.project.value;
+  if (res && res.data && projectId !== editingAgentProject) {
+    try { await api.setAgentProject(res.data.id, projectId || null); } catch (err) { showToast(err.message, true); }
+  }
   closeAgentModal();
   await loadAgents();
   if (res && res.data) {

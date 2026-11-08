@@ -11,6 +11,7 @@ public class MysqlSuperAgentStateStore extends AbstractJdbcSuperAgentStateStore 
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS superagent_state (
+              company_id      VARCHAR(64)  NOT NULL,
               owner           VARCHAR(255) NOT NULL,
               agent_id        VARCHAR(64)  NOT NULL,
               processed_until DATETIME(3),
@@ -19,7 +20,7 @@ public class MysqlSuperAgentStateStore extends AbstractJdbcSuperAgentStateStore 
               plan_json       MEDIUMTEXT,
               tracked_json    MEDIUMTEXT,
               updated_at      DATETIME(3)  NOT NULL,
-              PRIMARY KEY (owner)
+              PRIMARY KEY (company_id, owner)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 

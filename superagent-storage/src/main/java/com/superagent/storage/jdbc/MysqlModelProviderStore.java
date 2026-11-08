@@ -11,6 +11,7 @@ public class MysqlModelProviderStore extends AbstractJdbcModelProviderStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS model_provider (
+              company_id        VARCHAR(64) NOT NULL,
               id                VARCHAR(64) NOT NULL,
               provider_key      VARCHAR(64) NOT NULL,
               installed         TINYINT(1)  NOT NULL DEFAULT 0,
@@ -24,8 +25,8 @@ public class MysqlModelProviderStore extends AbstractJdbcModelProviderStore {
               models_checked_at DATETIME(3),
               created_at        DATETIME(3) NOT NULL,
               updated_at        DATETIME(3) NOT NULL,
-              PRIMARY KEY (id),
-              UNIQUE KEY uq_provider_key (provider_key)
+              PRIMARY KEY (company_id, id),
+              UNIQUE KEY uq_provider_key (company_id, provider_key)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 
@@ -55,7 +56,7 @@ public class MysqlModelProviderStore extends AbstractJdbcModelProviderStore {
 
     @Override
     public ModelProvider save(ModelProvider p) {
-        jdbc.update("INSERT INTO model_provider " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        jdbc.update("INSERT INTO model_provider " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON DUPLICATE KEY UPDATE provider_key=VALUES(provider_key), installed=VALUES(installed), "
                         + "can_infer=VALUES(can_infer), current_version=VALUES(current_version), "
                         + "latest_version=VALUES(latest_version), status=VALUES(status), "
@@ -68,6 +69,6 @@ public class MysqlModelProviderStore extends AbstractJdbcModelProviderStore {
 
     @Override
     public void delete(String id) {
-        jdbc.update("DELETE FROM model_provider WHERE id = ?", id);
+        jdbc.update("DELETE FROM model_provider WHERE company_id = ? AND id = ?", TenantSchema.company(), id);
     }
 }

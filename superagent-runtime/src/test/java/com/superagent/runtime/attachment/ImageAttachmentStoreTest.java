@@ -2,6 +2,9 @@ package com.superagent.runtime.attachment;
 
 import com.superagent.api.chat.ImageUploadDto;
 import com.superagent.core.chat.ImageAttachment;
+import com.superagent.core.tenant.TenantContext;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -30,6 +33,16 @@ class ImageAttachmentStoreTest {
 
     private static final String PNG = b64(0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2);
     private static final String JPEG = b64(0xFF, 0xD8, 0xFF, 0, 1);
+
+    @BeforeEach
+    void company() {
+        TenantContext.set("acme");
+    }
+
+    @AfterEach
+    void clear() {
+        TenantContext.clear();
+    }
 
     @Test
     void storesInOrderTakesTheRealFormatAndServesItBack(@TempDir Path dir) {
@@ -60,5 +73,17 @@ class ImageAttachmentStoreTest {
         assertThatThrownBy(() -> store.save("../../etc", MESSAGE, List.of(new ImageUploadDto("image/png", PNG))))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(store.list("../../etc", MESSAGE)).isEmpty();
+    }
+
+    @Test
+    void oneCompanyNeverSeesAnothersImages(@TempDir Path dir) {
+        ImageAttachmentStore store = new ImageAttachmentStore(dir.toString());
+        store.save(OWNER, MESSAGE, List.of(new ImageUploadDto("image/png", PNG)));
+
+        assertThat(store.list(OWNER, MESSAGE).getFirst().path()).startsWith(dir.resolve("acme").toString());
+        TenantContext.run("globex", () -> {
+            assertThat(store.list(OWNER, MESSAGE)).isEmpty();
+            assertThatThrownBy(() -> store.read(OWNER, MESSAGE, 0)).isInstanceOf(AttachmentNotFoundException.class);
+        });
     }
 }

@@ -19,20 +19,20 @@ abstract class AbstractJdbcTurnTimingStore implements TurnTimingStore {
 
     protected AbstractJdbcTurnTimingStore(JdbcTemplate jdbc, String ddl) {
         this.jdbc = jdbc;
-        jdbc.execute(ddl);
+        TenantSchema.create(jdbc, ddl);
     }
 
     /** "" for MySQL, " FINAL" for ClickHouse. */
     protected abstract String readFinal();
 
-    protected static final String INSERT = "(message_id, session_id, label, started_at, finished_at, prep_ms, startup_ms, "
-            + "model_ms, tools_ms, output_ms, retry_ms, save_ms, attempts, tools) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    protected static final String INSERT = "(company_id, message_id, session_id, label, started_at, finished_at, prep_ms, startup_ms, "
+            + "model_ms, tools_ms, output_ms, retry_ms, save_ms, attempts, tools) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(TurnTiming t) {
         StringBuilder tools = new StringBuilder();
         t.tools().forEach(x -> tools.append(x.name().replace('\t', ' ').replace('\n', ' ')).append('\t')
                 .append(x.count()).append('\t').append(x.ms()).append('\n'));
-        return new Object[]{t.messageId(), t.sessionId(), t.label() == null ? "" : t.label(), utc(t.startedAt()),
+        return new Object[]{TenantSchema.company(), t.messageId(), t.sessionId(), t.label() == null ? "" : t.label(), utc(t.startedAt()),
                 utc(t.finishedAt()), t.prepMs(), t.startupMs(), t.modelMs(), t.toolsMs(), t.outputMs(), t.retryMs(),
                 t.saveMs(), t.attempts(), tools.toString()};
     }
@@ -64,7 +64,10 @@ abstract class AbstractJdbcTurnTimingStore implements TurnTimingStore {
             return List.of();
         }
         String in = String.join(", ", sessionIds.stream().map(s -> "?").toList());
-        return jdbc.query("SELECT * FROM turn_timing" + readFinal() + " WHERE session_id IN (" + in + ") ORDER BY started_at",
-                mapper, sessionIds.toArray());
+        List<Object> args = new ArrayList<>(sessionIds.size() + 1);
+        args.add(TenantSchema.company());
+        args.addAll(sessionIds);
+        return jdbc.query("SELECT * FROM turn_timing" + readFinal() + " WHERE company_id = ? AND session_id IN (" + in + ") ORDER BY started_at",
+                mapper, args.toArray());
     }
 }

@@ -1,5 +1,6 @@
 package com.superagent.agent.memory;
 
+import com.superagent.platform.tenant.CompanyService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,9 +32,12 @@ public class AgentMemoryLoop {
         return t;
     });
 
-    public AgentMemoryLoop(AgentMemoryService service,
+    private final CompanyService companies;
+
+    public AgentMemoryLoop(CompanyService companies, AgentMemoryService service,
                            @Value("${superagent.memory.enabled:true}") boolean enabled,
                            @Value("${superagent.memory.interval-minutes:5}") long intervalMinutes) {
+        this.companies = companies;
         this.service = service;
         this.enabled = enabled;
         this.intervalMinutes = Math.max(1, intervalMinutes);
@@ -45,7 +49,7 @@ public class AgentMemoryLoop {
             log.info("agent memory disabled");
             return;
         }
-        scheduler.scheduleWithFixedDelay(this::tick, intervalMinutes, intervalMinutes, TimeUnit.MINUTES);
+        scheduler.scheduleWithFixedDelay(() -> companies.forEach(this::tick), intervalMinutes, intervalMinutes, TimeUnit.MINUTES);
         log.info("agent memory job started (every {} min)", intervalMinutes);
     }
 

@@ -1,5 +1,7 @@
 package com.superagent.orchestrator;
 
+import com.superagent.core.tenant.CompanyStarted;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.platform.provider.CredentialService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -115,7 +117,7 @@ public class SuperAgentService {
 
     /** Marks a delivery of received messages; such rounds can't touch the team or its tasks. */
     static final String EXTERNAL = "【外部消息】";
-    static final Set<String> ACTING_TOOLS = Set.of("hire_member", "update_member", "assign_task", "reply_task");
+    static final Set<String> ACTING_TOOLS = Set.of("hire_member", "update_member", "place_member", "assign_task", "reply_task");
     static final List<String> EXTERNAL_ROUND_TOOLS = BACKGROUND_TOOLS.stream()
             .filter(t -> !ACTING_TOOLS.contains(t.substring("mcp__superagent__".length()))).toList();
 
@@ -128,7 +130,18 @@ public class SuperAgentService {
     private static final int SUMMARY_CHARS = 300;
 
     /** A member as the tools describe it. */
-    record TeamMember(String id, String name, String persona, String model, List<String> skillIds, boolean hired) {
+    record TeamMember(String id, String name, String persona, String model, List<String> skillIds, boolean hired,
+                      String project, String parent) {
+    }
+
+    /** Clears a member's project or parent when given as its value. */
+    static final String NONE = "none";
+
+    private com.superagent.project.ProjectService projects; // null in tests: no projects
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setProjects(com.superagent.project.ProjectService projects) {
+        this.projects = projects;
     }
 
     private final AgentService agents;
@@ -316,13 +329,13 @@ public class SuperAgentService {
         if (running.putIfAbsent(owner, last) != null) {
             return;
         }
-        executor.execute(() -> {
+        executor.execute(TenantContext.wrap(() -> {
             try {
                 runRound(owner, sa, pending, last);
             } finally {
                 running.remove(owner);
             }
-        });
+        }));
     }
 
     /** How one attempt at a round went; {@code error} set + blank {@code text} = it failed. */
@@ -431,7 +444,7 @@ public class SuperAgentService {
     /** Where things stand, for a round or a chat turn: the plan and the team. */
     String statusLines(String owner) {
         StringBuilder sb = new StringBuilder();
-        SuperAgentState s = states.find(owner).orElseThrow();
+        SuperAgentState s = ensureState(owner); // a new user's first chat comes before any state was kept
         sb.append("## 当前状态\n- 计划：");
         if (s.planId() == null) {
             sb.append("无");
@@ -544,10 +557,72 @@ public class SuperAgentService {
 
     /** The user's agents other than the SuperAgent itself: its own hires and the user's own agents alike. */
     private List<TeamMember> team(String owner, Agent sa) {
+        Map<String, String> projectOf = new HashMap<>();
+        projects(owner).forEach(p -> p.agentIds().forEach(id -> projectOf.put(id, p.name())));
         return agents.owned(owner).stream().filter(a -> !a.isSuper())
-                .map(a -> new TeamMember(a.id(), a.name(), AgentCharacters.systemPrompt(a), a.model(),
-                        skills.agentSkillIds(a.id()), sa.id().equals(a.managedBy())))
+                .map(a -> {
+                    String parent = agents.parentOf(a.id());
+                    return new TeamMember(a.id(), a.name(), AgentCharacters.systemPrompt(a), a.model(),
+                            skills.agentSkillIds(a.id()), sa.id().equals(a.managedBy()), projectOf.get(a.id()),
+                            parent == null ? null : agents.findName(parent));
+                })
                 .toList();
+    }
+
+    /** The projects the owner is in, active ones first. */
+    List<com.superagent.api.project.ProjectDto> projects(String owner) {
+        return projects == null ? List.of() : projects.list(owner);
+    }
+
+    /**
+     * Puts a member into a project and under a parent agent, as the user asked: {@code projectId} / {@code parentId}
+     * null leaves that as it is, {@value #NONE} takes it away. Checked before anything changes.
+     */
+    Agent place(String owner, String memberId, String projectId, String parentId) {
+        Agent a = member(owner, memberId);
+        checkPlace(owner, a.id(), projectId, parentId);
+        applyPlace(owner, a.id(), projectId, parentId);
+        String where = describePlace(owner, a.id());
+        logSuper(owner, "info", "调整成员「" + a.name() + "」的归属", where);
+        return a;
+    }
+
+    private void checkPlace(String owner, String agentId, String projectId, String parentId) {
+        if (projectId != null && !NONE.equals(projectId)) {
+            if (projects == null) {
+                throw new IllegalArgumentException("项目功能不可用");
+            }
+            var p = projects.get(projectId, owner); // not a member: not found
+            if (!"active".equals(p.status())) {
+                throw new IllegalArgumentException("项目「" + p.name() + "」已归档，不能再放入 Agent");
+            }
+        }
+        if (parentId != null && !NONE.equals(parentId)) {
+            Agent above = agents.require(parentId, owner);
+            if (above.isSuper()) {
+                throw new IllegalArgumentException("你本来就带领所有成员，不用把自己设为上级；不设上级即可（传 none）");
+            }
+            if (above.id().equals(agentId)) {
+                throw new IllegalArgumentException("成员不能做自己的上级");
+            }
+        }
+    }
+
+    private void applyPlace(String owner, String agentId, String projectId, String parentId) {
+        if (projectId != null && projects != null) {
+            projects.setAgentProject(agentId, owner, NONE.equals(projectId) ? null : projectId);
+        }
+        if (parentId != null) {
+            agents.setParent(agentId, owner, NONE.equals(parentId) ? null : parentId);
+        }
+    }
+
+    /** "项目 X · 上级 Y" for a member, for the run log and tool replies. */
+    String describePlace(String owner, String agentId) {
+        String project = projects(owner).stream().filter(p -> p.agentIds().contains(agentId))
+                .map(com.superagent.api.project.ProjectDto::name).findFirst().orElse(null);
+        String parent = agents.parentOf(agentId);
+        return "项目：" + (project == null ? "无" : project) + "；上级：" + (parent == null ? "无（直接由你带领）" : agents.findName(parent));
     }
 
     /** Records a new plan for the user to approve; any earlier plan is replaced. */
@@ -576,6 +651,12 @@ public class SuperAgentService {
     }
 
     Agent hire(String owner, String name, String persona, String avatar, String model, List<String> skillIds) {
+        return hire(owner, name, persona, avatar, model, skillIds, null, null);
+    }
+
+    /** As above, straight into {@code projectId} and under {@code parentId} (either null: none). */
+    Agent hire(String owner, String name, String persona, String avatar, String model, List<String> skillIds,
+               String projectId, String parentId) {
         requireApproved(owner);
         Agent sa = agents.ensureSuperAgent(owner);
         if (team(owner, sa).size() >= teamLimit) {
@@ -585,7 +666,9 @@ public class SuperAgentService {
         if (team(owner, sa).stream().anyMatch(m -> m.name().equalsIgnoreCase(name == null ? "" : name.strip()))) {
             throw new IllegalArgumentException("A member named " + name + " already exists; re-brief them instead");
         }
+        checkPlace(owner, null, projectId, parentId); // before hiring, so a wrong project or parent hires no one
         Agent hired = agents.createTeamMember(owner, sa.id(), name, avatar, persona, model, skillIds);
+        applyPlace(owner, hired.id(), projectId, parentId);
         logSuper(owner, "info", "招入成员「" + hired.name() + "」", persona);
         return hired;
     }
@@ -710,7 +793,7 @@ public class SuperAgentService {
      * Work assigned before the history existed has no record; rebuild it from the tasks themselves (their brief
      * names the member). Plans and in-between events weren't kept, so those stay empty. Safe to repeat.
      */
-    @EventListener(ApplicationReadyEvent.class)
+    @EventListener(CompanyStarted.class)
     void backfillWork() {
         int added = 0;
         for (Task t : tasks.listTasks()) {

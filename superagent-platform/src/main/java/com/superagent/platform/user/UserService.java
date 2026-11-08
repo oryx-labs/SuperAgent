@@ -2,9 +2,12 @@ package com.superagent.platform.user;
 
 import com.superagent.api.user.SaveUserRequest;
 import com.superagent.api.user.UserDto;
+import com.superagent.core.tenant.Company;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserSource;
 import com.superagent.core.user.UserStore;
+import com.superagent.platform.tenant.QuotaService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,9 +36,11 @@ public class UserService {
     private final UserStore users;
     private final PasswordEncoder encoder;
     private final String adminUsername;
+    private final QuotaService quotas;
 
-    public UserService(UserStore users, PasswordEncoder encoder,
+    public UserService(UserStore users, PasswordEncoder encoder, QuotaService quotas,
                        @Value("${superagent.auth.admin.username:admin}") String adminUsername) {
+        this.quotas = quotas;
         this.users = users;
         this.encoder = encoder;
         this.adminUsername = adminUsername;
@@ -44,7 +49,7 @@ public class UserService {
     /** Everyone who can sign in: the configured administrator first, then the provisioned users. */
     public List<UserDto> list() {
         List<UserDto> out = new ArrayList<>();
-        if (users.findByUsername(adminUsername).isEmpty()) {
+        if (Company.DEFAULT_ID.equals(TenantContext.require()) && users.findByUsername(adminUsername).isEmpty()) {
             out.add(new UserDto("config:" + adminUsername, adminUsername, null, List.of("ADMIN"), true, null, null,
                     CONFIG_SOURCE, null));
         }
@@ -57,9 +62,11 @@ public class UserService {
         if (username.isEmpty()) {
             throw new IllegalArgumentException("username is required");
         }
-        if (users.findByUsername(username).isPresent() || username.equals(adminUsername)) {
+        // Usernames are unique across companies: signing in with one is how the company is known.
+        if (users.companyOfUsername(username).isPresent() || username.equals(adminUsername)) {
             throw new UsernameTakenException(username);
         }
+        quotas.checkCanAddUser(users.listUsers().size());
         UserSource source = parseSource(request.source());
         if (source == UserSource.PHONE && blankToNull(request.phone()) == null) {
             throw new IllegalArgumentException("phone is required");
@@ -85,7 +92,8 @@ public class UserService {
         String username = clean(request.username());
         if (username.isEmpty()) {
             username = existing.username();
-        } else if (!username.equals(existing.username()) && users.findByUsername(username).isPresent()) {
+        } else if (!username.equals(existing.username())
+                && (users.companyOfUsername(username).isPresent() || username.equals(adminUsername))) {
             throw new UsernameTakenException(username);
         }
         UserSource source = request.source() == null || request.source().isBlank()

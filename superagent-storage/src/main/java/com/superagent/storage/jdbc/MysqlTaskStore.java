@@ -11,6 +11,7 @@ public class MysqlTaskStore extends AbstractJdbcTaskStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS task (
+              company_id    VARCHAR(64)   NOT NULL,
               id            VARCHAR(64)   NOT NULL,
               title         VARCHAR(512)  NOT NULL,
               brief         MEDIUMTEXT,
@@ -30,8 +31,8 @@ public class MysqlTaskStore extends AbstractJdbcTaskStore {
               started_at    DATETIME(3),
               finished_at   DATETIME(3),
               updated_at    DATETIME(3)   NOT NULL,
-              PRIMARY KEY (id),
-              KEY idx_task_created (created_at)
+              PRIMARY KEY (company_id, id),
+              KEY idx_task_created (company_id, created_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 
@@ -65,7 +66,7 @@ public class MysqlTaskStore extends AbstractJdbcTaskStore {
 
     @Override
     public Task save(Task t) {
-        jdbc.update("INSERT INTO task " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        jdbc.update("INSERT INTO task " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON DUPLICATE KEY UPDATE title=VALUES(title), brief=VALUES(brief), source=VALUES(source), "
                         + "repo=VALUES(repo), branch=VALUES(branch), flow=VALUES(flow), status=VALUES(status), "
                         + "progress=VALUES(progress), spend=VALUES(spend), model=VALUES(model), "
@@ -78,6 +79,6 @@ public class MysqlTaskStore extends AbstractJdbcTaskStore {
 
     @Override
     public void delete(String id) {
-        jdbc.update("DELETE FROM task WHERE id = ?", id);
+        jdbc.update("DELETE FROM task WHERE company_id = ? AND id = ?", TenantSchema.company(), id);
     }
 }

@@ -2,7 +2,9 @@ package com.superagent.storage.jdbc;
 
 import com.superagent.core.file.WorkFile;
 import com.superagent.core.file.WorkFileKind;
+import com.superagent.core.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -11,6 +13,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ExtendWith(InCompany.class)
 class WorkFileStoreTest {
 
     private static WorkFile file(String id, String owner, String agent, String task, String origin, Instant at) {
@@ -44,5 +47,17 @@ class WorkFileStoreTest {
         store.link("b", "s1", "m1"); // idempotent
         assertThat(store.messages(List.of("b", "c"))).containsOnlyKeys("b");
         assertThat(store.messages(List.of("b")).get("b")).containsExactlyInAnyOrder("m1", "m2"); // once each
+
+        TenantContext.run(InCompany.OTHER, () -> {
+            assertThat(store.find("b")).isEmpty();
+            assertThat(store.listFor("bob", List.of("shared"))).isEmpty();
+            assertThat(store.untagged(10)).isEmpty();
+            assertThat(store.countByStorage()).isEmpty();
+            assertThat(store.messages(List.of("b"))).isEmpty();
+            store.save(file("b", "carol", null, null, WorkFile.ORIGIN_CHAT, t));
+            store.link("b", "s9", "m9");
+        });
+        assertThat(store.find("b").orElseThrow().owner()).isEqualTo("bob");
+        assertThat(store.messages(List.of("b")).get("b")).containsExactlyInAnyOrder("m1", "m2");
     }
 }

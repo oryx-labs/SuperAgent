@@ -1,5 +1,6 @@
 package com.superagent.agent.memory;
 
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.platform.provider.CredentialService;
 import com.superagent.agent.log.AgentLogService;
 import com.superagent.core.agent.Agent;
@@ -276,7 +277,7 @@ public class AgentMemoryService {
      * thresholds — called when the agent moves to a fresh session.
      */
     public void consolidateSoon(Agent agent) {
-        soon.execute(() -> {
+        soon.execute(TenantContext.wrap(() -> {
             List<ChatMessage> fresh = undistilled(agent);
             if (fresh.isEmpty() || !inFlight.add(agent.id())) {
                 return;
@@ -288,7 +289,7 @@ public class AgentMemoryService {
             } finally {
                 inFlight.remove(agent.id());
             }
-        });
+        }));
     }
 
     private List<ChatMessage> undistilled(Agent agent) {

@@ -3,6 +3,7 @@ package com.superagent.files;
 import com.superagent.core.file.FileStore;
 import com.superagent.core.file.FileStoreProvider;
 import com.superagent.core.file.WorkFile;
+import com.superagent.core.tenant.TenantPaths;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -16,7 +17,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** The default store: the server's own disk, {@code <files dir>/<id>/content}. Needs no settings. */
+/**
+ * The default store: the server's own disk, {@code <files dir>/<companyId>/<id>/content}. Needs no settings. The
+ * company is taken from the context on every access, so a store is never able to reach another company's files.
+ */
 @Component
 public class LocalFileStoreProvider implements FileStoreProvider {
 
@@ -55,8 +59,9 @@ public class LocalFileStoreProvider implements FileStoreProvider {
         }
 
         private Path path(String id) {
-            Path p = root.resolve(id).resolve("content").normalize();
-            if (!p.startsWith(root) || id.isBlank() || id.contains("/") || id.contains("\\") || id.startsWith(".")) {
+            Path company = TenantPaths.of(root);
+            Path p = company.resolve(id).resolve("content").normalize();
+            if (!p.startsWith(company) || id.isBlank() || id.contains("/") || id.contains("\\") || id.startsWith(".")) {
                 throw new IllegalArgumentException("Bad file id: " + id);
             }
             return p;

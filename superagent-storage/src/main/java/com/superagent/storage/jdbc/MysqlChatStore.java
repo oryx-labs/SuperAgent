@@ -18,6 +18,7 @@ public class MysqlChatStore extends AbstractJdbcChatStore {
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS chat_session (
+              company_id       VARCHAR(64)  NOT NULL,
               id               VARCHAR(64)  NOT NULL,
               title            VARCHAR(255),
               agent_type       VARCHAR(32)  NOT NULL,
@@ -27,30 +28,32 @@ public class MysqlChatStore extends AbstractJdbcChatStore {
               status           VARCHAR(32)  NOT NULL,
               created_at       DATETIME(3)  NOT NULL,
               updated_at       DATETIME(3)  NOT NULL,
-              PRIMARY KEY (id),
-              KEY idx_session_updated (updated_at)
+              PRIMARY KEY (company_id, id),
+              KEY idx_session_updated (company_id, updated_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
             """
             CREATE TABLE IF NOT EXISTS chat_message (
+              company_id VARCHAR(64) NOT NULL,
               id         VARCHAR(64) NOT NULL,
               session_id VARCHAR(64) NOT NULL,
               role       VARCHAR(16) NOT NULL,
               content    MEDIUMTEXT,
               created_at DATETIME(3) NOT NULL,
-              PRIMARY KEY (id),
-              KEY idx_message_session (session_id, created_at)
+              PRIMARY KEY (company_id, id),
+              KEY idx_message_session (company_id, session_id, created_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
             """
             CREATE TABLE IF NOT EXISTS agent_event (
+              company_id VARCHAR(64) NOT NULL,
               session_id VARCHAR(64) NOT NULL,
               message_id VARCHAR(64),
               seq        BIGINT      NOT NULL,
               type       VARCHAR(32) NOT NULL,
               payload    MEDIUMTEXT,
               created_at DATETIME(3) NOT NULL,
-              KEY idx_event_session (session_id, created_at, seq)
+              KEY idx_event_session (company_id, session_id, created_at, seq)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 
@@ -81,12 +84,13 @@ public class MysqlChatStore extends AbstractJdbcChatStore {
     @Override
     public void updateSession(ChatSession s) {
         jdbc.update("UPDATE chat_session SET title = ?, agent_type = ?, agent_session_id = ?, status = ?, updated_at = ? "
-                        + "WHERE id = ?",
+                        + "WHERE company_id = ? AND id = ?",
                 s.title() == null ? "" : s.title(),
                 s.agentType().name(),
                 s.agentSessionId() == null ? "" : s.agentSessionId(),
                 s.status().name(),
                 java.time.LocalDateTime.ofInstant(s.updatedAt(), java.time.ZoneOffset.UTC),
+                TenantSchema.company(),
                 s.id());
     }
 }
