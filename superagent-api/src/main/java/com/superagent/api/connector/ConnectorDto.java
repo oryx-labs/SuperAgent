@@ -42,5 +42,14 @@ public record ConnectorDto(
          * Comes with the system (SuperAgent's own, the messaging apps, the built-in MCP connectors): it can't be edited
          * or deleted, only turned on and off. Only connectors an administrator added are theirs to change.
          */
-        boolean system) {
+        boolean system,
+        /**
+         * The company side is in place so employees can authorize: an OAuth app, or (Confluence) the site address,
+         * under System Settings. True when there is nothing to set up.
+         */
+        boolean setUp,
+        /** Confluence: the site address, so people know where to make their token; null otherwise. */
+        String site,
+        /** Authorizing takes an account name with the token (Confluence Cloud: the employee's email). */
+        boolean needsAccount) {
 }

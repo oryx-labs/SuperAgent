@@ -258,7 +258,7 @@ const more = computed(() => [
       <div class="sa-wrap">
         <div class="sa-cta__panel">
           <h2>{{ t('给公司一个真正用得起来的 AI', 'Give your company AI it will actually use') }}</h2>
-          <p>{{ t('开源、自托管,部署一次,全员可用。', 'Open source and self-hosted. Deploy once for everyone.') }}</p>
+          <p>{{ t('源码公开、免费使用、自托管,部署一次,全员可用。', 'Source available, free to use and self-hosted. Deploy once for everyone.') }}</p>
           <div class="sa-actions">
             <a class="sa-btn sa-btn--white" :href="demo" target="_blank" rel="noreferrer">{{ t('在线体验', 'Try the live demo') }}</a>
             <a class="sa-btn sa-btn--clear" :href="docsStart">{{ t('部署指南', 'Deployment guide') }}</a>

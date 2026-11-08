@@ -1,0 +1,957 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SuperAgent 产品思考</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one reading column; the two figures break out to a wide canvas that scrolls sideways on phones.
+   Palette follows the product UI: neutral greys with the logo blue, used only for what this architecture adds. */
+:root {
+  --paper: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #14171d;
+  --muted: #5a606c;
+  --line: #dde0e6;
+  --line-strong: #b9bec8;
+  --brand: #2457f5;
+  --brand-ink: #1a3fb8;
+  --brand-soft: #e9effe;
+  --brand-line: #a9bdf8;
+  --trust-hi: #f0f4fe;
+  --trust-mid: #f0f1f4;
+  --trust-low: #fff5ea;
+  --trust-low-line: #d99a55;
+
+  --font-ui: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #0f1115;
+    --surface: #171a20;
+    --ink: #e7e9ee;
+    --muted: #9aa1ad;
+    --line: #2a2f38;
+    --line-strong: #3d4450;
+    --brand: #7f9dff;
+    --brand-ink: #a9bcff;
+    --brand-soft: #1b2440;
+    --brand-line: #3a4f8f;
+    --trust-hi: #141b2e;
+    --trust-mid: #1b1e25;
+    --trust-low: #2a1f13;
+    --trust-low-line: #a8743a;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0f1115;
+  --surface: #171a20;
+  --ink: #e7e9ee;
+  --muted: #9aa1ad;
+  --line: #2a2f38;
+  --line-strong: #3d4450;
+  --brand: #7f9dff;
+  --brand-ink: #a9bcff;
+  --brand-soft: #1b2440;
+  --brand-line: #3a4f8f;
+  --trust-hi: #141b2e;
+  --trust-mid: #1b1e25;
+  --trust-low: #2a1f13;
+  --trust-low-line: #a8743a;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.65;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.page { max-width: 1180px; margin: 0 auto; padding-block: 40px 72px; display: grid; gap: 44px; }
+.prose { max-width: none; }
+h1 { font-size: 30px; line-height: 1.25; margin: 0 0 10px; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-size: 19px; line-height: 1.35; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; }
+.lede { color: var(--muted); }
+.eyebrow { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+section { display: grid; gap: 14px; }
+
+/* ---------- figure shell ---------- */
+figure { margin: 0; display: grid; gap: 10px; }
+.canvas { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 18px; }
+figcaption { font-size: 13px; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12.5px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 18px; height: 12px; border: 1px solid var(--line-strong); background: var(--surface); display: inline-block; }
+.sw--new { background: var(--brand-soft); border-color: var(--brand); }
+.sw--plan { background: transparent; border-style: dashed; }
+.sw--hi { background: var(--trust-hi); border-color: var(--brand-line); }
+.sw--mid { background: var(--trust-mid); }
+.sw--low { background: var(--trust-low); border: 1px dashed var(--trust-low-line); }
+
+/* ---------- figure 1: the layered stack ---------- */
+.arch { display: grid; grid-template-columns: minmax(0, 1fr) 176px; gap: 12px; min-width: 1100px; }
+.stack { display: grid; }
+.layer { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; }
+.layer-name {
+  background: var(--ink); color: var(--paper); border-radius: 3px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  text-align: center; padding: 10px 6px; font-weight: 600; font-size: 14px; line-height: 1.3;
+}
+.layer-name small { font-weight: 400; font-size: 11px; opacity: 0.72; }
+.layer-body { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 3px; padding: 10px; display: grid; gap: 8px; }
+.layer--control .layer-body { background: var(--trust-hi); border-color: var(--brand-line); }
+.layer--run .layer-body { background: var(--trust-mid); }
+.row { display: grid; gap: 8px; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); }
+.group { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; }
+.group-name { display: flex; align-items: center; justify-content: center; text-align: center; font-size: 12px; color: var(--muted); border-right: 1px solid var(--line-strong); padding-right: 6px; line-height: 1.35; }
+.cell {
+  border: 1px solid var(--line-strong); background: var(--surface); border-radius: 2px;
+  padding: 7px 10px; min-height: 46px; display: flex; flex-direction: column; justify-content: center; gap: 1px;
+}
+.cell b { font-size: 13px; font-weight: 600; line-height: 1.35; }
+.cell span { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+.cell--new { background: var(--brand-soft); border-color: var(--brand); }
+.cell--new b { color: var(--brand-ink); }
+.cell--plan { background: transparent; border-style: dashed; }
+.cell--plan b { color: var(--muted); }
+.link {
+  display: flex; align-items: center; gap: 10px; margin-left: 102px; padding: 7px 0;
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--muted);
+}
+.link svg { flex: none; width: 10px; height: 22px; }
+.link svg path { stroke: var(--line-strong); fill: none; stroke-width: 1.4; }
+.link b { font-weight: 500; color: var(--ink); }
+
+/* nodes inside the runtime layer */
+.node { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 2px; padding: 8px; display: grid; gap: 7px; }
+.node-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; font-weight: 600; }
+.tag { font-family: var(--font-mono); font-size: 11px; font-weight: 500; padding: 0 6px; border: 1px solid var(--brand); color: var(--brand-ink); background: var(--brand-soft); border-radius: 2px; }
+.tag--plain { border-color: var(--line-strong); color: var(--muted); background: transparent; }
+.node-body { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 7px; }
+.node-left { display: grid; gap: 7px; }
+.node .cell { min-height: 40px; padding: 5px 8px; }
+.sandboxes { border: 1px dashed var(--trust-low-line); background: var(--trust-low); border-radius: 2px; padding: 6px; display: grid; gap: 5px; }
+.sandboxes > small { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.3; }
+.sbx { border: 1px solid var(--trust-low-line); background: var(--surface); border-radius: 2px; padding: 3px 8px; font-size: 12px; line-height: 1.45; }
+.sbx em { display: block; font-style: normal; color: var(--muted); font-size: 11px; }
+
+/* the column that runs through every layer */
+.side { display: grid; grid-template-rows: auto 1fr 1fr; gap: 10px; }
+.side-title { background: var(--ink); color: var(--paper); border-radius: 3px; text-align: center; font-weight: 600; font-size: 14px; padding: 10px 6px; }
+.side-box { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 3px; padding: 10px; display: grid; gap: 7px; align-content: start; }
+.side-box h3 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+.side-box .cell { min-height: 0; }
+
+/* ---------- figure 2: multi-machine deployment (inline SVG) ---------- */
+.deploy { display: block; width: 100%; min-width: 1080px; height: auto; }
+.deploy text { font-family: var(--font-ui); fill: var(--ink); font-size: 13px; }
+.deploy .t-s { fill: var(--muted); font-size: 11.5px; }
+.deploy .t-b { font-weight: 600; }
+.deploy .t-zone { font-weight: 600; font-size: 13px; fill: var(--muted); letter-spacing: 0.02em; paint-order: stroke; stroke: var(--trust-mid); stroke-width: 8px; stroke-linejoin: round; }
+.deploy .t-zone--hi { stroke: var(--trust-hi); }
+.deploy .t-brand { fill: var(--brand-ink); }
+.deploy .t-mono { font-family: var(--font-mono); font-size: 11.5px; }
+.deploy .zone-hi { fill: var(--trust-hi); stroke: var(--brand-line); }
+.deploy .zone-run { fill: var(--trust-mid); stroke: var(--line-strong); }
+.deploy .zone-ext { fill: none; stroke: var(--line-strong); stroke-dasharray: 5 4; }
+.deploy .box { fill: var(--surface); stroke: var(--line-strong); }
+.deploy .box-new { fill: var(--brand-soft); stroke: var(--brand); }
+.deploy .box-mid { fill: var(--trust-mid); stroke: var(--line-strong); }
+.deploy .zone-low { fill: var(--trust-low); stroke: var(--trust-low-line); stroke-dasharray: 5 3; }
+.deploy .sbx { fill: var(--surface); stroke: var(--trust-low-line); }
+.deploy .ln { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.deploy .ln-brand { stroke: var(--brand); stroke-width: 1.5; fill: none; }
+.deploy .ln-warm { stroke: var(--trust-low-line); stroke-width: 1.5; fill: none; stroke-dasharray: 6 4; }
+.deploy .ah { fill: var(--muted); }
+.deploy .ah-brand { fill: var(--brand); }
+.deploy .ah-warm { fill: var(--trust-low-line); }
+.deploy .badge { fill: var(--ink); }
+.deploy .badge-t { fill: var(--paper); font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
+
+ol.flows { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 14px; }
+ol.flows li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+ol.flows .n { width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--paper); font-family: var(--font-mono); font-size: 11px; display: inline-grid; place-items: center; transform: translateY(3px); }
+
+/* ---------- tables ---------- */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 860px; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); line-height: 1.55; }
+th { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.04em; background: var(--paper); }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+.pill { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.pill--hi { background: var(--brand-soft); color: var(--brand-ink); }
+.pill--mid { background: var(--trust-mid); color: var(--muted); border: 1px solid var(--line-strong); }
+.pill--low { background: var(--trust-low); color: var(--ink); border: 1px dashed var(--trust-low-line); }
+
+.modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.mode { border-top: 2px solid var(--ink); padding-top: 10px; display: grid; gap: 6px; align-content: start; }
+.mode h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.mode p { font-size: 14px; color: var(--muted); }
+@media (max-width: 720px) {
+  .modes { grid-template-columns: 1fr; }
+  h1 { font-size: 25px; }
+}
+
+/* ---------- document ---------- */
+.doc-head { display: grid; gap: 14px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 4px 0 0; font-size: 13px; }
+.meta div { display: flex; gap: 8px; }
+.meta dt { color: var(--muted); }
+.meta dd { margin: 0; font-weight: 500; }
+.toc { border-top: 2px solid var(--ink); border-bottom: 1px solid var(--line); padding-block: 12px 14px; }
+.toc-title { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.toc ol { margin: 0; padding-left: 22px; columns: 5 150px; column-gap: 24px; font-size: 14px; }
+.toc li { break-inside: avoid; padding-block: 2px; }
+.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+.toc a:hover, .toc a:focus-visible { color: var(--brand-ink); border-color: var(--brand); outline: none; }
+section[id] { scroll-margin-top: 16px; }
+section[id] > h2 { font-size: 23px; display: flex; align-items: baseline; gap: 12px; margin: 0; padding-top: 6px; border-top: 1px solid var(--line); padding-block-start: 22px; }
+.num { font-family: var(--font-mono); font-size: 14px; font-weight: 500; color: var(--brand-ink); min-width: 1.6em; }
+h3 { font-size: 16.5px; font-weight: 600; margin: 14px 0 0; text-wrap: balance; }
+.stack-text { display: grid; gap: 10px; }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--trust-mid); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+td code { white-space: nowrap; }
+ul.tight, ol.tight { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.tag-inline { font-family: var(--font-mono); font-size: 11px; font-weight: 500; vertical-align: 2px; padding: 1px 6px; border: 1px solid var(--line-strong); color: var(--muted); border-radius: 2px; margin-left: 6px; }
+.goals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--line); border-left: 1px solid var(--line); background: var(--surface); }
+.goal { padding: 14px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; gap: 4px; align-content: start; }
+.goal b { font-size: 14.5px; }
+.goal span { font-size: 13.5px; color: var(--muted); line-height: 1.55; }
+table.terms td:first-child, table.modules td:first-child { white-space: nowrap; }
+td.lv { font-family: var(--font-mono); font-weight: 500; color: var(--muted); }
+pre.code { margin: 0; overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; font-size: 13px; line-height: 1.6; }
+pre.code code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; }
+.note { font-size: 13.5px; color: var(--muted); border-left: 2px solid var(--line-strong); padding-left: 12px; }
+ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: st; display: grid; gap: 10px; }
+ol.steps li { counter-increment: st; position: relative; padding-left: 36px; font-size: 14.5px; }
+ol.steps li::before { content: counter(st); position: absolute; left: 0; top: 1px; font-family: var(--font-mono); font-size: 12px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line-strong); display: grid; place-items: center; color: var(--muted); }
+ol.phases { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; border-top: 1px solid var(--line); }
+ol.phases li { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 16px; padding-block: 14px; border-bottom: 1px solid var(--line); }
+.ph { font-family: var(--font-mono); font-size: 12.5px; color: var(--brand-ink); padding-top: 2px; }
+ol.phases div { display: grid; gap: 4px; }
+ol.phases b { font-size: 15px; }
+ol.phases span:not(.ph) { font-size: 14px; color: var(--muted); }
+
+/* sequence diagram */
+.seq { display: block; width: 100%; min-width: 1040px; height: auto; }
+.seq text { font-family: var(--font-ui); fill: var(--ink); font-size: 13px; }
+.seq .t-b { font-weight: 600; }
+.seq .t-s { fill: var(--muted); font-size: 11.5px; }
+.seq .m { font-size: 12px; fill: var(--ink); }
+.seq .halo { paint-order: stroke; stroke: var(--surface); stroke-width: 7px; stroke-linejoin: round; }
+.seq .lane { fill: var(--surface); stroke: var(--line-strong); }
+.seq .lane-hi { fill: var(--trust-hi); stroke: var(--brand-line); }
+.seq .lane-mid { fill: var(--trust-mid); stroke: var(--line-strong); }
+.seq .lane-low { fill: var(--trust-low); stroke: var(--trust-low-line); stroke-dasharray: 5 3; }
+.seq .life { stroke: var(--line-strong); stroke-dasharray: 3 4; }
+.seq .msg { stroke: var(--muted); stroke-width: 1.5; }
+.seq .msg-b { stroke: var(--brand); stroke-width: 1.5; }
+.seq .ret { stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.seq .note { fill: var(--surface); stroke: var(--line-strong); }
+.seq .ah { fill: var(--muted); }
+.seq .ah-brand { fill: var(--brand); }
+@media (max-width: 720px) {
+  .goals { grid-template-columns: 1fr; }
+  ol.phases li { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* section 2: three tiers, components, rationale */
+.tiers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tier { border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); padding: 14px 16px; display: grid; gap: 10px; align-content: start; }
+.tier--hi { background: var(--trust-hi); border-color: var(--brand-line); }
+.tier--mid { background: var(--trust-mid); }
+.tier--low { background: var(--trust-low); border: 1px dashed var(--trust-low-line); }
+.tier-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.tier-head b { font-size: 17px; }
+.tier-n { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+.tier-head .pill { margin-left: auto; }
+.tier-what { font-size: 14px; font-weight: 500; }
+.tier dl { margin: 0; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px 10px; font-size: 13.5px; }
+.tier dt { color: var(--muted); }
+.tier dd { margin: 0; line-height: 1.55; }
+table.comps td:nth-child(2) { font-weight: 600; white-space: nowrap; }
+table.comps td:first-child { font-weight: 400; }
+table.comps tr.grp td { background: var(--paper); font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; color: var(--muted); letter-spacing: 0.06em; padding-block: 6px; }
+.why { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border-top: 2px solid var(--ink); }
+.why div { padding: 12px 16px 12px 0; display: grid; gap: 4px; align-content: start; }
+.why div + div { padding-left: 16px; border-left: 1px solid var(--line); }
+.why b { font-size: 14.5px; }
+.why span { font-size: 13.5px; color: var(--muted); line-height: 1.55; }
+@media (max-width: 860px) {
+  .tiers, .why { grid-template-columns: 1fr; }
+  .why div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); }
+}
+
+/* ---------- product essay ---------- */
+.quote { font-size: 19px; font-weight: 600; border-left: 3px solid var(--brand); padding: 4px 0 4px 16px; margin: 6px 0; color: var(--ink); }
+.statement { border-top: 2px solid var(--ink); border-bottom: 1px solid var(--line); padding-block: 22px; display: grid; gap: 8px; }
+.statement-main { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+.statement-sub { font-size: 17px; color: var(--muted); }
+table.pos td.me { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
+table.pos th:last-child { color: var(--brand-ink); }
+.beliefs { display: grid; gap: 0; border-top: 1px solid var(--line); }
+.belief { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px; padding-block: 18px; border-bottom: 1px solid var(--line); }
+.b-n { font-family: var(--font-mono); font-size: 22px; font-weight: 500; color: var(--brand-ink); line-height: 1.2; }
+.b-body { display: grid; gap: 6px; }
+.b-body h3 { margin: 0; font-size: 17px; }
+.b-body p { color: var(--ink); }
+ol.values { margin: 0; padding: 0; list-style: none; display: grid; border-top: 2px solid var(--ink); }
+ol.values li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; padding-block: 12px; border-bottom: 1px solid var(--line); }
+.v-n { font-family: var(--font-mono); font-size: 15px; width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: var(--paper); display: grid; place-items: center; }
+ol.values div { display: grid; gap: 2px; }
+ol.values b { font-size: 16px; }
+ol.values span:not(.v-n) { color: var(--muted); font-size: 14.5px; }
+.persp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.p-col { border: 1px solid var(--line); background: var(--surface); border-radius: 4px; padding: 14px 16px; }
+.p-head { font-weight: 600; font-size: 15px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+.p-col ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+.loop { display: block; width: 100%; min-width: 980px; height: auto; }
+.loop text { font-family: var(--font-ui); fill: var(--ink); font-size: 13px; }
+.loop .t-b { font-weight: 600; font-size: 14.5px; }
+.loop .t-s { fill: var(--muted); font-size: 12px; }
+.loop .t-brand { fill: var(--brand-ink); }
+.loop .m { font-size: 12px; fill: var(--muted); }
+.loop .lbox { fill: var(--surface); stroke: var(--line-strong); }
+.loop .lbox-hi { fill: var(--brand-soft); stroke: var(--brand); }
+.loop .ln { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.loop .ln-brand { stroke: var(--brand); stroke-width: 1.6; fill: none; }
+.loop .ah { fill: var(--muted); }
+.loop .ah-brand { fill: var(--brand); }
+ol.day { margin: 0; padding: 0; list-style: none; display: grid; border-left: 2px solid var(--line-strong); margin-left: 6px; }
+ol.day li { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 14px; padding: 10px 0 10px 18px; position: relative; }
+ol.day li::before { content: ""; position: absolute; left: -6px; top: 17px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid var(--brand); }
+ol.day .t { font-family: var(--font-mono); font-size: 13px; color: var(--brand-ink); padding-top: 1px; }
+ol.day div { display: grid; gap: 2px; }
+ol.day span:not(.t) { color: var(--muted); font-size: 14.5px; }
+.nots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); border-left: 1px solid var(--line); background: var(--surface); }
+.nots div { padding: 14px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; gap: 4px; align-content: start; }
+.nots b { font-size: 15px; }
+.nots span { font-size: 14px; color: var(--muted); }
+ul.open { margin: 0; padding-left: 20px; display: grid; gap: 10px; }
+ul.open b { margin-right: 6px; }
+.closing { font-size: 17px; font-weight: 500; border-top: 2px solid var(--ink); padding-top: 18px; margin-top: 10px; }
+@media (max-width: 860px) {
+  .persp, .nots { grid-template-columns: 1fr; }
+  .belief { grid-template-columns: 1fr; gap: 6px; }
+  ol.day li { grid-template-columns: 1fr; gap: 2px; }
+  .statement-main { font-size: 24px; }
+}
+
+.dep { display: inline-block; margin-top: 4px; font-size: 12.5px; font-weight: 500; color: var(--brand-ink); background: var(--brand-soft); border: 1px solid var(--brand-line); border-radius: 3px; padding: 1px 8px; justify-self: start; }
+ol.day .t { white-space: nowrap; }
+ol.day li { grid-template-columns: 92px minmax(0, 1fr); }
+.boss { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.boss-card { border: 1px solid var(--line); background: var(--surface); border-radius: 4px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; }
+.boss-q { font-weight: 600; font-size: 15.5px; }
+ol.boss-flow { margin: 0; padding-left: 20px; display: grid; gap: 5px; font-size: 14px; }
+.boss-a { font-size: 14px; color: var(--brand-ink); border-top: 1px solid var(--line); padding-top: 8px; }
+@media (max-width: 860px) { .boss { grid-template-columns: 1fr; } }
+
+h4 { font-size: 15px; font-weight: 600; margin: 10px 0 0; padding-left: 10px; border-left: 3px solid var(--ink); }
+ol.boss-flow--row { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; counter-reset: bf; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+ol.boss-flow--row li { counter-increment: bf; padding: 12px 16px 12px 44px; position: relative; display: grid; gap: 2px; }
+ol.boss-flow--row li + li { border-left: 1px solid var(--line); }
+ol.boss-flow--row li::before { content: counter(bf); position: absolute; left: 14px; top: 13px; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--paper); font-family: var(--font-mono); font-size: 11px; display: grid; place-items: center; }
+ol.boss-flow--row span { font-size: 13.5px; color: var(--muted); }
+.trend { display: block; width: 100%; min-width: 900px; height: auto; }
+.trend text { font-family: var(--font-ui); font-size: 12.5px; }
+.trend .axis { stroke: var(--line-strong); stroke-width: 1.2; }
+.trend .grid { stroke: var(--line); stroke-dasharray: 3 4; }
+.trend .ax { fill: var(--muted); font-size: 12px; }
+.trend .stage { fill: var(--muted); font-size: 12.5px; font-weight: 500; }
+.trend .c-auto { fill: none; stroke: var(--brand); stroke-width: 2.4; }
+.trend .c-human { fill: none; stroke: var(--ink); stroke-width: 2; }
+.trend .c-cost { fill: none; stroke: var(--trust-low-line); stroke-width: 2; stroke-dasharray: 7 5; }
+.trend .d-auto { fill: var(--brand); }
+.trend .d-human { fill: var(--ink); }
+.trend .d-cost { fill: var(--trust-low-line); }
+.trend .l-auto { fill: var(--brand-ink); font-weight: 600; }
+.trend .l-human { fill: var(--ink); font-weight: 600; }
+.trend .l-cost { fill: var(--trust-low-line); font-weight: 600; }
+.stages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.stage-card { border-top: 2px solid var(--line-strong); padding-top: 10px; display: grid; gap: 4px; align-content: start; }
+.stage-card:last-child { border-top-color: var(--brand); }
+.stage-n { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; color: var(--muted); }
+.stage-card b { font-size: 15px; }
+.stage-card span { font-size: 14px; color: var(--muted); }
+table.cost td:first-child { width: 150px; }
+@media (max-width: 860px) {
+  ol.boss-flow--row, .stages { grid-template-columns: 1fr; }
+  ol.boss-flow--row li + li { border-left: 0; border-top: 1px solid var(--line); }
+}
+
+.forces { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.force { border: 1px solid var(--line); background: var(--surface); border-radius: 4px; padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+.force--hi { background: var(--brand-soft); border-color: var(--brand); }
+.force--hi b { color: var(--brand-ink); }
+.force b { font-size: 15.5px; }
+.force span { font-size: 14px; color: var(--muted); }
+ol.ladder { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
+ol.ladder li { display: grid; gap: 8px; align-content: start; border-top: 3px solid var(--line-strong); padding-top: 10px; }
+ol.ladder li:nth-child(1) { margin-top: 54px; }
+ol.ladder li:nth-child(2) { margin-top: 36px; border-top-color: var(--brand-line); }
+ol.ladder li:nth-child(3) { margin-top: 18px; border-top-color: var(--brand); }
+ol.ladder li:nth-child(4) { border-top-color: var(--brand-ink); }
+.lv-n { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+ol.ladder div { display: grid; gap: 4px; }
+ol.ladder b { font-size: 15px; }
+ol.ladder span:not(.lv-n) { font-size: 14px; color: var(--muted); }
+@media (max-width: 860px) {
+  .forces, ol.ladder { grid-template-columns: 1fr; }
+  ol.ladder li { margin-top: 0 !important; }
+}
+
+.boss--one { grid-template-columns: minmax(0, 1fr); max-width: 640px; }
+.gov { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+.gov-col { padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+.gov-col + .gov-col { border-left: 1px solid var(--line); }
+.gov-head { font-weight: 600; font-size: 16px; }
+.gov-what { font-size: 13.5px; color: var(--brand-ink); padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.gov-col ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13.5px; }
+.soon { display: inline-block; margin-left: 6px; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: 2px; padding: 0 5px; vertical-align: 1px; }
+@media (max-width: 960px) {
+  .gov { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gov-col:nth-child(3) { border-left: 0; }
+  .gov-col:nth-child(n+3) { border-top: 1px solid var(--line); }
+}
+@media (max-width: 600px) {
+  .gov { grid-template-columns: 1fr; }
+  .gov-col + .gov-col { border-left: 0; border-top: 1px solid var(--line); }
+}
+</style>
+
+</head>
+<body>
+<div class="page">
+  <header class="doc-head">
+    <div class="eyebrow">产品思考 · 2026-11</div>
+    <h1>SuperAgent：让 AI 的工作留在公司里</h1>
+  </header>
+
+  <nav class="toc" aria-label="目录">
+    <div class="toc-title">目录</div>
+    <ol>
+      <li><a href="#p1">一个观察</a></li>
+      <li><a href="#p2">个人助手的局限</a></li>
+      <li><a href="#p3">产品定位</a></li>
+      <li><a href="#p4">九个产品判断</a></li>
+      <li><a href="#p5">产品价值</a></li>
+      <li><a href="#p6">三个场景</a></li>
+      <li><a href="#goal">长期目标</a></li>
+      <li><a href="#p7">我们不做什么</a></li>
+      <li><a href="#p8">还在想的问题</a></li>
+    </ol>
+  </nav>
+
+  <!-- 1 -->
+  <section id="p1">
+    <h2><span class="num">1</span>一个观察</h2>
+    <div class="prose stack-text">
+      <p>今天几乎每家公司都有人在用 AI。有人用它写代码，有人用它改方案，有人用它整理会议纪要。效率确实上去了，可是我越看越觉得哪里不对：<b>AI 在公司里，是一个人一个人地在用。</b></p>
+      <p>每个人有自己的账号、自己的对话、自己慢慢摸索出来的提示词和做法。张三花了一个月调教出一套写周报的方法，李四完全不知道；王五离职了，他和 AI 一起做过的所有东西，跟着他的账号一起消失了。</p>
+      <p>公司表面上「用上了 AI」，但这些能力没有一样属于公司。它们散落在每个人的电脑里，没法共享，没法积累，也没法交接。</p>
+      <p class="quote">AI 让每个人都变快了，公司却没有因此变得更强。</p>
+      <p>SuperAgent 要做的，是一个<b>让 AI 的工作留在公司里</b>的系统。</p>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section id="p2">
+    <h2><span class="num">2</span>个人助手的局限</h2>
+    <div class="prose stack-text">
+      <p>个人助手是为一个人设计的，而公司是一群人一起做事。把它原样搬进公司，会遇到五个结构性的问题：</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>问题</th><th>在公司里是什么样子</th></tr></thead>
+        <tbody>
+          <tr><td>工作跟着人走</td><td>对话、上下文、做出来的文件都在个人账号里。有人转岗或离职，公司只能从头再来。</td></tr>
+          <tr><td>没法接着别人做</td><td>同一件事，同事没法和同一个 AI 一起推进；接手的人也接不上前任的进度。</td></tr>
+          <tr><td>什么都沉淀不下来</td><td>一个人摸索出的好方法，变不成团队或公司能复用的东西，每个人都在重复摸索。</td></tr>
+          <tr><td>成本分散</td><td>每个人自己订阅，或者干脆用不上；所有事情都用最贵的模型，没人知道钱花在了哪里。</td></tr>
+          <tr><td>公司看不见</td><td>AI 做了什么、动了哪些数据，公司一概不知，也没法让人在关键处拍板。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose stack-text">
+      <p>这五个问题有一个共同的根源：<b>工作发生在个人的地方</b>。只要工作还在个人账号里发生，再好的助手也解决不了它们。</p>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section id="p3">
+    <h2><span class="num">3</span>产品定位</h2>
+    <div class="statement">
+      <div class="statement-main">企业的 AI 协作工作系统</div>
+      <div class="statement-sub">全员与 AI 在一个系统里协作，工作沉淀为公司资产。</div>
+    </div>
+    <div class="prose stack-text">
+      <ul class="tight">
+        <li><b>企业的</b>：从公司和公司员工的角度设计。用户是员工，主人是公司。</li>
+        <li><b>协作</b>：人和人、人和 AI、AI 和 AI 在同一个地方一起把事做完。协作是它最先被感受到的价值。</li>
+        <li><b>工作系统</b>：它是干活的地方。我刻意不用「办公」两个字，因为它和飞书、钉钉是互补的：沟通、日程、审批留在那里，用 AI 干活、沉淀成果在这里，两边接起来用。</li>
+        <li><b>沉淀为公司资产</b>：这是它存在的根本理由。协作是过程，沉淀是结果。</li>
+      </ul>
+    </div>
+
+    <h3>3.1 它在什么位置</h3>
+    <div class="table-wrap">
+      <table class="pos">
+        <thead><tr><th></th><th>个人 AI 助手</th><th>办公协同套件</th><th>SuperAgent</th></tr></thead>
+        <tbody>
+          <tr><td>服务谁</td><td>一个人</td><td>全公司</td><td class="me">全公司和每位员工</td></tr>
+          <tr><td>核心是什么</td><td>回答和生成</td><td>沟通、文档、流程</td><td class="me">AI 把活干完</td></tr>
+          <tr><td>工作成果去哪</td><td>个人账号</td><td>文档和群聊</td><td class="me">公司的文件、Agent、技能</td></tr>
+          <tr><td>和别人一起</td><td>各用各的</td><td>人和人协作</td><td class="me">人和 AI 一起协作，可以交接</td></tr>
+          <tr><td>AI 的角色</td><td>工具</td><td>附加功能</td><td class="me">同事，有记忆、有分工</td></tr>
+          <tr><td>模型</td><td>通常是自家模型</td><td>由平台选定</td><td class="me">厂商中立，按任务选模型</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>3.2 它是工作平台，不是 AI 平台</h3>
+    <div class="prose stack-text">
+      <p>SuperAgent 的品类是<b>公司的工作平台</b>。这条线决定了做什么，也决定了怎么衡量做得好不好。</p>
+    </div>
+    <div class="table-wrap">
+      <table class="pos">
+        <thead><tr><th></th><th>AI 智能体 / 工作流平台</th><th>SuperAgent</th></tr></thead>
+        <tbody>
+          <tr><td>谁在用</td><td>搭建者：开发、AI 工程师</td><td class="me">公司的每一位员工</td></tr>
+          <tr><td>用来做什么</td><td>搭出一个 Agent 或一个应用</td><td class="me">把手上的工作做完</td></tr>
+          <tr><td>交付的是什么</td><td>一个能跑的 AI 应用</td><td class="me">做完的事和留下的资产</td></tr>
+          <tr><td>怎么衡量好坏</td><td>AI 能力有多强、能搭多复杂</td><td class="me">做完了多少事、人效提升了多少</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose stack-text">
+      <p>所以，AI 能力的每一次增强，在 SuperAgent 里都应该体现为某件具体的工作做得更快、更好、更少要人管，而不是多一个给人去配置的 AI 功能。</p>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section id="p4">
+    <h2><span class="num">4</span>九个产品判断</h2>
+
+    <div class="beliefs">
+      <article class="belief">
+        <div class="b-n">01</div>
+        <div class="b-body">
+          <h3>工作在哪里发生，资产就留在哪里</h3>
+          <p>沉淀不是事后整理出来的。要求员工把成果「上传到知识库」，几乎没人做；只有让工作本身就在公司的系统里发生，成果才会自然留下。所以 SuperAgent 首先是一个大家每天都愿意来干活的地方，沉淀是这件事的副产品。Agent 产出的文件、员工发来的资料，都自动归档到「文件」里，不需要谁额外动手。</p>
+        </div>
+      </article>
+      <article class="belief">
+        <div class="b-n">02</div>
+        <div class="b-body">
+          <h3>Agent 是同事，不是工具</h3>
+          <p>工具用完就放下，同事会记得上次做到哪里。所以 Agent 有自己的性格和长期记忆，可以被几个人一起用，人离开了它还在。员工交接时，交出去的不只是一堆文件，还有一个熟悉这摊事的 Agent。Agent 的设定、记忆和文件属于公司，这是「资产」最具体的样子。</p>
+        </div>
+      </article>
+      <article class="belief">
+        <div class="b-n">03</div>
+        <div class="b-body">
+          <h3>对话里商量，任务里干活</h3>
+          <p>聊天应该随时能回应。如果一件要花十分钟的事在聊天里一直跑着，人就只能干等。所以对话负责理解和商量，需要读资料、写东西、跑多步的活，就开成任务去做，做完把结果送回对话。人说完需求可以去做别的，这是把 AI 当同事而不是当计算器的前提。</p>
+        </div>
+      </article>
+      <article class="belief">
+        <div class="b-n">04</div>
+        <div class="b-body">
+          <h3>每个人都应该有一个负责人</h3>
+          <p>员工不应该需要知道「这件事该找哪个 Agent」。每个人有一个专属的 SuperAgent：听他说要什么，把事情拆开，交给合适的 Agent 或开成任务，再跟进结果。SuperAgent 自己不埋头干活，它的价值是分发和跟进。别的 Agent 只能自己干活或开任务；分发是 SuperAgent 独有的能力。</p>
+        </div>
+      </article>
+      <article class="belief">
+        <div class="b-n">05</div>
+        <div class="b-body">
+          <h3>方法比答案更值钱</h3>
+          <p>一次好的回答只帮了一次忙，一个好的方法可以被用一千次。所以「技能」是一等公民：一个人摸索出来的做法，比如怎么写行动营的 PPT、怎么做代码评审，可以存成个人技能，好用的再升级成公司技能，挂给需要的 Agent。高手的经验由此变成全员的默认能力。</p>
+        </div>
+      </article>
+      <article class="belief">
+        <div class="b-n">06</div>
+        <div class="b-body">
+          <h3>人拍板，AI 干活</h3>
+          <p>AI 可以替人做很多事，但不该替人做决定。组建团队、执行计划、需要选择的关键节点，都停下来等人确认，而且确认要轻：一个按钮就够，不用来回解释。人始终知道 AI 在做什么、为什么这样做，这是人敢把事情交给它的前提。</p>
+        </div>
+      </article>
+      <article class="belief">
+        <div class="b-n">07</div>
+        <div class="b-body">
+          <h3>不绑定任何一家模型厂商</h3>
+          <p>SuperAgent 对模型厂商保持中立。Claude、GPT、DeepSeek、Kimi、通义千问、GLM，以及客户自己的模型网关和私有部署的模型，都可以接进来一起用。每一类工作，用当下最合适的那一家：难的交给最强的，日常的交给又好又便宜的。模型格局变化很快，今天最好的明天未必最好；公司积累的文件、记忆和技能属于公司，不属于任何一家模型，换模型时一样都不会丢。</p>
+        </div>
+      </article>
+      <article class="belief">
+        <div class="b-n">08</div>
+        <div class="b-body">
+          <h3>默认就该省</h3>
+          <p>大部分工作不需要最强的模型。因为不绑定厂商，系统可以在所有接入的模型里，按任务难度自动选最便宜但够用的那个；做不好再升一档。每个任务花了多少、为什么选这个模型，都看得见。员工不需要懂模型，也不需要为了省钱而少用。</p>
+        </div>
+      </article>
+      <article class="belief">
+        <div class="b-n">09</div>
+        <div class="b-body">
+          <h3>消息是原料，待办才是结果</h3>
+          <p>飞书、钉钉里每天有大量消息，真正需要你做的事藏在里面。SuperAgent 替你看消息、分轻重：紧急的马上告诉你，需要你做的变成待办，其余的汇总成每日简报。打开 SuperAgent，首页看到的不是消息列表，而是需要你处理的事。我也有意让它不追求即时：消息按批处理，因为大多数事情并不需要立刻回应。</p>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section id="p5">
+    <h2><span class="num">5</span>产品价值</h2>
+    <ol class="values">
+      <li><span class="v-n">1</span><div><b>沉淀资产</b><span>所有人在一个系统里工作，成果自动留在公司：文件、带记忆的 Agent、技能。人会变，资产不会丢。</span></div></li>
+      <li><span class="v-n">2</span><div><b>协作与交接</b><span>多人和同一个 Agent 推进同一件事；每个人的 SuperAgent 带一个小团队；人离开时，Agent 和上下文交给下一个人继续。</span></div></li>
+      <li><span class="v-n">3</span><div><b>方法复用</b><span>个人和公司两级技能，把一个人的好方法变成所有人的默认做法。</span></div></li>
+      <li><span class="v-n">4</span><div><b>成本可控</b><span>入职就有 AI 可用，不用个人订阅；不绑定模型厂商，按任务难度在各家模型里选最划算的；每一分花费都能追到具体的任务和模型。</span></div></li>
+      <li><span class="v-n">5</span><div><b>看得见、用得安全</b><span>关键决定由人拍板；权限和运行日志让公司知道 AI 做了什么；Agent 只能碰它该碰的东西。</span></div></li>
+    </ol>
+
+    <h3>5.1 对不同的人意味着什么</h3>
+    <div class="persp">
+      <div class="p-col">
+        <div class="p-head">对员工</div>
+        <ul>
+          <li>入职第一天就有能干活的 AI 同事</li>
+          <li>说一句要什么，有人拆、有人做、有人跟进</li>
+          <li>不用自己摸索，直接用公司沉淀好的方法</li>
+          <li>接手别人的工作时，有一个熟悉情况的 Agent</li>
+        </ul>
+      </div>
+      <div class="p-col">
+        <div class="p-head">对团队</div>
+        <ul>
+          <li>同一件事，大家围绕同一个 Agent 推进</li>
+          <li>好做法写成技能，新人马上就能用</li>
+          <li>成果集中在一处，不再散落在各人电脑里</li>
+          <li>有人请假或离开，工作不会断</li>
+        </ul>
+      </div>
+      <div class="p-col">
+        <div class="p-head">对公司</div>
+        <ul>
+          <li>AI 带来的能力真正属于公司，并且越用越多</li>
+          <li>花在 AI 上的钱有去处、有依据，可以优化</li>
+          <li>知道 AI 在做什么，关键处有人把关</li>
+          <li>数据和成果在公司自己手里</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>5.2 价值是怎样累积的</h3>
+    <figure>
+      <div class="canvas">
+        <svg class="loop" viewBox="0 0 1100 300" role="img" aria-label="工作与资产的循环：员工提出要做的事，SuperAgent 分发，Agent 和任务把活做完，产出沉淀为文件、记忆和技能，这些资产让下一次工作更快更好。">
+          <defs>
+            <marker id="la" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0 10 5 0 10z"/></marker>
+            <marker id="lb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah-brand" d="M0 0 10 5 0 10z"/></marker>
+          </defs>
+          <rect class="lbox" x="30" y="70" width="190" height="100" rx="3"/>
+          <text class="t-b" x="125" y="112" text-anchor="middle">员工</text>
+          <text class="t-s" x="125" y="136" text-anchor="middle">说要做什么</text>
+
+          <rect class="lbox" x="300" y="70" width="190" height="100" rx="3"/>
+          <text class="t-b" x="395" y="112" text-anchor="middle">SuperAgent</text>
+          <text class="t-s" x="395" y="136" text-anchor="middle">拆解 · 分发 · 跟进</text>
+
+          <rect class="lbox" x="570" y="70" width="190" height="100" rx="3"/>
+          <text class="t-b" x="665" y="112" text-anchor="middle">Agent 与任务</text>
+          <text class="t-s" x="665" y="136" text-anchor="middle">把活做完 · 人在关键处拍板</text>
+
+          <rect class="lbox-hi" x="840" y="50" width="230" height="140" rx="3"/>
+          <text class="t-b t-brand" x="955" y="88" text-anchor="middle">公司资产</text>
+          <text class="t-s" x="955" y="114" text-anchor="middle">文件 · 自动归档</text>
+          <text class="t-s" x="955" y="136" text-anchor="middle">Agent 记忆 · 留在公司</text>
+          <text class="t-s" x="955" y="158" text-anchor="middle">技能 · 个人和公司两级</text>
+
+          <line class="ln" x1="220" y1="120" x2="298" y2="120" marker-end="url(#la)"/>
+          <text class="m" x="259" y="110" text-anchor="middle">需求</text>
+          <line class="ln" x1="490" y1="120" x2="568" y2="120" marker-end="url(#la)"/>
+          <text class="m" x="529" y="110" text-anchor="middle">分派</text>
+          <line class="ln" x1="760" y1="120" x2="838" y2="120" marker-end="url(#la)"/>
+          <text class="m" x="799" y="110" text-anchor="middle">沉淀</text>
+
+          <polyline class="ln-brand" points="955,190 955,250 125,250 125,172" marker-end="url(#lb)"/>
+          <text class="m t-brand" x="540" y="272" text-anchor="middle">下一次工作更快、更好：用上已有的文件、记忆和方法</text>
+        </svg>
+      </div>
+      <figcaption>工作和资产形成循环。每完成一件事，公司就多一点东西；每多一点东西，下一件事就做得更好。个人助手的价值停在个人身上，SuperAgent 的价值会累积。</figcaption>
+    </figure>
+  </section>
+
+  <!-- 6 -->
+  <section id="p6">
+    <h2><span class="num">6</span>三个场景</h2>
+
+    <h3>6.1 一个员工：从入职到离职，再到下一个人接手</h3>
+    <div class="prose stack-text">
+      <p>小林是一家软件公司的产品经理。</p>
+    </div>
+    <ol class="day">
+      <li><span class="t">入职第一天</span><div><b>打开就能用</b><span>管理员把她加进系统，飞书账号按手机号自动关联上。她登录后，就有一个自己的 SuperAgent，模型、Key 都是公司配好的，不用自己订阅、配置任何东西。公司已有的技能（写 PRD、做方案 PPT、竞品分析）她直接就能用。</span></div></li>
+      <li><span class="t">第一周</span><div><b>边干边熟悉</b><span>她让 SuperAgent 帮她整理前任留下的需求文档，又让它总结最近一个月群里关于这个产品的讨论。SuperAgent 交给成员去做，结果回到对话里。</span><span class="dep">沉淀 · 整理好的文档进入她的「文件」，自动归档</span></div></li>
+      <li><span class="t">日常</span><div><b>和 AI 一起干活</b><span>每天打开待办页：要确认的、要处理的、做完的一目了然；飞书消息已经分好了轻重。她说一句「根据上周的访谈做一份方案 PPT」，SuperAgent 交给「方案助手」去做，她去开会。</span><span class="dep">沉淀 · 方案和访谈资料归档在「方案」文件夹；Agent 记住了她改过的偏好</span></div></li>
+      <li><span class="t">第三个月</span><div><b>好方法变成公司的</b><span>她摸索出一套写客户访谈纪要的方法，让 Agent 存成技能。团队试用后觉得好，管理员把它升级成公司技能，所有人的 Agent 都能用上。</span><span class="dep">沉淀 · 个人技能，再升级为公司技能</span></div></li>
+      <li><span class="t">一年后</span><div><b>转岗</b><span>她调去另一个产品线。她用过的 Agent、它们的记忆、全部文件都留在公司，没有一样跟着她的账号走。</span></div></li>
+      <li><span class="t">接手当天</span><div><b>下一个人接着做</b><span>接手的小周被加进这些 Agent。他打开对话，看到小林一年里的方案、访谈资料、客户偏好，Agent 也还记得这些客户的习惯。他问 Agent「上次报价为什么改了」，Agent 能讲清楚来龙去脉。第二天，他就在前任的基础上继续推进。</span><span class="dep">沉淀 · 交接的是一个熟悉情况的 Agent，而不只是一堆文件</span></div></li>
+    </ol>
+
+    <h3>6.2 一个项目：从开始到收尾</h3>
+    <div class="prose stack-text">
+      <p>产品团队要给客户做一个新的数据看板，小林牵头，参与的还有开发小王和设计小陈。</p>
+    </div>
+    <ol class="day">
+      <li><span class="t">启动</span><div><b>说清楚要做什么</b><span>小林对 SuperAgent 说：「我们要给 A 客户做一个数据看板，下个月交付。」SuperAgent 先问了几个关键问题，然后提出计划：需要哪些成员（需求分析、开发、测试各一个 Agent，复用已有的就不新建），拆成哪些任务、分别交给谁。小林在计划卡片上点「确认执行」。</span></div></li>
+      <li><span class="t">拉人进来</span><div><b>一起围绕同一个 Agent</b><span>小林把小王和小陈邀请进「看板项目」这个 Agent，三个人在同一个对话里讨论，谁都不用重新交代背景。</span><span class="dep">沉淀 · 项目的讨论和决定都在这个 Agent 里，它会记住</span></div></li>
+      <li><span class="t">Agent 干活</span><div><b>需求到交付</b><span>需求分析 Agent 写出 PRD，等小林确认；开发任务按「需求、开发、验收」三个阶段跑，代码推到公司的 Git 仓库；遇到要拍板的地方停下来，在待办里一键确认。每个任务按难度自动选模型，花了多少都看得见。</span><span class="dep">沉淀 · PRD、设计稿说明、测试报告自动归档到项目文件夹</span></div></li>
+      <li><span class="t">外部消息</span><div><b>客户的反馈不漏</b><span>客户在飞书群里提了修改意见。SuperAgent 识别出这是要团队做的事，提了一个修改计划请小林确认，确认后分给对应的 Agent。</span></div></li>
+      <li><span class="t">收尾</span><div><b>留下能复用的东西</b><span>项目交付后，小林让 Agent 总结这次的做法。好用的流程存成「数据看板项目」技能，下一个类似项目直接套用。</span><span class="dep">沉淀 · 项目文件、Agent 的记忆、新技能都留在公司</span></div></li>
+      <li><span class="t">下一个项目</span><div><b>不是从零开始</b><span>半年后另一个团队接到类似需求。他们的 SuperAgent 找到了这个技能，也能参考上一个项目留下的文件，第一周就拿出了方案。</span></div></li>
+    </ol>
+
+    <h3>6.3 公司负责人看到的样子</h3>
+    <div class="prose stack-text">
+      <p>老陈是这家公司的负责人。他不需要懂模型，也不需要管每个人怎么用 AI。</p>
+    </div>
+
+    <h4>省事：部署一次，全员可用</h4>
+    <ol class="boss-flow boss-flow--row">
+      <li><b>IT 部署一次</b><span>配好公司的模型 Key 和飞书应用</span></li>
+      <li><b>新员工入职</b><span>加进系统，飞书按手机号自动关联</span></li>
+      <li><b>登录就能干活</b><span>有自己的 SuperAgent 和公司的全部技能，不用订阅、不用配置</span></li>
+    </ol>
+
+    <h4>越用越省</h4>
+    <div class="prose stack-text">
+      <p>AI 的成本问题，往往不是单价太贵，而是花得没有章法：每个人各自订阅，什么事都用最贵的模型，同一个问题被不同的人反复摸索。SuperAgent 把成本优化做成系统自己的事，不需要谁去盯着。</p>
+    </div>
+    <div class="table-wrap">
+      <table class="cost">
+        <thead><tr><th>省在哪里</th><th>系统怎么做</th></tr></thead>
+        <tbody>
+          <tr><td>不再重复订阅</td><td>全公司用统一的模型 Key，员工不再各自订阅、各自报销；离职员工的订阅也不会忘了取消。</td></tr>
+          <tr><td>不绑定一家</td><td>各家模型都能接进来，包括客户自己的模型网关和私有部署的模型。哪家在这类工作上又好又便宜就用哪家，厂商降价、出了新模型，马上就能用上。</td></tr>
+          <tr><td>用对模型</td><td>每个任务执行前按难度自动选最便宜但够用的模型，做不好再逐级升档。大部分日常工作，用不到最贵的模型。</td></tr>
+          <tr><td>少走弯路</td><td>技能和记忆让 Agent 一开始就知道该怎么做，不用每次从头摸索；同样的事，用的轮次和 token 都更少。积累越多，这一项省得越多。</td></tr>
+          <tr><td>不白花钱</td><td>多个 Key 自动轮换，失败自动切换，不让请求浪费在失败和重试上；任务卡住时由看门狗及时处理。</td></tr>
+          <tr><td>花得清楚</td><td>每一次模型调用都记到具体的人、任务和模型上；每个任务为什么选这个模型都有记录。哪里花得多，一眼就能看到，也能针对性地调整价格和策略。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="boss-a prose">成本优化不需要员工懂模型，也不需要员工为了省钱而少用。用得越多、积累越多，每件事的平均成本越低。</p>
+
+    <h4>攒得下，不怕交接</h4>
+    <div class="boss boss--one">
+      <div class="boss-card">
+        <div class="boss-q">公司攒下了什么？</div>
+        <ol class="boss-flow">
+          <li>所有工作成果都在公司的「文件」里，按人、按主题归档</li>
+          <li>Agent 和它们的记忆属于公司，人员变动时直接交接</li>
+          <li>好方法沉淀成公司技能，新人入职第一天就能用上</li>
+        </ol>
+        <p class="boss-a">人员流动不再意味着从头再来，公司做事的能力在持续累积。</p>
+      </div>
+    </div>
+
+    <h4>看得清，管得住</h4>
+    <div class="prose stack-text">
+      <p>全公司的 AI 使用情况，负责人都看得到：谁在用、用了多少、花了多少、做成了什么、卡在哪里。心里有底，也就知道该从哪里优化流程和成本。</p>
+    </div>
+    <div class="gov">
+      <div class="gov-col">
+        <div class="gov-head">审计</div>
+        <span class="gov-what">AI 做过的每件事都查得到</span>
+        <ul>
+          <li>每个 Agent 都有运行日志：会话、每一轮、记忆的变化、SuperAgent 的决定</li>
+          <li>每次模型调用都记到具体的人、任务和模型上</li>
+          <li>每个任务为什么选了这个模型，都有记录</li>
+        </ul>
+      </div>
+      <div class="gov-col">
+        <div class="gov-head">分析</div>
+        <span class="gov-what">全公司的使用情况一目了然</span>
+        <ul>
+          <li>活跃人数、任务量、成功率，每天的走势</li>
+          <li>按人、按模型看用量和花费，每个人的明细都能展开</li>
+          <li>回复和任务的耗时分段，看出时间花在哪</li>
+          <li>按部门、按流程透视，找出哪里用得好、哪里卡住<span class="soon">规划</span></li>
+        </ul>
+      </div>
+      <div class="gov-col">
+        <div class="gov-head">管控</div>
+        <span class="gov-what">关键处有人把关，用量有边界</span>
+        <ul>
+          <li>组建团队、执行计划、关键选择，都要员工确认后才继续</li>
+          <li>权限按人分：员工只看得到自己和所在 Agent 的东西</li>
+          <li>模型、价格由公司统一配置，可以关掉不该用的模型</li>
+          <li>按公司、部门、员工设预算和配额<span class="soon">规划</span></li>
+        </ul>
+      </div>
+      <div class="gov-col">
+        <div class="gov-head">治理</div>
+        <span class="gov-what">AI 只碰它该碰的东西</span>
+        <ul>
+          <li>Key 和授权由公司统一管理，加密保存</li>
+          <li>员工用自己的账号授权外部工具，Agent 的权限不会超过员工本人</li>
+          <li>外部消息只当数据，里面的指令不会被执行</li>
+          <li>Agent 在隔离环境里运行，碰不到数据库和别人的东西<span class="soon">规划</span></li>
+        </ul>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="cost">
+        <thead><tr><th>看到了什么</th><th>可以怎么优化</th></tr></thead>
+        <tbody>
+          <tr><td>某类任务总在用最贵的模型</td><td>调整这类任务的选模型策略，或者关掉不必要的高价模型。</td></tr>
+          <tr><td>某个流程总卡在等人确认</td><td>把确认的标准写成技能，或者把它变成自动化，人只看结果。</td></tr>
+          <tr><td>同一件事很多人在反复做</td><td>把做得最好的那个人的方法沉淀成公司技能，推给所有人。</td></tr>
+          <tr><td>有的团队几乎不用</td><td>看看他们的工作适合哪些技能和 Agent，有针对性地推广。</td></tr>
+          <tr><td>某个 Agent 失败率高</td><td>查运行日志看原因，调整它的设定、技能或连接。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h4>越用越自动</h4>
+    <div class="prose stack-text">
+      <p>刚开始，人带着 AI 干活，很多步骤都要人确认。随着技能和记忆不断积累、连接的工具越来越多、团队对 Agent 越来越放心，需要人介入的地方会越来越少。很多流程，Agent 自己就能从头做到尾。</p>
+    </div>
+    <figure>
+      <div class="canvas">
+        <svg class="trend" viewBox="0 0 1000 330" role="img" aria-label="示意图：随着使用时间增加，Agent 自动完成的工作占比上升，需要人介入的程度下降，每件事的平均成本下降。">
+          <line class="axis" x1="70" y1="270" x2="950" y2="270"/>
+          <line class="axis" x1="70" y1="40" x2="70" y2="270"/>
+          <text class="ax" x="950" y="296" text-anchor="end">使用时间，积累越来越多 →</text>
+          <text class="ax" x="60" y="44" text-anchor="end">多</text>
+          <text class="ax" x="60" y="270" text-anchor="end">少</text>
+          <line class="grid" x1="363" y1="40" x2="363" y2="270"/>
+          <line class="grid" x1="656" y1="40" x2="656" y2="270"/>
+          <text class="stage" x="216" y="318" text-anchor="middle">人带着 AI 干</text>
+          <text class="stage" x="510" y="318" text-anchor="middle">AI 做完，人确认关键节点</text>
+          <text class="stage" x="803" y="318" text-anchor="middle">流程自动跑，人看结果</text>
+          <path class="c-auto" d="M70 240 C 260 232, 420 170, 560 120 S 820 66, 950 58"/>
+          <path class="c-human" d="M70 62 C 250 70, 420 130, 560 178 S 820 238, 950 246"/>
+          <path class="c-cost" d="M70 110 C 260 124, 420 168, 600 196 S 840 220, 950 224"/>
+          <circle class="d-auto" cx="950" cy="58" r="4"/>
+          <circle class="d-human" cx="950" cy="246" r="4"/>
+          <circle class="d-cost" cx="950" cy="224" r="4"/>
+          <text class="l-auto" x="940" y="48" text-anchor="end">Agent 自己完成的工作</text>
+          <text class="l-human" x="82" y="54">需要人介入的程度</text>
+          <text class="l-cost" x="82" y="102">每件事的平均成本</text>
+        </svg>
+      </div>
+      <figcaption>示意图，表达趋势，不是实测数据。积累的技能、记忆和工具，同时推动三条曲线：自动完成的越来越多，人要管的越来越少，每件事花的钱越来越少。</figcaption>
+    </figure>
+    <div class="stages">
+      <div class="stage-card">
+        <div class="stage-n">起步</div>
+        <b>人带着 AI 干</b>
+        <span>Agent 刚开始做公司的事，不熟悉做法和偏好。计划、关键步骤都由人确认，人也在一次次修改中把要求教给它。</span>
+      </div>
+      <div class="stage-card">
+        <div class="stage-n">积累</div>
+        <b>AI 做完，人确认关键节点</b>
+        <span>常做的事都有了技能，Agent 记住了团队的习惯。一件事 Agent 能独立做完，人只在交付前看一眼，或在真正要拍板的地方确认。</span>
+      </div>
+      <div class="stage-card">
+        <div class="stage-n">成熟</div>
+        <b>流程自动跑，人看结果</b>
+        <span>重复出现的流程变成自动化：定时生成周报、每天汇总客户反馈、代码提交后自动走验收。Agent 自己从头做到尾，人只看结果、处理例外。</span>
+      </div>
+    </div>
+    <div class="prose stack-text">
+      <p>自动化的前提是信任，而信任来自可见和可控。所以「人拍板」的原则不会被放弃：变少的是例行的确认，真正要人决定的事仍然回到人手里。每家公司、每类工作可以按自己的节奏放手。</p>
+    </div>
+
+  </section>
+
+  <!-- goal -->
+  <section id="goal">
+    <h2><span class="num">7</span>长期目标</h2>
+    <div class="statement">
+      <div class="statement-main">自动化 · 智能化 · 全天候</div>
+      <div class="statement-sub">同样的人，做更多的事；同样的事，需要更少的人。</div>
+    </div>
+    <div class="prose stack-text">
+      <p>今天，SuperAgent 帮每个人和 AI 一起把事做完；长期看，公司越来越多的工作由系统自己完成，人只负责方向、判断和例外。</p>
+      <ul class="tight">
+        <li><b>自动化</b>：重复出现的工作变成流程，Agent 自己从头做到尾，不再需要人一步步推动。</li>
+        <li><b>智能化</b>：系统越来越懂这家公司的业务、做法和偏好，交给它的事情可以越来越复杂、越来越少需要解释。</li>
+        <li><b>全天候</b>：工作不再受上下班时间限制。消息进来、事件发生、时间到了，Agent 随时接手处理；人第二天来看结果、做决定。</li>
+      </ul>
+    </div>
+
+    <h3>7.1 三股力量推着它往前走</h3>
+    <div class="forces">
+      <div class="force"><b>模型变强</b><span>模型能独立完成的工作越来越复杂，出错越来越少，成本越来越低。这一项来自外部，我们不用做，只要用好。</span></div>
+      <div class="force"><b>软件成熟</b><span>工具和连接越来越全，流程越来越稳，系统能可靠地替人走完一整件事。这一项是我们自己要做好的。</span></div>
+      <div class="force force--hi"><b>业务知识积累</b><span>技能、记忆、文件越攒越多，Agent 越来越懂这家公司。这一项只能在公司的日常工作里慢慢长出来，也是每家公司自己独有的。</span></div>
+    </div>
+    <div class="prose stack-text">
+      <p>三者缺一不可：模型再强，不懂公司的业务也做不好公司的事；业务知识攒得再多，没有成熟的工具也落不了地。第三股力量正是 SuperAgent 把「沉淀资产」放在第一位的原因：<b>今天攒下的每一份文件、每一条记忆、每一个技能，都是明天自动化的燃料。</b></p>
+    </div>
+
+    <h3>7.2 一步一步走过去</h3>
+    <ol class="ladder">
+      <li><span class="lv-n">1</span><div><b>人带着 AI 干</b><span>每一步人都在，AI 是得力的帮手。</span></div></li>
+      <li><span class="lv-n">2</span><div><b>AI 做完，人确认关键节点</b><span>常见的事 AI 能独立做完，人在交付前和需要拍板时介入。</span></div></li>
+      <li><span class="lv-n">3</span><div><b>流程自动跑，人看结果</b><span>重复的流程变成自动化，人只处理例外。</span></div></li>
+      <li><span class="lv-n">4</span><div><b>全天候运转，人定方向</b><span>系统持续地接收、处理、交付；人负责目标、判断，以及真正重要的决定。</span></div></li>
+    </ol>
+    <div class="prose stack-text">
+      <p>没有哪一步是一次跳过去的。每家公司、每类工作走到哪一步，取决于模型、工具和这家公司自己的积累，也取决于人对系统的信任。SuperAgent 要做的，是让每一步都走得稳，并让下一步自然到来。</p>
+    </div>
+
+    <h3>7.3 目标始终落在「工作」上</h3>
+    <div class="prose stack-text">
+      <p>往自动化、智能化走，很容易走成一个「AI 平台」：堆模型、堆能力、让人去搭。判断一件事该不该做，看三个问题：</p>
+      <ul class="tight">
+        <li>这件事让哪一项<b>具体的工作</b>做得更快、更好，或者更少要人管了？</li>
+        <li>它有没有让公司<b>攒下</b>更多东西，下一次能复用？</li>
+        <li>员工是否<b>不需要学任何 AI 知识</b>就能得到它的好处？</li>
+      </ul>
+      <p>三个问题都能回答「是」，才是 SuperAgent 该做的事。衡量进展的指标也一样：做完了多少事，每个人多做了多少，人要介入的地方少了多少。</p>
+    </div>
+  </section>
+
+  <!-- 7 -->
+  <section id="p7">
+    <h2><span class="num">8</span>我们不做什么</h2>
+    <div class="nots">
+      <div><b>不做个人助手</b><span>不为单个用户的私人生活和私人账号优化。所有设计都先问：这对公司和团队意味着什么。</span></div>
+      <div><b>不做办公套件</b><span>沟通、日程、审批交给飞书和钉钉，我们去接它们，而不是重做一套。</span></div>
+      <div><b>不做 AI 平台</b><span>不让员工去拖节点、连流程、搭 Agent。说清楚要什么，由 SuperAgent 和 Agent 去组织怎么做；AI 能力的提升，都落到具体的工作上。</span></div>
+      <div><b>不让 AI 替人拍板</b><span>关键决定一定回到人手里，哪怕这会让流程慢一点。</span></div>
+      <div><b>不追求处处即时</b><span>外部消息按轻重分批处理；花时间的活交给任务，不占着聊天。</span></div>
+      <div><b>不为了「智能」牺牲可靠</b><span>记忆宁缺毋滥，只记真正有用的；看不准的事宁可问一句，也不自作主张。</span></div>
+    </div>
+  </section>
+
+  <!-- 8 -->
+  <section id="p8">
+    <h2><span class="num">9</span>还在想的问题</h2>
+    <ul class="open">
+      <li><b>沉淀之后如何提炼？</b>今天资产主要是「存下来」：文件、记忆、技能。更进一步，是让系统自己从大量工作里提炼、归纳、汇总出知识，而不只是堆积。这件事难，但它是「资产越用越值钱」的关键。</li>
+      <li><b>交接怎样才算顺？</b>把 Agent 交给下一个人只是开始，怎么让接手的人在一小时内理解前任做到哪里、为什么这样做，还需要更好的设计。</li>
+      <li><b>怎样让价值被看见？</b>沉淀是慢的，员工往往感觉不到。需要一种方式，让人看到公司积累了什么、这些积累帮他省了多少事。</li>
+      <li><b>人和 AI 的边界在哪？</b>哪些事情应该停下来问人，哪些可以放手让 AI 做，这条线会随着信任的建立而移动，我还在找它该怎么移动。</li>
+      <li><b>一个 SuperAgent 能带多大的团队？</b>团队太大，管理本身就会变成负担。小而清晰的分工目前看是对的，但边界在哪里还不清楚。</li>
+    </ul>
+    <p class="closing prose">我相信，AI 在公司里真正的价值，在于让公司作为一个整体越来越会做事：今天让每个人和 AI 一起把事做完，明天让越来越多的事由系统自己做完。SuperAgent 想做的，就是这件事。</p>
+  </section>
+</div>
+</body>
+</html>

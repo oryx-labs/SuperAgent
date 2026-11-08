@@ -43,7 +43,16 @@ See the [capability map](./features) for everything it does today, and the [road
 
 ## Status
 
-SuperAgent is open source, self-hosted and iterating fast. The docs describe what works today; what isn't built yet is on the [roadmap](./roadmap).
+SuperAgent is source available, free to use, self-hosted and iterating fast. The docs describe what works today; what isn't built yet is on the [roadmap](./roadmap).
+
+## License
+
+SuperAgent is licensed under the [Apache License 2.0 with the Commons Clause](https://github.com/oryx-labs/SuperAgent/blob/main/LICENSE):
+
+- **Free to use** for individuals and inside your company, and you can modify it for your own use.
+- **Not for sale**: no reselling, no paid hosted service built on it, and no selling modified versions or products built mainly on it.
+
+Versions released before this license change remain under the plain Apache License 2.0.
 
 ## Next
 

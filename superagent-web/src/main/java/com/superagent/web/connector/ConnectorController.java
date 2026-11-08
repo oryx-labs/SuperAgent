@@ -74,7 +74,8 @@ public class ConnectorController {
     @PutMapping(ApiPaths.CONNECTORS + "/{id}/token")
     public ApiResponse<ConnectorDto> authorize(@PathVariable String id, @RequestBody Map<String, String> body,
                                                Authentication auth) {
-        return ApiResponse.ok(connectorService.authorize(id, auth.getName(), body.get("token"), isAdmin(auth)));
+        return ApiResponse.ok(connectorService.authorize(id, auth.getName(), body.get("token"), body.get("account"),
+                isAdmin(auth)));
     }
 
     @DeleteMapping(ApiPaths.CONNECTORS + "/{id}/token")

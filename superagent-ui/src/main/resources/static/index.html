@@ -170,15 +170,13 @@
         </div>
         <!-- The message stream: what Feishu / DingTalk brought to the user's SuperAgent, and what it did with each. -->
         <div id="todoMessages" hidden>
-          <p class="ib-notice" id="ibNotLinked" hidden><span data-i18n="ib.notLinked">Your Feishu account isn't linked yet.</span>
-            <a href="#connectors" data-i18n="ib.goConnectors">Link it on the Connectors page →</a></p>
-          <p class="admin__sub ib-sub" data-i18n="ib.sub">Messages from Feishu that reached your SuperAgent, and what it did with each.</p>
-          <div class="ib-filters">
+          <div class="ib-bar">
             <select id="ibFilterPriority" aria-label="Priority"></select>
             <select id="ibFilterHandling" aria-label="Handling"></select>
           </div>
           <table class="ctable ib-events">
-            <thead><tr><th data-i18n="ib.colSource">Source</th><th data-i18n="ib.colFrom">From</th><th data-i18n="ib.colText">Message</th><th data-i18n="ib.colPriority">Priority</th><th data-i18n="ib.colHandling">SuperAgent</th><th data-i18n="ib.colTime">Received</th></tr></thead>
+            <colgroup><col class="ib-c-from" /><col /><col class="ib-c-prio" /><col class="ib-c-handled" /><col class="ib-c-time" /></colgroup>
+            <thead><tr><th data-i18n="ib.colFrom">From</th><th data-i18n="ib.colText">Message</th><th data-i18n="ib.colPriority">Priority</th><th data-i18n="ib.colHandling">SuperAgent</th><th class="ib-time" data-i18n="ib.colTime">Received</th></tr></thead>
             <tbody id="ibEvents"></tbody>
           </table>
           <p class="kb-empty" id="ibEventsEmpty" data-i18n="ib.eventsEmpty" hidden></p>
@@ -1053,7 +1051,9 @@
     <div class="modal__backdrop" data-close></div>
     <form class="modal__card" id="connTokenForm">
       <h3 class="modal__title" id="connTokenTitle"></h3>
-      <p class="field-hint" data-i18n="conn.tokenHint"></p>
+      <p class="field-hint" id="connTokenHint" data-i18n="conn.tokenHint"></p>
+      <p class="field-hint" id="connTokenWhere" hidden><a id="connTokenLink" target="_blank" rel="noopener noreferrer"></a></p>
+      <label class="field" id="connTokenAccountField" hidden><span data-i18n="conn.accountEmail">Email</span><input type="email" id="connTokenAccount" autocomplete="username" /></label>
       <label class="field"><span>Token</span><input type="password" id="connTokenInput" autocomplete="new-password" required /></label>
       <p class="field-hint kb-modal__error" id="connTokenError" hidden></p>
       <div class="modal__actions">

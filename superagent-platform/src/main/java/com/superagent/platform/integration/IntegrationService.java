@@ -35,6 +35,8 @@ public class IntegrationService {
     public static final String GITEE = "gitee";
     public static final String DINGTALK = "dingtalk";
     public static final String NOTION = "notion";
+    /** The company's Confluence site: no app to make, only where it is (self-hosted or Cloud). */
+    public static final String CONFLUENCE = "confluence";
 
     /**
      * {@code options}: the values it can take (a choice, shown as a select), else free text; {@code defaultValue}
@@ -73,7 +75,9 @@ public class IntegrationService {
                     new FieldDef("clientSecret", "Client Secret（AppSecret）", true))),
             new Definition(NOTION, "Notion", "/api/v1/oauth/notion/callback", List.of(
                     new FieldDef("clientId", "OAuth Client ID", false),
-                    new FieldDef("clientSecret", "OAuth Client Secret", true))));
+                    new FieldDef("clientSecret", "OAuth Client Secret", true))),
+            new Definition(CONFLUENCE, "Confluence", null, List.of(
+                    new FieldDef("url", "站点地址", false))));
 
     /** Live connection state reported by whatever runs an integration (Feishu's long connection); not stored. */
     private record Status(String state, String error) {
@@ -102,7 +106,8 @@ public class IntegrationService {
         Map<String, String> all = store.all();
         Map<String, String> next = new LinkedHashMap<>();
         for (FieldDef f : d.fields()) {
-            String given = blank(values.get(f.key()));
+            String raw = blank(values.get(f.key()));
+            String given = raw != null && CONFLUENCE.equals(key) && "url".equals(f.key()) ? siteUrl(raw) : raw;
             if (f.secret()) {
                 // A blank secret keeps the stored one: the browser never has it to send back.
                 next.put(f.key(), given != null ? cipher.encrypt(given) : blank(all.get(name(key, f.key()))));
@@ -211,6 +216,14 @@ public class IntegrationService {
 
     private static String name(String key, String field) {
         return "integration." + key + "." + field;
+    }
+
+    /** A site address: http(s), without the trailing slash. */
+    private static String siteUrl(String url) {
+        if (!url.matches("(?i)https?://[^\\s/]+(/\\S*)?")) {
+            throw new IllegalArgumentException("站点地址要以 http:// 或 https:// 开头，例如 https://wiki.example.com");
+        }
+        return trimSlash(url);
     }
 
     private static String trimSlash(String url) {

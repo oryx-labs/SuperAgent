@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SuperAgent 核心判断</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one reading column; the two figures break out to a wide canvas that scrolls sideways on phones.
+   Palette follows the product UI: neutral greys with the logo blue, used only for what this architecture adds. */
+:root {
+  --paper: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #14171d;
+  --muted: #5a606c;
+  --line: #dde0e6;
+  --line-strong: #b9bec8;
+  --brand: #2457f5;
+  --brand-ink: #1a3fb8;
+  --brand-soft: #e9effe;
+  --brand-line: #a9bdf8;
+  --trust-hi: #f0f4fe;
+  --trust-mid: #f0f1f4;
+  --trust-low: #fff5ea;
+  --trust-low-line: #d99a55;
+
+  --font-ui: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #0f1115;
+    --surface: #171a20;
+    --ink: #e7e9ee;
+    --muted: #9aa1ad;
+    --line: #2a2f38;
+    --line-strong: #3d4450;
+    --brand: #7f9dff;
+    --brand-ink: #a9bcff;
+    --brand-soft: #1b2440;
+    --brand-line: #3a4f8f;
+    --trust-hi: #141b2e;
+    --trust-mid: #1b1e25;
+    --trust-low: #2a1f13;
+    --trust-low-line: #a8743a;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0f1115;
+  --surface: #171a20;
+  --ink: #e7e9ee;
+  --muted: #9aa1ad;
+  --line: #2a2f38;
+  --line-strong: #3d4450;
+  --brand: #7f9dff;
+  --brand-ink: #a9bcff;
+  --brand-soft: #1b2440;
+  --brand-line: #3a4f8f;
+  --trust-hi: #141b2e;
+  --trust-mid: #1b1e25;
+  --trust-low: #2a1f13;
+  --trust-low-line: #a8743a;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.65;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.page { max-width: 1180px; margin: 0 auto; padding-block: 40px 72px; display: grid; gap: 44px; }
+.prose { max-width: none; }
+h1 { font-size: 30px; line-height: 1.25; margin: 0 0 10px; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-size: 19px; line-height: 1.35; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; }
+.lede { color: var(--muted); }
+.eyebrow { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+section { display: grid; gap: 14px; }
+
+/* ---------- figure shell ---------- */
+figure { margin: 0; display: grid; gap: 10px; }
+.canvas { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 18px; }
+figcaption { font-size: 13px; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12.5px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 18px; height: 12px; border: 1px solid var(--line-strong); background: var(--surface); display: inline-block; }
+.sw--new { background: var(--brand-soft); border-color: var(--brand); }
+.sw--plan { background: transparent; border-style: dashed; }
+.sw--hi { background: var(--trust-hi); border-color: var(--brand-line); }
+.sw--mid { background: var(--trust-mid); }
+.sw--low { background: var(--trust-low); border: 1px dashed var(--trust-low-line); }
+
+/* ---------- figure 1: the layered stack ---------- */
+.arch { display: grid; grid-template-columns: minmax(0, 1fr) 176px; gap: 12px; min-width: 1100px; }
+.stack { display: grid; }
+.layer { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; }
+.layer-name {
+  background: var(--ink); color: var(--paper); border-radius: 3px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  text-align: center; padding: 10px 6px; font-weight: 600; font-size: 14px; line-height: 1.3;
+}
+.layer-name small { font-weight: 400; font-size: 11px; opacity: 0.72; }
+.layer-body { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 3px; padding: 10px; display: grid; gap: 8px; }
+.layer--control .layer-body { background: var(--trust-hi); border-color: var(--brand-line); }
+.layer--run .layer-body { background: var(--trust-mid); }
+.row { display: grid; gap: 8px; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); }
+.group { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; }
+.group-name { display: flex; align-items: center; justify-content: center; text-align: center; font-size: 12px; color: var(--muted); border-right: 1px solid var(--line-strong); padding-right: 6px; line-height: 1.35; }
+.cell {
+  border: 1px solid var(--line-strong); background: var(--surface); border-radius: 2px;
+  padding: 7px 10px; min-height: 46px; display: flex; flex-direction: column; justify-content: center; gap: 1px;
+}
+.cell b { font-size: 13px; font-weight: 600; line-height: 1.35; }
+.cell span { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+.cell--new { background: var(--brand-soft); border-color: var(--brand); }
+.cell--new b { color: var(--brand-ink); }
+.cell--plan { background: transparent; border-style: dashed; }
+.cell--plan b { color: var(--muted); }
+.link {
+  display: flex; align-items: center; gap: 10px; margin-left: 102px; padding: 7px 0;
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--muted);
+}
+.link svg { flex: none; width: 10px; height: 22px; }
+.link svg path { stroke: var(--line-strong); fill: none; stroke-width: 1.4; }
+.link b { font-weight: 500; color: var(--ink); }
+
+/* nodes inside the runtime layer */
+.node { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 2px; padding: 8px; display: grid; gap: 7px; }
+.node-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; font-weight: 600; }
+.tag { font-family: var(--font-mono); font-size: 11px; font-weight: 500; padding: 0 6px; border: 1px solid var(--brand); color: var(--brand-ink); background: var(--brand-soft); border-radius: 2px; }
+.tag--plain { border-color: var(--line-strong); color: var(--muted); background: transparent; }
+.node-body { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 7px; }
+.node-left { display: grid; gap: 7px; }
+.node .cell { min-height: 40px; padding: 5px 8px; }
+.sandboxes { border: 1px dashed var(--trust-low-line); background: var(--trust-low); border-radius: 2px; padding: 6px; display: grid; gap: 5px; }
+.sandboxes > small { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.3; }
+.sbx { border: 1px solid var(--trust-low-line); background: var(--surface); border-radius: 2px; padding: 3px 8px; font-size: 12px; line-height: 1.45; }
+.sbx em { display: block; font-style: normal; color: var(--muted); font-size: 11px; }
+
+/* the column that runs through every layer */
+.side { display: grid; grid-template-rows: auto 1fr 1fr; gap: 10px; }
+.side-title { background: var(--ink); color: var(--paper); border-radius: 3px; text-align: center; font-weight: 600; font-size: 14px; padding: 10px 6px; }
+.side-box { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 3px; padding: 10px; display: grid; gap: 7px; align-content: start; }
+.side-box h3 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+.side-box .cell { min-height: 0; }
+
+/* ---------- figure 2: multi-machine deployment (inline SVG) ---------- */
+.deploy { display: block; width: 100%; min-width: 1080px; height: auto; }
+.deploy text { font-family: var(--font-ui); fill: var(--ink); font-size: 13px; }
+.deploy .t-s { fill: var(--muted); font-size: 11.5px; }
+.deploy .t-b { font-weight: 600; }
+.deploy .t-zone { font-weight: 600; font-size: 13px; fill: var(--muted); letter-spacing: 0.02em; paint-order: stroke; stroke: var(--trust-mid); stroke-width: 8px; stroke-linejoin: round; }
+.deploy .t-zone--hi { stroke: var(--trust-hi); }
+.deploy .t-brand { fill: var(--brand-ink); }
+.deploy .t-mono { font-family: var(--font-mono); font-size: 11.5px; }
+.deploy .zone-hi { fill: var(--trust-hi); stroke: var(--brand-line); }
+.deploy .zone-run { fill: var(--trust-mid); stroke: var(--line-strong); }
+.deploy .zone-ext { fill: none; stroke: var(--line-strong); stroke-dasharray: 5 4; }
+.deploy .box { fill: var(--surface); stroke: var(--line-strong); }
+.deploy .box-new { fill: var(--brand-soft); stroke: var(--brand); }
+.deploy .box-mid { fill: var(--trust-mid); stroke: var(--line-strong); }
+.deploy .zone-low { fill: var(--trust-low); stroke: var(--trust-low-line); stroke-dasharray: 5 3; }
+.deploy .sbx { fill: var(--surface); stroke: var(--trust-low-line); }
+.deploy .ln { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.deploy .ln-brand { stroke: var(--brand); stroke-width: 1.5; fill: none; }
+.deploy .ln-warm { stroke: var(--trust-low-line); stroke-width: 1.5; fill: none; stroke-dasharray: 6 4; }
+.deploy .ah { fill: var(--muted); }
+.deploy .ah-brand { fill: var(--brand); }
+.deploy .ah-warm { fill: var(--trust-low-line); }
+.deploy .badge { fill: var(--ink); }
+.deploy .badge-t { fill: var(--paper); font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
+
+ol.flows { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 14px; }
+ol.flows li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+ol.flows .n { width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--paper); font-family: var(--font-mono); font-size: 11px; display: inline-grid; place-items: center; transform: translateY(3px); }
+
+/* ---------- tables ---------- */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 860px; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); line-height: 1.55; }
+th { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.04em; background: var(--paper); }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+.pill { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.pill--hi { background: var(--brand-soft); color: var(--brand-ink); }
+.pill--mid { background: var(--trust-mid); color: var(--muted); border: 1px solid var(--line-strong); }
+.pill--low { background: var(--trust-low); color: var(--ink); border: 1px dashed var(--trust-low-line); }
+
+.modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.mode { border-top: 2px solid var(--ink); padding-top: 10px; display: grid; gap: 6px; align-content: start; }
+.mode h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.mode p { font-size: 14px; color: var(--muted); }
+@media (max-width: 720px) {
+  .modes { grid-template-columns: 1fr; }
+  h1 { font-size: 25px; }
+}
+
+/* ---------- document ---------- */
+.doc-head { display: grid; gap: 14px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 4px 0 0; font-size: 13px; }
+.meta div { display: flex; gap: 8px; }
+.meta dt { color: var(--muted); }
+.meta dd { margin: 0; font-weight: 500; }
+.toc { border-top: 2px solid var(--ink); border-bottom: 1px solid var(--line); padding-block: 12px 14px; }
+.toc-title { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.toc ol { margin: 0; padding-left: 22px; columns: 5 150px; column-gap: 24px; font-size: 14px; }
+.toc li { break-inside: avoid; padding-block: 2px; }
+.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+.toc a:hover, .toc a:focus-visible { color: var(--brand-ink); border-color: var(--brand); outline: none; }
+section[id] { scroll-margin-top: 16px; }
+section[id] > h2 { font-size: 23px; display: flex; align-items: baseline; gap: 12px; margin: 0; padding-top: 6px; border-top: 1px solid var(--line); padding-block-start: 22px; }
+.num { font-family: var(--font-mono); font-size: 14px; font-weight: 500; color: var(--brand-ink); min-width: 1.6em; }
+h3 { font-size: 16.5px; font-weight: 600; margin: 14px 0 0; text-wrap: balance; }
+.stack-text { display: grid; gap: 10px; }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--trust-mid); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+td code { white-space: nowrap; }
+ul.tight, ol.tight { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.tag-inline { font-family: var(--font-mono); font-size: 11px; font-weight: 500; vertical-align: 2px; padding: 1px 6px; border: 1px solid var(--line-strong); color: var(--muted); border-radius: 2px; margin-left: 6px; }
+.goals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--line); border-left: 1px solid var(--line); background: var(--surface); }
+.goal { padding: 14px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; gap: 4px; align-content: start; }
+.goal b { font-size: 14.5px; }
+.goal span { font-size: 13.5px; color: var(--muted); line-height: 1.55; }
+table.terms td:first-child, table.modules td:first-child { white-space: nowrap; }
+td.lv { font-family: var(--font-mono); font-weight: 500; color: var(--muted); }
+pre.code { margin: 0; overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; font-size: 13px; line-height: 1.6; }
+pre.code code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; }
+.note { font-size: 13.5px; color: var(--muted); border-left: 2px solid var(--line-strong); padding-left: 12px; }
+ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: st; display: grid; gap: 10px; }
+ol.steps li { counter-increment: st; position: relative; padding-left: 36px; font-size: 14.5px; }
+ol.steps li::before { content: counter(st); position: absolute; left: 0; top: 1px; font-family: var(--font-mono); font-size: 12px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line-strong); display: grid; place-items: center; color: var(--muted); }
+ol.phases { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; border-top: 1px solid var(--line); }
+ol.phases li { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 16px; padding-block: 14px; border-bottom: 1px solid var(--line); }
+.ph { font-family: var(--font-mono); font-size: 12.5px; color: var(--brand-ink); padding-top: 2px; }
+ol.phases div { display: grid; gap: 4px; }
+ol.phases b { font-size: 15px; }
+ol.phases span:not(.ph) { font-size: 14px; color: var(--muted); }
+
+/* sequence diagram */
+.seq { display: block; width: 100%; min-width: 1040px; height: auto; }
+.seq text { font-family: var(--font-ui); fill: var(--ink); font-size: 13px; }
+.seq .t-b { font-weight: 600; }
+.seq .t-s { fill: var(--muted); font-size: 11.5px; }
+.seq .m { font-size: 12px; fill: var(--ink); }
+.seq .halo { paint-order: stroke; stroke: var(--surface); stroke-width: 7px; stroke-linejoin: round; }
+.seq .lane { fill: var(--surface); stroke: var(--line-strong); }
+.seq .lane-hi { fill: var(--trust-hi); stroke: var(--brand-line); }
+.seq .lane-mid { fill: var(--trust-mid); stroke: var(--line-strong); }
+.seq .lane-low { fill: var(--trust-low); stroke: var(--trust-low-line); stroke-dasharray: 5 3; }
+.seq .life { stroke: var(--line-strong); stroke-dasharray: 3 4; }
+.seq .msg { stroke: var(--muted); stroke-width: 1.5; }
+.seq .msg-b { stroke: var(--brand); stroke-width: 1.5; }
+.seq .ret { stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.seq .note { fill: var(--surface); stroke: var(--line-strong); }
+.seq .ah { fill: var(--muted); }
+.seq .ah-brand { fill: var(--brand); }
+@media (max-width: 720px) {
+  .goals { grid-template-columns: 1fr; }
+  ol.phases li { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* section 2: three tiers, components, rationale */
+.tiers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tier { border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); padding: 14px 16px; display: grid; gap: 10px; align-content: start; }
+.tier--hi { background: var(--trust-hi); border-color: var(--brand-line); }
+.tier--mid { background: var(--trust-mid); }
+.tier--low { background: var(--trust-low); border: 1px dashed var(--trust-low-line); }
+.tier-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.tier-head b { font-size: 17px; }
+.tier-n { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+.tier-head .pill { margin-left: auto; }
+.tier-what { font-size: 14px; font-weight: 500; }
+.tier dl { margin: 0; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px 10px; font-size: 13.5px; }
+.tier dt { color: var(--muted); }
+.tier dd { margin: 0; line-height: 1.55; }
+table.comps td:nth-child(2) { font-weight: 600; white-space: nowrap; }
+table.comps td:first-child { font-weight: 400; }
+table.comps tr.grp td { background: var(--paper); font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; color: var(--muted); letter-spacing: 0.06em; padding-block: 6px; }
+.why { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border-top: 2px solid var(--ink); }
+.why div { padding: 12px 16px 12px 0; display: grid; gap: 4px; align-content: start; }
+.why div + div { padding-left: 16px; border-left: 1px solid var(--line); }
+.why b { font-size: 14.5px; }
+.why span { font-size: 13.5px; color: var(--muted); line-height: 1.55; }
+@media (max-width: 860px) {
+  .tiers, .why { grid-template-columns: 1fr; }
+  .why div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); }
+}
+
+/* ---------- product essay ---------- */
+.quote { font-size: 19px; font-weight: 600; border-left: 3px solid var(--brand); padding: 4px 0 4px 16px; margin: 6px 0; color: var(--ink); }
+.statement { border-top: 2px solid var(--ink); border-bottom: 1px solid var(--line); padding-block: 22px; display: grid; gap: 8px; }
+.statement-main { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+.statement-sub { font-size: 17px; color: var(--muted); }
+table.pos td.me { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
+table.pos th:last-child { color: var(--brand-ink); }
+.beliefs { display: grid; gap: 0; border-top: 1px solid var(--line); }
+.belief { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px; padding-block: 18px; border-bottom: 1px solid var(--line); }
+.b-n { font-family: var(--font-mono); font-size: 22px; font-weight: 500; color: var(--brand-ink); line-height: 1.2; }
+.b-body { display: grid; gap: 6px; }
+.b-body h3 { margin: 0; font-size: 17px; }
+.b-body p { color: var(--ink); }
+ol.values { margin: 0; padding: 0; list-style: none; display: grid; border-top: 2px solid var(--ink); }
+ol.values li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; padding-block: 12px; border-bottom: 1px solid var(--line); }
+.v-n { font-family: var(--font-mono); font-size: 15px; width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: var(--paper); display: grid; place-items: center; }
+ol.values div { display: grid; gap: 2px; }
+ol.values b { font-size: 16px; }
+ol.values span:not(.v-n) { color: var(--muted); font-size: 14.5px; }
+.persp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.p-col { border: 1px solid var(--line); background: var(--surface); border-radius: 4px; padding: 14px 16px; }
+.p-head { font-weight: 600; font-size: 15px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+.p-col ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+.loop { display: block; width: 100%; min-width: 980px; height: auto; }
+.loop text { font-family: var(--font-ui); fill: var(--ink); font-size: 13px; }
+.loop .t-b { font-weight: 600; font-size: 14.5px; }
+.loop .t-s { fill: var(--muted); font-size: 12px; }
+.loop .t-brand { fill: var(--brand-ink); }
+.loop .m { font-size: 12px; fill: var(--muted); }
+.loop .lbox { fill: var(--surface); stroke: var(--line-strong); }
+.loop .lbox-hi { fill: var(--brand-soft); stroke: var(--brand); }
+.loop .ln { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.loop .ln-brand { stroke: var(--brand); stroke-width: 1.6; fill: none; }
+.loop .ah { fill: var(--muted); }
+.loop .ah-brand { fill: var(--brand); }
+ol.day { margin: 0; padding: 0; list-style: none; display: grid; border-left: 2px solid var(--line-strong); margin-left: 6px; }
+ol.day li { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 14px; padding: 10px 0 10px 18px; position: relative; }
+ol.day li::before { content: ""; position: absolute; left: -6px; top: 17px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid var(--brand); }
+ol.day .t { font-family: var(--font-mono); font-size: 13px; color: var(--brand-ink); padding-top: 1px; }
+ol.day div { display: grid; gap: 2px; }
+ol.day span:not(.t) { color: var(--muted); font-size: 14.5px; }
+.nots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); border-left: 1px solid var(--line); background: var(--surface); }
+.nots div { padding: 14px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; gap: 4px; align-content: start; }
+.nots b { font-size: 15px; }
+.nots span { font-size: 14px; color: var(--muted); }
+ul.open { margin: 0; padding-left: 20px; display: grid; gap: 10px; }
+ul.open b { margin-right: 6px; }
+.closing { font-size: 17px; font-weight: 500; border-top: 2px solid var(--ink); padding-top: 18px; margin-top: 10px; }
+@media (max-width: 860px) {
+  .persp, .nots { grid-template-columns: 1fr; }
+  .belief { grid-template-columns: 1fr; gap: 6px; }
+  ol.day li { grid-template-columns: 1fr; gap: 2px; }
+  .statement-main { font-size: 24px; }
+}
+
+.dep { display: inline-block; margin-top: 4px; font-size: 12.5px; font-weight: 500; color: var(--brand-ink); background: var(--brand-soft); border: 1px solid var(--brand-line); border-radius: 3px; padding: 1px 8px; justify-self: start; }
+ol.day .t { white-space: nowrap; }
+ol.day li { grid-template-columns: 92px minmax(0, 1fr); }
+.boss { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.boss-card { border: 1px solid var(--line); background: var(--surface); border-radius: 4px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; }
+.boss-q { font-weight: 600; font-size: 15.5px; }
+ol.boss-flow { margin: 0; padding-left: 20px; display: grid; gap: 5px; font-size: 14px; }
+.boss-a { font-size: 14px; color: var(--brand-ink); border-top: 1px solid var(--line); padding-top: 8px; }
+@media (max-width: 860px) { .boss { grid-template-columns: 1fr; } }
+
+h4 { font-size: 15px; font-weight: 600; margin: 10px 0 0; padding-left: 10px; border-left: 3px solid var(--ink); }
+ol.boss-flow--row { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; counter-reset: bf; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+ol.boss-flow--row li { counter-increment: bf; padding: 12px 16px 12px 44px; position: relative; display: grid; gap: 2px; }
+ol.boss-flow--row li + li { border-left: 1px solid var(--line); }
+ol.boss-flow--row li::before { content: counter(bf); position: absolute; left: 14px; top: 13px; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--paper); font-family: var(--font-mono); font-size: 11px; display: grid; place-items: center; }
+ol.boss-flow--row span { font-size: 13.5px; color: var(--muted); }
+.trend { display: block; width: 100%; min-width: 900px; height: auto; }
+.trend text { font-family: var(--font-ui); font-size: 12.5px; }
+.trend .axis { stroke: var(--line-strong); stroke-width: 1.2; }
+.trend .grid { stroke: var(--line); stroke-dasharray: 3 4; }
+.trend .ax { fill: var(--muted); font-size: 12px; }
+.trend .stage { fill: var(--muted); font-size: 12.5px; font-weight: 500; }
+.trend .c-auto { fill: none; stroke: var(--brand); stroke-width: 2.4; }
+.trend .c-human { fill: none; stroke: var(--ink); stroke-width: 2; }
+.trend .c-cost { fill: none; stroke: var(--trust-low-line); stroke-width: 2; stroke-dasharray: 7 5; }
+.trend .d-auto { fill: var(--brand); }
+.trend .d-human { fill: var(--ink); }
+.trend .d-cost { fill: var(--trust-low-line); }
+.trend .l-auto { fill: var(--brand-ink); font-weight: 600; }
+.trend .l-human { fill: var(--ink); font-weight: 600; }
+.trend .l-cost { fill: var(--trust-low-line); font-weight: 600; }
+.stages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.stage-card { border-top: 2px solid var(--line-strong); padding-top: 10px; display: grid; gap: 4px; align-content: start; }
+.stage-card:last-child { border-top-color: var(--brand); }
+.stage-n { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; color: var(--muted); }
+.stage-card b { font-size: 15px; }
+.stage-card span { font-size: 14px; color: var(--muted); }
+table.cost td:first-child { width: 150px; }
+@media (max-width: 860px) {
+  ol.boss-flow--row, .stages { grid-template-columns: 1fr; }
+  ol.boss-flow--row li + li { border-left: 0; border-top: 1px solid var(--line); }
+}
+
+.forces { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.force { border: 1px solid var(--line); background: var(--surface); border-radius: 4px; padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+.force--hi { background: var(--brand-soft); border-color: var(--brand); }
+.force--hi b { color: var(--brand-ink); }
+.force b { font-size: 15.5px; }
+.force span { font-size: 14px; color: var(--muted); }
+ol.ladder { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
+ol.ladder li { display: grid; gap: 8px; align-content: start; border-top: 3px solid var(--line-strong); padding-top: 10px; }
+ol.ladder li:nth-child(1) { margin-top: 54px; }
+ol.ladder li:nth-child(2) { margin-top: 36px; border-top-color: var(--brand-line); }
+ol.ladder li:nth-child(3) { margin-top: 18px; border-top-color: var(--brand); }
+ol.ladder li:nth-child(4) { border-top-color: var(--brand-ink); }
+.lv-n { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+ol.ladder div { display: grid; gap: 4px; }
+ol.ladder b { font-size: 15px; }
+ol.ladder span:not(.lv-n) { font-size: 14px; color: var(--muted); }
+@media (max-width: 860px) {
+  .forces, ol.ladder { grid-template-columns: 1fr; }
+  ol.ladder li { margin-top: 0 !important; }
+}
+
+.boss--one { grid-template-columns: minmax(0, 1fr); max-width: 640px; }
+.gov { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+.gov-col { padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+.gov-col + .gov-col { border-left: 1px solid var(--line); }
+.gov-head { font-weight: 600; font-size: 16px; }
+.gov-what { font-size: 13.5px; color: var(--brand-ink); padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.gov-col ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13.5px; }
+.soon { display: inline-block; margin-left: 6px; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: 2px; padding: 0 5px; vertical-align: 1px; }
+@media (max-width: 960px) {
+  .gov { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gov-col:nth-child(3) { border-left: 0; }
+  .gov-col:nth-child(n+3) { border-top: 1px solid var(--line); }
+}
+@media (max-width: 600px) {
+  .gov { grid-template-columns: 1fr; }
+  .gov-col + .gov-col { border-left: 0; border-top: 1px solid var(--line); }
+}
+
+td.me { background: var(--brand-soft); color: var(--brand-ink); }
+.split { display: block; width: 100%; min-width: 900px; height: auto; }
+.split text { font-family: var(--font-ui); fill: var(--ink); font-size: 13px; }
+.split .t-b { font-weight: 600; font-size: 15px; }
+.split .t-s { fill: var(--muted); font-size: 12.5px; }
+.split .t-brand { fill: var(--brand-ink); }
+.split .c { font-size: 13px; fill: var(--brand-ink); font-weight: 500; }
+.split .row-top { fill: var(--surface); stroke: var(--line-strong); }
+.split .row-me { fill: var(--brand-soft); stroke: var(--brand); }
+.split .chip { fill: var(--surface); stroke: var(--brand-line); }
+.split .row { fill: var(--trust-mid); stroke: var(--line-strong); }
+</style>
+
+</head>
+<body>
+<div class="page">
+  <header class="doc-head">
+    <div class="eyebrow">核心判断 · 2026-11</div>
+    <h1>SuperAgent 核心判断</h1>
+  </header>
+
+  <nav class="toc" aria-label="目录">
+    <div class="toc-title">目录</div>
+    <ol>
+      <li><a href="#c1">起点</a></li>
+      <li><a href="#c2">要解决的问题</a></li>
+      <li><a href="#c3">六个核心判断</a></li>
+      <li><a href="#c4">为谁而做</a></li>
+      <li><a href="#c5">核心竞争力</a></li>
+      <li><a href="#c6">要做成的样子</a></li>
+      <li><a href="#c7">愿景</a></li>
+      <li><a href="#c8">判断成立的前提</a></li>
+    </ol>
+  </nav>
+
+  <!-- 1 -->
+  <section id="c1">
+    <h2><span class="num">1</span>起点</h2>
+    <div class="statement">
+      <div class="statement-main">AI 已经能干活了，公司却还没有一个让 AI 干活的地方。</div>
+    </div>
+    <div class="prose stack-text">
+      <ul class="tight">
+        <li><b>模型能干活了。</b>它们能写代码、写文档、做分析、读资料，能连续几十分钟独立推进一件事。这已经不是「回答问题」，而是「完成工作」。</li>
+        <li><b>Agent 成熟了。</b>Claude Code、Codex 这一类官方 Agent，把模型变成了真正能在电脑上执行、读写文件、调用工具的工作者，而且每周都在变强。</li>
+        <li><b>员工已经在用了。</b>几乎每家公司都有人自己买 token、自己装 Agent，在自己的电脑上让 AI 干活。效率实实在在地提升了。</li>
+      </ul>
+      <p>可是这些使用全部发生在个人的电脑上：账号是个人的，花费是个人的，做出来的东西留在个人的硬盘里，用了什么数据、做了什么操作，公司一概不知。每个人都在单打独斗，公司作为一个整体，并没有因此变得更会做事。</p>
+      <p>这就是 SuperAgent 的起点：<b>AI 的使用正在从个人走向公司，公司需要一个系统，把这些分散的使用收拢起来。</b></p>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section id="c2">
+    <h2><span class="num">2</span>要解决的问题</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>问题</th><th>今天的样子</th><th>SuperAgent 要做到的</th></tr></thead>
+        <tbody>
+          <tr><td>用不起来</td><td>要自己买、自己装、自己配，会折腾的人用得好，其他人用不上</td><td class="me">入职就能用，不用订阅、不用配置</td></tr>
+          <tr><td>留不下来</td><td>成果和经验在个人账号和硬盘里，人一走就没了</td><td class="me">工作在公司的系统里发生，成果自动沉淀为公司资产</td></tr>
+          <tr><td>接不上</td><td>同一件事没法一起推进，接手的人从头再来</td><td class="me">多人和同一个 Agent 协作，人走了 Agent 和上下文可以交接</td></tr>
+          <tr><td>复用不了</td><td>一个人摸索出的好方法，别人不知道</td><td class="me">方法沉淀成技能，从个人的升级为公司的</td></tr>
+          <tr><td>花得乱</td><td>各自订阅、重复付费，什么事都用最贵的模型</td><td class="me">统一管理，按任务选模型，每一分钱都追得到</td></tr>
+          <tr><td>看不见、管不住</td><td>AI 做了什么、动了什么数据，公司不知道</td><td class="me">审计、分析、管控、治理，关键处有人拍板</td></tr>
+          <tr><td>和公司割裂</td><td>个人的 Agent 接不上公司的飞书、钉钉、GitLab 和各种内部系统</td><td class="me">由公司统一打通，员工用自己的身份授权</td></tr>
+          <tr><td>跑不稳</td><td>复杂任务在个人电脑上跑，断了、卡了、失败了没人管</td><td class="me">由系统分配、调度、追踪，持续、可靠、低成本地跑完</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose stack-text">
+      <p>这些问题有同一个根源：<b>工作发生在个人的地方。</b>只要还是这样，模型再强，这些问题也不会自己消失。</p>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section id="c3">
+    <h2><span class="num">3</span>六个核心判断</h2>
+
+    <div class="beliefs">
+      <article class="belief">
+        <div class="b-n">01</div>
+        <div class="b-body">
+          <h3>分散的 AI 使用，一定会被公司收拢</h3>
+          <p>每一种进入公司的技术都走过这条路：先是个人自发地用，规模大了，公司就需要统一管理。AI 也一样。员工自己买 token、装 Agent 的阶段会过去，公司会需要一个系统来统一管理、统一运行、统一积累。这个系统长期的核心价值有三个：<b>管控、积累、成本。</b></p>
+        </div>
+      </article>
+
+      <article class="belief">
+        <div class="b-n">02</div>
+        <div class="b-body">
+          <h3>智能交给模型和官方 Agent，我们不重造</h3>
+          <p>直接调用模型 API、自己搭运行循环、自己写工具调用，一定跟不上官方 Agent：模型和它自家的 Agent 是一起调教、一起迭代的，几乎每周都在进步。所以 SuperAgent 不做执行框架、不做推理循环，也不和模型去抢「怎么把一件事做好」。我们走 <b>runtime + CLI</b> 的路线：直接驱动官方的 Agent，让它们去干活。</p>
+          <p>这样选，模型和 Agent 的每一次进步，都会直接变成 SuperAgent 的进步。<b>模型越强，SuperAgent 越强。</b></p>
+        </div>
+      </article>
+
+      <article class="belief">
+        <div class="b-n">03</div>
+        <div class="b-body">
+          <h3>价值在组织层</h3>
+          <p>一个 Agent 再强，也只是在一个人的一次会话里把一件事做好。公司需要的是另一层东西：成果归谁、谁能看、怎么交接、谁来做、花了多少、做了什么、和哪些系统打通、出了问题谁负责。这些都是跨人、跨时间、跨系统的事，只能由一个公司级的系统来承担。</p>
+          <p>SuperAgent 要做的，就是这一层：<b>让公司用好 AI，降本提效。</b></p>
+        </div>
+      </article>
+
+      <article class="belief">
+        <div class="b-n">04</div>
+        <div class="b-body">
+          <h3>对模型厂商保持中立</h3>
+          <p>SuperAgent 不绑定任何一家模型厂商。各家模型，包括客户自己的模型网关和私有部署的模型，都能接进来。不同的任务用不同的模型：难的交给最强的，日常的交给又好又便宜的，以此把成本降下来。模型格局变化很快，中立让公司始终能用上当下最合适的那一个，而公司攒下的资产不属于任何一家模型。</p>
+        </div>
+      </article>
+
+      <article class="belief">
+        <div class="b-n">05</div>
+        <div class="b-body">
+          <h3>让 Agent 守规矩，公司才敢用</h3>
+          <p>Agent 能执行任意命令、读写任意文件，这是它强大的地方，也是公司不敢放手的原因。SuperAgent 要让它守规矩：每个 Agent 都在隔离的环境里运行，只能碰它该碰的东西；凭证由公司统一保管；它做的每件事都有记录；关键决定回到人手里。<b>能被管住，才能被放手。</b></p>
+        </div>
+      </article>
+
+      <article class="belief">
+        <div class="b-n">06</div>
+        <div class="b-body">
+          <h3>任务越来越复杂，越需要一个系统来跑</h3>
+          <p>交给 AI 的任务会越来越长、越来越复杂：从几分钟到几小时，从一个人到一个团队，从一次性到每天自动运行。公司会越来越需要一个系统来<b>分配、调度、追踪、运行</b>这些任务，保证它们持续、可靠、低成本地跑完：该找谁做、放在哪里跑、卡住了怎么办、失败了怎么重来、结果交给谁。</p>
+        </div>
+      </article>
+    </div>
+
+    <h3>3.1 分工</h3>
+    <figure>
+      <div class="canvas">
+        <svg class="split" viewBox="0 0 1000 330" role="img" aria-label="分工示意：模型和官方 Agent 负责把一件事做好；SuperAgent 负责让公司用好 Agent，包括管控、积累、成本、调度和打通公司系统；公司和员工在最上面使用。">
+          <rect class="row-top" x="30" y="20" width="940" height="56" rx="3"/>
+          <text class="t-b" x="56" y="54">公司和员工</text>
+          <text class="t-s" x="250" y="54">提要求、做决定、用成果</text>
+
+          <rect class="row-me" x="30" y="96" width="940" height="128" rx="3"/>
+          <text class="t-b t-brand" x="56" y="128">SuperAgent</text>
+          <text class="t-s" x="56" y="150">让公司用好 Agent</text>
+          <rect class="chip" x="250" y="112" width="130" height="40" rx="2"/><text class="c" x="315" y="137" text-anchor="middle">管控与治理</text>
+          <rect class="chip" x="394" y="112" width="130" height="40" rx="2"/><text class="c" x="459" y="137" text-anchor="middle">积累与交接</text>
+          <rect class="chip" x="538" y="112" width="130" height="40" rx="2"/><text class="c" x="603" y="137" text-anchor="middle">成本与选模型</text>
+          <rect class="chip" x="682" y="112" width="130" height="40" rx="2"/><text class="c" x="747" y="137" text-anchor="middle">分配与调度</text>
+          <rect class="chip" x="826" y="112" width="130" height="40" rx="2"/><text class="c" x="891" y="137" text-anchor="middle">打通公司系统</text>
+          <rect class="chip" x="250" y="166" width="274" height="40" rx="2"/><text class="c" x="387" y="191" text-anchor="middle">协作 · 方法复用</text>
+          <rect class="chip" x="538" y="166" width="274" height="40" rx="2"/><text class="c" x="675" y="191" text-anchor="middle">隔离运行 · 审计</text>
+          <rect class="chip" x="826" y="166" width="130" height="40" rx="2"/><text class="c" x="891" y="191" text-anchor="middle">模型中立</text>
+
+          <rect class="row" x="30" y="244" width="460" height="66" rx="3"/>
+          <text class="t-b" x="56" y="273">官方 Agent（CLI）</text>
+          <text class="t-s" x="56" y="295">Claude Code · Codex · Qwen Code · Kimi …</text>
+          <rect class="row" x="510" y="244" width="460" height="66" rx="3"/>
+          <text class="t-b" x="536" y="273">模型</text>
+          <text class="t-s" x="536" y="295">各家厂商 · 客户自己的模型网关 · 私有部署</text>
+        </svg>
+      </div>
+      <figcaption>模型和官方 Agent 负责「把一件事做好」，它们越强越好；SuperAgent 负责「让公司用好 Agent」，这一层只有公司级的系统能做。</figcaption>
+    </figure>
+  </section>
+
+  <!-- 4 -->
+  <section id="c4">
+    <h2><span class="num">4</span>为谁而做</h2>
+    <div class="prose stack-text">
+      <p>SuperAgent 为<b>公司</b>而做，用户是公司里的每一个人。</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>谁</th><th>关心什么</th><th>SuperAgent 给他什么</th></tr></thead>
+        <tbody>
+          <tr><td>员工</td><td>好用，省事，能把活干完</td><td>入职就有能干活的 AI 团队，说一句要什么，有人拆、有人做、有人跟进</td></tr>
+          <tr><td>团队负责人</td><td>大家能一起推进，人员变动不断档</td><td>围绕同一个 Agent 协作，好方法变成团队的技能，交接时有一个熟悉情况的 Agent</td></tr>
+          <tr><td>公司负责人</td><td>效率、成本、风险，以及公司攒下了什么</td><td>全公司 AI 使用的审计、分析、管控和治理；成本由系统优化；资产越积越多</td></tr>
+          <tr><td>IT 与安全</td><td>部署、权限、数据、合规</td><td>部署一次全员可用；统一的 Key 和授权；Agent 隔离运行、有据可查；可以私有化部署</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose stack-text">
+      <p>最先需要它的，是这样的公司：<b>知识型工作多、员工已经在自发地用 AI、希望把它统一管起来、用到更多人身上。</b>研发、产品、运营、咨询、内容这些团队，是 AI 最先能大规模干活的地方。</p>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section id="c5">
+    <h2><span class="num">5</span>核心竞争力</h2>
+    <ol class="values">
+      <li><span class="v-n">1</span><div><b>工作自动沉淀为公司资产</b><span>所有人在一个系统里和 AI 干活，文件、Agent 的记忆、技能自动留在公司。积累只能在日常工作里长出来，每家公司的积累都是它自己独有的，越用越值钱。</span></div></li>
+      <li><span class="v-n">2</span><div><b>协作与交接</b><span>多人和同一个 Agent 推进同一件事；每个人有一个 SuperAgent 负责拆解和分发；人离开时，Agent 和上下文交给下一个人继续。</span></div></li>
+      <li><span class="v-n">3</span><div><b>方法复用</b><span>个人和公司两级技能，把高手的做法变成全员的默认能力。</span></div></li>
+      <li><span class="v-n">4</span><div><b>中立与成本</b><span>不绑定模型厂商，按任务选最划算的模型；统一 Key、统一计量，每一分花费都能追到人、任务和模型。</span></div></li>
+      <li><span class="v-n">5</span><div><b>审计、管控与治理</b><span>Agent 隔离运行、守规矩；做过的事查得到；关键决定有人拍板；全公司的使用情况看得清。</span></div></li>
+    </ol>
+    <h3>5.1 支撑它们的三个选择</h3>
+    <div class="forces">
+      <div class="force"><b>站在最强的 Agent 上</b><span>走 runtime + CLI 路线，直接驱动官方 Agent。Agent 的智能来自整个行业最好的那一批，并且自动跟着变强。</span></div>
+      <div class="force force--hi"><b>做在组织层</b><span>只做跨人、跨时间、跨系统的事。这一层和模型的进步是互相成全的：模型越能干，越需要被管起来、攒下来、调度好。</span></div>
+      <div class="force"><b>一套系统，两种形态</b><span>同一套代码，既能作为 SaaS 服务很多家公司，也能私有化部署在一家公司里；接得上客户自己的模型和内部系统。</span></div>
+    </div>
+  </section>
+
+  <!-- 6 -->
+  <section id="c6">
+    <h2><span class="num">6</span>要做成的样子</h2>
+    <div class="statement">
+      <div class="statement-main">企业的 AI 协作工作系统</div>
+      <div class="statement-sub">全员与 AI 在一个系统里协作，工作沉淀为公司资产。</div>
+    </div>
+    <ul class="open">
+      <li><b>员工每天在这里干活。</b>打开它，看到的是需要自己处理的事；说一句要什么，有一个 AI 团队去做。</li>
+      <li><b>每个人都有一个 AI 团队。</b>SuperAgent 是负责人，下面是各有专长的 Agent，人负责提要求和做决定。</li>
+      <li><b>它是公司所有 AI 工作的总入口和总账。</b>谁在用、做了什么、花了多少、攒下了什么，都在这里。</li>
+      <li><b>它连着公司的一切。</b>飞书、钉钉、代码仓库、文档、内部系统，Agent 用员工自己的身份去读写。</li>
+      <li><b>它让任务跑得稳。</b>大大小小的任务被分配、调度、追踪，持续、可靠、低成本地完成。</li>
+    </ul>
+  </section>
+
+  <!-- 7 -->
+  <section id="c7">
+    <h2><span class="num">7</span>愿景</h2>
+    <div class="statement">
+      <div class="statement-main">让公司作为一个整体，越来越会做事。</div>
+      <div class="statement-sub">自动化 · 智能化 · 全天候。同样的人，做更多的事；同样的事，需要更少的人。</div>
+    </div>
+    <div class="prose stack-text">
+      <p>今天，SuperAgent 让每个人和 AI 一起把事做完。随着模型变强、软件成熟、公司的业务知识越积越多，需要人介入的地方会越来越少：先是 AI 做完、人确认关键节点，再是流程自动地跑、人只看结果，最后系统全天候地运转，人只负责方向、判断和真正重要的决定。</p>
+      <p>每一步都建立在前一步攒下的东西上。今天沉淀下来的每一份文件、每一条记忆、每一个技能，都是明天自动化的燃料。这条路没有终点，只有一步一步地往前走。</p>
+    </div>
+  </section>
+
+  <!-- 8 -->
+  <section id="c8">
+    <h2><span class="num">8</span>判断成立的前提</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>前提</th><th>它支撑了什么</th></tr></thead>
+        <tbody>
+          <tr><td>模型会持续变强、变便宜</td><td>AI 能接手的工作越来越多，自动化的路能走下去；按任务选模型的省钱空间一直存在。</td></tr>
+          <tr><td>官方 Agent 会持续进步，并以 CLI 等形式可以被驱动</td><td>runtime + CLI 路线成立：我们不重造智能，而是站在最强的 Agent 上。</td></tr>
+          <tr><td>不会只有一家模型一直领先</td><td>中立有价值：不同任务、不同时期，最合适的模型不同。</td></tr>
+          <tr><td>公司会把 AI 当作需要管理的生产力</td><td>收拢是必然：管控、积累、成本成为公司的真实需求。</td></tr>
+          <tr><td>业务知识能在日常工作中积累下来，并且越积越有用</td><td>沉淀资产成为最核心的价值，也是自动化最重要的燃料。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="closing prose">模型负责变强，Agent 负责把事做好，SuperAgent 负责让公司用好它们：管得住、攒得下、花得省、跑得稳。这是 SuperAgent 存在的理由，也是它能做成的理由。</p>
+  </section>
+</div>
+</body>
+</html>

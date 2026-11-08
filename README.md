@@ -3,7 +3,7 @@
   <img src="docs/images/superagent-logo.png" alt="SuperAgent logo" style="max-width: 50%;" />
 </p>
 
-**AI collaborative work system for companies, not personal assistants.** Everyone works with AI in one system, and the work becomes the company's assets. Open source and self-hosted.
+**AI collaborative work system for companies, not personal assistants.** Everyone works with AI in one system, and the work becomes the company's assets. Source available, free to use and self-hosted.
 
 [Website](https://oryx-labs.github.io/SuperAgent/) · [Live demo](http://117.72.92.117:18081/login) · [中文](https://oryx-labs.github.io/SuperAgent/zh/)
 
@@ -140,3 +140,9 @@ While the pull request is open, [the release workflow](.github/workflows/release
 ## Status
 
 SuperAgent is iterating fast. The core is already running in daily use; what isn't built yet is on the [roadmap](https://oryx-labs.github.io/SuperAgent/docs/roadmap).
+
+## License
+
+SuperAgent is licensed under the [Apache License 2.0 with the Commons Clause](LICENSE). You may use it for free, personally or inside your company, and modify it for your own use. You may not sell it: no reselling, no offering it as a paid hosted service, and no selling modified versions or products built mainly on it. Versions released before this change remain under the plain Apache License 2.0.
+
+SuperAgent 采用 [Apache License 2.0 + Commons Clause](LICENSE) 许可。个人和公司内部可以免费使用，也可以为自用修改；但不允许售卖：不得转卖，不得做成付费的托管服务，不得售卖二次开发的版本或主要基于它的产品。本次变更之前发布的版本仍按原 Apache License 2.0 授权。

@@ -43,7 +43,16 @@ SuperAgent 从**公司和公司员工**的角度出发。企业对 AI 是刚需,
 
 ## 项目状态
 
-SuperAgent 开源、自托管,迭代很快。文档只写今天已经能用的;还没做的列在[路线图](./roadmap)。
+SuperAgent 源码公开、免费使用、自托管,迭代很快。文档只写今天已经能用的;还没做的列在[路线图](./roadmap)。
+
+## 许可
+
+SuperAgent 采用 [Apache License 2.0 + Commons Clause](https://github.com/oryx-labs/SuperAgent/blob/main/LICENSE) 许可:
+
+- **免费使用**:个人和公司内部都可以免费使用,也可以为自用修改。
+- **不得售卖**:不得转卖,不得做成付费的托管服务,不得售卖二次开发的版本或主要基于它的产品。
+
+本次许可变更之前发布的版本,仍按原 Apache License 2.0 授权。
 
 ## 下一步
 

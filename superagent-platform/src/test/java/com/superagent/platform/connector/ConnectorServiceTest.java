@@ -20,7 +20,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.sun.net.httpserver.HttpServer;
+
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -102,7 +106,7 @@ class ConnectorServiceTest {
         ConnectorOAuthService oauth = new ConnectorOAuthService(store, creds, List.of(new GitHubOAuthClient(), gitee),
                 cipher, integrations);
         service = new ConnectorService(store, creds, sources, oauth, cipher,
-                new McpGrants("http://127.0.0.1:18080/mcp"), integrations, settingStore);
+                new McpGrants("http://127.0.0.1:18080/mcp"), integrations, settingStore, new ConfluenceSite());
     }
 
     @Test
@@ -122,7 +126,7 @@ class ConnectorServiceTest {
     @Test
     void seedsGitHubAndGiteeAsPersonallyAuthorizedConnectors() {
         assertThat(service.list("ada", false)).filteredOn(c -> c.kind().equals("mcp")).extracting(ConnectorDto::id)
-                .containsExactly("github", "gitee", "feishu-docs", "notion", "dingtalk-tools");
+                .containsExactly("github", "gitee", "feishu-docs", "notion", "confluence", "dingtalk-tools");
         assertThat(service.list("ada", false)).filteredOn(c -> c.kind().equals("mcp") && !c.id().equals("dingtalk-tools")).allSatisfy(c -> {
             assertThat(c.needsAuthorization()).isTrue();
             assertThat(c.authorized()).isFalse();
@@ -272,5 +276,52 @@ class ConnectorServiceTest {
         assertThatThrownBy(() -> integrations.update("feishu",
                 new SaveIntegrationRequest(true, Map.of("domain", "mars", "appId", "cli_1")), "https://sa.example"))
                 .hasMessageContaining("must be one of");
+    }
+
+    @Test
+    void confluenceChecksEachTokenAgainstTheSiteAndRunsAsThatPerson() throws IOException {
+        // Not set up: listed, but nobody can authorize yet.
+        assertThat(service.list("ada", false)).filteredOn(c -> c.id().equals("confluence")).singleElement()
+                .satisfies(c -> assertThat(c.setUp()).isFalse());
+        assertThatThrownBy(() -> service.authorize("confluence", "ada", "t", null, false)).hasMessageContaining("地址");
+
+        HttpServer site = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        site.createContext("/rest/api/user/current", ex -> {
+            boolean ok = "Bearer good-pat".equals(ex.getRequestHeaders().getFirst("Authorization"));
+            byte[] body = (ok ? "{\"type\":\"known\",\"username\":\"ada.l\"}" : "").getBytes(StandardCharsets.UTF_8);
+            ex.sendResponseHeaders(ok ? 200 : 401, ok ? body.length : -1);
+            if (ok) {
+                ex.getResponseBody().write(body);
+            }
+            ex.close();
+        });
+        site.start();
+        try {
+            String url = "http://127.0.0.1:" + site.getAddress().getPort();
+            integrations.update("confluence", new SaveIntegrationRequest(true, Map.of("url", url + "/")), "x");
+
+            assertThatThrownBy(() -> service.authorize("confluence", "ada", "stale", null, false)).hasMessageContaining("无效");
+            ConnectorDto mine = service.authorize("confluence", "ada", "good-pat", null, false);
+            assertThat(mine.account()).isEqualTo("ada.l");
+            assertThat(mine.site()).isEqualTo(url);
+            assertThat(mine.needsAccount()).isFalse();
+
+            assertThat(service.mcpServersFor("ada")).filteredOn(s -> s.name().equals("confluence")).singleElement()
+                    .satisfies(s -> {
+                        assertThat(s.command()).isEqualTo("uvx");
+                        assertThat(s.env()).containsEntry("CONFLUENCE_URL", url).containsEntry("CONFLUENCE_PERSONAL_TOKEN", "good-pat");
+                    });
+            assertThat(service.mcpServersFor("bob")).noneMatch(s -> s.name().equals("confluence"));
+        } finally {
+            site.stop(0);
+        }
+
+        // Cloud: the site's Confluence lives under /wiki, and signing in takes the email with an API token.
+        assertThat(ConfluenceSite.env("https://acme.atlassian.net/wiki/spaces/ENG", "ada@acme.com", "api-t"))
+                .containsEntry("CONFLUENCE_URL", "https://acme.atlassian.net/wiki")
+                .containsEntry("CONFLUENCE_USERNAME", "ada@acme.com").containsEntry("CONFLUENCE_API_TOKEN", "api-t")
+                .doesNotContainKey("CONFLUENCE_PERSONAL_TOKEN");
+        assertThatThrownBy(() -> new ConfluenceSite().verify("https://acme.atlassian.net", "", "api-t"))
+                .hasMessageContaining("邮箱");
     }
 }

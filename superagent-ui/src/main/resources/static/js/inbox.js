@@ -12,7 +12,6 @@ const IB_SOURCES = { feishu: "ib.source.feishu", dingtalk: "ib.source.dingtalk" 
 const IB_HANDLINGS = ["delivered", "notified", "todo", "task", "read", "ignored"];
 
 const ibel = {
-  notLinked: document.getElementById("ibNotLinked"),
   events: document.getElementById("ibEvents"),
   eventsEmpty: document.getElementById("ibEventsEmpty"),
   fPriority: document.getElementById("ibFilterPriority"),
@@ -25,7 +24,6 @@ async function loadInbox() {
     api.ibSummary().catch(() => null),
     api.ibEvents().catch(e => { showToast(e.message, true); return []; }),
   ]);
-  ibel.notLinked.hidden = !summary || summary.linked;
   if (summary) setTodoMessagesCount(summary.today);
   ibEventList = list || [];
   fillIbFilters();
@@ -51,43 +49,69 @@ function fillIbFilters() {
 
 function renderIbEvents() {
   const prio = ibel.fPriority.value, handling = ibel.fHandling.value;
+  ibel.fPriority.classList.toggle("is-set", !!prio);
+  ibel.fHandling.classList.toggle("is-set", !!handling);
   const shown = ibEventList.filter(ev => (!prio || ev.priority === prio) && (!handling || (ev.handling || "waiting") === handling));
   ibel.events.innerHTML = "";
   ibel.eventsEmpty.hidden = shown.length > 0;
   ibel.eventsEmpty.textContent = L(ibEventList.length ? "ib.noMatch" : "ib.eventsEmpty");
-  shown.forEach(ev => {
-    const tr = document.createElement("tr");
-    const source = document.createElement("td");
-    source.className = "kb-list__meta";
-    source.textContent = IB_SOURCES[ev.source] ? L(IB_SOURCES[ev.source]) : ev.source;
-    const from = document.createElement("td");
-    from.textContent = (ev.senderName || "—") + " · " + (ev.chatName || "—");
-    const text = document.createElement("td");
-    text.className = "ib-text";
-    text.textContent = ev.text || "";
-    const prioCell = document.createElement("td");
-    const badge = document.createElement("span");
-    badge.className = "ib-prio ib-prio--" + ev.priority;
-    badge.textContent = L("ib.prio." + ev.priority);
-    prioCell.appendChild(badge);
-    if (ev.triageReason) {
-      const r = document.createElement("span");
-      r.className = "ib-reason";
-      r.textContent = ev.triageReason;
-      prioCell.appendChild(r);
-    }
-    const handled = document.createElement("td");
-    const h = ev.handling || "waiting";
-    const hb = document.createElement("span");
-    hb.className = "ib-handling is-" + h;
-    hb.textContent = L("ib.handling." + h);
-    handled.appendChild(hb);
-    const when = document.createElement("td");
-    when.className = "kb-list__meta";
-    when.textContent = formatDateTime(ev.receivedAt);
-    tr.append(source, from, text, prioCell, handled, when);
-    ibel.events.appendChild(tr);
-  });
+  shown.forEach(ev => ibel.events.appendChild(ibRow(ev)));
+}
+
+/** One message: who and where (with the source's mark), the text, how urgent, what SuperAgent did, when. */
+function ibRow(ev) {
+  const tr = document.createElement("tr");
+  const cell = (cls, ...kids) => {
+    const td = document.createElement("td");
+    if (cls) td.className = cls;
+    td.append(...kids);
+    return td;
+  };
+  const span = (cls, text) => {
+    const s = document.createElement("span");
+    s.className = cls;
+    s.textContent = text;
+    return s;
+  };
+
+  const mark = span("ib-src ib-src--" + ev.source, ev.source === "dingtalk" ? "钉" : ev.source === "feishu" ? "飞" : "·");
+  mark.title = IB_SOURCES[ev.source] ? L(IB_SOURCES[ev.source]) : ev.source;
+  const who = document.createElement("div");
+  who.className = "ib-who";
+  who.append(span("ib-who__name", ev.senderName || "—"), span("ib-who__chat", ev.chatName || "—"));
+  const fromBox = document.createElement("div");
+  fromBox.className = "ib-from";
+  fromBox.append(mark, who);
+  const from = cell("", fromBox);
+
+  const text = span("ib-text", ev.text || "");
+  text.title = ev.text || "";
+  const msg = cell("", text);
+
+  const prio = cell("", span("ib-prio ib-prio--" + ev.priority, L("ib.prio." + ev.priority)));
+  if (ev.triageReason) {
+    const r = span("ib-reason", ev.triageReason);
+    r.title = ev.triageReason;
+    prio.appendChild(r);
+  }
+  const h = ev.handling || "waiting";
+  const handled = cell("", span("ib-handling is-" + h, L("ib.handling." + h)));
+  const when = cell("ib-time", ibWhen(ev.receivedAt));
+  when.title = formatDateTime(ev.receivedAt);
+  tr.append(from, msg, prio, handled, when);
+  return tr;
+}
+
+/** Today: the time; this year: month/day and time; older: the date. */
+function ibWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  const p = n => String(n).padStart(2, "0");
+  const now = new Date();
+  const hm = p(d.getHours()) + ":" + p(d.getMinutes());
+  if (d.toDateString() === now.toDateString()) return hm;
+  if (d.getFullYear() === now.getFullYear()) return (d.getMonth() + 1) + "/" + d.getDate() + " " + hm;
+  return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
 }
 
 // ---------- the SuperAgent panel's line about outside messages ----------

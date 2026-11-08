@@ -15,7 +15,7 @@ Object.assign(api, {
   updateConnector: (id, body) => connSend("PUT", "/api/v1/connectors/" + id, body),
   deleteConnector: id => connSend("DELETE", "/api/v1/connectors/" + id),
   setConnectorEnabled: (id, enabled) => connSend("PUT", "/api/v1/connectors/" + id + "/enabled", { enabled }),
-  saveConnectorToken: (id, token) => connSend("PUT", "/api/v1/connectors/" + id + "/token", { token }),
+  saveConnectorToken: (id, token, account) => connSend("PUT", "/api/v1/connectors/" + id + "/token", { token, account }),
   revokeConnector: id => connSend("DELETE", "/api/v1/connectors/" + id + "/token"),
   connectorBindCode: id => connSend("POST", "/api/v1/connectors/" + id + "/bind-code"),
   connectorTools: (id, refresh) => fetch("/api/v1/connectors/" + encodeURIComponent(id) + "/tools"
@@ -46,6 +46,11 @@ const cel = {
   tokenTitle: document.getElementById("connTokenTitle"),
   tokenInput: document.getElementById("connTokenInput"),
   tokenError: document.getElementById("connTokenError"),
+  tokenHint: document.getElementById("connTokenHint"),
+  tokenWhere: document.getElementById("connTokenWhere"),
+  tokenLink: document.getElementById("connTokenLink"),
+  tokenAccountField: document.getElementById("connTokenAccountField"),
+  tokenAccount: document.getElementById("connTokenAccount"),
 };
 let editing = null;
 let tokenFor = null;
@@ -81,6 +86,7 @@ const CONNECTOR_MARKS = [
   { test: c => c.kind === "feishu" || /feishu|lark|飞书/i.test(c.name), cls: "feishu", text: "飞" },
   { test: c => c.kind === "dingtalk" || /dingtalk|钉钉/i.test(c.name), cls: "dingtalk", text: "钉" },
   { test: c => /gitlab/i.test(c.name + " " + (c.endpoint || "")), cls: "gitlab", text: "GL" },
+  { test: c => /confluence/i.test(c.name), cls: "atlassian", text: "C" },
   { test: c => /jira|atlassian|confluence/i.test(c.name + " " + (c.endpoint || "")), cls: "atlassian", text: "J" },
   { test: c => /notion/i.test(c.name + " " + (c.endpoint || "")), cls: "notion", text: "N" },
   { test: c => /slack/i.test(c.name + " " + (c.endpoint || "")), cls: "slack", text: "#" },
@@ -232,7 +238,7 @@ const isMessaging = c => c.kind === "feishu" || c.kind === "dingtalk";
 /** disabled · connected / connecting / error (Feishu's live connection) · noToken (company token missing) · ready */
 function connState(c) {
   if (!c.enabled) return "disabled";
-  if (c.authMethod === "oauth" && !c.oauthConfigured) return "notSetUp";
+  if (c.setUp === false) return "notSetUp"; // the OAuth app or the Confluence site isn't set under System Settings
   if (isMessaging(c) || c.kind === "builtin") return c.status || "connecting";
   if (c.authMethod === "shared_token" && !c.authorized) return "noToken";
   return "ready";
@@ -268,6 +274,11 @@ function myAuthorization(c) {
     }
     return box;
   }
+  if (c.setUp === false && c.authMethod !== "oauth") {
+    text(L("conn.notSetUp"), true);
+    if (isAdmin) box.appendChild(linkBtn(L("conn.goSetUp"), () => setView("integrations")));
+    return box;
+  }
   if (c.authMethod === "oauth") {
     if (!c.oauthConfigured) {
       // The company app isn't set up yet: nobody can authorize until an administrator does.
@@ -284,7 +295,7 @@ function myAuthorization(c) {
     return box;
   }
   if (c.authorized) {
-    text(L("conn.tokenSet"));
+    text(c.account ? "@" + c.account : L("conn.tokenSet"));
     box.append(linkBtn(L("conn.changeToken"), () => openTokenModal(c)), linkBtn(L("conn.revoke"), () => revoke(c), "link-btn--muted"));
   } else {
     box.appendChild(primaryBtn(L("conn.enterToken"), () => openTokenModal(c)));
@@ -332,6 +343,7 @@ function canSeeTools(c) {
   if (c.kind === "dingtalk") return true;
   if (c.kind !== "mcp") return false;
   if (c.authMethod === "oauth" && !c.oauthConfigured) return false;
+  if (c.setUp === false) return false;
   return c.authorized;
 }
 
@@ -506,14 +518,27 @@ function openTokenModal(c) {
   cel.tokenTitle.textContent = L("conn.tokenTitle", { name: c.name });
   cel.tokenInput.value = "";
   cel.tokenError.hidden = true;
+  // Confluence: Cloud signs in with the email and an API token, a self-hosted site with a personal access token.
+  const site = c.site;
+  cel.tokenHint.textContent = L(site ? (c.needsAccount ? "conn.confluenceHintCloud" : "conn.confluenceHintServer") : "conn.tokenHint",
+    { site: site || "" });
+  cel.tokenWhere.hidden = !site;
+  if (site) {
+    cel.tokenLink.href = c.needsAccount ? "https://id.atlassian.com/manage-profile/security/api-tokens"
+      : site + "/plugins/personalaccesstokens/usertokens.action";
+    cel.tokenLink.textContent = L(c.needsAccount ? "conn.confluenceLinkCloud" : "conn.confluenceLinkServer");
+  }
+  cel.tokenAccountField.hidden = !c.needsAccount;
+  cel.tokenAccount.required = !!c.needsAccount;
+  cel.tokenAccount.value = c.needsAccount && c.account ? c.account : "";
   cel.tokenModal.hidden = false;
-  cel.tokenInput.focus();
+  (c.needsAccount && !cel.tokenAccount.value ? cel.tokenAccount : cel.tokenInput).focus();
 }
 
 cel.tokenForm.addEventListener("submit", async e => {
   e.preventDefault();
   try {
-    await api.saveConnectorToken(tokenFor.id, cel.tokenInput.value);
+    await api.saveConnectorToken(tokenFor.id, cel.tokenInput.value, tokenFor.needsAccount ? cel.tokenAccount.value.trim() : null);
     cel.tokenModal.hidden = true;
     await loadConnectors();
   } catch (err) {

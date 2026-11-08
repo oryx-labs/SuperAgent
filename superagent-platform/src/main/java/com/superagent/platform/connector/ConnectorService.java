@@ -63,12 +63,13 @@ public class ConnectorService {
     private final McpGrants grants;
     private final IntegrationService integrations;
     private final com.superagent.core.settings.SystemSettingStore settings;
+    private final ConfluenceSite confluence;
     private final SecureRandom random = new SecureRandom();
 
     public ConnectorService(ConnectorStore store, ConnectorCredentialStore credentials, EventSourceStore links,
                             ConnectorOAuthService oauth, SecretCipher cipher,
                             McpGrants grants, IntegrationService integrations,
-                            com.superagent.core.settings.SystemSettingStore settings) {
+                            com.superagent.core.settings.SystemSettingStore settings, ConfluenceSite confluence) {
         this.store = store;
         this.credentials = credentials;
         this.links = links;
@@ -77,6 +78,7 @@ public class ConnectorService {
         this.grants = grants;
         this.integrations = integrations;
         this.settings = settings;
+        this.confluence = confluence;
         seedDefaults();
     }
 
@@ -108,7 +110,7 @@ public class ConnectorService {
         };
         return new ConnectorDto(BUILTIN_ID, "SuperAgent", null, "builtin", "none", true, "http", status,
                 admin ? st.error() : null, false, true, null, null, false, admin ? grants.selfUrl() : null, null,
-                false, 0, null, st.checkedAt(), true);
+                false, 0, null, st.checkedAt(), true, true, null, false);
     }
 
     /** Feishu as an employee sees it: whether they're linked, and the code to link if matching by phone didn't. */
@@ -127,7 +129,7 @@ public class ConnectorService {
         return new ConnectorDto(id, name, null, kind, "none", true, "http",
                 integrations.status(integration), admin ? integrations.lastError(integration) : null,
                 true, linked, null, linked || link == null ? null : link.bindCode(), false, null, null, false, count,
-                null, null, true);
+                null, null, true, true, null, false);
     }
 
     // --- administration ---
@@ -169,6 +171,14 @@ public class ConnectorService {
 
     /** Saves the viewer's personal token for a connector that acts with each employee's own identity. */
     public ConnectorDto authorize(String id, String viewer, String token, boolean admin) {
+        return authorize(id, viewer, token, null, admin);
+    }
+
+    /**
+     * {@code account}: the name that goes with the token where the service needs one (Confluence Cloud: the email).
+     * A Confluence token is checked against the site first, so a wrong one is caught here rather than in a run.
+     */
+    public ConnectorDto authorize(String id, String viewer, String token, String account, boolean admin) {
         Connector c = require(id);
         if (c.authMethod() != ConnectorAuthMethod.PERSONAL_TOKEN) {
             throw new IllegalArgumentException("This connector doesn't take a personal token");
@@ -176,7 +186,13 @@ public class ConnectorService {
         if (blank(token) == null) {
             throw new IllegalArgumentException("Token is required");
         }
-        credentials.save(new ConnectorCredential(id, viewer, cipher.encrypt(token.strip()), null, Instant.now()));
+        String label = null;
+        if (CONFLUENCE_ID.equals(id)) {
+            String site = confluenceSite().orElseThrow(() ->
+                    new IllegalArgumentException("管理员还没在系统设置里填 Confluence 的地址"));
+            label = confluence.verify(site, blank(account), token.strip());
+        }
+        credentials.save(new ConnectorCredential(id, viewer, cipher.encrypt(token.strip()), label, Instant.now()));
         return toDto(c, viewer, admin);
     }
 
@@ -253,6 +269,15 @@ public class ConnectorService {
             token = usable.get();
         }
         McpServerSpec spec = spec(c, token);
+        if (CONFLUENCE_ID.equals(c.id())) {
+            Optional<String> site = confluenceSite();
+            if (site.isEmpty()) {
+                return Optional.empty(); // the site isn't set under System Settings
+            }
+            String account = credentials.find(c.id(), owner).map(ConnectorCredential::accountLabel).orElse(null);
+            spec = new McpServerSpec(spec.name(), spec.transport(), spec.url(), spec.headers(), spec.command(), spec.args(),
+                    ConfluenceSite.env(site.get(), account, token));
+        }
         if (DINGTALK_TOOLS_ID.equals(c.id())) {
             Map<String, String> env = new LinkedHashMap<>(spec.env());
             env.put("DINGTALK_Client_ID", integrations.value(IntegrationService.DINGTALK, "clientId").orElse(""));
@@ -385,6 +410,10 @@ public class ConnectorService {
                 "员工连接自己的 Notion 工作区（授权时选择共享哪些页面），通过 Notion 官方 MCP 服务读写页面和数据库。",
                 ConnectorKind.MCP, ConnectorAuthMethod.OAUTH, true, ConnectorTransport.STDIO,
                 "npx -y @notionhq/notion-mcp-server", "NOTION_TOKEN", now, now));
+        seedOnce(CONFLUENCE_ID, new Connector(CONFLUENCE_ID, "Confluence",
+                "以员工本人身份搜索、阅读、新建和修改 Confluence 页面（公司自建版和 Cloud 都支持）。管理员在系统设置里填站点地址，员工用自己的令牌授权。",
+                ConnectorKind.MCP, ConnectorAuthMethod.PERSONAL_TOKEN, true, ConnectorTransport.STDIO, CONFLUENCE_COMMAND,
+                "CONFLUENCE_PERSONAL_TOKEN", now, now));
         // App identity, not each employee's: off until an administrator turns it on knowingly.
         seedOnce(DINGTALK_TOOLS_ID, new Connector(DINGTALK_TOOLS_ID, "钉钉工具",
                 "钉钉官方 MCP：通讯录、日程、待办、日志。以公司钉钉应用的身份调用，所有员工的 Agent 共用这个身份，开启前请确认应用权限。",
@@ -393,7 +422,7 @@ public class ConnectorService {
 
     /** The connectors the system ships: an administrator can turn them on or off, nothing else. */
     static final java.util.Set<String> SYSTEM_IDS = java.util.Set.of(ConnectorOAuthService.GITHUB,
-            ConnectorOAuthService.GITEE, FeishuDocsOAuthClient.KEY, NotionOAuthClient.KEY, "dingtalk-tools");
+            ConnectorOAuthService.GITEE, FeishuDocsOAuthClient.KEY, NotionOAuthClient.KEY, "dingtalk-tools", "confluence");
 
     static boolean isSystem(String id) {
         return SYSTEM_IDS.contains(id);
@@ -430,6 +459,9 @@ public class ConnectorService {
     public static final String FEISHU_DOCS_ID = FeishuDocsOAuthClient.KEY;
     public static final String NOTION_ID = NotionOAuthClient.KEY;
     public static final String DINGTALK_TOOLS_ID = "dingtalk-tools";
+    public static final String CONFLUENCE_ID = "confluence";
+    /** mcp-atlassian (Confluence and Jira, Cloud and self-hosted), pinned: run by uv, which fetches it on first use. */
+    static final String CONFLUENCE_COMMAND = "uvx mcp-atlassian@0.23.1";
     static final String DINGTALK_TOOLS_COMMAND = "npx -y dingtalk-mcp@latest";
     /** DingTalk's official MCP server: which of its tool groups agents get. */
     static final String DINGTALK_PROFILES = "dingtalk-contacts,dingtalk-department,dingtalk-calendar,dingtalk-tasks,dingtalk-report";
@@ -476,7 +508,21 @@ public class ConnectorService {
                 lower(c.transport()), null, null, needs, authorized, account, null,
                 c.authMethod() == ConnectorAuthMethod.OAUTH && oauth.isConfigured(oauth.providerFor(c.id())),
                 admin ? c.endpoint() : null, admin ? c.tokenEnv() : null, secretSet,
-                authorizedCount, c.createdAt(), c.updatedAt(), isSystem(c.id()));
+                authorizedCount, c.createdAt(), c.updatedAt(), isSystem(c.id()), setUp(c),
+                CONFLUENCE_ID.equals(c.id()) ? confluenceSite().orElse(null) : null,
+                CONFLUENCE_ID.equals(c.id()) && confluenceSite().map(ConfluenceSite::isCloud).orElse(false));
+    }
+
+    /** Whether employees can authorize yet: the OAuth app or the Confluence site is set up under System Settings. */
+    private boolean setUp(Connector c) {
+        if (c.authMethod() == ConnectorAuthMethod.OAUTH) {
+            return oauth.isConfigured(oauth.providerFor(c.id()));
+        }
+        return !CONFLUENCE_ID.equals(c.id()) || confluenceSite().isPresent();
+    }
+
+    private Optional<String> confluenceSite() {
+        return integrations.value(IntegrationService.CONFLUENCE, "url");
     }
 
     // --- helpers ---

@@ -19,6 +19,14 @@
   <name>SuperAgent</name>
   <description>Self-hosted AI work platform for enterprises</description>
 
+  <licenses>
+    <license>
+      <name>Apache License 2.0 with Commons Clause v1.0</name>
+      <url>https://github.com/oryx-labs/SuperAgent/blob/main/LICENSE</url>
+      <comments>Free for individuals and for companies' internal use; selling it (resale, paid hosting, selling modified versions) is not permitted.</comments>
+    </license>
+  </licenses>
+
   <modules>
     <module>superagent-core</module>
     <module>superagent-api</module>
