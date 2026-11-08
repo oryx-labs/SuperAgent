@@ -650,8 +650,9 @@ class TaskServiceTest {
         assertThat(models).isEmpty(); // recorded, not run
 
         service.awaitingAdmission().forEach(service::admit);
-        await().atMost(Duration.ofSeconds(5)).until(() -> service.awaitingAdmission().size() == 1
-                && "strong".equals(tasks.findTask(id).orElseThrow().model())); // failed on cheap, queued again one tier up
+        await().atMost(Duration.ofSeconds(5)).until(() -> com.superagent.core.tenant.TenantContext.call("acme",
+                () -> service.awaitingAdmission().size() == 1
+                        && "strong".equals(tasks.findTask(id).orElseThrow().model()))); // failed on cheap, queued again one tier up
         service.awaitingAdmission().forEach(service::admit);
         awaitStatus(tasks, id, "DONE");
 

@@ -11,14 +11,47 @@ import java.util.List;
  * a new row (a newer version) and reads use {@code FINAL} to collapse to the
  * latest. Messages and events are append-only; a message edit is applied as an
  * {@code ALTER TABLE ... UPDATE} mutation (asynchronous in ClickHouse).
- *
- * <p>No auto schema init: apply {@code db/clickhouse/schema.sql} first (the
- * database must exist before the JDBC connection selects it).
  */
 public class ClickHouseChatStore extends AbstractJdbcChatStore {
 
     public ClickHouseChatStore(JdbcTemplate jdbc) {
-        super(jdbc, List.of("ALTER TABLE chat_message ADD COLUMN IF NOT EXISTS author String"));
+        super(jdbc, List.of("""
+                CREATE TABLE IF NOT EXISTS chat_session (
+                  company_id String,
+                  id String,
+                  title String,
+                  agent_type String,
+                  agent_session_id String,
+                  workspace_dir String,
+                  agent_id String,
+                  status String,
+                  created_at DateTime64(3, 'UTC'),
+                  updated_at DateTime64(3, 'UTC')
+                ) ENGINE = ReplacingMergeTree(updated_at)
+                ORDER BY (company_id, id)
+                """, """
+                CREATE TABLE IF NOT EXISTS chat_message (
+                  company_id String,
+                  id String,
+                  session_id String,
+                  role String,
+                  content String,
+                  created_at DateTime64(3, 'UTC'),
+                  author String
+                ) ENGINE = MergeTree
+                ORDER BY (company_id, session_id, created_at)
+                """, """
+                CREATE TABLE IF NOT EXISTS agent_event (
+                  company_id String,
+                  session_id String,
+                  message_id String,
+                  seq Int64,
+                  type String,
+                  payload String,
+                  created_at DateTime64(3, 'UTC')
+                ) ENGINE = MergeTree
+                ORDER BY (company_id, session_id, created_at, seq)
+                """));
     }
 
     @Override

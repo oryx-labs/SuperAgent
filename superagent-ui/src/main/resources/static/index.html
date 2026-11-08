@@ -17,8 +17,9 @@
     <nav class="topnav" aria-label="Main">
       <a class="nav__item" href="#todo" data-view="todo"><span data-i18n="nav.todo">To-do</span><span class="nav__badge" id="todoBadge" hidden></span></a>
       <a class="nav__item is-active" href="#chat" data-view="chat"><span data-i18n="nav.agents">Agents</span></a>
-      <a class="nav__item" href="#files" data-view="files"><span data-i18n="nav.files">Files</span></a>
       <a class="nav__item" href="#tasks" data-view="tasks"><span data-i18n="nav.tasks">Tasks</span></a>
+      <a class="nav__item" href="#automation" data-view="automation"><span data-i18n="nav.automation">Automation</span></a>
+      <a class="nav__item" href="#files" data-view="files"><span data-i18n="nav.files">Resources</span></a>
       <div class="topmenu" id="workspaceMenu">
         <button class="topmenu__btn" type="button" id="workspaceBtn" aria-haspopup="menu" aria-expanded="false">
           <span data-i18n="nav.workspace">Workspace</span><span class="topmenu__current" id="workspaceCurrent"></span>
@@ -212,10 +213,10 @@
             <button type="button" class="link-btn link-btn--muted proj-back" id="projBack" data-i18n="proj.back">← All projects</button>
             <h2 class="admin__title"><span id="projName"></span> <span class="pill proj-state" id="projState"></span></h2>
             <p class="admin__sub" id="projDesc"></p>
-            <p class="proj-meta" id="projMeta"></p>
           </div>
           <div class="proj-head__actions">
             <button class="btn btn--primary" id="projInviteBtn" type="button" data-i18n="proj.invite">+ Invite</button>
+            <button class="btn" id="projAddAgentBtn" type="button" data-i18n="proj.addAgent">+ Add Agent</button>
             <button class="btn" id="projEditBtn" type="button" data-i18n="common.edit">Edit</button>
             <button class="btn" id="projArchiveBtn" type="button" data-i18n="proj.reopen">Reopen</button>
           </div>
@@ -227,7 +228,6 @@
           <button type="button" class="model-tab" data-tab="members"><span data-i18n="proj.tabMembers">Members</span> <b></b></button>
         </div>
         <div class="admin__body">
-          <div class="proj-toolbar" id="projToolbar"></div>
           <table class="ctable proj-table"><tbody id="projRows"></tbody></table>
           <p class="kb-empty" id="projRowsEmpty" hidden></p>
         </div>
@@ -338,19 +338,10 @@
 
     <section class="admin" data-pane="tasks" aria-label="Tasks" hidden>
       <div class="task-list-view" id="taskListView">
-        <div class="work-stats" data-work-stats></div>
-        <div class="model-tabs page-tabs" role="tablist">
-          <button type="button" class="model-tab is-active" data-goto="tasks" data-i18n="tasks.tabTasks">Tasks</button>
-          <button type="button" class="model-tab" data-goto="automation" data-i18n="tasks.tabScheduled">Scheduled</button>
-        </div>
         <div class="admin__body">
-          <!-- Narrow the list by topic tag, the agent that ran the tasks, where they came from; with what they add up to. -->
+          <!-- Narrow the list by topic tag, with what the tag's tasks add up to. -->
           <div class="task-filter" id="taskFilter">
-            <select id="taskFilterProject" data-i18n-title="proj.filterTitle" aria-label="Project" hidden></select>
-            <select id="taskFilterTag" data-i18n-title="tasks.filterTag" aria-label="Tag"></select>
-            <select id="taskFilterAgent" data-i18n-title="tasks.filterAgent" aria-label="Agent"></select>
-            <select id="taskFilterSource" data-i18n-title="tasks.filterSource" aria-label="Source"></select>
-            <button type="button" class="link-btn link-btn--muted" id="taskFilterClear" data-i18n="tasks.filterClear" hidden>Clear</button>
+            <div class="tag-bar" id="taskTagBar" role="tablist" data-i18n-title="tasks.filterTag" aria-label="Tags"></div>
             <span class="task-filter__sum" id="taskFilterSum"></span>
           </div>
           <table class="ttable">
@@ -849,29 +840,24 @@
 
     <section class="admin" data-pane="automation" aria-label="Automations" hidden>
       <div class="task-list-view" id="autoListView">
-        <div class="work-stats" data-work-stats></div>
-        <div class="model-tabs page-tabs" role="tablist">
-          <button type="button" class="model-tab" data-goto="tasks" data-i18n="tasks.tabTasks">Tasks</button>
-          <button type="button" class="model-tab is-active" data-goto="automation" data-i18n="tasks.tabScheduled">Scheduled</button>
-        </div>
 
+        <!-- Narrow the list on the left; the one action on the right. -->
         <div class="auto-toolbar">
-          <!-- Filtering moved to the shared stat cards above; kept hidden because the list code still reads it. -->
-          <div class="auto-tabs" id="autoTabs" role="tablist" hidden>
-            <button type="button" class="auto-tab is-active" data-filter="all"><span data-i18n="auto.tabAll">All</span> <b></b></button>
-            <button type="button" class="auto-tab" data-filter="active"><span data-i18n="auto.tabActive">Active</span> <b></b></button>
-            <button type="button" class="auto-tab" data-filter="once"><span data-i18n="auto.typeOnce">One-time</span> <b></b></button>
-            <button type="button" class="auto-tab" data-filter="recurring"><span data-i18n="auto.typeRecurring">Recurring</span> <b></b></button>
-            <button type="button" class="auto-tab" data-filter="api" id="autoTabApi" hidden><span data-i18n="auto.typeApi">API</span> <b></b></button>
-          </div>
           <div class="auto-filters">
             <input type="search" id="autoSearch" data-i18n-ph="auto.search" aria-label="Search automations" />
+            <select id="autoTypeFilter" aria-label="Type">
+              <option value="all" data-i18n="auto.tabAll">All</option>
+              <option value="active" data-i18n="auto.tabActive">Active</option>
+              <option value="once" data-i18n="auto.typeOnce">One-time</option>
+              <option value="recurring" data-i18n="auto.typeRecurring">Recurring</option>
+              <option value="api" id="autoTypeApi" data-i18n="auto.typeApi" hidden>API</option>
+            </select>
             <select id="autoOwnerFilter" aria-label="Creator">
               <option value="mine" data-i18n="auto.ownerMine">My automations</option>
               <option value="all" data-i18n="auto.ownerAll">Everyone's</option>
             </select>
-            <button class="btn btn--primary" id="autoAddBtn" type="button" data-i18n="auto.add">+ New scheduled task</button>
           </div>
+          <button class="btn btn--primary" id="autoAddBtn" type="button" data-i18n="auto.add">+ New scheduled task</button>
         </div>
         <div class="admin__body">
           <table class="ctable">

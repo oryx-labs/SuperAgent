@@ -7,12 +7,20 @@ import java.util.List;
 /**
  * ClickHouse task-phase store: {@code ReplacingMergeTree(updated_at)} keyed by
  * (company_id, task_id), so save re-inserts a newer version and reads use {@code FINAL}; delete
- * is an {@code ALTER TABLE ... DELETE} mutation. Apply {@code db/clickhouse/schema.sql} first.
+ * is an {@code ALTER TABLE ... DELETE} mutation.
  */
 public class ClickHouseTaskPhaseStore extends AbstractJdbcTaskPhaseStore {
 
     public ClickHouseTaskPhaseStore(JdbcTemplate jdbc) {
-        super(jdbc, List.of());
+        super(jdbc, List.of("""
+                CREATE TABLE IF NOT EXISTS task_phase (
+                  company_id String,
+                  task_id String,
+                  phases_json String,
+                  updated_at DateTime64(3, 'UTC')
+                ) ENGINE = ReplacingMergeTree(updated_at)
+                ORDER BY (company_id, task_id)
+                """));
     }
 
     @Override

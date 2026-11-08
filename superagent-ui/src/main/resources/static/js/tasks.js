@@ -16,7 +16,6 @@ Object.assign(api, {
   createTask: body => fetch("/api/v1/tasks", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   }).then(kbJson),
-  taskStats: () => fetch("/api/v1/tasks/stats").then(r => r.json()),
   taskDetail: id => fetch("/api/v1/tasks/" + id).then(r => r.json()),
   taskAgents: () => fetch("/api/v1/tasks/agents").then(r => r.json()),
   taskStatus: id => fetch("/api/v1/tasks/" + id + "/status").then(r => r.json()),
@@ -99,7 +98,6 @@ function showTaskList() {
 
 const TASK_PAGE_SIZE = 20;
 let taskPage = 1;
-let taskFilter = ""; // "" = all; otherwise the stat card the user clicked
 let agentOptions = [];  // [{key, name, models:[ProviderModelDto]}] from /tasks/agents
 
 // Tasks are only ever created by agents and automations, so the list just pages through them.
@@ -112,95 +110,14 @@ function renderTaskPager(page) {
   tel.pagerNext.disabled = page.page >= pages;
 }
 
-// The overview above the list. Each card is also a filter: click to see just those tasks, click again for all.
-const TASK_STAT_CARDS = [
-  { key: "", label: "tasks.statTotal", value: s => s.total },
-  { key: "active", label: "tasks.statActive", value: s => s.active },
-  { key: "needs_confirmation", label: "tasks.statWaiting", value: s => s.needsConfirmation, tone: "warn" },
-  { key: "done", label: "tasks.statDoneToday", value: s => s.doneToday, tone: "ok" },
-  { key: "error", label: "tasks.statFailed", value: s => s.failed, tone: "bad" },
-  { key: null, label: "tasks.statSpend", value: s => "$" + Number(s.spendThisMonth || 0).toFixed(2) },
-];
-
-// Scheduled-task cards; each also filters the Scheduled tab (keys match its filters).
-const SCHEDULED_STAT_CARDS = [
-  { key: "all", label: "auto.statTotal", value: l => l.length },
-  { key: "active", label: "auto.statEnabled", value: l => l.filter(a => a.enabled).length, tone: "ok" },
-  { key: "recurring", label: "auto.typeRecurring", value: l => l.filter(a => a.type === "recurring").length },
-  { key: "once", label: "auto.typeOnce", value: l => l.filter(a => a.type === "once").length },
-];
-let workStats = null;     // task counters from /tasks/stats
-let workSchedules = [];   // the user's scheduled tasks
-
-// Tasks and scheduled tasks share one stats strip at the top of both tabs; clicking a card filters its tab.
-async function loadTaskStats() {
-  const [s, a] = await Promise.all([api.taskStats().catch(() => null), api.listAutomations().catch(() => null)]);
-  workStats = s && s.data;
-  workSchedules = (a && a.data) || [];
-  renderWorkStats();
-}
-
-function renderWorkStats() {
-  const onScheduled = !document.querySelector('[data-pane="automation"]').hidden;
-  const owner = document.getElementById("autoOwnerFilter");
-  const schedules = owner && owner.value === "all" ? workSchedules : workSchedules.filter(a => a.owner === currentUsername);
-  document.querySelectorAll("[data-work-stats]").forEach(box => {
-    const taskCards = workStats ? TASK_STAT_CARDS.map(c => statCard(L(c.label), c.value(workStats), c.tone,
-      c.key === null ? null : !onScheduled && c.key === taskFilter, () => {
-        taskFilter = !onScheduled && taskFilter === c.key ? "" : c.key;
-        taskPage = 1;
-        if (onScheduled) setView("tasks"); else loadTasks();
-      })) : [];
-    const scheduleCards = SCHEDULED_STAT_CARDS.map(c => statCard(L(c.label), c.value(schedules), c.tone,
-      onScheduled && c.key === autoFilter, () => {
-        autoFilter = onScheduled && autoFilter === c.key ? "all" : c.key;
-        if (onScheduled) renderAutomations(); else setView("automation");
-      }));
-    box.replaceChildren(statGroup(L("tasks.tabTasks"), taskCards), statGroup(L("tasks.tabScheduled"), scheduleCards));
-  });
-}
-
-function statGroup(label, cards) {
-  const g = document.createElement("div");
-  g.className = "work-stats__group";
-  const h = document.createElement("div");
-  h.className = "work-stats__label";
-  h.textContent = label;
-  const grid = document.createElement("div");
-  grid.className = "stat-cards stat-cards--filter";
-  grid.append(...cards);
-  g.append(h, grid);
-  return g;
-}
-
-/** {@code active === null}: a plain figure, not a filter. */
-function statCard(label, value, tone, active, onClick) {
-  const card = document.createElement(active === null ? "div" : "button");
-  card.className = "stat-card" + (tone ? " is-" + tone : "") + (active ? " is-active" : "");
-  if (active !== null) {
-    card.type = "button";
-    card.addEventListener("click", onClick);
-  }
-  const v = document.createElement("span");
-  v.className = "stat-card__value";
-  v.textContent = value;
-  const l = document.createElement("span");
-  l.className = "stat-card__label";
-  l.textContent = label;
-  card.append(v, l);
-  return card;
-}
-
 async function loadTasks() {
   if (!agentOptions.length) await loadAgentOptions();
   let list = [];
   let page = null;
-  loadTaskStats();
   loadTaskFacets();
-  try { const res = await api.listTasks(taskPage, taskFilter, taskNarrow); page = res && res.data; } catch (e) { /* ignore */ }
+  try { const res = await api.listTasks(taskPage, "", taskNarrow); page = res && res.data; } catch (e) { /* ignore */ }
   list = (page && page.items) || [];
-  const narrowed = taskFilter || taskNarrow.project || taskNarrow.tag || taskNarrow.agent || taskNarrow.source;
-  tfEl.sum.textContent = page && narrowed
+  tfEl.sum.textContent = page && taskNarrow.tag
     ? L("tasks.filterSum", { n: page.total, spend: "$" + Number(page.spend || 0).toFixed(2) }) : "";
   if (page) taskPage = page.page; // the server clamps a page past the end (e.g. after deletes)
   renderTaskPager(page);
@@ -209,57 +126,47 @@ async function loadTasks() {
   list.forEach(t => tel.rows.appendChild(taskRow(t)));
 }
 
-// ---------- narrowing the list: topic tag, the agent that ran it, where it came from ----------
+// ---------- narrowing the list by topic tag: one chip per tag, "All" first ----------
 const taskNarrow = { project: "", tag: "", agent: "", source: "" };
 const tfEl = {
-  project: document.getElementById("taskFilterProject"),
-  tag: document.getElementById("taskFilterTag"),
-  agent: document.getElementById("taskFilterAgent"),
-  source: document.getElementById("taskFilterSource"),
-  clear: document.getElementById("taskFilterClear"),
+  box: document.getElementById("taskFilter"),
+  bar: document.getElementById("taskTagBar"),
   sum: document.getElementById("taskFilterSum"),
 };
 
 async function loadTaskFacets() {
   let f = null;
-  try { f = await api.taskFacets(); } catch (e) { return; }
-  const fill = (select, key, items, allLabel, label) => {
-    const opts = [new Option(allLabel, "")];
-    items.forEach(i => opts.push(new Option(label(i) + " · " + i.count + " · $" + Number(i.spend || 0).toFixed(2), i.key)));
-    // Keep a chosen value even once it has no tasks left, so the filter doesn't silently drop.
-    if (taskNarrow[key] && !items.some(i => i.key === taskNarrow[key])) opts.push(new Option(taskNarrow[key], taskNarrow[key]));
-    select.replaceChildren(...opts);
-    select.value = taskNarrow[key];
-  };
-  fill(tfEl.tag, "tag", f.tags, L("tasks.filterAllTags"), i => "#" + i.label);
-  fill(tfEl.agent, "agent", f.agents, L("tasks.filterAllAgents"), i => i.label);
-  fill(tfEl.source, "source", f.sources, L("tasks.filterAllSources"), i => TASK_SOURCE_LABEL[i.key] || i.key);
-  tfEl.tag.hidden = !f.tags.length && !taskNarrow.tag;
-  tfEl.agent.hidden = !f.agents.length && !taskNarrow.agent;
-  fillTaskProjectFilter();
-  tfEl.clear.hidden = !(taskNarrow.project || taskNarrow.tag || taskNarrow.agent || taskNarrow.source);
+  try { f = await api.taskFacets(); } catch (e) { f = {}; }
+  const tags = f.tags || [];
+  // Keep a chosen tag even once it has no tasks left, so the filter doesn't silently drop.
+  if (taskNarrow.tag && !tags.some(t => t.key === taskNarrow.tag)) tags.push({ key: taskNarrow.tag, label: taskNarrow.tag, count: 0 });
+  // Always there, with "All" even before any task is tagged: the list keeps its shape.
+  tfEl.bar.replaceChildren(tagBarChip(L("tasks.filterAll"), null, ""),
+    ...tags.map(t => tagBarChip("#" + t.label, t.count, t.key)));
 }
 
-/** The projects the user is in; a project lists every task made in it, whoever started it. */
-async function fillTaskProjectFilter() {
-  const list = await api.listProjects().catch(() => []);
-  const opts = [new Option(L("proj.filterAll"), "")];
-  (list || []).forEach(p => opts.push(new Option(p.name + (p.status === "archived" ? " · " + L("proj.archived") : ""), p.id)));
-  tfEl.project.replaceChildren(...opts);
-  tfEl.project.value = taskNarrow.project;
-  tfEl.project.hidden = !(list || []).length && !taskNarrow.project;
+function tagBarChip(label, count, key) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "tag-bar__chip" + (taskNarrow.tag === key ? " is-active" : "");
+  b.setAttribute("role", "tab");
+  b.setAttribute("aria-selected", String(taskNarrow.tag === key));
+  const name = document.createElement("span");
+  name.textContent = label;
+  b.appendChild(name);
+  if (count != null) {
+    const n = document.createElement("span");
+    n.className = "tag-bar__count";
+    n.textContent = count;
+    b.appendChild(n);
+  }
+  b.addEventListener("click", () => {
+    taskNarrow.tag = taskNarrow.tag === key ? "" : key;
+    taskPage = 1;
+    loadTasks();
+  });
+  return b;
 }
-
-["project", "tag", "agent", "source"].forEach(k => tfEl[k].addEventListener("change", () => {
-  taskNarrow[k] = tfEl[k].value;
-  taskPage = 1;
-  loadTasks();
-}));
-tfEl.clear.addEventListener("click", () => {
-  taskNarrow.project = taskNarrow.tag = taskNarrow.agent = taskNarrow.source = "";
-  taskPage = 1;
-  loadTasks();
-});
 
 /** Narrows the list to one tag (from a tag chip). */
 function filterByTag(tag) {

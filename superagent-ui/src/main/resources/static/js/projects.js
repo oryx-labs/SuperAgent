@@ -34,13 +34,12 @@ const pjel = {
   name: document.getElementById("projName"),
   state: document.getElementById("projState"),
   desc: document.getElementById("projDesc"),
-  meta: document.getElementById("projMeta"),
   editBtn: document.getElementById("projEditBtn"),
   archiveBtn: document.getElementById("projArchiveBtn"),
   inviteBtn: document.getElementById("projInviteBtn"),
+  addAgentBtn: document.getElementById("projAddAgentBtn"),
   formArchive: document.getElementById("projFormArchive"),
   detailTabs: document.getElementById("projDetailTabs"),
-  toolbar: document.getElementById("projToolbar"),
   rows: document.getElementById("projRows"),
   rowsEmpty: document.getElementById("projRowsEmpty"),
   modal: document.getElementById("projModal"),
@@ -157,10 +156,9 @@ function openProject(p) {
   pjel.state.classList.toggle("is-archived", archived);
   pjel.desc.textContent = p.description || "";
   pjel.desc.hidden = !p.description;
-  pjel.meta.textContent = (p.mine ? L("proj.youOwn") : L("proj.ownedBy", { name: p.ownerName })) + " · " + projectCounts(p)
-    + (archived ? " · " + L("proj.archivedNote") : "");
   pjel.editBtn.hidden = !p.mine;
   pjel.inviteBtn.hidden = !p.mine || archived;
+  pjel.addAgentBtn.hidden = archived; // members put their own agents in too
   pjel.archiveBtn.hidden = !p.mine || !archived; // archiving is in the edit dialog; reopening is right here
   const counts = { agents: (p.agentIds || []).length, tasks: p.taskCount, files: p.fileCount, members: (p.members || []).length };
   pjel.detailTabs.querySelectorAll(".model-tab").forEach(t => {
@@ -181,13 +179,10 @@ pjel.detailTabs.addEventListener("click", e => {
 
 async function renderProjectTab() {
   const p = projOpen;
-  const active = p.status !== "archived";
-  pjel.toolbar.replaceChildren();
   pjel.rows.replaceChildren();
   pjel.rowsEmpty.hidden = true;
   let rows = [];
   if (projTab === "agents") {
-    if (active) pjel.toolbar.appendChild(projToolBtn(L("proj.addAgent"), pickAgentsForProject));
     const all = await api.listAgents().then(r => (r && r.data) || []).catch(() => []);
     rows = all.filter(a => (p.agentIds || []).includes(a.id)).map(projectAgentRow);
     pjel.rowsEmpty.textContent = L("proj.noAgents");
@@ -200,21 +195,11 @@ async function renderProjectTab() {
     rows = (files || []).map(projectFileRow);
     pjel.rowsEmpty.textContent = L("proj.noFiles");
   } else {
-    if (p.mine && active) pjel.toolbar.appendChild(projToolBtn(L("proj.invite"), pickMembersForProject));
     rows = (p.members || []).map(projectMemberRow);
   }
   if (projOpen !== p) return; // switched away while loading
   pjel.rows.replaceChildren(...rows);
   pjel.rowsEmpty.hidden = rows.length > 0;
-}
-
-function projToolBtn(text, onClick) {
-  const b = document.createElement("button");
-  b.type = "button";
-  b.className = "btn";
-  b.textContent = text;
-  b.addEventListener("click", onClick);
-  return b;
 }
 
 /** A table row: a main cell (title + small line), a meta cell, and actions. */
@@ -318,6 +303,7 @@ async function setProjectArchived(p, archiving) {
 }
 pjel.archiveBtn.addEventListener("click", () => { if (projOpen) setProjectArchived(projOpen, false); });
 pjel.inviteBtn.addEventListener("click", () => { if (projOpen) pickMembersForProject(); });
+pjel.addAgentBtn.addEventListener("click", () => { if (projOpen) pickAgentsForProject(); });
 pjel.formArchive.addEventListener("click", async () => {
   const p = projEditing;
   if (!p) return;

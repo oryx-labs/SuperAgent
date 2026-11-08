@@ -38,6 +38,7 @@ import com.superagent.core.task.TaskStatus;
 import com.superagent.core.task.TaskStore;
 import jakarta.annotation.PreDestroy;
 import com.superagent.files.FileService;
+import com.superagent.platform.tenant.QuotaService;
 import com.superagent.skills.SkillService;
 import com.superagent.runtime.attachment.ImageAttachmentStore;
 import com.superagent.core.connector.McpServerSpec;
@@ -174,6 +175,12 @@ public class TaskService implements TaskRecovery {
     /** Tasks handed to admission (being judged, or queued for a session), so a sweep doesn't take them twice. */
     // task id -> its company: each company's sweep only forgets its own (the others' tasks aren't in its list).
     private final Map<String, String> admitted = new ConcurrentHashMap<>();
+    private QuotaService quotas; // null in tests: no limits
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void useQuotas(QuotaService quotas) {
+        this.quotas = quotas;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setDoers(com.superagent.core.task.TaskDoers doers) {
@@ -633,6 +640,9 @@ public class TaskService implements TaskRecovery {
 
     private TaskDto create(CreateTaskRequest request, String owner, String agentId, String sessionId, String messageId,
                            String parentId) {
+        if (quotas != null) {
+            quotas.checkTokens();
+        }
         String id = UUID.randomUUID().toString();
         String who = owner == null || owner.isBlank() ? defaultOwner : owner;
         String continuesFrom = blankToNull(request.continuesFrom());
@@ -749,6 +759,19 @@ public class TaskService implements TaskRecovery {
                 out.add(t);
                 room.put(parent, free - 1);
             }
+        }
+        if (quotas != null) {
+            // The company's limit on tasks running at once: the rest wait for the next sweep.
+            int running = (int) all.stream().filter(k -> k.status() == TaskStatus.RUNNING || admitted.containsKey(k.id())
+                    || (k.status() == TaskStatus.PENDING && k.workspaceDir() != null)).count();
+            List<Task> admit = new ArrayList<>();
+            for (Task t : out) {
+                if (!quotas.canStartTask(running + admit.size())) {
+                    break;
+                }
+                admit.add(t);
+            }
+            return admit;
         }
         return out;
     }

@@ -34,6 +34,7 @@ import com.superagent.core.tenant.TenantContext;
 import com.superagent.core.tenant.TenantPaths;
 import com.superagent.core.user.UserStore;
 import com.superagent.files.FileService;
+import com.superagent.platform.tenant.QuotaService;
 import com.superagent.skills.SkillService;
 import com.superagent.platform.provider.CredentialService;
 import com.superagent.platform.provider.EndpointFailures;
@@ -463,6 +464,13 @@ public class ChatService {
 
     // --- sending a message (streamed) ---
 
+    private QuotaService quotas; // null in tests: no limits
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void useQuotas(QuotaService quotas) {
+        this.quotas = quotas;
+    }
+
     public SseEmitter sendMessage(String sessionId, String content) {
         return sendMessage(sessionId, content, List.of(), List.of(), null);
     }
@@ -472,6 +480,9 @@ public class ChatService {
     public SseEmitter sendMessage(String requestedSessionId, String content, List<ImageUploadDto> uploads,
                                   List<String> fileIds, String user) {
         com.superagent.core.timing.TurnTimer timer = new com.superagent.core.timing.TurnTimer(); // from the request on
+        if (quotas != null) {
+            quotas.checkTokens();
+        }
         ChatSession session = store.findSession(requestedSessionId)
                 .orElseThrow(() -> new SessionNotFoundException(requestedSessionId));
         String sessionId = session.id();

@@ -30,6 +30,21 @@ class CompanyStoreTest {
     }
 
     @Test
+    void aCompanyTableFromBeforeLimitsGetsTheirColumnsAndKeepsItsRows() {
+        JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
+                "jdbc:h2:mem:company-old-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+        jdbc.execute("CREATE TABLE company (id VARCHAR(64) NOT NULL PRIMARY KEY, name VARCHAR(255) NOT NULL, "
+                + "enabled BOOLEAN NOT NULL, data_key_cipher TEXT, created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL)");
+        jdbc.update("INSERT INTO company VALUES ('default', 'Default', TRUE, 'v1:key', NOW(), NOW())");
+
+        JdbcCompanyStore store = new JdbcCompanyStore(jdbc, JdbcCompanyStore.MYSQL_DDL);
+        assertThat(store.find("default")).hasValueSatisfying(c -> {
+            assertThat(c.dataKeyCipher()).isEqualTo("v1:key");
+            assertThat(c.maxUsers()).isNull();
+        });
+    }
+
+    @Test
     void contextFailsClosedAndRestoresTheOuterCompany() {
         assertThatThrownBy(TenantContext::require).isInstanceOf(IllegalStateException.class);
         TenantContext.run("acme", () -> {

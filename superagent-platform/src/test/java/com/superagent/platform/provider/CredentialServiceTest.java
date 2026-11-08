@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -32,7 +33,8 @@ class CredentialServiceTest {
 
     @org.junit.jupiter.api.BeforeEach
     void inCompany() {
-        com.superagent.core.tenant.TenantContext.set("acme"); // work handed to other threads carries the company
+        // The host's company: the only one that may fall back to the machine's own environment / CLI login.
+        com.superagent.core.tenant.TenantContext.set(com.superagent.core.tenant.Company.DEFAULT_ID);
     }
 
     @org.junit.jupiter.api.AfterEach
@@ -86,6 +88,9 @@ class CredentialServiceTest {
                 new SecretCipher("", tmp.resolve("secret.key").toString()), probe, null);
 
         assertThat(svc.current("claude").id()).isEqualTo(CredentialService.ENV_ID); // nothing configured yet
+        // Another company never runs on the host's account: without a key of its own it is told to add one.
+        assertThatThrownBy(() -> com.superagent.core.tenant.TenantContext.call("acme", () -> svc.current("claude")))
+                .isInstanceOf(CredentialService.NoCompanyKeyException.class);
         String main = svc.add("claude", new CredentialRequests.Save("官方", "", "sk-ant-main-0000000001", false, null)).id();
         String relay = svc.add("claude", new CredentialRequests.Save("中转", "https://relay.example/", "relay-token-000000002", true, null)).id();
         assertThat(svc.current("claude").credential().apiKey()).isEqualTo("sk-ant-main-0000000001");

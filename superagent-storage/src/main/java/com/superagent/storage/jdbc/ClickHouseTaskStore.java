@@ -8,14 +8,37 @@ import java.util.List;
 /**
  * ClickHouse task store: {@code ReplacingMergeTree(updated_at)} keyed by (company_id, id), so
  * save re-inserts a newer version and reads use {@code FINAL}; delete is an
- * {@code ALTER TABLE ... DELETE} mutation. Apply {@code db/clickhouse/schema.sql} first.
+ * {@code ALTER TABLE ... DELETE} mutation.
  */
 public class ClickHouseTaskStore extends AbstractJdbcTaskStore {
 
     public ClickHouseTaskStore(JdbcTemplate jdbc) {
-        super(jdbc, List.of("ALTER TABLE task ADD COLUMN IF NOT EXISTS tier String",
-                // Cents were too coarse: a small task costs a fraction of a cent.
-                "ALTER TABLE task MODIFY COLUMN spend Decimal(16, 6)"));
+        super(jdbc, List.of("""
+                CREATE TABLE IF NOT EXISTS task (
+                  company_id String,
+                  id String,
+                  title String,
+                  brief String,
+                  source String,
+                  repo String,
+                  branch String,
+                  flow String,
+                  status String,
+                  progress Int32,
+                  spend Decimal(16, 6),
+                  model String,
+                  tier String,
+                  agent_type String,
+                  workspace_dir String,
+                  created_by String,
+                  error String,
+                  created_at DateTime64(3, 'UTC'),
+                  started_at Nullable(DateTime64(3, 'UTC')),
+                  finished_at Nullable(DateTime64(3, 'UTC')),
+                  updated_at DateTime64(3, 'UTC')
+                ) ENGINE = ReplacingMergeTree(updated_at)
+                ORDER BY (company_id, id)
+                """));
     }
 
     @Override

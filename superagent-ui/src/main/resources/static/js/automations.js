@@ -25,7 +25,7 @@ const ael2 = {
   detailView: document.getElementById("autoDetailView"),
   rows: document.getElementById("autoRows"),
   empty: document.getElementById("autoEmpty"),
-  tabs: document.getElementById("autoTabs"),
+  type: document.getElementById("autoTypeFilter"),
   search: document.getElementById("autoSearch"),
   owner: document.getElementById("autoOwnerFilter"),
   addBtn: document.getElementById("autoAddBtn"),
@@ -146,7 +146,6 @@ function showAutoList() {
 async function loadAutomations() {
   try { const res = await api.listAutomations(); automations = (res && res.data) || []; } catch (e) { automations = []; }
   renderAutomations();
-  loadTaskStats(); // the shared stats strip (task counters + these schedules)
 }
 
 function autoMatches(a, filter) {
@@ -161,17 +160,12 @@ function renderAutomations() {
   const mine = ael2.owner.value === "mine";
   const q = ael2.search.value.trim().toLowerCase();
   const scoped = automations.filter(a => !mine || a.owner === currentUsername);
-  ael2.tabs.querySelectorAll(".auto-tab").forEach(t => {
-    t.classList.toggle("is-active", t.dataset.filter === autoFilter);
-    t.querySelector("b").textContent = scoped.filter(a => autoMatches(a, t.dataset.filter)).length;
-  });
-  // API triggers aren't offered yet; the tab shows only for ones that already exist.
-  document.getElementById("autoTabApi").hidden = !scoped.some(a => a.type === "api");
+  ael2.type.value = autoFilter;
+  // API triggers aren't offered yet; the choice shows only for ones that already exist.
+  document.getElementById("autoTypeApi").hidden = !scoped.some(a => a.type === "api");
   const shown = scoped.filter(a => autoMatches(a, autoFilter) && (!q || a.name.toLowerCase().includes(q)));
   ael2.rows.replaceChildren(...shown.map(autoRow));
   ael2.empty.hidden = shown.length > 0;
-  workSchedules = automations; // keep the shared stats in step with toggles, deletes and the owner filter
-  renderWorkStats();
 }
 
 const canEditAuto = a => isAdmin || a.owner === currentUsername;
@@ -275,10 +269,7 @@ async function deleteAutomation(a) {
   await loadAutomations();
 }
 
-ael2.tabs.addEventListener("click", e => {
-  const t = e.target.closest(".auto-tab");
-  if (t) { autoFilter = t.dataset.filter; renderAutomations(); }
-});
+ael2.type.addEventListener("change", () => { autoFilter = ael2.type.value; renderAutomations(); });
 ael2.search.addEventListener("input", renderAutomations);
 ael2.owner.addEventListener("change", renderAutomations);
 ael2.back.addEventListener("click", () => { showAutoList(); loadAutomations(); });
@@ -521,4 +512,3 @@ initAuth().then(async ok => {
 });
 
 // Tasks | Scheduled tasks: two tabs of one page, each its own view (and URL hash).
-document.querySelectorAll(".page-tabs [data-goto]").forEach(b => b.addEventListener("click", () => setView(b.dataset.goto)));

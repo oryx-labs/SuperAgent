@@ -8,13 +8,24 @@ import java.util.List;
 /**
  * ClickHouse credential store: {@code ReplacingMergeTree(updated_at)} keyed by
  * (company_id, connector_id, owner), so save re-inserts a newer version and reads use {@code FINAL};
- * delete is an {@code ALTER TABLE ... DELETE} mutation. Apply {@code db/clickhouse/schema.sql} first.
+ * delete is an {@code ALTER TABLE ... DELETE} mutation.
  */
 public class ClickHouseConnectorCredentialStore extends AbstractJdbcConnectorCredentialStore {
 
     public ClickHouseConnectorCredentialStore(JdbcTemplate jdbc) {
-        super(jdbc, List.of("ALTER TABLE connector_credential ADD COLUMN IF NOT EXISTS refresh_cipher String",
-                "ALTER TABLE connector_credential ADD COLUMN IF NOT EXISTS expires_at Nullable(DateTime64(3, 'UTC'))"));
+        super(jdbc, List.of("""
+                CREATE TABLE IF NOT EXISTS connector_credential (
+                  company_id String,
+                  connector_id String,
+                  owner String,
+                  secret_cipher String,
+                  account_label String,
+                  updated_at DateTime64(3, 'UTC'),
+                  refresh_cipher String,
+                  expires_at Nullable(DateTime64(3, 'UTC'))
+                ) ENGINE = ReplacingMergeTree(updated_at)
+                ORDER BY (company_id, connector_id, owner)
+                """));
     }
 
     @Override

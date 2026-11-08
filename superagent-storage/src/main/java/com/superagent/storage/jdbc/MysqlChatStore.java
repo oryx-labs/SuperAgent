@@ -9,9 +9,7 @@ import java.util.List;
  * MySQL {@link com.superagent.core.chat.ChatStore}. Session metadata is updated
  * in place with {@code UPDATE}; no {@code FINAL} clause is needed on reads.
  *
- * <p>Creates its tables on startup ({@code CREATE TABLE IF NOT EXISTS}) so the
- * default backend works out of the box; the canonical schema also lives in
- * {@code db/mysql/schema.sql}.
+ * <p>Creates its tables on startup ({@code CREATE TABLE IF NOT EXISTS}), like every store.
  */
 public class MysqlChatStore extends AbstractJdbcChatStore {
 

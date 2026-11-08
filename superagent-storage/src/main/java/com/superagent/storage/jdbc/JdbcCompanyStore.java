@@ -2,6 +2,7 @@ package com.superagent.storage.jdbc;
 
 import com.superagent.core.tenant.Company;
 import com.superagent.core.tenant.CompanyStore;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
@@ -54,6 +55,27 @@ public class JdbcCompanyStore implements CompanyStore {
         this.jdbc = jdbc;
         this.clickHouse = ddl.contains("MergeTree");
         jdbc.execute(ddl);
+        addLimitColumns();
+    }
+
+    /**
+     * Tables made before companies had limits lack these columns. Unlike company-scoped tables they are kept, not
+     * rebuilt: a company's data key is in its row, and losing it would make that company's secrets unreadable.
+     */
+    private void addLimitColumns() {
+        try {
+            jdbc.queryForList("SELECT max_users, max_running_tasks, monthly_tokens FROM company WHERE 1 = 0");
+        } catch (DataAccessException missing) {
+            if (clickHouse) {
+                jdbc.execute("ALTER TABLE company ADD COLUMN IF NOT EXISTS max_users Nullable(Int32), "
+                        + "ADD COLUMN IF NOT EXISTS max_running_tasks Nullable(Int32), "
+                        + "ADD COLUMN IF NOT EXISTS monthly_tokens Nullable(Int64)");
+            } else {
+                jdbc.execute("ALTER TABLE company ADD COLUMN max_users INT");
+                jdbc.execute("ALTER TABLE company ADD COLUMN max_running_tasks INT");
+                jdbc.execute("ALTER TABLE company ADD COLUMN monthly_tokens BIGINT");
+            }
+        }
     }
 
     @Override

@@ -6,6 +6,7 @@ import com.superagent.api.provider.CredentialDto;
 import com.superagent.api.provider.CredentialRequests;
 import com.superagent.api.provider.ProviderModelDto;
 import com.superagent.core.chat.RunCredential;
+import com.superagent.core.error.ForbiddenException;
 import com.superagent.core.provider.ModelProvider;
 import com.superagent.core.provider.ModelProviderStore;
 import com.superagent.core.provider.ProviderCredential;
@@ -192,6 +193,14 @@ public class CredentialService {
         if (healthy.isPresent()) {
             return new Choice(toRun(healthy.get()));
         }
+        // The server's own environment / CLI login is the host's, i.e. the default company's account: another
+        // company never falls back to it, it runs on its own keys only.
+        if (!Company.DEFAULT_ID.equals(TenantContext.require())) {
+            if (pool.isEmpty()) {
+                throw new NoCompanyKeyException(providerKey);
+            }
+            return new Choice(toRun(pool.get(0)));
+        }
         // Every page key is failing: the server's own environment / login is the last resort, unless that
         // is what just failed — then the best page key, which may have recovered since it was marked.
         if (!ENV_ID.equals(excluding) || pool.isEmpty()) {
@@ -204,6 +213,13 @@ public class CredentialService {
      * The vendor's official endpoint, from the catalogue. An entry without its own endpoint is always sent there
      * explicitly: left unset, a CLI would fall back to whatever the server's own CLI config points at (a relay, say).
      */
+    /** A company other than the host's has no key of its own for this CLI. */
+    public static class NoCompanyKeyException extends ForbiddenException {
+        NoCompanyKeyException(String providerKey) {
+            super("本公司还没有配置 " + providerKey + " 的 API Key：请管理员在「模型」里为它添加 Key");
+        }
+    }
+
     private static String defaultBaseUrl(String providerKey) {
         return com.superagent.core.provider.ProviderCatalog.find(providerKey)
                 .map(e -> e.access().defaultBaseUrl()).orElse(null);

@@ -54,14 +54,15 @@ function ffRenderTree() {
   };
   const row = (id, name, depth, folder) => {
     const item = document.createElement("div");
-    item.className = "ff-node" + (ffChosen === id ? " is-chosen" : "");
+    const kind = id === FF_ALL ? "all" : id === FF_UNFILED ? "unfiled" : "folder";
+    item.className = "ff-node ff-node--" + kind + (ffChosen === id ? " is-chosen" : "") + (depth > 0 ? " is-nested" : "");
     item.style.setProperty("--ff-depth", depth);
     item.setAttribute("role", "treeitem");
     const hasKids = folder && ffFolders.some(f => f.parentId === folder.id);
     const caret = document.createElement("button");
     caret.type = "button";
-    caret.className = "ff-node__caret";
-    caret.textContent = hasKids ? (ffCollapsed.has(id) ? "▸" : "▾") : "";
+    caret.className = "ff-node__caret" + (hasKids ? " has-kids" + (ffCollapsed.has(id) ? "" : " is-open") : "");
+    caret.setAttribute("aria-label", hasKids ? L(ffCollapsed.has(id) ? "ff.expand" : "ff.collapse") : "");
     caret.tabIndex = hasKids ? 0 : -1;
     caret.addEventListener("click", e => {
       e.stopPropagation();
@@ -78,12 +79,22 @@ function ffRenderTree() {
     const n = document.createElement("span");
     n.className = "ff-node__count";
     n.textContent = count(id) || "";
-    item.append(caret, label, n);
+    const icon = document.createElement("span");
+    icon.className = "ff-node__icon";
+    icon.setAttribute("aria-hidden", "true");
+    item.append(caret, icon, label, n);
     if (folder) item.appendChild(ffActions(folder, depth));
     if (id !== FF_ALL) ffMakeDropTarget(item, id);
     return item;
   };
-  const nodes = [row(FF_ALL, L("ff.all"), 0), row(FF_UNFILED, L("ff.unfiled"), 0)];
+  const nodes = [row(FF_ALL, L("ff.all"), 0), row(FF_UNFILED, L("ff.unfiled"), 0), document.createElement("div")];
+  nodes[2].className = "ff-sep";
+  if (!ffFolders.length) {
+    const hint = document.createElement("p");
+    hint.className = "ff-hint";
+    hint.textContent = L("ff.noFolders");
+    nodes.push(hint);
+  }
   const walk = (parentId, depth) => ffFolders.filter(f => (f.parentId || null) === parentId).forEach(f => {
     nodes.push(row(f.id, f.name, depth, f));
     if (!ffCollapsed.has(f.id)) walk(f.id, depth + 1);

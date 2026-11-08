@@ -50,9 +50,7 @@ function setView(view) {
   if (window.location.hash !== "#" + view) {
     history.replaceState(history.state, document.title, window.location.pathname + window.location.search + "#" + view);
   }
-  // Scheduled tasks are a tab of Tasks, so "Tasks" stays lit for both.
-  const navView = view === "automation" ? "tasks" : view;
-  navItems.forEach(a => a.classList.toggle("is-active", a.dataset.view === navView));
+  navItems.forEach(a => a.classList.toggle("is-active", a.dataset.view === view));
   // Top menu: the dropdown and "Admin" light up for any of their pages; the dropdown also says which one.
   const inWorkspace = WORKSPACE_VIEWS.has(view);
   const inAdmin = ADMIN_VIEWS.has(view);
