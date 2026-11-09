@@ -234,6 +234,7 @@ async function selectSession(id) {
   if (activeAgent) attachInviteCards(activeAgent); // invitations the agent proposed, under the reply that did
   if (activeAgent) attachSkillDeletionCards(activeAgent.id); // and skill deletions waiting for a yes
   if (activeAgent) attachAgentTaskCards(); // and the tasks each reply set off
+  attachQuickReplies(); // a button for the answer the last reply asks for
 }
 
 // An agent has many sessions over time (a new model, or a session that kept failing, starts a fresh

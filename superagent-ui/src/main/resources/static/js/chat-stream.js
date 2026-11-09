@@ -169,3 +169,36 @@ function autoGrow() {
   el.input.style.height = "auto";
   el.input.style.height = Math.min(el.input.scrollHeight, 180) + "px";
 }
+
+// ---------- quick replies: a button for the answer a reply asks for ----------
+// When the latest reply asks whether to create a task, or ends a task's parameter table with "下一步：回复「…」",
+// a button sends that answer, so the user needn't type it. Only on the last message, and gone once anything is sent.
+const QUICK_CREATE = /要创建吗[？?]/;
+const QUICK_NEXT = /下一步[：:]\s*回复\s*[「“"]([^」”"\n]{1,80})[」”"]/;
+
+function attachQuickReplies() {
+  el.messages.querySelectorAll(".quick-replies").forEach(x => x.remove());
+  const all = el.messages.querySelectorAll(".msg");
+  const last = all[all.length - 1];
+  if (!last || !last.classList.contains("msg--agent") || last.classList.contains("msg--background") || streaming) return;
+  const bubble = last.querySelector(".bubble");
+  const text = (bubble && (bubble.dataset.md || bubble.textContent)) || "";
+  const next = QUICK_NEXT.exec(text);
+  const reply = next ? next[1].trim() : QUICK_CREATE.test(text) ? L("chat.quickCreate") : null;
+  if (!reply) return;
+  const row = document.createElement("div");
+  row.className = "quick-replies";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "quick-reply";
+  btn.textContent = reply;
+  btn.title = L("chat.quickReplyHint");
+  btn.addEventListener("click", () => {
+    if (streaming) return;
+    row.remove();
+    el.input.value = reply;
+    el.composer.requestSubmit();
+  });
+  row.appendChild(btn);
+  last.appendChild(row);
+}

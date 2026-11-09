@@ -89,7 +89,25 @@ function renderMarkdown(content) {
     d.textContent = raw;
     return d.innerHTML;
   }
-  return window.DOMPurify.sanitize(window.marked.parse(raw));
+  return tidyTables(window.DOMPurify.sanitize(window.marked.parse(raw)));
+}
+
+/**
+ * Tables in replies: each in a scroll box (a wide one scrolls instead of squeezing), and short cells kept on one line
+ * so labels like "任务标题" or "✅ 已确定" don't break into a column of single characters.
+ */
+function tidyTables(html) {
+  if (html.indexOf("<table") < 0) return html;
+  const box = document.createElement("div");
+  box.innerHTML = html;
+  box.querySelectorAll("table").forEach(t => {
+    const wrap = document.createElement("div");
+    wrap.className = "md-table";
+    t.parentNode.insertBefore(wrap, t);
+    wrap.appendChild(t);
+    t.querySelectorAll("th, td").forEach(c => { if (c.textContent.trim().length <= 10) c.classList.add("is-short"); });
+  });
+  return box.innerHTML;
 }
 
 const isUserRole = role => role === "user";

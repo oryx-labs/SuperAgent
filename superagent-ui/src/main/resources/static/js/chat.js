@@ -21,6 +21,7 @@ function renderStoredMessage(role, content, id, images, sessionId) {
   setBubbleContent(bubble, role, content);
   bubble.hidden = !content && !!(images && images.length); // image-only message: no empty bubble
   msg.appendChild(bubble);
+  if (role !== "user" && content) msg.appendChild(copyButton(bubble));
   if (id) {
     const edit = document.createElement("button");
     edit.className = "msg__edit";
@@ -31,6 +32,33 @@ function renderStoredMessage(role, content, id, images, sessionId) {
   }
   el.messages.appendChild(msg);
   return msg;
+}
+
+/** Copies a reply's text as written (its markdown), under the reply. */
+function copyButton(bubble) {
+  const row = document.createElement("div");
+  row.className = "msg__actions";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "msg__copy";
+  btn.textContent = L("chat.copy");
+  btn.addEventListener("click", async () => {
+    const text = bubble.dataset.md != null ? bubble.dataset.md : bubble.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) { // no clipboard permission (e.g. plain http on another host): the old way
+      const ta = Object.assign(document.createElement("textarea"), { value: text });
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    btn.textContent = L("chat.copied");
+    btn.classList.add("is-done");
+    setTimeout(() => { btn.textContent = L("chat.copy"); btn.classList.remove("is-done"); }, 1500);
+  });
+  row.appendChild(btn);
+  return row;
 }
 
 // Messages a data source received, handed to the SuperAgent: one line, the messages folded away.

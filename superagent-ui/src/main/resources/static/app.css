@@ -620,8 +620,25 @@ img { max-width: 100%; }
   display: block; padding: 0; background: none; white-space: pre;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px;
 }
-.bubble table, .ev__body table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
-.bubble th, .bubble td, .ev__body th, .ev__body td { border: 1px solid var(--line-strong); padding: 4px 8px; text-align: left; }
+/* Tables in replies: a rounded card with a tinted header, quiet row rules and a hover row; wide ones scroll. */
+.md-table {
+  margin: 10px 0; max-width: 100%; overflow-x: auto;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--paper);
+}
+.bubble table, .ev__body table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.55; }
+.bubble th, .bubble td, .ev__body th, .ev__body td {
+  padding: 8px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line);
+}
+.bubble th, .ev__body th {
+  background: var(--panel); color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .02em;
+  white-space: nowrap;
+}
+.bubble tr:last-child td, .ev__body tr:last-child td { border-bottom: 0; }
+.bubble tbody tr:hover td, .ev__body tbody tr:hover td { background: var(--panel); }
+.bubble td:first-child, .ev__body td:first-child { color: var(--ink); font-weight: 600; }
+.bubble .is-short, .ev__body .is-short { white-space: nowrap; }
+.bubble td code, .ev__body td code { white-space: nowrap; }
+.md-table + p, .md-table + h3, .md-table + h4 { margin-top: 12px; }
 .bubble hr, .ev__body hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 .bubble > *:first-child, .bubble .text > *:first-child { margin-top: 0; }
 .bubble > *:last-child, .bubble .text > *:last-child { margin-bottom: 0; }
@@ -2503,3 +2520,29 @@ button.t-chip { font: inherit; font-size: 11.5px; cursor: pointer; }
   margin: 0 0 12px; padding: 9px 12px; border-radius: 8px; font-size: 12.5px; line-height: 1.6;
   color: #92400e; background: #fffbeb; border: 1px solid #fde68a;
 }
+
+/* A button under the last reply for the answer it asks for ("好的，创建任务", "确认，…"). */
+.quick-replies { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.quick-reply {
+  padding: 7px 14px; border-radius: 999px; border: 1px solid var(--accent); background: var(--paper);
+  color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.quick-reply::before { content: "✓ "; }
+.quick-reply:hover { background: var(--accent); color: #fff; }
+
+/* Under a reply: copy its text. */
+.msg__actions { display: flex; gap: 6px; margin-top: 4px; }
+.msg__copy {
+  padding: 2px 8px; border: 1px solid transparent; border-radius: 6px; background: none;
+  color: var(--muted-2); font: inherit; font-size: 12px; cursor: pointer;
+}
+.msg__copy::before { content: "⧉ "; }
+.msg__copy:hover { color: var(--ink); border-color: var(--line); background: var(--paper); }
+.msg__copy.is-done { color: #16a34a; }
+.msg__copy.is-done::before { content: "✓ "; }
+
+/* Run log → Prompts: one line per message sent to the agent; click to read it whole. */
+.prompt-log__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.prompt-log__count { font-size: 12.5px; color: var(--muted); }
+.prompt-line__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.prompt-line.is-open .prompt-line__text { color: var(--muted); }

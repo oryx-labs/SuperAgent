@@ -1334,6 +1334,10 @@
       <div class="drawer__body" id="agentInfoDetails">
         <!-- What's beneath the conversation: what it remembers, and what it did. -->
         <div class="agent-links">
+          <button class="agent-link" id="agentPromptsBtn" type="button">
+            <span class="agent-link__icon" aria-hidden="true">✎</span>
+            <span class="agent-link__text"><b data-i18n="log.catPrompts">Prompts</b><small data-i18n="log.promptsLinkHint">Everything sent to it, to read or download</small></span>
+          </button>
           <button class="agent-link" id="agentMemoryBtn" type="button">
             <span class="agent-link__icon" aria-hidden="true">◎</span>
             <span class="agent-link__text"><b data-i18n="mem.open">Memory</b><small data-i18n="mem.linkHint">What it carries into every new conversation</small></span>
@@ -1404,6 +1408,25 @@
             <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Everything sent to an agent, across its sessions: one line each, the whole text on a click, all of it as a file. -->
+  <div class="drawer" id="agentPromptDrawer" hidden>
+    <div class="drawer__backdrop" data-close></div>
+    <div class="drawer__panel drawer__panel--wide">
+      <div class="drawer__head">
+        <button type="button" class="drawer__close" data-close aria-label="Close">×</button>
+        <h3 class="drawer__title" id="agentPromptTitle">Prompts</h3>
+      </div>
+      <div class="drawer__body">
+        <div class="prompt-log__head">
+          <span class="prompt-log__count" id="agentPromptCount"></span>
+          <button type="button" class="btn" id="agentPromptDownload" data-i18n="log.promptsDownload">Download all</button>
+        </div>
+        <ol class="log-list" id="agentPromptList"></ol>
+        <p class="admin__empty" id="agentPromptEmpty" data-i18n="log.promptsEmpty" hidden>Nothing has been sent to this agent yet.</p>
       </div>
     </div>
   </div>
@@ -1554,6 +1577,7 @@
   <script src="/js/superagent.js"></script>
   <script src="/js/skill-cards.js"></script>
   <script src="/js/agent-log.js"></script>
+  <script src="/js/agent-prompts.js"></script>
   <script src="/js/memory.js"></script>
   <script src="/js/files.js"></script>
   <script src="/js/file-folders.js"></script>

@@ -43,9 +43,10 @@ class SuperAgentDelegatesTest {
     @Test
     void theChatPromptSaysToDelegate() {
         String prompt = SuperAgentPrompts.chat(6);
-        // Simple things it does itself; anything that takes reading, producing or time goes out, with the user's example.
-        assertThat(prompt).contains("简单的事你自己做", "拿不准时，按派出去处理", "理解一下，后面会用到", "start_task", "propose_plan",
-                "确认执行").doesNotContain("%d");
+        // It chats by default; a task only when the user asks for one, after they confirm its parameters.
+        assertThat(prompt).contains("默认就是聊天", "只有用户明确说要建任务时", "任务参数", "执行者", "目前尚未创建任务",
+                "理解一下，后面会用到", "start_task", "propose_plan", "确认执行").doesNotContain("%d", "%1$s");
+        assertThat(SuperAgentPrompts.TURN_CHECK).contains("start_task", "用户没说建任务");
         assertThat(SuperAgentPrompts.background(6)).contains("propose_plan");
     }
 
