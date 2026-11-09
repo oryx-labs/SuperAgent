@@ -39,7 +39,7 @@ public class TaskMcpTools implements McpToolProvider {
     @Override
     public List<ObjectNode> tools() {
         return List.of(
-                tool("create_task", "把要做的事作为任务异步执行：由你自己执行（带着你的人设、记忆和技能），不占住对话；完成、失败或需要用户确认时，结果会自动发回这个对话。",
+                tool("create_task", "把要动手做的事作为任务异步执行：读文件或资料、上网查证、产出用户明确要的文件或交付物、多步操作或跑命令。凭已有知识就能回答的问题（哪怕回答很长）不要开任务，直接在对话里回答。任务由你自己执行（带着你的人设、记忆和技能），不占住对话；完成、失败或需要用户确认时，结果会自动发回这个对话。",
                         props(req("title", "string", "任务标题"), req("brief", "string", "任务说明：目标、范围、验收标准"),
                                 opt("repo", "string", "可选代码库"), opt("branch", "string", "可选分支"),
                                 req("kind", "string", TaskKinds.DESCRIPTION),

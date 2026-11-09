@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress'
 const base = '/SuperAgent/'
 const siteUrl = 'https://oryx-labs.github.io/SuperAgent/'
 const github = 'https://github.com/oryx-labs/SuperAgent'
-const demo = 'http://117.72.92.117:18081/login'
+const demo = 'http://superagent.robustmq.com'
 
 export default defineConfig({
   title: 'SuperAgent',

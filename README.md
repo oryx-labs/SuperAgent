@@ -5,7 +5,7 @@
 
 **AI collaborative work system for companies, not personal assistants.** Everyone works with AI in one system, and the work becomes the company's assets. Open source and self-hosted.
 
-[Website](https://oryx-labs.github.io/SuperAgent/) · [Live demo](http://117.72.92.117:18081/login) · [中文](https://oryx-labs.github.io/SuperAgent/zh/)
+[Website](https://oryx-labs.github.io/SuperAgent/) · [Live demo](http://superagent.robustmq.com) · [中文](https://oryx-labs.github.io/SuperAgent/zh/)
 
 ## Why SuperAgent
 

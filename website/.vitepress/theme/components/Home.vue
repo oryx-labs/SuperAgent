@@ -7,7 +7,7 @@ const isZh = computed(() => lang.value === 'zh-CN')
 const t = (zh, en) => (isZh.value ? zh : en)
 
 const github = 'https://github.com/oryx-labs/SuperAgent'
-const demo = 'http://117.72.92.117:18081/login'
+const demo = 'http://superagent.robustmq.com'
 const docsFeatures = computed(() =>
   withBase(isZh.value ? '/zh/docs/features' : '/docs/features')
 )
