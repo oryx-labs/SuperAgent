@@ -565,7 +565,9 @@ function appendStreamItem(item) {
 
   // A run of tool calls folds into one compact, collapsible block (one row per call).
   if (type === "tool_use" || type === "tool_result") { appendToolEvent(item); return; }
-  // Any non-tool event ends the current tool group, so the next call starts a fresh one.
+  // Any non-tool event ends the current tool group, so the next call starts a fresh one. The agent has moved on, so a
+  // call still showing as running is done (MCP tools often send no result event of their own).
+  if (task.toolGroup && task.toolGroup.pendingRow) finishToolRow(task.toolGroup.pendingRow, "");
   task.toolGroup = null;
 
   const mergeable = type === "text" || type === "thinking";
@@ -704,6 +706,16 @@ function finishToolRow(handle, result) {
   }
 }
 
+/** The run is over: nothing is still being called, whatever events went missing. */
+function finishAllToolRows() {
+  tel.stream.querySelectorAll(".evtool.is-using").forEach(row => {
+    row.className = "evtool is-done";
+    const lead = row.querySelector(".evtool__lead");
+    if (lead) lead.textContent = L("ev.usedTool");
+  });
+  if (task.toolGroup) task.toolGroup.pendingRow = null;
+}
+
 // The run pane is the scrolling container (the stream itself never overflows).
 function scrollStream() { tel.runPane.scrollTop = tel.runPane.scrollHeight; }
 
@@ -714,6 +726,7 @@ function updateStatusUi(t) {
   tel.progressBar.style.width = (t.progress || 0) + "%";
   tel.progressPct.textContent = (t.progress || 0) + "%";
   const busy = isActiveStatus(t.status);
+  if (!busy) finishAllToolRows();
   tel.steerInput.disabled = busy;
   tel.steerBtn.disabled = busy;
   taskImages.setDisabled(busy);

@@ -224,6 +224,11 @@ public class AgentService {
         memory.forget(agent); // the agent's memory goes with it; its chat history is kept like the agent row
     }
 
+    /** Its sessions, newest first; callers check access first. */
+    public List<com.superagent.api.chat.AgentSessionDto> sessions(String id) {
+        return chatService.agentSessions(id);
+    }
+
     /** The agent's whole conversation: every session it has had, oldest first. */
     public List<ChatSegmentDto> history(String id, String user) {
         return chatService.agentHistory(requireViewer(id, user).id());
@@ -289,6 +294,10 @@ public class AgentService {
     }
 
     private com.superagent.core.project.ProjectAccess projects; // null in tests: no projects
+    /** The model its conversation runs on (the default, or the strongest that can run); null when none can. */
+    public String model(String id, String user) {
+        return chatService.resolveModel(requireViewer(id, user));
+    }
     private com.superagent.core.agent.AgentParentStore parents; // null in tests: no parent agents
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)

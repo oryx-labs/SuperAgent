@@ -28,8 +28,8 @@
         <div class="topmenu__panel" role="menu">
           <nav class="nav" aria-label="Workspace">
             <a class="nav__item" href="#projects" data-view="projects"><span class="nav__dot"></span><span data-i18n="nav.projects">Projects</span></a>
-            <a class="nav__item" href="#skills" data-view="skills"><span class="nav__dot"></span><span data-i18n="nav.skills">Skills</span></a>
             <a class="nav__item" href="#connectors" data-view="connectors"><span class="nav__dot"></span><span data-i18n="nav.connectors">Connectors</span></a>
+            <a class="nav__item" href="#skills" data-view="skills"><span class="nav__dot"></span><span data-i18n="nav.skills">Skills</span></a>
             <a class="nav__item" href="#usage" data-view="usage"><span class="nav__dot"></span><span data-i18n="nav.usage">Usage</span></a>
           </nav>
         </div>
@@ -1284,12 +1284,15 @@
     <div class="modal__backdrop" data-close></div>
     <form class="modal__card" id="agentForm">
       <h3 class="modal__title" id="agentModalTitle" data-i18n="agent.modalAdd">New Agent</h3>
-      <div class="field"><span data-i18n="agent.fAvatar">Avatar</span>
-        <div class="avatar-picker" id="afAvatars" role="radiogroup"></div>
+      <div class="field"><label for="afName" data-i18n="agent.fName">Name</label>
+        <!-- One avatar, picked at random: click it to choose another, or shuffle. -->
+        <div class="name-row">
+          <button type="button" class="avatar-current" id="afAvatarBtn" aria-expanded="false" data-i18n-title="agent.avatarPick"></button>
+          <input type="text" id="afName" required data-i18n-ph="agent.fNamePh" />
+          <button type="button" class="avatar-shuffle" id="afAvatarShuffle" data-i18n-title="agent.avatarShuffle">↻</button>
+        </div>
+        <div class="avatar-picker" id="afAvatars" role="radiogroup" hidden></div>
       </div>
-      <label class="field"><span data-i18n="agent.fName">Name</span>
-        <input type="text" id="afName" required data-i18n-ph="agent.fNamePh" />
-      </label>
       <label class="field" id="afProjectField"><span data-i18n="proj.fProject">Project</span>
         <select id="afProject"></select>
       </label>
@@ -1304,8 +1307,9 @@
         </div>
       </div>
       <label class="field"><span id="afPersonaLabel"></span>
-        <textarea id="afPersona" rows="4"></textarea>
+        <textarea id="afPersona" rows="8"></textarea>
       </label>
+      <p class="field-hint" data-i18n="agent.fPersonaSkillHint">Steps it repeats, or ones several agents share, work better as a Skill attached above.</p>
       <div class="modal__actions">
         <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
         <button type="submit" class="btn btn--primary" id="afSubmit" data-i18n="common.save">Save</button>
@@ -1335,10 +1339,6 @@
             <span class="agent-link__icon" aria-hidden="true">≡</span>
             <span class="agent-link__text"><b data-i18n="log.open">Run log</b><small data-i18n="log.linkHint">Sessions, turns and what it did in the background</small></span>
           </button>
-          <a class="agent-link" id="superSources" href="#messages" hidden>
-            <span class="agent-link__icon" aria-hidden="true">✉</span>
-            <span class="agent-link__text"><b data-i18n="super.messagesLink">Message stream</b><small id="superSourcesHint"></small></span>
-          </a>
         </div>
         <div class="agent-field agent-members" id="agentMembersBlock" hidden>
           <div class="agent-field__head">
@@ -1423,6 +1423,7 @@
           </div>
           <button type="button" class="super-work__all log-refresh" id="agentLogRefresh" data-i18n="log.refresh">Refresh</button>
         </div>
+        <ol class="sess-list" id="agentSessList" hidden></ol>
         <ol class="log-list" id="agentLogList"></ol>
         <p class="admin__empty" id="agentLogEmpty" data-i18n="log.empty" hidden>Nothing logged yet.</p>
         <p class="log-note" data-i18n="log.retention">Kept for 30 days, up to 5000 lines per agent.</p>

@@ -67,11 +67,57 @@ public class ClaudeCliAgentRunner implements AgentRunner {
     /** Claude's error when {@code --resume} names a session it has no conversation for. */
     private static final String NO_CONVERSATION = "No conversation found with session ID";
 
+    /** Conversations' CLIs kept running between turns; null = every turn starts its own. */
+    private ClaudeWarmSessions warm;
+
     public ClaudeCliAgentRunner(
             @Value("${superagent.agent.claude.command:claude}") String command,
             @Value("${superagent.agent.claude.timeout-seconds:600}") long timeoutSeconds) {
         this.command = command;
         this.timeoutSeconds = timeoutSeconds;
+    }
+
+    @Autowired
+    void setWarmSessions(@Value("${superagent.agent.claude.warm.enabled:true}") boolean enabled,
+                         @Value("${superagent.agent.claude.warm.idle-minutes:10}") long idleMinutes,
+                         @Value("${superagent.agent.claude.warm.max:20}") int max,
+                         org.springframework.beans.factory.ObjectProvider<com.superagent.runtime.mcp.McpGrants> grants) {
+        this.warm = enabled ? new ClaudeWarmSessions(this, grants.getIfAvailable(), java.time.Duration.ofMinutes(idleMinutes), max)
+                : null;
+    }
+
+    /** Tests: keep the CLI running between turns. */
+    ClaudeWarmSessions enableWarm(com.superagent.runtime.mcp.McpGrants grants, java.time.Duration idle, int max) {
+        warm = new ClaudeWarmSessions(this, grants, idle, max);
+        return warm;
+    }
+
+    @jakarta.annotation.PreDestroy
+    void stopWarm() {
+        if (warm != null) {
+            warm.closeAll();
+        }
+    }
+
+    @Override
+    public void runChat(AgentRunRequest request, AgentEventSink sink, Cancellation cancellation) {
+        if (warm == null || !warm.run(request, sink, cancellation)) {
+            run(request, sink, cancellation);
+        }
+    }
+
+    long timeoutSeconds() {
+        return timeoutSeconds;
+    }
+
+    /** Where the CLI runs and with what: the search path and the run's endpoint and key. */
+    ProcessBuilder processFor(List<String> cmd, AgentRunRequest request) {
+        ProcessBuilder pb = new ProcessBuilder(cmd).directory(new File(request.workspaceDir())).redirectErrorStream(false);
+        if (cliPaths != null) {
+            cliPaths.apply(pb);
+        }
+        applyEnvironment(pb, request);
+        return pb;
     }
 
     @Override
@@ -155,13 +201,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
                 String.join(" ", stdinMessage != null ? cmd : cmd.subList(0, cmd.size() - 1)),
                 request.workspaceDir(), request.images().size());
 
-        ProcessBuilder pb = new ProcessBuilder(cmd)
-                .directory(new File(request.workspaceDir()))
-                .redirectErrorStream(false);
-        if (cliPaths != null) {
-            cliPaths.apply(pb);
-        }
-        applyEnvironment(pb, request);
+        ProcessBuilder pb = processFor(cmd, request);
 
         Process process;
         try {
@@ -269,6 +309,11 @@ public class ClaudeCliAgentRunner implements AgentRunner {
     }
 
     List<String> buildCommand(AgentRunRequest request, Path mcpConfigFile, Path settingsFile) {
+        return buildCommand(request, mcpConfigFile, settingsFile, false);
+    }
+
+    /** {@code kept}: the CLI stays running and reads each turn's message from stdin. */
+    List<String> buildCommand(AgentRunRequest request, Path mcpConfigFile, Path settingsFile, boolean kept) {
         List<String> cmd = new ArrayList<>();
         cmd.add(command);
         cmd.add("-p");
@@ -319,7 +364,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
             cmd.add("--settings");
             cmd.add(settingsFile.toString());
         }
-        if (!request.images().isEmpty()) {
+        if (kept || !request.images().isEmpty()) {
             // Images can only travel as content blocks, so the whole message goes on stdin instead.
             cmd.add("--input-format");
             cmd.add("stream-json");
@@ -388,7 +433,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
     }
 
     /** Writes the request's MCP config (if any) to a temp file the CLI reads via {@code --mcp-config}. */
-    private Path writeMcpConfig(AgentRunRequest request) {
+    Path writeMcpConfig(AgentRunRequest request) {
         if (request.mcpConfig() == null || request.mcpConfig().isBlank()) {
             return null;
         }
@@ -403,7 +448,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         }
     }
 
-    private void deleteQuietly(Path file) {
+    void deleteQuietly(Path file) {
         if (file == null) {
             return;
         }
@@ -415,7 +460,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
     }
 
     /** Logs stderr and keeps its last ~2 KB, to explain a run that exits without a result. */
-    private void drainStderr(InputStream stream, String sessionId, StringBuilder tail) {
+    void drainStderr(InputStream stream, String sessionId, StringBuilder tail) {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {

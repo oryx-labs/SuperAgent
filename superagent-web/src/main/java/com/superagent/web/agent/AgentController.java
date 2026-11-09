@@ -66,6 +66,12 @@ public class AgentController {
         return ApiResponse.ok(agentService.history(id, auth.getName()));
     }
 
+    /** The model its conversation runs on; {@code model} is null when no model can run. */
+    @GetMapping(ApiPaths.AGENTS + "/{id}/model")
+    public ApiResponse<java.util.Map<String, String>> model(@PathVariable String id, Authentication auth) {
+        return ApiResponse.ok(java.util.Collections.singletonMap("model", agentService.model(id, auth.getName())));
+    }
+
     /** Where each reply's time went (prep, CLI start, waiting for the model, tools, output), shown under it. */
     @GetMapping(ApiPaths.AGENTS + "/{id}/timings")
     public ApiResponse<List<com.superagent.api.timing.TurnTimingDto>> timings(@PathVariable String id, Authentication auth) {

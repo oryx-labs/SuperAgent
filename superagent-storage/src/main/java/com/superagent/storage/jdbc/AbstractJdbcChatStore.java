@@ -54,7 +54,10 @@ abstract class AbstractJdbcChatStore implements ChatStore {
                 agentId == null || agentId.isEmpty() ? null : agentId,
                 SessionStatus.valueOf(rs.getString("status")),
                 instant(rs, "created_at"),
-                instant(rs, "updated_at"));
+                instant(rs, "updated_at"),
+                emptyToNull(rs.getString("model")),
+                emptyToNull(rs.getString("reason")),
+                rs.getInt("cli_restarts"));
     };
 
     private final RowMapper<ChatMessage> messageMapper = (rs, n) -> new ChatMessage(
@@ -103,10 +106,11 @@ abstract class AbstractJdbcChatStore implements ChatStore {
 
     protected void insertSession(ChatSession s) {
         jdbc.update("INSERT INTO chat_session "
-                        + "(company_id, id, title, agent_type, agent_session_id, workspace_dir, agent_id, status, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        + "(company_id, id, title, agent_type, agent_session_id, workspace_dir, agent_id, status, created_at, updated_at, "
+                        + "model, reason, cli_restarts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 TenantSchema.company(), s.id(), nn(s.title()), s.agentType().name(), nn(s.agentSessionId()),
-                nn(s.workspaceDir()), nn(s.agentId()), s.status().name(), utc(s.createdAt()), utc(s.updatedAt()));
+                nn(s.workspaceDir()), nn(s.agentId()), s.status().name(), utc(s.createdAt()), utc(s.updatedAt()),
+                nn(s.model()), nn(s.reason()), s.cliRestarts());
     }
 
     @Override

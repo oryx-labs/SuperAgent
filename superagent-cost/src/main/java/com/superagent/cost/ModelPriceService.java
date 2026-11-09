@@ -202,11 +202,14 @@ public class ModelPriceService implements ModelRouter {
     @Override
     public List<String> chatModels() {
         String def = settings == null ? null : settings.agentDefaultModel();
-        if (def == null) {
-            return List.of();
-        }
         List<Candidate> runnable = candidates();
         java.util.function.Predicate<String> usable = id -> runnable.stream().anyMatch(c -> c.id().equals(id)) && !coolingDown(id);
+        if (def == null) { // none set: the strongest that can run, then the next down
+            List<String> strongest = runnable.stream().sorted(Comparator.comparingDouble(Candidate::blended).reversed())
+                    .map(Candidate::id).toList();
+            List<String> live = strongest.stream().filter(usable).toList();
+            return live.isEmpty() ? strongest : live;
+        }
         List<String> out = new java.util.ArrayList<>();
         if (usable.test(def)) {
             out.add(def);

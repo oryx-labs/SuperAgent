@@ -113,18 +113,3 @@ function ibWhen(iso) {
   if (d.getFullYear() === now.getFullYear()) return (d.getMonth() + 1) + "/" + d.getDate() + " " + hm;
   return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
 }
-
-// ---------- the SuperAgent panel's line about outside messages ----------
-// Always opens the message stream (it says there how to link when that's still to do); the line under it gives
-// today's count, or the nudge to link.
-
-async function loadSuperSources() {
-  const link = document.getElementById("superSources");
-  const res = await api.ibSummary().catch(() => null);
-  if (!res) { link.hidden = true; return; }
-  link.hidden = false;
-  link.href = "#messages";
-  // The link lives in SuperAgent's details drawer: a title, and this line under it.
-  document.getElementById("superSourcesHint").textContent = res.linked
-    ? L("ib.superLine", { today: res.today, handled: res.handled }) : L("ib.superNone");
-}

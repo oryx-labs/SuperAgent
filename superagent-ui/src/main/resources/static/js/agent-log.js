@@ -9,6 +9,7 @@ const lel = {
   title: document.getElementById("agentLogTitle"),
   tabs: document.getElementById("agentLogTabs"),
   superTab: document.getElementById("agentLogSuperTab"),
+  sessions: document.getElementById("agentSessList"),
   list: document.getElementById("agentLogList"),
   empty: document.getElementById("agentLogEmpty"),
 };
@@ -27,6 +28,8 @@ function openAgentLog() {
 
 async function loadAgentLog() {
   lel.tabs.querySelectorAll(".auto-tab").forEach(t => t.classList.toggle("is-active", t.dataset.cat === logCategory));
+  lel.sessions.hidden = logCategory !== "session";
+  if (logCategory === "session") loadAgentSessions();
   const res = await fetch("/api/v1/agents/" + logAgent.id + "/logs?limit=500"
     + (logCategory ? "&category=" + logCategory : "")).then(r => r.json()).catch(() => null);
   if (!res || !res.data) {
@@ -38,6 +41,49 @@ async function loadAgentLog() {
   lel.list.replaceChildren(...res.data.map(logLine));
   lel.empty.hidden = res.data.length > 0;
   lel.empty.textContent = L("log.empty");
+}
+
+// The Sessions tab: every session it has had, newest first, then the session lines of the log below.
+async function loadAgentSessions() {
+  const agent = logAgent;
+  const res = await fetch("/api/v1/agents/" + agent.id + "/sessions").then(r => r.json()).catch(() => null);
+  if (logAgent !== agent || logCategory !== "session") return;
+  lel.sessions.replaceChildren(...((res && res.data) || []).map(sessionRow));
+}
+
+function sessionRow(s) {
+  const li = document.createElement("li");
+  li.className = "sess-row" + (s.current ? " is-current" : "");
+  const head = document.createElement("div");
+  head.className = "sess-row__head";
+  const num = document.createElement("b");
+  num.textContent = "#" + s.number;
+  head.appendChild(num);
+  if (s.current) {
+    const tag = document.createElement("span");
+    tag.className = "sess-row__tag";
+    tag.textContent = L("log.sessCurrent");
+    head.appendChild(tag);
+  }
+  const model = document.createElement("code");
+  model.className = "sess-row__model";
+  model.textContent = s.model || "—";
+  const when = document.createElement("span");
+  when.className = "sess-row__when";
+  when.textContent = L("log.sessWhen", { from: formatDateTime(s.startedAt).slice(5, 16),
+    last: formatDateTime(s.lastAt).slice(5, 16), n: s.turns });
+  head.append(model, when);
+  const why = document.createElement("div");
+  why.className = "sess-row__why";
+  why.textContent = L("log.reason." + (s.reason || "unknown"));
+  if (s.cliRestarts) {
+    const warn = document.createElement("span");
+    warn.className = "sess-row__warn";
+    warn.textContent = L("log.sessRestarts", { n: s.cliRestarts });
+    why.appendChild(warn);
+  }
+  li.append(head, why);
+  return li;
 }
 
 function logLine(e) {

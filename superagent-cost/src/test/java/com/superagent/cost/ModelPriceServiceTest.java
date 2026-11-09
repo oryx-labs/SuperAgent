@@ -117,5 +117,9 @@ class ModelPriceServiceTest {
         assertThat(prices.chatModels().get(0)).isEqualTo("mid");
         assertThat(told).hasSize(2);
         assertThat(((com.superagent.core.notice.NoticeEvents.DefaultModelChanged) told.get(1)).down()).isFalse();
+
+        // None set: the most expensive that can run.
+        when(settings.agentDefaultModel()).thenReturn(null);
+        assertThat(prices.chatModels()).containsExactly("strong", "mid", "fast");
     }
 }

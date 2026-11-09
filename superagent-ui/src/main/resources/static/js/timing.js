@@ -91,6 +91,28 @@ function tmSummary(t) {
   return [L("tm.total", { d: tmDuration(t.totalMs) }), ...parts].join(" · ");
 }
 
+// The line under a reply: the total, a small bar, and the biggest stages keyed to the bar's colours.
+function tmCompact(t) {
+  const ms = tmStageMs(t);
+  const total = document.createElement("b");
+  total.className = "tm-line__total";
+  total.textContent = "⏱ " + tmDuration(t.totalMs);
+  const bar = tmBar(t);
+  bar.classList.add("tm-bar--mini");
+  const parts = TM_STAGES.filter(k => ms[k] >= 500).sort((a, b) => ms[b] - ms[a]).slice(0, 3).map(k => {
+    const part = document.createElement("span");
+    part.className = "tm-line__part";
+    const dot = document.createElement("i");
+    dot.className = "tm-dot tm-" + k;
+    const label = k === "tools" && t.tools.length
+      ? L("tm.toolsShort", { n: t.tools.reduce((n, x) => n + x.count, 0), d: tmDuration(ms[k]) })
+      : L("tm.stage." + k) + " " + tmDuration(ms[k]);
+    part.append(dot, document.createTextNode(label));
+    return part;
+  });
+  return [total, bar, ...parts];
+}
+
 // Under each reply on screen; a click opens the breakdown.
 async function attachTimings(agentId) {
   if (!agentId) return;
@@ -105,7 +127,8 @@ async function attachTimings(agentId) {
     btn.type = "button";
     btn.className = "tm-line__btn";
     btn.setAttribute("aria-expanded", "false");
-    btn.textContent = "⏱ " + tmSummary(t);
+    btn.append(...tmCompact(t));
+    btn.title = L("tm.open");
     let detail = null;
     btn.addEventListener("click", () => {
       if (detail) { detail.remove(); detail = null; btn.setAttribute("aria-expanded", "false"); return; }

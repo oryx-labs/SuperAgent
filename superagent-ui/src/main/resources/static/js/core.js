@@ -29,6 +29,7 @@ const api = {
     }).then(r => { if (!r.ok) throw new Error("edit failed"); return r.json(); }),
   listAgents: () => fetch("/api/v1/agents").then(r => r.json()),
   agentHistory: id => fetch("/api/v1/agents/" + id + "/history").then(r => r.json()),
+  agentModel: id => fetch("/api/v1/agents/" + id + "/model").then(r => r.json()),
   superState: () => fetch("/api/v1/superagent").then(r => r.json()),
   superBackground: () => fetch("/api/v1/superagent/background?limit=300").then(kbJson),
   superWork: (status, memberId, limit) => fetch("/api/v1/superagent/work?status=" + encodeURIComponent(status)

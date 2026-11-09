@@ -133,6 +133,11 @@ function attachAgentTaskCards(items) {
 function noticeSettledTasks(agent, items) {
   const before = agentTaskStatus.agentId === agent.id ? agentTaskStatus.byId : null;
   agentTaskStatus = { agentId: agent.id, byId: new Map(items.map(t => [t.id, t.status])), items };
+  // Notes drawn before the statuses arrived get their colour now.
+  el.messages.querySelectorAll(".msg--task-report").forEach(m => {
+    const s = agentTaskStatus.byId.get(m.dataset.taskId);
+    if (s) m.className = m.className.replace(/\bis-\S*/g, "").trim() + " is-" + s;
+  });
   if (!before || streaming || liveWatch) return;
   // Moved since the last look — or new and already settled (it ran between two looks) — or handed to this agent
   // from elsewhere (the SuperAgent), with a note in this chat the page hasn't shown yet.
@@ -145,11 +150,14 @@ function noticeSettledTasks(agent, items) {
 
 /** A note from a task in the chat (taken on, finished, failed, waiting): labelled as such, with a way to open it. */
 function markTaskReport(msgEl, taskId) {
-  msgEl.classList.add("msg--background", "msg--task-report");
+  // Coloured by how the task stands now (done / failed / waiting on someone).
+  const status = agentTaskStatus.byId.get(taskId) || "";
+  msgEl.classList.add("msg--background", "msg--task-report", "is-" + status);
+  msgEl.dataset.taskId = taskId;
   const tag = document.createElement("button");
   tag.type = "button";
   tag.className = "msg__bg-tag msg__task-tag";
-  tag.textContent = L("chat.taskReportTag");
+  tag.textContent = L("chat.taskReportTag") + " · " + L("chat.taskReportOpen");
   tag.title = L("super.dispatchOpenTask");
   tag.addEventListener("click", () => { setView("tasks"); openTask(taskId); });
   msgEl.prepend(tag);

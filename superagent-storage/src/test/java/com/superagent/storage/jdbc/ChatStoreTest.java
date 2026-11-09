@@ -45,4 +45,21 @@ class ChatStoreTest {
         assertThat(store.listMessages("s1")).extracting(ChatMessage::content).containsExactly("hello");
         assertThat(store.listEvents("s1")).hasSize(1);
     }
+
+    @Test
+    void aSessionKeepsItsModelReasonAndRestarts() {
+        MysqlChatStore store = new MysqlChatStore(new JdbcTemplate(new DriverManagerDataSource(
+                "jdbc:h2:mem:chat-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+        Instant now = Instant.now();
+        store.createSession(new ChatSession("s1", "t", AgentType.CLAUDE, "c1", "/w", "a1", SessionStatus.ACTIVE, now, now,
+                "opus", ChatSession.MODEL_DOWN, 0));
+        ChatSession restarted = store.findSession("s1").orElseThrow().withAgentSessionId("c2"); // the CLI started over
+        store.updateSession(restarted);
+
+        assertThat(store.findSession("s1")).hasValueSatisfying(s -> {
+            assertThat(s.model()).isEqualTo("opus");
+            assertThat(s.reason()).isEqualTo(ChatSession.MODEL_DOWN);
+            assertThat(s.cliRestarts()).isEqualTo(1);
+        });
+    }
 }

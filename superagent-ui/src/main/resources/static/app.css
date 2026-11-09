@@ -572,7 +572,8 @@ img { max-width: 100%; }
 .msg { display: flex; }
 /* column: attached images stack above the text bubble, both right-aligned */
 .msg--user { flex-direction: column; align-items: flex-end; }
-.msg--agent { justify-content: flex-start; }
+/* column too: the timing line sits under the reply, not beside it */
+.msg--agent { flex-direction: column; align-items: flex-start; }
 
 .bubble {
   max-width: 76%;
@@ -700,7 +701,13 @@ img { max-width: 100%; }
   content: "▋"; margin-left: 1px; color: var(--muted-2);
   animation: sa-blink 1s steps(2, start) infinite;
 }
+/* Nothing streamed yet: say so in words rather than a lone cursor. */
+.text.is-streaming:empty::after {
+  content: attr(data-waiting); margin-left: 0; color: var(--muted);
+  animation: sa-fade 1.4s ease-in-out infinite;
+}
 .text.is-error { color: #b91c1c; }
+@keyframes sa-fade { 50% { opacity: .35; } }
 @keyframes sa-blink { to { visibility: hidden; } }
 
 /* ---------- Stop button + stopped marker ---------- */
@@ -1419,11 +1426,26 @@ button.stat-card:hover { border-color: var(--line-strong); }
 }
 /* In the leader's conversation: its replies carry a blue rule; what its background posts is set apart. */
 .messages--super .msg--agent .bubble { box-shadow: inset 2px 0 0 var(--accent); }
-.msg--background .bubble { background: var(--panel); border: 1px dashed var(--line-strong); box-shadow: none; }
-.msg__bg-tag { margin: 0 0 4px 2px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--muted); }
-.msg__bg-tag::before { content: "↻ "; }
+/* Notices in the chat (a task's outcome, what the background posted): a slim card, not a speech bubble. */
+.msg--background .bubble {
+  max-width: 76%; padding: 8px 12px 9px; font-size: 13px; line-height: 1.55; color: var(--muted);
+  background: var(--paper); border: 1px solid var(--line); border-left: 3px solid var(--muted-2);
+  border-radius: 8px; box-shadow: none;
+}
+.msg--background .bubble p { margin: 0 0 4px; }
+.msg--background .bubble p:last-child { margin-bottom: 0; }
+.msg--task-report.is-done .bubble { border-left-color: #16a34a; }
+.msg--task-report.is-error .bubble { border-left-color: #dc2626; }
+.msg--task-report.is-needs_confirmation .bubble { border-left-color: #d97706; }
+.msg__bg-tag {
+  display: inline-flex; align-items: center; gap: 5px; margin: 0 0 4px 1px;
+  font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--muted-2);
+}
+.msg__bg-tag::before { content: "↻"; }
 .msg__task-tag { padding: 0; border: 0; background: none; font-family: inherit; text-align: left; cursor: pointer; }
-.msg__task-tag::before { content: "▸ "; }
+.msg__task-tag::before { content: "🔔"; font-size: 11px; }
+.msg--task-report.is-done .msg__task-tag::before { content: "✓"; color: #16a34a; }
+.msg--task-report.is-error .msg__task-tag::before { content: "✕"; color: #dc2626; }
 .msg__task-tag:hover { color: var(--accent); }
 /* Under a SuperAgent reply: the tasks it handed out, each with who's on it. */
 .sa-dispatch { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding: 10px 12px;
@@ -1521,6 +1543,15 @@ button.stat-card:hover { border-color: var(--line-strong); }
 /* Run log: a quiet timeline; colour only marks warnings and errors. */
 .log-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .log-refresh::after { content: ""; }
+.sess-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sess-row { padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+.sess-row.is-current { border-color: var(--line-strong); background: var(--panel); }
+.sess-row__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 12.5px; }
+.sess-row__tag { font-size: 10.5px; color: var(--paper); background: var(--ink); border-radius: 5px; padding: 1px 6px; }
+.sess-row__model { font-size: 12px; }
+.sess-row__when { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sess-row__why { margin-top: 3px; font-size: 12px; color: var(--muted); }
+.sess-row__warn { margin-left: 10px; color: #b45309; }
 .log-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .log-list li + li { border-top: 1px solid var(--line); }
 .log-line {
@@ -1711,9 +1742,24 @@ button.stat-card:hover { border-color: var(--line-strong); }
 .multi-select__name { font-size: 13px; color: var(--ink); }
 .multi-select__desc { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .multi-select__empty { margin: 0; padding: 10px; font-size: 12.5px; color: var(--muted); }
-.avatar-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 6px; }
+.name-row { display: flex; align-items: center; gap: 8px; }
+.name-row input { flex: 1 1 auto; min-width: 0; }
+.avatar-current {
+  flex: none; width: 42px; height: 42px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel);
+  font-size: 24px; line-height: 1; cursor: pointer;
+}
+.avatar-current:hover, .avatar-current[aria-expanded="true"] { border-color: var(--line-strong); }
+.avatar-shuffle {
+  flex: none; width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper);
+  color: var(--muted); font-size: 16px; cursor: pointer;
+}
+.avatar-shuffle:hover { color: var(--ink); border-color: var(--line-strong); }
+.avatar-picker {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 4px; margin-top: 8px;
+  padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
+}
 .avatar-option {
-  height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper);
+  height: 34px; border-radius: 8px; border: 1px solid transparent; background: none;
   font-size: 20px; line-height: 1; cursor: pointer;
 }
 .avatar-option:hover { background: var(--panel); }
@@ -2194,9 +2240,13 @@ small.model-note { display: block; margin-top: 4px; }
 .status-badge.is-infer-checking { background: #eff6ff; color: #1d4ed8; }
 
 /* ---------- Where time went: under replies, and the task's Time tab ---------- */
-.tm-line { margin-top: 4px; }
+.tm-line { margin-top: 6px; max-width: 76%; }
 .tm-line__btn { padding: 0; font: inherit; font-size: 11.5px; color: var(--muted-2); background: none; border: 0; cursor: pointer; text-align: left; }
 .tm-line__btn:hover { color: var(--muted); }
+.tm-line > .tm-line__btn { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.tm-line__total { font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tm-line__part { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.tm-bar--mini { width: 72px; height: 6px; flex: none; }
 .tm-detail { margin-top: 8px; padding: 10px 12px; max-width: 520px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
 .tm-bar { display: flex; height: 8px; overflow: hidden; background: var(--line); border-radius: 999px; }
 .tm-bar__seg { height: 100%; }

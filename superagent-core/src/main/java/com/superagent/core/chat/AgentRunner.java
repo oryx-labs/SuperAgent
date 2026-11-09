@@ -25,4 +25,12 @@ public interface AgentRunner {
      *                     turn can be stopped early (e.g. user hit stop)
      */
     void run(AgentRunRequest request, AgentEventSink sink, Cancellation cancellation);
+
+    /**
+     * Runs a conversation turn. A runner that can keeps the CLI running between a session's turns, so the next one
+     * skips starting it; the rest run it like any other turn.
+     */
+    default void runChat(AgentRunRequest request, AgentEventSink sink, Cancellation cancellation) {
+        run(request, sink, cancellation);
+    }
 }

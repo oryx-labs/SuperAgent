@@ -26,7 +26,10 @@ public class ClickHouseChatStore extends AbstractJdbcChatStore {
                   agent_id String,
                   status String,
                   created_at DateTime64(3, 'UTC'),
-                  updated_at DateTime64(3, 'UTC')
+                  updated_at DateTime64(3, 'UTC'),
+                  model String,
+                  reason String,
+                  cli_restarts Int32 DEFAULT 0
                 ) ENGINE = ReplacingMergeTree(updated_at)
                 ORDER BY (company_id, id)
                 """, """
@@ -51,7 +54,9 @@ public class ClickHouseChatStore extends AbstractJdbcChatStore {
                   created_at DateTime64(3, 'UTC')
                 ) ENGINE = MergeTree
                 ORDER BY (company_id, session_id, created_at, seq)
-                """));
+                """, "ALTER TABLE chat_session ADD COLUMN IF NOT EXISTS model String",
+                "ALTER TABLE chat_session ADD COLUMN IF NOT EXISTS reason String",
+                "ALTER TABLE chat_session ADD COLUMN IF NOT EXISTS cli_restarts Int32 DEFAULT 0"));
     }
 
     @Override

@@ -135,6 +135,8 @@ public class McpGrants {
     private final Map<String, Grant> grants = new ConcurrentHashMap<>();
     /** The company each open grant's run belongs to; its tool calls run as that company. */
     private final Map<String, String> companies = new ConcurrentHashMap<>();
+    /** A CLI kept running between turns holds the token it started with: during a turn it stands for that turn's. */
+    private final Map<String, String> standIns = new ConcurrentHashMap<>();
     private final SecureRandom random = new SecureRandom();
     private final ObjectMapper mapper = new ObjectMapper();
     /** Set explicitly (a proxy, another host); otherwise found from the port the server actually listens on. */
@@ -256,7 +258,43 @@ public class McpGrants {
     }
 
     public Optional<Grant> find(String token) {
-        return token == null ? Optional.empty() : Optional.ofNullable(grants.get(token));
+        if (token == null) {
+            return Optional.empty();
+        }
+        Grant grant = grants.get(token);
+        if (grant == null) {
+            String current = standIns.get(token);
+            grant = current == null ? null : grants.get(current);
+        }
+        return Optional.ofNullable(grant);
+    }
+
+    /**
+     * Lets {@code standing} (the token a running CLI was started with) act as {@code current} (this turn's grant)
+     * until {@link #release}. Between turns it stands for nothing, so an idle CLI can't call anything.
+     */
+    public void standIn(String standing, String current) {
+        if (!standing.equals(current)) {
+            standIns.put(standing, current);
+        }
+    }
+
+    public void release(String standing) {
+        standIns.remove(standing);
+    }
+
+    /** The bearer token for SuperAgent's own server in an {@code --mcp-config} JSON, or null. */
+    public static String tokenIn(String mcpConfig) {
+        if (mcpConfig == null || mcpConfig.isBlank()) {
+            return null;
+        }
+        try {
+            String auth = new ObjectMapper().readTree(mcpConfig).path("mcpServers").path("superagent").path("headers")
+                    .path("Authorization").asText("");
+            return auth.startsWith("Bearer ") ? auth.substring(7) : null;
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     /** The company {@code grant}'s run belongs to. */

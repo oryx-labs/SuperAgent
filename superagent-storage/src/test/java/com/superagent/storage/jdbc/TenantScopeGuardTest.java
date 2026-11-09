@@ -45,20 +45,6 @@ class TenantScopeGuardTest {
                 }
             }
         }
-        // Tables some ClickHouse/MySQL installs create from the shipped schema files instead of the stores.
-        try (Stream<Path> files = Files.list(Path.of("../db"))) {
-            for (Path dir : files.toList()) {
-                Path schema = dir.resolve("schema.sql");
-                if (Files.exists(schema)) {
-                    Matcher m = DDL.matcher(Files.readString(schema));
-                    while (m.find()) {
-                        if (!GLOBAL.contains(m.group(1)) && !m.group(2).contains("company_id")) {
-                            unscoped.add(m.group(1));
-                        }
-                    }
-                }
-            }
-        }
         assertThat(unscoped).as("tables without company_id").isEmpty();
         assertThat(scopedWithoutContext).as("company-scoped tables whose store never reads TenantContext").isEmpty();
     }

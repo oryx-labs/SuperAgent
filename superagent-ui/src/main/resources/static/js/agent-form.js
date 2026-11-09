@@ -11,6 +11,8 @@ const ael = {
   name: document.getElementById("afName"),
   persona: document.getElementById("afPersona"),
   avatars: document.getElementById("afAvatars"),
+  avatarBtn: document.getElementById("afAvatarBtn"),
+  avatarShuffle: document.getElementById("afAvatarShuffle"),
   character: document.getElementById("afCharacter"),
   characterHint: document.getElementById("afCharacterHint"),
   personaLabel: document.getElementById("afPersonaLabel"),
@@ -26,26 +28,40 @@ async function renderAvatarPicker(current) {
     try { const res = await api.agentAvatars(); avatarChoices = (res && res.data) || []; } catch (e) { avatarChoices = []; }
   }
   // A new agent starts on a random pick (the user can change it); an edit keeps its avatar.
-  chosenAvatar = current || (avatarChoices.length ? avatarChoices[Math.floor(Math.random() * avatarChoices.length)] : null);
   ael.avatars.innerHTML = "";
+  toggleAvatarGrid(false);
   avatarChoices.forEach(av => {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "avatar-option" + (av === chosenAvatar ? " is-selected" : "");
+    b.className = "avatar-option";
     b.textContent = av;
     b.setAttribute("role", "radio");
-    b.setAttribute("aria-checked", String(av === chosenAvatar));
-    b.addEventListener("click", () => {
-      chosenAvatar = av;
-      ael.avatars.querySelectorAll(".avatar-option").forEach(x => {
-        const on = x.textContent === av;
-        x.classList.toggle("is-selected", on);
-        x.setAttribute("aria-checked", String(on));
-      });
-    });
+    b.addEventListener("click", () => { chooseAvatar(av); toggleAvatarGrid(false); });
     ael.avatars.appendChild(b);
   });
+  chooseAvatar(current || randomAvatar());
 }
+
+const randomAvatar = () => avatarChoices.length
+  ? avatarChoices.filter(a => a !== chosenAvatar)[Math.floor(Math.random() * (avatarChoices.length - (avatarChoices.includes(chosenAvatar) ? 1 : 0)))] || avatarChoices[0]
+  : null;
+
+function chooseAvatar(av) {
+  chosenAvatar = av;
+  ael.avatarBtn.textContent = av || "🙂";
+  ael.avatars.querySelectorAll(".avatar-option").forEach(x => {
+    const on = x.textContent === av;
+    x.classList.toggle("is-selected", on);
+    x.setAttribute("aria-checked", String(on));
+  });
+}
+
+function toggleAvatarGrid(open) {
+  ael.avatars.hidden = !open;
+  ael.avatarBtn.setAttribute("aria-expanded", String(open));
+}
+ael.avatarBtn.addEventListener("click", () => toggleAvatarGrid(ael.avatars.hidden));
+ael.avatarShuffle.addEventListener("click", () => chooseAvatar(randomAvatar()));
 
 // Characters: built-in "what kind of person" presets from the server, plus a custom one written in the persona box.
 let characterChoices = [];

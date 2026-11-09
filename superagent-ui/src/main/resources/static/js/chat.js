@@ -121,6 +121,7 @@ function addAssistantBubble() {
   tools.hidden = true;
   const text = document.createElement("div");
   text.className = "text is-streaming";
+  text.dataset.waiting = L("chat.waiting");
   bubble.append(thinking, tools, text);
   msg.appendChild(bubble);
   el.messages.appendChild(msg);
@@ -387,8 +388,6 @@ function renderAgentPanel(agent) {
   // Every agent has a details drawer; the SuperAgent's holds only what it has (memory, run log, messages).
   document.getElementById("agentDetailTitle").textContent = agent.name || "Agent";
   document.getElementById("agentInfoDetails").classList.toggle("is-super", agent.kind === "super");
-  document.getElementById("superSources").hidden = agent.kind !== "super";
-  if (agent.kind === "super") loadSuperSources();
   renderAgentWork(agent);
   renderAgentProject(agent);
   renderAgentParent(agent);
@@ -397,9 +396,13 @@ function renderAgentPanel(agent) {
   document.getElementById("agentPersonaWrap").hidden = !agent.persona;
   setupPersonaClamp();
   if (!characterChoices.length) loadCharacters().then(() => { if (activeAgent === agent && agent.character) renderAgentPanel(agent); });
-  // Conversations run on what the admin set, not a model of each agent's own (the work runs in tasks).
-  const model = systemSettings.agentDefaultModel || "default";
-  document.getElementById("agentInfoModel").textContent = model;
+  // Conversations run on what the admin set (or, with nothing set, the strongest that can run), not a model of each
+  // agent's own: the work runs in tasks.
+  const modelEl = document.getElementById("agentInfoModel");
+  modelEl.textContent = systemSettings.agentDefaultModel || "";
+  api.agentModel(agent.id).then(r => {
+    if (activeAgent === agent) modelEl.textContent = (r && r.data && r.data.model) || L("chat.noModel");
+  }).catch(() => {});
   renderComposerModel(agent);
   renderAgentSkills(agent);
 }
@@ -470,9 +473,7 @@ async function renderComposerModel(agent) {
   }
   const def = document.createElement("option");
   def.value = "";
-  def.textContent = systemSettings.agentDefaultModel || failed || cliDefaultWorks(groups)
-    ? L("chat.modelDefault", { model: systemSettings.agentDefaultModel || L("settings.modelCliDefault") })
-    : L("settings.modelPick");
+  def.textContent = L("chat.modelDefault", { model: systemSettings.agentDefaultModel || L("settings.modelAuto") });
   composerModel.appendChild(def);
   fillModelGroups(composerModel, groups, m => m.id);
   // Show the truth when the saved model has since failed its probe, rather than silently displaying another.
@@ -482,8 +483,6 @@ async function renderComposerModel(agent) {
   composerModel.value = agent.model || "";
 }
 
-/** With no model chosen, a turn runs on Claude Code's own default: that only works if Claude Code has a working model. */
-const cliDefaultWorks = groups => groups.some(g => g.key === "claude");
 
 function setNoChatModel(on) {
   noChatModel = on;

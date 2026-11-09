@@ -45,9 +45,8 @@ async function loadSettingsForm() {
   sel.agentModel.innerHTML = "";
   const def = document.createElement("option");
   def.value = "";
-  // Never offer a default that can't run: say there's nothing, or ask for a pick.
-  def.textContent = L(failed || cliDefaultWorks(groups) ? "settings.modelCliDefault"
-    : ok ? "settings.modelPick" : "chat.noModel");
+  // Nothing picked = the most expensive model that can run; say so, or that nothing can.
+  def.textContent = L(failed || ok ? "settings.modelAuto" : "chat.noModel");
   sel.agentModel.appendChild(def);
   fillModelGroups(sel.agentModel, groups,
     m => m.displayName && m.displayName !== m.id ? m.displayName + " (" + m.id + ")" : m.id);

@@ -323,11 +323,17 @@ public class ChatService {
      * over), and the agent's long-term memory — not the old conversation — is what the new one starts from.
      */
     public ChatSession sessionForTurn(Agent agent, String model) {
+        return sessionForTurn(agent, model, false);
+    }
+
+    /** {@code modelDown}: the move is because the previous model couldn't run, not because the choice changed. */
+    private ChatSession sessionForTurn(Agent agent, String model, boolean modelDown) {
         ChatSession current = currentSession(agent.id()).orElse(null);
         if (current == null || memory.modelChanged(agent.id(), model)) {
             boolean switching = current != null;
             String previous = memory.lastModel(agent.id());
-            current = startSession(agent, current == null ? null : current.workspaceDir());
+            current = startSession(agent, current == null ? null : current.workspaceDir(), model,
+                    !switching ? ChatSession.FIRST : modelDown ? ChatSession.MODEL_DOWN : ChatSession.MODEL_CHANGED);
             log.info("agent {} starts session {} on model {}", agent.id(), current.id(), model);
             runLog.info(agent, AgentLogService.SESSION, "开新会话 #" + sessionNumber(agent.id(), current.id())
                     + (switching ? "（切换模型：" + modelLabel(previous) + " → " + modelLabel(model) + "）" : "（首次对话）"),
@@ -346,7 +352,7 @@ public class ChatService {
      */
     public ChatSession rotateSession(Agent agent) {
         String workspace = currentSession(agent.id()).map(ChatSession::workspaceDir).orElse(null);
-        ChatSession fresh = startSession(agent, workspace);
+        ChatSession fresh = startSession(agent, workspace, memory.lastModel(agent.id()), ChatSession.FAILURES);
         log.info("agent {} moved to fresh session {}", agent.id(), fresh.id());
         runLog.warn(agent, AgentLogService.SESSION, "会话连续失败 " + memory.failureLimit() + " 次，已切换到新会话 #"
                 + sessionNumber(agent.id(), fresh.id()) + " 并重试", "新会话从 Agent 记忆和最近的对话原文继续；已触发记忆沉淀");
@@ -391,16 +397,37 @@ public class ChatService {
         }
     }
 
-    private ChatSession startSession(Agent agent, String workspaceDir) {
-        if (workspaceDir == null) {
-            return store.findSession(createSession(new CreateSessionRequest(null, agent.name(), null, agent.id())).id())
-                    .orElseThrow();
+    private ChatSession startSession(Agent agent, String workspaceDir, String model, String reason) {
+        String id = UUID.randomUUID().toString();
+        if (workspaceDir == null) { // the agent's first session: its workspace is made now, and later ones share it
+            Path workspace = TenantPaths.of(workspaceRoot).resolve(id);
+            try {
+                Files.createDirectories(workspace);
+            } catch (IOException e) {
+                throw new UncheckedIOException("Cannot create workspace for session " + id, e);
+            }
+            workspaceDir = workspace.toString();
         }
         Instant now = Instant.now();
-        ChatSession session = new ChatSession(UUID.randomUUID().toString(), agent.name(), AgentType.CLAUDE, null,
-                workspaceDir, agent.id(), SessionStatus.ACTIVE, now, now);
+        ChatSession session = new ChatSession(id, agent.name(), AgentType.CLAUDE, null,
+                workspaceDir, agent.id(), SessionStatus.ACTIVE, now, now, model, reason, 0);
         store.createSession(session);
         return session;
+    }
+
+    /** The agent's sessions, newest first: the one its next turn continues, then the ones before it. */
+    public List<com.superagent.api.chat.AgentSessionDto> agentSessions(String agentId) {
+        List<ChatSession> sessions = store.listSessionsByAgent(agentId).stream()
+                .filter(s -> s.status() != SessionStatus.DELETED)
+                .sorted(Comparator.comparing(ChatSession::createdAt)).toList();
+        List<com.superagent.api.chat.AgentSessionDto> out = new ArrayList<>();
+        for (int i = sessions.size() - 1; i >= 0; i--) {
+            ChatSession s = sessions.get(i);
+            int turns = (int) store.listMessages(s.id()).stream().filter(m -> m.role() == MessageRole.ASSISTANT).count();
+            out.add(new com.superagent.api.chat.AgentSessionDto(s.id(), i + 1, i == sessions.size() - 1, s.model(),
+                    s.reason(), s.cliRestarts(), turns, s.createdAt(), s.updatedAt()));
+        }
+        return out;
     }
 
     /** Every session the agent has had, oldest first, each with its messages — the agent's whole conversation. */
@@ -417,7 +444,7 @@ public class ChatService {
         ChatSession s = store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
         String clean = title == null || title.isBlank() ? "Untitled" : title.trim();
         ChatSession renamed = new ChatSession(s.id(), clean, s.agentType(), s.agentSessionId(),
-                s.workspaceDir(), s.agentId(), s.status(), s.createdAt(), s.updatedAt());
+                s.workspaceDir(), s.agentId(), s.status(), s.createdAt(), s.updatedAt(), s.model(), s.reason(), s.cliRestarts());
         store.updateSession(renamed);
         return toDto(renamed);
     }
@@ -426,7 +453,8 @@ public class ChatService {
     public void deleteSession(String sessionId) {
         ChatSession s = store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
         store.updateSession(new ChatSession(s.id(), s.title(), s.agentType(), s.agentSessionId(),
-                s.workspaceDir(), s.agentId(), SessionStatus.DELETED, s.createdAt(), Instant.now()));
+                s.workspaceDir(), s.agentId(), SessionStatus.DELETED, s.createdAt(), Instant.now(), s.model(), s.reason(),
+                s.cliRestarts()));
     }
 
     public SessionDetailDto getSession(String sessionId) {
@@ -590,7 +618,7 @@ public class ChatService {
      * Every conversation runs on the admin's default model, not on a model of its own: the chat thinks and hands out
      * work, which wants the strongest; the work itself runs in tasks, each on a model chosen for it.
      */
-    private String resolveModel(Agent agent) {
+    public String resolveModel(Agent agent) {
         if (agent != null && modelRouter != null) {
             List<String> usable = modelRouter.chatModels();
             if (!usable.isEmpty()) {
@@ -674,7 +702,7 @@ public class ChatService {
                 model = next;
                 agentType = nextType;
                 runner = runners.get(nextType);
-                ChatSession moved = sessionForTurn(agent, next); // another model: a new session, from memory + recent messages
+                ChatSession moved = sessionForTurn(agent, next, true); // another model: a new session, from memory + recent messages
                 attempt = attempt(moved, agentType, runner, model, systemPrompt, memory.context(agent, Set.of(userMessageId)),
                         prompt, attached, user, assistantMessageId, emitter, cancellation);
             }
@@ -808,7 +836,7 @@ public class ChatService {
                          AtomicReference<String> error, ChatSession session, com.superagent.core.timing.TurnTimer timer) {
         timer.attemptStarted();
         try {
-            runner.run(request, sink, cancellation);
+            runner.runChat(request, sink, cancellation);
         } catch (RuntimeException e) {
             // A runner that blows up is a failed attempt like any other: it may count against the session.
             log.warn("turn attempt failed in session {}: {}", session.id(), e.getMessage());
@@ -852,8 +880,7 @@ public class ChatService {
                                       String firstPrompt) {
         ChatSession updated = session;
         if (agentType != session.agentType()) {
-            updated = new ChatSession(session.id(), session.title(), agentType, agentSessionId,
-                    session.workspaceDir(), session.agentId(), session.status(), session.createdAt(), Instant.now());
+            updated = session.withAgentType(agentType, agentSessionId);
         } else if (agentSessionId != null && !agentSessionId.equals(session.agentSessionId())) {
             updated = updated.withAgentSessionId(agentSessionId);
         }

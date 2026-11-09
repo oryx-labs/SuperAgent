@@ -26,6 +26,9 @@ public class MysqlChatStore extends AbstractJdbcChatStore {
               status           VARCHAR(32)  NOT NULL,
               created_at       DATETIME(3)  NOT NULL,
               updated_at       DATETIME(3)  NOT NULL,
+              model            VARCHAR(128),
+              reason           VARCHAR(32),
+              cli_restarts     INT          NOT NULL DEFAULT 0,
               PRIMARY KEY (company_id, id),
               KEY idx_session_updated (company_id, updated_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -60,6 +63,9 @@ public class MysqlChatStore extends AbstractJdbcChatStore {
         // CREATE TABLE IF NOT EXISTS won't alter a chat_session table created before agent_id existed.
         ensureColumn("chat_session", "agent_id", "VARCHAR(64)");
         ensureColumn("chat_message", "author", "VARCHAR(128)");
+        ensureColumn("chat_session", "model", "VARCHAR(128)");
+        ensureColumn("chat_session", "reason", "VARCHAR(32)");
+        ensureColumn("chat_session", "cli_restarts", "INT NOT NULL DEFAULT 0");
     }
 
     /** Adds a column to an already-created table idempotently (MySQL has no ADD COLUMN IF NOT EXISTS). */
@@ -81,13 +87,14 @@ public class MysqlChatStore extends AbstractJdbcChatStore {
 
     @Override
     public void updateSession(ChatSession s) {
-        jdbc.update("UPDATE chat_session SET title = ?, agent_type = ?, agent_session_id = ?, status = ?, updated_at = ? "
-                        + "WHERE company_id = ? AND id = ?",
+        jdbc.update("UPDATE chat_session SET title = ?, agent_type = ?, agent_session_id = ?, status = ?, updated_at = ?, "
+                        + "cli_restarts = ? WHERE company_id = ? AND id = ?",
                 s.title() == null ? "" : s.title(),
                 s.agentType().name(),
                 s.agentSessionId() == null ? "" : s.agentSessionId(),
                 s.status().name(),
                 java.time.LocalDateTime.ofInstant(s.updatedAt(), java.time.ZoneOffset.UTC),
+                s.cliRestarts(),
                 TenantSchema.company(),
                 s.id());
     }

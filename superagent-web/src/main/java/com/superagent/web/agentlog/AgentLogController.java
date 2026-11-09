@@ -33,4 +33,11 @@ public class AgentLogController {
         agents.require(id, auth.getName());
         return ApiResponse.ok(logs.list(id, category, limit));
     }
+
+    /** Its sessions, newest first: whether it keeps to one or keeps moving between them. */
+    @GetMapping(ApiPaths.AGENTS + "/{id}/sessions")
+    public ApiResponse<List<com.superagent.api.chat.AgentSessionDto>> sessions(@PathVariable String id, Authentication auth) {
+        agents.require(id, auth.getName());
+        return ApiResponse.ok(agents.sessions(id));
+    }
 }
