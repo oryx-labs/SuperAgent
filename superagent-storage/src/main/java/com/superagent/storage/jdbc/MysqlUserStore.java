@@ -23,8 +23,9 @@ public class MysqlUserStore extends AbstractJdbcUserStore {
               source        VARCHAR(16)  NOT NULL,
               created_at    DATETIME(3)  NOT NULL,
               updated_at    DATETIME(3)  NOT NULL,
+              must_change_password TINYINT(1) NOT NULL DEFAULT 0,
               PRIMARY KEY (company_id, id),
-              UNIQUE KEY uq_user_username (username),
+              UNIQUE KEY uq_user_username (company_id, username),
               KEY idx_user_phone (company_id, phone),
               KEY idx_user_external (company_id, external_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -39,15 +40,15 @@ public class MysqlUserStore extends AbstractJdbcUserStore {
         return "";
     }
 
-    // Not ON DUPLICATE KEY UPDATE: username is unique across companies, so a clash there would update
-    // another company's row. Update by (company, id), else insert (a taken username then fails).
+    // Update by (company, id), else insert: a username taken in the company then fails on the unique key instead of
+    // overwriting that other user.
     @Override
     public User save(User u) {
         int updated = jdbc.update("UPDATE app_user SET username = ?, display_name = ?, roles = ?, enabled = ?, "
-                        + "password_hash = ?, phone = ?, external_id = ?, source = ?, updated_at = ? "
+                        + "password_hash = ?, phone = ?, external_id = ?, source = ?, updated_at = ?, must_change_password = ? "
                         + "WHERE company_id = ? AND id = ?",
                 u.username(), nn(u.displayName()), String.join(",", u.roles()), u.enabled(), nn(u.passwordHash()),
-                nn(u.phone()), nn(u.externalId()), u.source().name(), utc(u.updatedAt()), TenantSchema.company(), u.id());
+                nn(u.phone()), nn(u.externalId()), u.source().name(), utc(u.updatedAt()), u.mustChangePassword(), TenantSchema.company(), u.id());
         if (updated == 0) {
             insert(u);
         }

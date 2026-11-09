@@ -31,8 +31,8 @@ public class OrgService {
         Map<String, String> managers = store.managers();
         Map<String, List<String>> memberships = store.memberships();
         List<OrgDto.Member> members = users.listUsers().stream()
-                .map(u -> new OrgDto.Member(u.username(), managers.get(u.username()),
-                        memberships.getOrDefault(u.username(), List.of())))
+                .map(u -> new OrgDto.Member(u.id(), managers.get(u.id()),
+                        memberships.getOrDefault(u.id(), List.of())))
                 .toList();
         return new OrgDto(members, allTeams(memberships));
     }

@@ -264,7 +264,13 @@ async function loadTaskUsage(taskId) {
   info.textContent = " ⓘ";
   info.title = L("us.note") + (t.costPartial ? "\n" + L("us.partial") : "");
   sum.appendChild(info);
-  box.append(sum, usTable(L("us.byModel"), u.byModel));
+  box.appendChild(sum);
+  // A complex task: what it cost itself (planning, summing up) and what each subtask cost.
+  if ((u.byTask || []).length) {
+    box.appendChild(usTable(L("us.bySubtask"), u.byTask.map(x => Object.assign({}, x,
+      { label: x.key === taskId ? L("us.mainTask") : x.label }))));
+  }
+  box.appendChild(usTable(L("us.byModel"), u.byModel));
   // Every run, oldest first: when, what for, which model, its tokens and cost.
   box.appendChild(usTable(L("us.runsTitle"), u.rows, {
     textCols: 2,

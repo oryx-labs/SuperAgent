@@ -24,7 +24,7 @@ import java.util.Optional;
 
 /**
  * What a signed-in user changes about their own account: their avatar and their password. Avatars are small
- * images on disk under the company's directory, one per username (file named by its hash, so any username is a safe file name); their
+ * images on disk under the company's directory, one per user (file named by a hash of the user id); their
  * modification time is the version clients use to refresh a cached picture.
  */
 @Service
@@ -35,30 +35,27 @@ public class AccountService {
 
     private final UserStore users;
     private final PasswordEncoder encoder;
-    private final String adminUsername;
     private final Path avatars;
 
     public AccountService(UserStore users, PasswordEncoder encoder,
-                          @Value("${superagent.auth.admin.username:admin}") String adminUsername,
                           @Value("${superagent.avatars.dir:./data/avatars}") String avatarsDir) {
         this.users = users;
         this.encoder = encoder;
-        this.adminUsername = adminUsername;
         this.avatars = Path.of(avatarsDir).toAbsolutePath().normalize();
     }
 
-    /** Only username/password accounts have a password to change; the built-in admin's comes from configuration. */
-    public boolean canChangePassword(String username) {
-        return !adminUsername.equals(username)
-                && users.findByUsername(username).map(u -> u.passwordHash() != null && !u.passwordHash().isBlank())
-                .orElse(false);
+    /** Only username/password accounts have a password to change. */
+    public boolean canChangePassword(String userId) {
+        return users.findById(userId).map(u -> u.passwordHash() != null && !u.passwordHash().isBlank()).orElse(false);
     }
 
-    public void changePassword(String username, String current, String next) {
-        if (adminUsername.equals(username)) {
-            throw new IllegalArgumentException("内置管理员的密码在配置文件中设置，不能在这里修改");
-        }
-        User user = users.findByUsername(username).orElseThrow(() -> new UserNotFoundException(username));
+    /** Signed in with a password someone else set (generated, or the built-in default): it must be changed first. */
+    public boolean mustChangePassword(String userId) {
+        return users.findById(userId).map(User::mustChangePassword).orElse(false);
+    }
+
+    public void changePassword(String userId, String current, String next) {
+        User user = users.findById(userId).orElseThrow(() -> new UserNotFoundException(userId));
         if (user.passwordHash() == null || user.passwordHash().isBlank()) {
             throw new IllegalArgumentException("这个账号不用密码登录");
         }
@@ -75,7 +72,7 @@ public class AccountService {
     }
 
     /** Replaces the user's avatar (PNG, JPEG, GIF or WebP, sniffed from the bytes); returns its new version. */
-    public long setAvatar(String username, String base64) {
+    public long setAvatar(String userId, String base64) {
         byte[] bytes;
         try {
             bytes = Base64.getDecoder().decode(base64 == null ? "" : base64);
@@ -88,7 +85,7 @@ public class AccountService {
         if (ImageAttachmentStore.sniff(bytes) == null) {
             throw new IllegalArgumentException("头像只支持 PNG、JPEG、GIF、WebP 图片");
         }
-        Path file = avatarFile(username);
+        Path file = avatarFile(userId);
         try {
             Files.createDirectories(file.getParent());
             Path tmp = Files.createTempFile(file.getParent(), "avatar-", ".tmp");
@@ -100,17 +97,17 @@ public class AccountService {
         }
     }
 
-    public void removeAvatar(String username) {
+    public void removeAvatar(String userId) {
         try {
-            Files.deleteIfExists(avatarFile(username));
+            Files.deleteIfExists(avatarFile(userId));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
     /** The user's avatar version, or null when they have none. */
-    public Long avatarVersion(String username) {
-        Path file = avatarFile(username);
+    public Long avatarVersion(String userId) {
+        Path file = avatarFile(userId);
         try {
             return Files.isRegularFile(file) ? Files.getLastModifiedTime(file).toMillis() : null;
         } catch (IOException e) {
@@ -121,21 +118,17 @@ public class AccountService {
     /** Everyone who has an avatar → its version, so a page can show any user's picture without asking per user. */
     public Map<String, Long> avatarVersions() {
         Map<String, Long> out = new LinkedHashMap<>();
-        Long admin = avatarVersion(adminUsername);
-        if (admin != null) {
-            out.put(adminUsername, admin);
-        }
         users.listUsers().forEach(u -> {
-            Long v = avatarVersion(u.username());
+            Long v = avatarVersion(u.id());
             if (v != null) {
-                out.put(u.username(), v);
+                out.put(u.id(), v);
             }
         });
         return out;
     }
 
-    public Optional<ImageAttachmentStore.StoredImage> avatar(String username) {
-        Path file = avatarFile(username);
+    public Optional<ImageAttachmentStore.StoredImage> avatar(String userId) {
+        Path file = avatarFile(userId);
         if (!Files.isRegularFile(file)) {
             return Optional.empty();
         }
@@ -148,9 +141,9 @@ public class AccountService {
         }
     }
 
-    private Path avatarFile(String username) {
+    private Path avatarFile(String userId) {
         try {
-            byte[] hash = MessageDigest.getInstance("SHA-256").digest((username == null ? "" : username)
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest((userId == null ? "" : userId)
                     .getBytes(StandardCharsets.UTF_8));
             return TenantPaths.of(avatars).resolve(HexFormat.of().formatHex(hash));
         } catch (NoSuchAlgorithmException e) {

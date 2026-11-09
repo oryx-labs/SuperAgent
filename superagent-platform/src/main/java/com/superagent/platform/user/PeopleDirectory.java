@@ -12,44 +12,37 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * Everyone who can sign in, for looking people up (inviting them to an agent, showing their name): the provisioned
- * users plus the built-in administrator, who lives in configuration rather than the user table.
- */
+/** Everyone in the company who can sign in, for looking people up (inviting them to an agent, showing their name). */
 @Service
 public class PeopleDirectory {
 
     private final UserStore users;
-    private final String adminUsername;
 
-    public PeopleDirectory(UserStore users, @Value("${superagent.auth.admin.username:admin}") String adminUsername) {
+    public PeopleDirectory(UserStore users) {
         this.users = users;
-        this.adminUsername = adminUsername;
     }
 
-    /** Enabled people, the built-in administrator included. */
     public List<User> enabled() {
-        List<User> out = new ArrayList<>();
-        builtInAdmin().ifPresent(out::add);
-        users.listUsers().stream().filter(User::enabled).forEach(out::add);
-        return out;
+        return users.listUsers().stream().filter(User::enabled).toList();
     }
 
-    public Optional<User> find(String username) {
-        if (username == null) {
-            return Optional.empty();
-        }
-        Optional<User> stored = users.findByUsername(username);
-        return stored.isPresent() ? stored : builtInAdmin().filter(u -> u.username().equals(username));
+    /** By user id, which is what everything records about a person. */
+    public Optional<User> find(String userId) {
+        return userId == null ? Optional.empty() : users.findById(userId);
     }
 
-    /** The configured administrator, unless the user table has a row of the same name (which then wins). */
-    private Optional<User> builtInAdmin() {
-        if (adminUsername == null || adminUsername.isBlank() || users.findByUsername(adminUsername).isPresent()) {
+    /** A person named either way: by user id (from a page) or by username (typed, or said to an agent). */
+    public Optional<User> resolve(String idOrUsername) {
+        if (idOrUsername == null || idOrUsername.isBlank()) {
             return Optional.empty();
         }
-        Instant epoch = Instant.EPOCH;
-        return Optional.of(new User("config:" + adminUsername, adminUsername, null, Set.of("ADMIN"), true, null, null,
-                null, UserSource.LOCAL, epoch, epoch));
+        String key = idOrUsername.strip();
+        Optional<User> byId = users.findById(key);
+        return byId.isPresent() ? byId : users.findByUsername(key);
+    }
+
+    /** By the name someone typed (when inviting by username). */
+    public Optional<User> findByUsername(String username) {
+        return username == null ? Optional.empty() : users.findByUsername(username.strip());
     }
 }

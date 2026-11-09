@@ -126,9 +126,10 @@ public class InboxService implements SmartLifecycle {
         return out;
     }
 
-    private List<String> names(String username) {
-        String display = users.findByUsername(username).map(User::displayName).orElse(null);
-        return Stream.of(username, display).filter(n -> n != null && !n.isBlank())
+    /** What a message might call this person: their username and display name. */
+    private List<String> names(String userId) {
+        User u = users.findById(userId).orElse(null);
+        return Stream.of(u == null ? null : u.username(), u == null ? null : u.displayName()).filter(n -> n != null && !n.isBlank())
                 .map(n -> n.strip().toLowerCase(Locale.ROOT)).distinct().toList();
     }
 

@@ -321,7 +321,7 @@ public class DingTalkConnector implements SmartLifecycle {
             if (!u.enabled() || mobile == null || !live(conn)) {
                 continue;
             }
-            EventSource cur = links.find(u.username(), EventSource.DINGTALK).orElse(null);
+            EventSource cur = links.find(u.id(), EventSource.DINGTALK).orElse(null);
             if (cur != null && cur.linkedTo(conn.clientId)) {
                 continue; // already linked under this app (maybe by a bind code)
             }
@@ -329,7 +329,7 @@ public class DingTalkConnector implements SmartLifecycle {
                 JsonNode r = post(oapi + "/topapi/v2/user/getbymobile?access_token=" + conn.token(), null,
                         JSON.createObjectNode().put("mobile", mobile));
                 String userId = r.path("result").path("userid").asText("");
-                if (!userId.isEmpty() && link(conn, u.username(), userId, false)) {
+                if (!userId.isEmpty() && link(conn, u.id(), userId, false)) {
                     linked++;
                 }
             } catch (InterruptedException e) {

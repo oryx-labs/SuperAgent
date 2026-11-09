@@ -29,9 +29,26 @@ public class SettingsService {
         this.providerService = providerService;
     }
 
+    private com.superagent.core.tenant.CompanyStore companies; // null in tests: no fallback name
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setCompanies(com.superagent.core.tenant.CompanyStore companies) {
+        this.companies = companies;
+    }
+
+    /** The company's name: as an admin set it here, else the name it was registered with. */
+    private String companyName(Map<String, String> all) {
+        String set = trimToNull(all.get(COMPANY_NAME));
+        if (set != null || companies == null) {
+            return set;
+        }
+        return companies.find(com.superagent.core.tenant.TenantContext.require())
+                .map(com.superagent.core.tenant.Company::name).map(SettingsService::trimToNull).orElse(null);
+    }
+
     public SystemSettingsDto get() {
         Map<String, String> all = store.all();
-        return new SystemSettingsDto(trimToNull(all.get(AGENT_DEFAULT_MODEL)), trimToNull(all.get(COMPANY_NAME)),
+        return new SystemSettingsDto(trimToNull(all.get(AGENT_DEFAULT_MODEL)), companyName(all),
                 trimToNull(all.get(COMPANY_SHORT_NAME)), trimToNull(all.get(PUBLIC_URL)), backupModels(all),
                 number(all, COMPLEX_MAX_SUBTASKS, DEFAULT_MAX_SUBTASKS), number(all, COMPLEX_MAX_PARALLEL, DEFAULT_MAX_PARALLEL));
     }

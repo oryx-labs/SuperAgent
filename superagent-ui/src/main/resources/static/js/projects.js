@@ -246,7 +246,7 @@ function projectAgentRow(a) {
     () => openAgentFromProject(a));
 }
 
-const agentOwnerName = a => ((a.members || []).find(m => m.username === a.owner) || {}).displayName || a.owner || "";
+const agentOwnerName = a => ((a.members || []).find(m => m.username === a.owner) || {}).displayName || personName(a.owner);
 
 async function openAgentFromProject(a) {
   setView("chat");
@@ -256,7 +256,7 @@ async function openAgentFromProject(a) {
 }
 
 function projectTaskRow(t) {
-  return projRow(t.title, [t.agentName, t.createdBy].filter(Boolean).join(" · "),
+  return projRow(t.title, [t.agentName, personName(t.createdBy)].filter(Boolean).join(" · "),
     [statusBadge(t.status)], [], () => { setView("tasks"); openTask(t.id); });
 }
 
@@ -268,7 +268,7 @@ function projectFileRow(f) {
 function projectMemberRow(m) {
   const actions = projOpen.mine && !m.owner && projOpen.status !== "archived"
     ? [[L("proj.removeMember"), () => removeProjectMember(m.username), "link-btn--danger"]] : [];
-  return projRow(m.displayName, m.username, m.owner ? L("proj.ownerTag") : "", actions);
+  return projRow(m.displayName, "", m.owner ? L("proj.ownerTag") : "", actions); // m.username is the user id
 }
 
 async function moveAgent(agentId, projectId) {
@@ -358,7 +358,7 @@ async function pickMembersForProject() {
   try { people = (await api.directory()) || []; } catch (e) { showToast(e.message, true); return; }
   const already = new Set((projOpen.members || []).map(m => m.username));
   openProjectPick(L("proj.addMemberTitle", { name: projOpen.name }), L("proj.addMemberHint"),
-    people.filter(p => !already.has(p.username)).map(p => ({ id: p.username, label: p.displayName, sub: p.username })),
+    people.filter(p => !already.has(p.id)).map(p => ({ id: p.id, label: p.displayName, sub: p.username })), // members carry user ids
     L("co.noOneElse"), ids => api.addProjectMembers(projOpen.id, ids));
 }
 

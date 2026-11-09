@@ -72,7 +72,7 @@ async function loadSkills() {
 async function loadSkillPeople() {
   try {
     const people = (await fetch("/api/v1/directory/users").then(kbJson)) || [];
-    skPeople = Object.fromEntries(people.map(p => [p.username, p.displayName || p.username]));
+    skPeople = Object.fromEntries(people.map(p => [p.id, p.displayName || p.username])); // createdBy is a user id
   } catch (e) { /* names fall back to usernames */ }
 }
 
@@ -90,7 +90,7 @@ function renderSkillGrid() {
     && (!source || skLayerOf(s) === source)
     && (!owner || s.createdBy === owner)
     && (!state || (state === "on") === s.enabled)
-    && (!skMineOnly || s.createdBy === currentUsername))
+    && (!skMineOnly || s.createdBy === currentUserId))
     // Most recently updated first: what people are working on now.
     .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
   skel.mine.classList.toggle("is-active", skMineOnly);

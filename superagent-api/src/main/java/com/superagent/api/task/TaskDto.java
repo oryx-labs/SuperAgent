@@ -49,5 +49,7 @@ public record TaskDto(
         String agentName,
         /** A complex task's subtasks: how many, and how many have finished (done, failed for good or stopped). */
         int subtasks,
-        int subtasksFinished) {
+        int subtasksFinished,
+        /** What it cost with its subtasks' spend added in (equal to {@code spend} for any other task). */
+        BigDecimal totalSpend) {
 }

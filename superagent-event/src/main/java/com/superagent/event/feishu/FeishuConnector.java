@@ -255,7 +255,7 @@ public class FeishuConnector implements SmartLifecycle {
             for (JsonNode hit : found.path("user_list")) {
                 User u = byMobile.get(mobile(hit.path("mobile").asText(null)));
                 String openId = hit.path("user_id").asText("");
-                if (u != null && !openId.isEmpty() && link(conn, u.username(), openId, false)) {
+                if (u != null && !openId.isEmpty() && link(conn, u.id(), openId, false)) {
                     linked++;
                 }
             }

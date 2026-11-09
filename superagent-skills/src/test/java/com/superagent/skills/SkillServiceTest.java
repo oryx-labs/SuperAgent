@@ -64,13 +64,12 @@ class SkillServiceTest {
     /** Everyone exists; only "root" is an administrator. */
     private static final class Users implements UserStore {
         @Override public List<User> listUsers() { return List.of(); }
-        @Override public Optional<User> findById(String id) { return Optional.empty(); }
+        @Override public Optional<User> findById(String id) { return findByUsername(id); }
         @Override public Optional<User> findByUsername(String name) {
             Instant now = Instant.now();
             return Optional.of(new User(name, name, name, "root".equals(name) ? Set.of("ADMIN") : Set.of("USER"), true,
                     null, null, null, UserSource.LOCAL, now, now));
         }
-        @Override public Optional<String> companyOfUsername(String name) { return Optional.empty(); }
         @Override public Optional<User> findByPhone(String phone) { return Optional.empty(); }
         @Override public Optional<User> findByExternalId(String id) { return Optional.empty(); }
         @Override public User save(User u) { return u; }
@@ -78,7 +77,7 @@ class SkillServiceTest {
     }
 
     private SkillService service(InMemorySkills store, InMemorySettings settings, Path dir) {
-        SkillService svc = new SkillService(store, settings, new Users(), dir.toString(), "admin");
+        SkillService svc = new SkillService(store, settings, new Users(), dir.toString());
         svc.seedOnce(); // what each company's start does
         return svc;
     }
@@ -105,7 +104,7 @@ class SkillServiceTest {
         // Someone who couldn't delete it can't even get a card for it; the built-in administrator (from the
         // configuration, not the user table) can, like any administrator.
         assertThatThrownBy(() -> deletions.propose(company, "ada", "a1", "s1", "m1")).isInstanceOf(SkillForbiddenException.class);
-        assertThat(svc.get(company, "admin").canWrite()).isTrue();
+        assertThat(svc.get(company, "root").canWrite()).isTrue();
 
         var proposed = deletions.propose(mine, "ada", "a1", "s1", "m1");
         assertThat(svc.list("ada")).anyMatch(x -> x.id().equals(mine)); // nothing deleted yet

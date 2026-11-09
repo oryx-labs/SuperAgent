@@ -34,7 +34,6 @@ superagent-<version>/
 首次启动前在 `config/superagent.env` 里设置(文件权限保持 `600`):
 
 ```bash
-SUPERAGENT_ADMIN_PASSWORD=<一个强密码>
 SUPERAGENT_STORAGE_MYSQL_URL=jdbc:mysql://127.0.0.1:3306/superagent
 SUPERAGENT_STORAGE_MYSQL_USERNAME=superagent
 SUPERAGENT_STORAGE_MYSQL_PASSWORD=<密码>
@@ -50,7 +49,7 @@ bin/superagent-stop.sh           # 停止
 
 ## 完成设置(管理员)
 
-打开 `http://<host>:18080`,用管理员账号登录。其余设置都在页面上完成,不用改文件:
+打开 `http://<host>:18080`,在登录页点「注册一个组织」,会得到这个组织的管理员账号(密码只显示一次,首次登录时改成你自己的)。第一个注册的组织拥有这台服务器(负责安装 Agent 命令行工具);之后注册的组织各自独立。其余设置都在页面上完成,不用改文件:
 
 1. **模型**:安装需要的 CLI,添加公司的 API Key。每个 Key 都会用真实请求检查,失败时会说明原因。
 2. **系统设置 → 基本设置**:公司名称、Logo、默认模型;如果大家通过代理或域名访问,填写对外地址。

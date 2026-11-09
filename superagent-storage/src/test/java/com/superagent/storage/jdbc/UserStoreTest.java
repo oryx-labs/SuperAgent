@@ -37,16 +37,13 @@ class UserStoreTest {
             assertThat(store.findByPhone("138")).isEmpty();
             store.delete("u1");
             store.save(user("u1", "bob", "Bob")); // same id, other company: a separate row
+            store.save(user("u3", "ada", "Another Ada")); // usernames are only unique within a company
             assertThatThrownBy(() -> store.save(user("u2", "ada", "Impostor"))).isInstanceOf(DuplicateKeyException.class);
         });
         assertThat(store.listUsers()).singleElement().satisfies(u -> {
             assertThat(u.username()).isEqualTo("ada");
             assertThat(u.displayName()).isEqualTo("Ada L.");
         });
-
-        TenantContext.clear(); // login runs before any company is known
-        assertThat(store.companyOfUsername("ada")).contains(InCompany.ID);
-        assertThat(store.companyOfUsername("bob")).contains(InCompany.OTHER);
-        assertThat(store.companyOfUsername("nobody")).isEmpty();
+        assertThat(store.findByUsername("ada")).hasValueSatisfying(u -> assertThat(u.id()).isEqualTo("u1"));
     }
 }

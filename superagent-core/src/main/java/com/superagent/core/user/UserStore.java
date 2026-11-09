@@ -12,12 +12,6 @@ public interface UserStore {
 
     Optional<User> findByUsername(String username);
 
-    /**
-     * The company {@code username} belongs to. The only lookup not scoped to the current company: usernames are
-     * globally unique, and login uses this to find which company a username is in, so it needs no tenant context.
-     */
-    Optional<String> companyOfUsername(String username);
-
     Optional<User> findByPhone(String phone);
 
     Optional<User> findByExternalId(String externalId);

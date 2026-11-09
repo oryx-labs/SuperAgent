@@ -93,7 +93,7 @@ class SuperAgentCollabTools implements McpToolProvider {
                     List<String> names = new ArrayList<>();
                     args.path("usernames").forEach(n -> names.add(n.asText("")));
                     AgentInvite invite = invites.propose(agent.id(), user, names, grant.sessionId(), grant.messageId());
-                    yield "已在聊天里生成邀请确认卡片：邀请 " + String.join("、", invite.usernames()) + " 加入「" + agent.name()
+                    yield "已在聊天里生成邀请确认卡片：邀请 " + String.join("、", invite.usernames().stream().map(agents::displayName).toList()) + " 加入「" + agent.name()
                             + "」。用户在卡片上点「确认邀请」后才会生效，请这样告诉用户。";
                 }
                 case "collab_remove" -> {

@@ -17,7 +17,8 @@ Object.assign(api, {
 });
 
 
-let currentUsername = null;
+/** Who is signed in: their user id, which owners, members and authors record (not their username). */
+let currentUserId = null;
 let currentMe = null;
 
 async function initAuth() {
@@ -25,10 +26,12 @@ async function initAuth() {
   try { res = await api.me(); } catch (e) { window.location.href = "/login"; return false; }
   if (res.status === 401) { window.location.href = "/login"; return false; }
   const me = (await res.json()).data;
-  currentUsername = me.username;
+  currentUserId = me.id;
   currentMe = me;
   renderAccount();
+  if (me.mustChangePassword) { openAccount(true); return false; } // nothing else works until they do: don't boot the app
   loadAvatarVersions(); // other people's pictures, for member lists
+  loadPeopleNames();
   // Admin-only sections: hide for non-admins.
   const showAdmin = !!me.admin;
   isAdmin = showAdmin;
@@ -43,7 +46,7 @@ function renderAccount() {
   if (!me) return;
   const shown = me.displayName || me.username || "";
   document.getElementById("currentUser").textContent = shown;
-  paintAvatar(document.getElementById("userAvatar"), me.username, shown, me.avatarVersion);
+  paintAvatar(document.getElementById("userAvatar"), me.id, shown, me.avatarVersion);
   const short = me.companyShortName || "";
   const shortEl = document.getElementById("currentCompanyShort");
   shortEl.textContent = short;
@@ -79,12 +82,24 @@ Object.assign(api, {
   }).then(r => r.json()),
 });
 
+// ---- people: owners, creators and members are recorded as user ids; show them by name ----
+let peopleNames = {}; // user id → display name
+async function loadPeopleNames() {
+  try {
+    const res = await fetch("/api/v1/directory/users").then(r => r.json());
+    peopleNames = Object.fromEntries(((res && res.data) || []).map(p => [p.id, p.displayName || p.username]));
+  } catch (e) { /* ids show until names arrive */ }
+}
+/** A person's name from their user id (the id itself if they're unknown, e.g. removed). */
+const personName = id => !id ? "" : id === currentUserId && currentMe ? (currentMe.displayName || currentMe.username)
+  : peopleNames[id] || id;
+
 async function loadAvatarVersions() {
   try { const res = await api.avatarVersions(); avatarVersions = (res && res.data) || {}; } catch (e) { return; }
   if (typeof activeAgent !== "undefined" && activeAgent) renderMembers(activeAgent); // drawn before they arrived
 }
 
-/** Puts {@code username}'s picture into {@code box}, or their initial when they have none. */
+/** Puts the picture of the user with id {@code username} into {@code box}, or their initial when they have none. */
 function paintAvatar(box, username, label, version) {
   const v = version !== undefined ? version : avatarVersions[username];
   box.replaceChildren();
@@ -114,12 +129,15 @@ const acel = {
   error: document.getElementById("acError"),
 };
 
-function openAccount() {
+/** {@code forced}: a password someone else set, to be replaced before anything else (no way to close it). */
+function openAccount(forced) {
   const me = currentMe;
+  acel.modal.classList.toggle("is-forced", !!forced);
+  document.getElementById("acForced").hidden = !forced;
   renderAccountAvatar();
   acel.fields.hidden = !me.canChangePassword;
   acel.none.hidden = me.canChangePassword;
-  acel.none.textContent = L(me.username && me.admin && !me.canChangePassword ? "account.passwordConfig" : "account.passwordNone");
+  acel.none.textContent = L("account.passwordNone");
   [acel.current, acel.next, acel.confirm].forEach(i => { i.value = ""; });
   acel.error.hidden = true;
   acel.modal.hidden = false;
@@ -127,13 +145,13 @@ function openAccount() {
 
 function renderAccountAvatar() {
   const me = currentMe;
-  paintAvatar(acel.avatar, me.username, me.displayName || me.username, me.avatarVersion);
+  paintAvatar(acel.avatar, me.id, me.displayName || me.username, me.avatarVersion);
   acel.remove.hidden = !me.avatarVersion;
 }
 
 function avatarChanged(version) {
   currentMe.avatarVersion = version || null;
-  if (version) avatarVersions[currentMe.username] = version; else delete avatarVersions[currentMe.username];
+  if (version) avatarVersions[currentMe.id] = version; else delete avatarVersions[currentMe.id];
   renderAccount();
   renderAccountAvatar();
   if (activeAgent) renderMembers(activeAgent);
@@ -163,7 +181,9 @@ document.getElementById("accountBtn").addEventListener("click", () => {
   document.activeElement.blur(); // the menu stays open while it holds focus
   openAccount();
 });
-acel.modal.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", () => { acel.modal.hidden = true; }));
+acel.modal.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", () => {
+  if (!acel.modal.classList.contains("is-forced")) acel.modal.hidden = true;
+}));
 acel.input.addEventListener("change", async () => {
   const file = acel.input.files && acel.input.files[0];
   acel.input.value = "";
@@ -189,6 +209,7 @@ acel.form.addEventListener("submit", async e => {
   const res = await api.changePassword(acel.current.value, acel.next.value).catch(() => null);
   if (!res || res.code !== "ok") return fail((res && res.message) || L("account.passwordFailed"));
   [acel.current, acel.next, acel.confirm].forEach(i => { i.value = ""; });
+  if (acel.modal.classList.contains("is-forced")) { window.location.reload(); return; } // now the app opens
   showToast(L("account.passwordSaved"), false);
 });
 
@@ -346,8 +367,8 @@ function renderOrg() {
   const shown = orgTeam ? members(orgTeam) : loose;
   uel.orgTitle.textContent = orgTeam || L("org.noTeam");
   uel.orgMembers.replaceChildren(...shown.map(m => {
-    const u = allUsers.find(x => x.username === m.username) || { username: m.username };
-    const boss = m.manager && allUsers.find(x => x.username === m.manager);
+    const u = allUsers.find(x => x.id === m.username) || { username: m.username }; // org entries carry user ids
+    const boss = m.manager && allUsers.find(x => x.id === m.manager);
     const li = document.createElement("li");
     const initial = document.createElement("span");
     initial.className = "member-initial";

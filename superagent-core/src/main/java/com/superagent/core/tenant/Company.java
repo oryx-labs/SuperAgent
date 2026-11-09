@@ -18,8 +18,11 @@ public record Company(
         Instant createdAt,
         Instant updatedAt) {
 
-    /** The company a single-company install (and every install, until companies can be created) runs as. */
-    public static final String DEFAULT_ID = "default";
+    /**
+     * Not a real organization: the company context for platform-level checks that touch no company's data (the MCP
+     * self-check) and for pages shown before sign-in. A company's id is its organization's English name.
+     */
+    public static final String DEFAULT_ID = "superagent";
 
     /** A company on the configured default limits. */
     public Company(String id, String name, boolean enabled, String dataKeyCipher, Instant createdAt, Instant updatedAt) {

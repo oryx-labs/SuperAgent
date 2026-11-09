@@ -117,13 +117,12 @@ superagent-<version>/
 
 ### Configure
 
-- `config/superagent.env`: secrets and deployment values, sourced by the start script. It includes the admin password, MySQL connection, `SERVER_PORT` and `JAVA_OPTS`. Outside systems (the GitHub OAuth app, the Feishu app) are set up by an administrator under **Admin → System Settings → Integrations**, not in this file. Every entry ships commented out. Keep the file at mode `600`.
+- `config/superagent.env`: secrets and deployment values, sourced by the start script. It includes the MySQL connection, `SERVER_PORT` and `JAVA_OPTS`. Outside systems (the GitHub OAuth app, the Feishu app) are set up by an administrator under **Admin → System Settings → Integrations**, not in this file. Every entry ships commented out. Keep the file at mode `600`.
 - `config/application.yml`: overrides the defaults built into the jar. Changes take effect on restart, with no repackaging.
 
 At minimum, set these before the first start:
 
 ```bash
-SUPERAGENT_ADMIN_PASSWORD=<a strong password>
 SUPERAGENT_STORAGE_MYSQL_URL=jdbc:mysql://127.0.0.1:3306/superagent
 SUPERAGENT_STORAGE_MYSQL_USERNAME=superagent
 SUPERAGENT_STORAGE_MYSQL_PASSWORD=<password>
@@ -144,7 +143,7 @@ bin/superagent-stop.sh           # stop
 - **force:** stops the running process with SIGTERM. The server shuts down gracefully; if it is still running after 35 seconds (`STOP_TIMEOUT`), it is killed. The server then starts again.
 - **Working directory:** the scripts can be run from any directory. Relative paths in the config, such as `./data`, resolve against the install directory.
 
-Once started, open `http://<host>:18080` and sign in as the admin user.
+Once started, open `http://<host>:18080` and choose **Register an organization**: you get its admin account (the password is shown once, and you set your own at first sign-in). The organization named by `SUPERAGENT_HOST_ORG` (set it in `config/superagent.env` on any server others can reach) owns the host: it installs the agent CLIs and may use the machine's own keys. Unset, the first organization registered owns it. Every later organization is independent, with its own data, models and keys.
 
 ### Development
 

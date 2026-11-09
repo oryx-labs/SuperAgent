@@ -159,7 +159,7 @@ function autoMatches(a, filter) {
 function renderAutomations() {
   const mine = ael2.owner.value === "mine";
   const q = ael2.search.value.trim().toLowerCase();
-  const scoped = automations.filter(a => !mine || a.owner === currentUsername);
+  const scoped = automations.filter(a => !mine || a.owner === currentUserId);
   ael2.type.value = autoFilter;
   // API triggers aren't offered yet; the choice shows only for ones that already exist.
   document.getElementById("autoTypeApi").hidden = !scoped.some(a => a.type === "api");
@@ -168,7 +168,7 @@ function renderAutomations() {
   ael2.empty.hidden = shown.length > 0;
 }
 
-const canEditAuto = a => isAdmin || a.owner === currentUsername;
+const canEditAuto = a => isAdmin || a.owner === currentUserId;
 
 function autoRow(a) {
   const tr = document.createElement("tr");
@@ -202,7 +202,7 @@ function autoRow(a) {
   const tdNext = document.createElement("td");
   tdNext.textContent = a.nextRunAt ? formatDateTime(a.nextRunAt) : "—";
   const tdOwner = document.createElement("td");
-  tdOwner.textContent = a.owner || "—";
+  tdOwner.textContent = personName(a.owner) || "—";
 
   const tdOn = document.createElement("td");
   tdOn.appendChild(enabledSwitch(a));
@@ -284,7 +284,7 @@ async function openAutomation(id, freshToken) {
   ael2.listView.hidden = true;
   ael2.detailView.hidden = false;
   ael2.dTitle.textContent = a.name;
-  ael2.dMeta.textContent = [L(a.source === "chat" ? "auto.sourceChat" : "auto.sourceManual"), a.owner,
+  ael2.dMeta.textContent = [L(a.source === "chat" ? "auto.sourceChat" : "auto.sourceManual"), personName(a.owner),
     L(a.enabled ? "auto.enabled" : "auto.paused")].filter(Boolean).join(" · ");
 
   ael2.dActions.replaceChildren();

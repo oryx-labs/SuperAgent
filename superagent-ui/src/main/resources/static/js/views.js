@@ -42,11 +42,17 @@ function initialView() {
   return view;
 }
 
+/** The page shown now, and the one shown before it (a task opened from a chat goes back to that chat). */
+let currentView = null;
+let enteredTasksFrom = null;
+
 function setView(view) {
   if (view === "messages") { // the message stream is a tab of the to-do page (old links still land on it)
     todoFilter = "messages";
     view = "todo";
   }
+  const from = currentView;
+  currentView = view;
   if (window.location.hash !== "#" + view) {
     history.replaceState(history.state, document.title, window.location.pathname + window.location.search + "#" + view);
   }
@@ -113,6 +119,8 @@ function setView(view) {
   if (isFiles) loadFiles();
   if (isAutomation) { showAutoList(); loadAutomations(); }
   if (isTasks) { showTaskList(); loadTasks(); } else { stopTaskPolling(); }
+  // Set after showTaskList (which forgets where the list was entered from): a task opened next can go back there.
+  enteredTasksFrom = isTasks && from && from !== "tasks" ? from : null;
   if (isModels) { showModelList(); startModelPolling(); } else { stopModelPolling(); }
   if (isModelPrices) mpLoad();
 }

@@ -142,7 +142,8 @@ async function attachTimings(agentId) {
 }
 
 // ---------- the task's "Time" tab ----------
-const TM_WAITS = { wait_start: "tm.waitStart", wait_user: "tm.waitUser", wait_queue: "tm.waitQueue", running: "tm.running" };
+const TM_WAITS = { wait_start: "tm.waitStart", wait_user: "tm.waitUser", wait_subtasks: "tm.waitSubtasks",
+  wait_queue: "tm.waitQueue", running: "tm.running" };
 
 async function loadTaskTiming(id) {
   const box = document.getElementById("taskTiming");
@@ -167,6 +168,7 @@ async function loadTaskTiming(id) {
   };
   head.append(stat(L(d.open ? "tm.soFar" : "tm.whole"), total), stat(L("tm.machine"), machine),
     stat(L("tm.waitStart"), sum("wait_start") + sum("wait_queue")), stat(L("tm.waitUser"), sum("wait_user")));
+  if (sum("wait_subtasks")) head.appendChild(stat(L("tm.waitSubtasks"), sum("wait_subtasks")));
 
   // All turns together: what the runs themselves spent their time on.
   const parts = { prepMs: 0, retryMs: 0, startupMs: 0, modelMs: 0, toolsMs: 0, outputMs: 0, saveMs: 0, totalMs: 0 };

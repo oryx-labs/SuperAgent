@@ -25,6 +25,22 @@ class SuperAgentDelegatesTest {
     }
 
     @Test
+    void theChatSetsUpAutomationsButItsBackgroundCannot() {
+        assertThat(SuperAgentService.CHAT_TOOLS).contains("mcp__superagent__create_automation", "mcp__superagent__list_automations");
+        assertThat(SuperAgentService.BACKGROUND_TOOLS).noneMatch(t -> t.contains("automation"));
+
+        var tools = new SuperAgentAutomationTools(new com.superagent.task.automation.AutomationMcpTools(
+                org.mockito.Mockito.mock(com.superagent.task.automation.AutomationService.class)));
+        // One get_current_time per run: the SuperAgent's own.
+        assertThat(tools.tools()).extracting(t -> t.path("name").asText()).contains("create_automation")
+                .doesNotContain("get_current_time");
+        var background = new McpGrants.Grant("t", McpGrants.Kind.SUPER, "ada", null, "sa", null, null, null);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> tools.call(background, "list_automations",
+                new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode()))
+                .isInstanceOf(com.superagent.runtime.mcp.McpToolException.class);
+    }
+
+    @Test
     void theChatPromptSaysToDelegate() {
         String prompt = SuperAgentPrompts.chat(6);
         // Simple things it does itself; anything that takes reading, producing or time goes out, with the user's example.

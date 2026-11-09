@@ -17,7 +17,7 @@ function renderMembers(agent) {
     initial.className = "member-initial";
     paintAvatar(initial, m.username, m.displayName);
     const name = document.createElement("span");
-    name.textContent = m.username === currentUsername ? m.displayName + "（" + L("co.me") + "）" : m.displayName;
+    name.textContent = m.username === currentUserId ? m.displayName + "（" + L("co.me") + "）" : m.displayName;
     const role = document.createElement("span");
     role.className = "member-role";
     role.textContent = L(m.role === "owner" ? "co.owner" : "co.collaborator");
@@ -96,7 +96,7 @@ document.getElementById("agentInviteBtn").addEventListener("click", async () => 
   let people = [];
   try { people = (await api.directory()) || []; } catch (e) { showToast(e.message, true); return; }
   const already = new Set((agent.members || []).map(m => m.username));
-  inviteCandidates = people.filter(p => !already.has(p.username));
+  inviteCandidates = people.filter(p => !already.has(p.id) && p.id !== currentUserId); // members carry user ids
   inviteChosen.clear();
   inv.title.textContent = L("co.inviteTitle", { name: agent.name });
   inv.search.value = "";
@@ -119,8 +119,8 @@ function renderInviteList() {
     const label = document.createElement("label");
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.checked = inviteChosen.has(p.username);
-    cb.addEventListener("change", () => { if (cb.checked) inviteChosen.add(p.username); else inviteChosen.delete(p.username); });
+    cb.checked = inviteChosen.has(p.id);
+    cb.addEventListener("change", () => { if (cb.checked) inviteChosen.add(p.id); else inviteChosen.delete(p.id); });
     const user = document.createElement("span");
     user.className = "invite-user";
     user.textContent = p.username;
@@ -145,7 +145,7 @@ document.getElementById("agentLeaveBtn").addEventListener("click", async () => {
   const agent = activeAgent;
   if (!agent || !window.confirm(L("co.leaveConfirm", { name: agent.name }))) return;
   try {
-    await api.removeMember(agent.id, currentUsername);
+    await api.removeMember(agent.id, currentUserId);
     activeAgentId = null;
     activeAgent = null;
     renderAgentPanel(null);
@@ -174,7 +174,7 @@ async function pollLive() {
 async function watchLiveTurn(agent, live) {
   const abort = new AbortController();
   liveWatch = { agent, abort };
-  const mine = live.by === currentUsername;
+  const mine = live.by === currentUserId;
   await selectSession(activeSessionId); // shows the message that started the turn
   if (activeAgent !== agent) { liveWatch = null; return; }
   const handles = addAssistantBubble();
@@ -246,7 +246,7 @@ function flattenHistory(segments) {
 
 function renderHistoryItem(m) {
   const msg = renderStoredMessage(m.role, m.content, m.role === "system" ? null : m.id, m.images, m.sessionId);
-  if (m.role === "user" && isShared(activeAgent) && m.authorName) addAuthor(msg, m.author === currentUsername ? L("co.me") : m.authorName);
+  if (m.role === "user" && isShared(activeAgent) && m.authorName) addAuthor(msg, m.author === currentUserId ? L("co.me") : m.authorName);
   if (m.role === "assistant" && m.author && m.author.startsWith("task:")) markTaskReport(msg, m.author.slice(5));
   return msg;
 }

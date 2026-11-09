@@ -347,7 +347,8 @@
           <table class="ttable">
             <thead>
               <tr>
-                <th data-i18n="tasks.colTask">Task</th><th data-i18n="tasks.colAgent">Agent / Model</th>
+                <th data-i18n="tasks.colTask">Task</th><th class="t-col-kind" data-i18n="tasks.colKind">Type</th>
+                <th class="t-col-subs" data-i18n="tasks.colSubtasks">Subtasks</th><th data-i18n="tasks.colAgent">Agent / Model</th>
                 <th data-i18n="tasks.colSource">Source</th>
                 <th data-i18n="tasks.colCreated">Created</th><th data-i18n="tasks.colSpend">Spend</th>
                 <th class="ttable__status-col" data-i18n="tasks.colStatus">Status</th><th></th>
@@ -404,6 +405,7 @@
               </section>
               <h3 class="task-section__title" data-i18n="tasks.runlog">Run log</h3>
               <div class="task-stream" id="taskStream"></div>
+              <p class="task-live" id="taskLive" hidden></p>
             </div>
             <div class="task-pane" data-pane-tab="output" hidden>
               <div class="task-output markdown" id="taskOutput"></div>
@@ -1166,6 +1168,7 @@
       </section>
       <form class="account-section" id="acPasswordForm">
         <h4 class="account-section__title" data-i18n="account.password">Password</h4>
+        <p class="account-forced" id="acForced" data-i18n="account.forced" hidden>You signed in with a password someone else set. Choose your own to continue.</p>
         <p class="field-hint" id="acPasswordNone" hidden></p>
         <div id="acPasswordFields">
           <label class="field"><span data-i18n="account.current">Current password</span>

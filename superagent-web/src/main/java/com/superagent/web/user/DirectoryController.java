@@ -27,7 +27,7 @@ public class DirectoryController {
     @GetMapping(ApiPaths.V1 + "/directory/users")
     public ApiResponse<List<DirectoryUserDto>> users() {
         return ApiResponse.ok(people.enabled().stream()
-                .map(u -> new DirectoryUserDto(u.username(),
+                .map(u -> new DirectoryUserDto(u.id(), u.username(),
                         u.displayName() == null || u.displayName().isBlank() ? u.username() : u.displayName()))
                 .sorted(Comparator.comparing(DirectoryUserDto::displayName, String.CASE_INSENSITIVE_ORDER))
                 .toList());

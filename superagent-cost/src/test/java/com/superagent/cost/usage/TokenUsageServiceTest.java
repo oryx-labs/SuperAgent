@@ -87,4 +87,27 @@ class TokenUsageServiceTest {
         assertThat(bob.agents()).singleElement().extracting(UsageDtos.Total::key).isEqualTo("dev");
         assertThat(bob.agentTotal().total()).isEqualTo(bob.total().total());
     }
+
+    @Test
+    void aComplexTasksCostIncludesItsSubtasks() {
+        List<com.superagent.core.task.TaskLink> links = List.of(
+                new com.superagent.core.task.TaskLink("sub1", "main", null, Instant.now()),
+                new com.superagent.core.task.TaskLink("sub2", "main", null, Instant.now()));
+        service.setLinks(new com.superagent.core.task.TaskLinkStore() {
+            @Override public void save(com.superagent.core.task.TaskLink link) { }
+            @Override public Optional<com.superagent.core.task.TaskLink> find(String id) { return Optional.empty(); }
+            @Override public List<com.superagent.core.task.TaskLink> all() { return links; }
+        });
+        for (String t : List.of("main", "sub1", "sub2")) {
+            service.record(new UsageContext("ada", UsageContext.SOURCE_TASK, null, t, null, "codex"),
+                    "[{\"model\":\"m\",\"input\":100,\"cacheRead\":0,\"cacheWrite\":0,\"cacheWrite1h\":0,\"output\":10,\"reasoning\":0}]");
+        }
+
+        UsageDtos.Task main = service.forTask("main");
+        assertThat(main.total().total()).isEqualTo(330);
+        assertThat(main.byTask()).extracting(UsageDtos.Total::key).containsExactlyInAnyOrder("main", "sub1", "sub2");
+        // On the usage page the subtasks show under their complex task, not as tasks of their own.
+        assertThat(service.summary("ada", Instant.EPOCH, Instant.now(), ZoneOffset.UTC).tasks())
+                .singleElement().satisfies(t -> assertThat(t.key()).isEqualTo("main"));
+    }
 }

@@ -5,6 +5,7 @@ import com.superagent.api.ApiResponse;
 import com.superagent.api.auth.MeDto;
 import com.superagent.api.settings.SystemSettingsDto;
 import com.superagent.core.org.OrgStore;
+import com.superagent.core.tenant.TenantContext;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
 import com.superagent.platform.settings.SettingsService;
@@ -42,12 +43,14 @@ public class AuthController {
                 .map(GrantedAuthority::getAuthority)
                 .map(a -> a.startsWith("ROLE_") ? a.substring(5) : a)
                 .toList();
-        String username = authentication.getName();
-        String displayName = users.findByUsername(username).map(User::displayName).orElse(username);
+        String id = authentication.getName();
+        User me = users.findById(id).orElse(null);
+        String username = me == null ? id : me.username();
+        String displayName = me == null || me.displayName() == null || me.displayName().isBlank() ? username : me.displayName();
         boolean admin = roles.contains("ADMIN");
         SystemSettingsDto company = settings.get();
-        return ApiResponse.ok(new MeDto(username, displayName == null ? username : displayName, roles, admin,
-                org.teams(username), company.companyName(), company.companyShortName(),
-                account.avatarVersion(username), account.canChangePassword(username)));
+        return ApiResponse.ok(new MeDto(id, username, displayName, roles, admin, org.teams(id), company.companyName(),
+                company.companyShortName(), account.avatarVersion(id), account.canChangePassword(id),
+                TenantContext.require(), me != null && me.mustChangePassword()));
     }
 }

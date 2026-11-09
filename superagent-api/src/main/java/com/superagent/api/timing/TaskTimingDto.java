@@ -14,6 +14,8 @@ public record TaskTimingDto(Instant createdAt, Instant endedAt, boolean open, Li
     public static final String WAIT_START = "wait_start";
     /** Waiting for the user's reply (to a confirmation or a question). */
     public static final String WAIT_USER = "wait_user";
+    /** A complex task between handing out its subtasks and summing up: waiting for them to finish. */
+    public static final String WAIT_SUBTASKS = "wait_subtasks";
     /** Between turns, waiting to run again (a free session, a requeue after moving to a stronger model). */
     public static final String WAIT_QUEUE = "wait_queue";
     /** A turn still running. */

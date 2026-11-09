@@ -17,6 +17,7 @@
         <img class="brand__logo" src="/api/v1/branding/logo" alt="Logo" />
       </div>
 
+      <div id="signInView">
       <div class="tabs" id="methodTabs">
         <button type="button" class="tab is-active" data-method="password" data-i18n="login.methodPassword">Username</button>
         <button type="button" class="tab" data-method="phone" data-i18n="login.methodPhone">Phone</button>
@@ -27,6 +28,11 @@
       <p class="auth-error" id="authError" hidden></p>
 
       <form class="form" id="passwordForm" data-panel="password">
+        <label class="field">
+          <span class="field__label" data-i18n="login.org">Organization</span>
+          <input class="field__input" type="text" id="pwOrg" autocomplete="organization" autocapitalize="off"
+                 spellcheck="false" data-i18n-ph="login.orgPh" required />
+        </label>
         <label class="field">
           <span class="field__label" data-i18n="login.username">Username</span>
           <input class="field__input" type="text" id="pwUsername" autocomplete="username"
@@ -66,9 +72,43 @@
       </div>
 
       <p class="card__foot">
-        <span data-i18n="login.noAccess">No access?</span>
-        <a class="link" href="#" data-i18n="login.contactAdmin">Contact your administrator</a>
+        <span data-i18n="login.noOrg">New here?</span>
+        <a class="link" href="#register" id="toRegister" data-i18n="login.registerLink">Register an organization</a>
       </p>
+      </div>
+
+      <!-- Registering an organization: its name and English name (both required), then its admin sign-in, shown once. -->
+      <div id="registerView" hidden>
+        <h2 class="reg__title" data-i18n="reg.title">Register an organization</h2>
+        <p class="reg__lead" data-i18n="reg.lead">You'll get its administrator account. Each organization's data, models and keys are its own.</p>
+        <p class="auth-error" id="regError" hidden></p>
+        <form class="form" id="registerForm">
+          <label class="field">
+            <span class="field__label" data-i18n="reg.name">Organization name</span>
+            <input class="field__input" type="text" id="regName" maxlength="64" data-i18n-ph="reg.namePh" required />
+          </label>
+          <label class="field">
+            <span class="field__label" data-i18n="reg.shortName">English name</span>
+            <input class="field__input" type="text" id="regShort" maxlength="32" autocapitalize="off" spellcheck="false"
+                   pattern="[a-z][a-z0-9-]{1,30}[a-z0-9]" data-i18n-ph="reg.shortPh" required />
+            <span class="field__hint" data-i18n="reg.shortHint">Lowercase letters, digits and hyphens. Everyone types it when signing in; it's also the admin's username.</span>
+          </label>
+          <button class="btn btn--primary" type="submit" id="regSubmit" data-i18n="reg.submit">Register</button>
+        </form>
+        <p class="card__foot"><a class="link" href="#" id="toSignIn" data-i18n="reg.back">Back to sign in</a></p>
+      </div>
+
+      <div id="registeredView" hidden>
+        <h2 class="reg__title" data-i18n="reg.doneTitle">Your organization is ready</h2>
+        <p class="reg__warn" data-i18n="reg.doneWarn">Save this now: the password is shown only once. You'll set your own at first sign-in.</p>
+        <dl class="reg__creds">
+          <dt data-i18n="login.org">Organization</dt><dd><code id="doneOrg"></code></dd>
+          <dt data-i18n="login.username">Username</dt><dd><code id="doneUser"></code></dd>
+          <dt data-i18n="login.password">Password</dt><dd><code id="donePassword"></code></dd>
+        </dl>
+        <button class="btn btn--ghost" type="button" id="doneCopy" data-i18n="reg.copy">Copy all</button>
+        <button class="btn btn--primary" type="button" id="doneSignIn" data-i18n="reg.goSignIn">Go to sign in</button>
+      </div>
     </section>
     <footer class="auth__foot" data-i18n="login.footer">SuperAgent · Self-hosted AI work platform</footer>
   </main>

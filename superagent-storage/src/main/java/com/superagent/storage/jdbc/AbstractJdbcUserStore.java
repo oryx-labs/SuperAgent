@@ -48,7 +48,8 @@ abstract class AbstractJdbcUserStore implements UserStore {
             emptyToNull(rs.getString("external_id")),
             UserSource.valueOf(rs.getString("source")),
             instant(rs, "created_at"),
-            instant(rs, "updated_at"));
+            instant(rs, "updated_at"),
+            rs.getBoolean("must_change_password"));
 
     @Override
     public List<User> listUsers() {
@@ -66,11 +67,6 @@ abstract class AbstractJdbcUserStore implements UserStore {
         return one("SELECT * FROM app_user" + userFinal() + " WHERE company_id = ? AND username = ?", username);
     }
 
-    @Override
-    public Optional<String> companyOfUsername(String username) {
-        return jdbc.queryForList("SELECT company_id FROM app_user" + userFinal() + " WHERE username = ?",
-                String.class, username).stream().findFirst();
-    }
 
     @Override
     public Optional<User> findByPhone(String phone) {
@@ -90,17 +86,17 @@ abstract class AbstractJdbcUserStore implements UserStore {
 
     protected static final String COLUMNS =
             "(company_id, id, username, display_name, roles, enabled, password_hash, phone, external_id, source, "
-                    + "created_at, updated_at)";
+                    + "created_at, updated_at, must_change_password)";
 
     protected Object[] params(User u) {
         return new Object[]{
                 TenantSchema.company(), u.id(), u.username(), nn(u.displayName()), String.join(",", u.roles()), u.enabled(),
                 nn(u.passwordHash()), nn(u.phone()), nn(u.externalId()), u.source().name(),
-                utc(u.createdAt()), utc(u.updatedAt())};
+                utc(u.createdAt()), utc(u.updatedAt()), u.mustChangePassword()};
     }
 
     protected void insert(User u) {
-        jdbc.update("INSERT INTO app_user " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params(u));
+        jdbc.update("INSERT INTO app_user " + COLUMNS + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params(u));
     }
 
     private static Set<String> parseRoles(String csv) {

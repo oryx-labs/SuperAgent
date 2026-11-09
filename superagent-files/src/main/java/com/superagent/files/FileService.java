@@ -786,12 +786,12 @@ public class FileService {
                 folderId == null || folderId.isEmpty() ? null : folderId);
     }
 
-    private String displayName(String username) {
-        if (username == null) {
+    private String displayName(String userId) {
+        if (userId == null) {
             return null;
         }
-        return users.findByUsername(username).map(User::displayName).filter(n -> n != null && !n.isBlank())
-                .orElse(username);
+        return users.findById(userId).map(u -> u.displayName() != null && !u.displayName().isBlank() ? u.displayName()
+                : u.username()).orElse(userId);
     }
 
     /** A plain file name: no folders (a file has none), no control characters, a sane length. */

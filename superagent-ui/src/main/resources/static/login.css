@@ -139,3 +139,20 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .lang-switch button:first-child { border-radius: 7px 0 0 7px; }
 .lang-switch button:last-child { border-radius: 0 7px 7px 0; border-left: 0; }
 .lang-switch button.is-active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* Registering an organization */
+.field__hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.reg__title { margin: 0 0 6px; font-size: 18px; }
+.reg__lead { margin: 0 0 18px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.reg__warn {
+  margin: 0 0 16px; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.6;
+  color: #92400e; background: #fffbeb; border: 1px solid #fde68a;
+}
+.reg__creds { display: grid; grid-template-columns: max-content 1fr; gap: 10px 16px; margin: 0 0 18px; font-size: 13px; }
+.reg__creds dt { color: var(--muted); }
+.reg__creds dd { margin: 0; }
+.reg__creds code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; user-select: all;
+  padding: 2px 6px; border-radius: 5px; background: var(--panel); word-break: break-all;
+}
+#registeredView .btn + .btn { margin-top: 10px; }

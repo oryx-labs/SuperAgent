@@ -26,7 +26,8 @@ public class ClickHouseUserStore extends AbstractJdbcUserStore {
                   external_id String,
                   source String,
                   created_at DateTime64(3, 'UTC'),
-                  updated_at DateTime64(3, 'UTC')
+                  updated_at DateTime64(3, 'UTC'),
+                  must_change_password UInt8 DEFAULT 0
                 ) ENGINE = ReplacingMergeTree(updated_at)
                 ORDER BY (company_id, id)
                 """));

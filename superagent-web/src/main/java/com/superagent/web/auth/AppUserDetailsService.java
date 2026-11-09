@@ -4,83 +4,51 @@ import com.superagent.core.tenant.TenantContext;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
 import com.superagent.platform.tenant.CompanyService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * Resolves credentials for username/password login. The config-seeded admin is
- * always available (its hash is computed at startup from
- * {@code superagent.auth.admin.*}); every other user must be a provisioned,
- * enabled LOCAL account in the {@link UserStore}.
+ * Resolves a sign-in: the organization and the username in it (see {@link #KEY_SEPARATOR}), to that company's user.
+ * Every account is a provisioned, enabled LOCAL user in the {@link UserStore}; there is no configured one.
  */
 @Service
 public class AppUserDetailsService implements UserDetailsService {
 
-    private static final Logger log = LoggerFactory.getLogger(AppUserDetailsService.class);
+    /** Joins the organization and the username into the one name Spring's form login passes along. */
+    static final char KEY_SEPARATOR = '\n';
 
     private final UserStore users;
     private final CompanyService companies;
-    private final String adminUsername;
-    private final String adminPasswordHash;
 
-    public AppUserDetailsService(
-            UserStore users,
-            CompanyService companies,
-            PasswordEncoder encoder,
-            @Value("${superagent.auth.admin.username:admin}") String adminUsername,
-            @Value("${superagent.auth.admin.password:}") String adminPassword) {
+    public AppUserDetailsService(UserStore users, CompanyService companies) {
         this.users = users;
         this.companies = companies;
-        this.adminUsername = adminUsername;
-        // No weak default: if the admin password is unset, generate a strong one-time
-        // password and log it once, so there is always a way in but never a known default.
-        String password = adminPassword;
-        if (password == null || password.isBlank()) {
-            password = randomPassword();
-            log.warn("No superagent.auth.admin.password set — generated a one-time admin password for '{}': {}  "
-                    + "(set superagent.auth.admin.password / SUPERAGENT_ADMIN_PASSWORD to choose your own)",
-                    adminUsername, password);
-        }
-        this.adminPasswordHash = encoder.encode(password);
-    }
-
-    private static String randomPassword() {
-        byte[] bytes = new byte[18];
-        new java.security.SecureRandom().nextBytes(bytes);
-        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     @Override
-    public UserDetails loadUserByUsername(String username) {
-        if (adminUsername.equals(username)) {
-            return org.springframework.security.core.userdetails.User.withUsername(username)
-                    .password(adminPasswordHash)
-                    .authorities("ROLE_ADMIN", "ROLE_USER")
-                    .build();
+    public UserDetails loadUserByUsername(String key) {
+        int at = key == null ? -1 : key.indexOf(KEY_SEPARATOR);
+        if (at <= 0) {
+            throw new UsernameNotFoundException("No organization given");
         }
-        // Usernames are global: the username says which company to look the user up in.
-        String company = companies.companyOf(username)
-                .orElseThrow(() -> new UsernameNotFoundException("No such user: " + username));
+        String org = key.substring(0, at).strip().toLowerCase(java.util.Locale.ROOT);
+        String username = key.substring(at + 1).strip();
+        String company = companies.enabledCompany(org)
+                .orElseThrow(() -> new UsernameNotFoundException("No such organization: " + org));
         User u = TenantContext.call(company, () -> users.findByUsername(username))
                 .orElseThrow(() -> new UsernameNotFoundException("No such user: " + username));
         if (u.passwordHash() == null || u.passwordHash().isBlank()) {
             // non-local account (phone / SSO / WeChat): cannot sign in with a password
             throw new UsernameNotFoundException("User has no password login: " + username);
         }
-        return org.springframework.security.core.userdetails.User.withUsername(username)
-                .password(u.passwordHash())
-                .disabled(!u.enabled())
-                .authorities(authorities(u.roles()))
-                .build();
+        return new TenantUser(u.id(), company, u.username(), u.passwordHash(), u.enabled(),
+                AuthorityUtils.createAuthorityList(authorities(u.roles())));
     }
 
     /** Maps bare role names to Spring authorities, always including ROLE_USER. */

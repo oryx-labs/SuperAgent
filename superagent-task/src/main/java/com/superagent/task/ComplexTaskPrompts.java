@@ -13,6 +13,11 @@ final class ComplexTaskPrompts {
 
     /** Marks the message that hands a complex task its subtasks' results; counting them counts the rounds. */
     static final String SUMMARY_MARK = "【子任务汇总】";
+
+    /** Whether a message in a complex task's run is the system's summary prompt (not the user's). */
+    static boolean isSummary(String message) {
+        return message != null && message.startsWith(SUMMARY_MARK);
+    }
     /** At most this many summing-up rounds; the last one must conclude. */
     static final int MAX_ROUNDS = 3;
     private static final int ALL_RESULTS_CHARS = 60_000;

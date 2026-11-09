@@ -17,7 +17,7 @@ public final class UsageDtos {
     /** One model's tokens in one run. */
     public record Row(Instant at, String source, String user, String agentId, String agentName, String cli, String model,
                       long input, long cacheRead, long cacheWrite, long output, long reasoning, long total,
-                      Double costUsd, Double cliCostUsd) {
+                      Double costUsd, Double cliCostUsd, String taskId) {
     }
 
     /**
@@ -30,7 +30,8 @@ public final class UsageDtos {
     }
 
     /** A task's usage: every run, oldest first, then totals. */
-    public record Task(List<Row> rows, List<Total> byModel, Total total) {
+    /** {@code byTask}: for a complex task, its own runs and each subtask's (empty for any other task). */
+    public record Task(List<Row> rows, List<Total> byModel, Total total, List<Total> byTask) {
     }
 
     /**

@@ -73,13 +73,11 @@ public class AgentService {
     private final ApplicationEventPublisher events;
     private final UserStore users;
     private final PeopleDirectory people;
-    private final String adminUsername;
     private final Object superLock = new Object();
 
     public AgentService(AgentStore store, ChatService chatService, SkillService skills, AgentMemoryService memory,
                         AgentMemberStore members, UserStore users,
-                        ApplicationEventPublisher events, PeopleDirectory people,
-                        @Value("${superagent.auth.admin.username:admin}") String adminUsername) {
+                        ApplicationEventPublisher events, PeopleDirectory people) {
         this.events = events;
         this.members = members;
         this.users = users;
@@ -88,22 +86,6 @@ public class AgentService {
         this.chatService = chatService;
         this.skills = skills;
         this.memory = memory;
-        this.adminUsername = adminUsername;
-    }
-
-    /**
-     * Agents created before agents had owners belong to nobody, so no one would see them any more.
-     * They are handed to the initial admin rather than shown to everyone.
-     */
-    @EventListener(CompanyStarted.class)
-    void claimUnownedAgents() {
-        List<Agent> orphans = store.list().stream().filter(a -> a.owner() == null).toList();
-        for (Agent a : orphans) {
-            store.update(a.withOwner(adminUsername));
-        }
-        if (!orphans.isEmpty()) {
-            log.info("assigned {} agent(s) created before agents had owners to {}", orphans.size(), adminUsername);
-        }
     }
 
     public AgentDto create(CreateAgentRequest request, String owner) {
@@ -392,20 +374,23 @@ public class AgentService {
         }
         Instant now = Instant.now();
         for (String raw : usernames == null ? List.<String>of() : usernames) {
-            String username = raw == null ? "" : raw.strip();
-            if (username.isEmpty() || username.equals(owner) || isMember(id, username)) {
+            String name = raw == null ? "" : raw.strip();
+            if (name.isEmpty()) {
                 continue;
             }
-            User user = people.find(username).filter(User::enabled)
-                    .orElseThrow(() -> new IllegalArgumentException("No such user: " + username));
-            members.save(new AgentMember(id, user.username(), owner, true, now, now));
-            events.publishEvent(new NoticeEvents.AgentShared(id, agent.name(), user.username(), displayName(owner)));
-            log.info("agent {} shared by {} with {}", id, owner, username);
+            User user = people.resolve(name).filter(User::enabled)
+                    .orElseThrow(() -> new IllegalArgumentException("No such user: " + name));
+            if (user.id().equals(owner) || isMember(id, user.id())) {
+                continue;
+            }
+            members.save(new AgentMember(id, user.id(), owner, true, now, now));
+            events.publishEvent(new NoticeEvents.AgentShared(id, agent.name(), user.id(), displayName(owner)));
+            log.info("agent {} shared by {} with {}", id, owner, user.id());
         }
         return toDto(agent, chatService.currentSessionId(id), owner);
     }
 
-    /** Usernames of the agent's active collaborators (the owner isn't one). */
+    /** User ids of the agent's active collaborators (the owner isn't one). */
     public List<String> memberUsernames(String id) {
         return members.members(id).stream().map(AgentMember::username).toList();
     }
@@ -415,8 +400,9 @@ public class AgentService {
         return shareable(require(id, owner));
     }
 
-    /** The owner removes someone, or a collaborator leaves (username = themselves). */
-    public void removeMember(String id, String caller, String username) {
+    /** The owner removes someone, or a collaborator leaves (themselves). {@code who}: a user id or username. */
+    public void removeMember(String id, String caller, String who) {
+        String username = people.resolve(who).map(User::id).orElse(who);
         Agent agent = requireViewer(id, caller);
         boolean self = Objects.equals(caller, username);
         if (!self && !Objects.equals(agent.owner(), caller)) {
@@ -426,11 +412,12 @@ public class AgentService {
                 .ifPresent(m -> members.save(new AgentMember(id, username, m.addedBy(), false, m.createdAt(), Instant.now())));
     }
 
-    public String displayName(String username) {
-        if (username == null) {
+    /** A person's name to show, from their user id. */
+    public String displayName(String userId) {
+        if (userId == null) {
             return null;
         }
-        return people.find(username).map(u -> u.displayName() == null || u.displayName().isBlank()
-                ? u.username() : u.displayName()).orElse(username);
+        return people.find(userId).map(u -> u.displayName() == null || u.displayName().isBlank()
+                ? u.username() : u.displayName()).orElse(userId);
     }
 }

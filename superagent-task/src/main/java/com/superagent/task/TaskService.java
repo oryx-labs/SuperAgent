@@ -520,8 +520,13 @@ public class TaskService implements TaskRecovery {
     public com.superagent.api.timing.TaskTimingDto timing(String id, String owner) {
         Task task = requireVisible(id, owner);
         List<com.superagent.core.timing.TurnTiming> turns = timings == null ? List.of() : timings.forSessions(List.of(id));
-        List<Instant> replies = runStore.listMessages(id).stream().filter(m -> m.role() == MessageRole.USER)
-                .map(ChatMessage::createdAt).sorted().toList();
+        List<ChatMessage> asked = runStore.listMessages(id).stream().filter(m -> m.role() == MessageRole.USER)
+                .sorted(java.util.Comparator.comparing(ChatMessage::createdAt)).toList();
+        // A complex task's summary prompt is posted by the system once its subtasks are over, not by the user.
+        List<Instant> summaries = asked.stream().filter(m -> ComplexTaskPrompts.isSummary(m.content()))
+                .map(ChatMessage::createdAt).toList();
+        List<Instant> replies = asked.stream().filter(m -> !ComplexTaskPrompts.isSummary(m.content()))
+                .map(ChatMessage::createdAt).toList();
         List<com.superagent.api.timing.TaskTimingDto.Segment> out = new ArrayList<>();
         Instant at = task.createdAt();
         for (com.superagent.core.timing.TurnTiming t : turns) {
@@ -530,7 +535,11 @@ public class TaskService implements TaskRecovery {
                         : com.superagent.api.timing.TaskTimingDto.WAIT_QUEUE;
                 Instant from = at;
                 Instant reply = replies.stream().filter(r -> r.isAfter(from) && !r.isAfter(t.startedAt())).findFirst().orElse(null);
-                if (!out.isEmpty() && reply != null) {
+                Instant summed = summaries.stream().filter(r -> r.isAfter(from) && !r.isAfter(t.startedAt())).findFirst().orElse(null);
+                if (!out.isEmpty() && summed != null) {
+                    out.add(com.superagent.api.timing.TaskTimingDto.wait(com.superagent.api.timing.TaskTimingDto.WAIT_SUBTASKS, from, summed));
+                    out.add(com.superagent.api.timing.TaskTimingDto.wait(kind, summed, t.startedAt()));
+                } else if (!out.isEmpty() && reply != null) {
                     out.add(com.superagent.api.timing.TaskTimingDto.wait(com.superagent.api.timing.TaskTimingDto.WAIT_USER, from, reply));
                     out.add(com.superagent.api.timing.TaskTimingDto.wait(kind, reply, t.startedAt()));
                 } else {
@@ -545,6 +554,7 @@ public class TaskService implements TaskRecovery {
         Instant end = open ? Instant.now() : task.finishedAt() != null ? task.finishedAt() : at;
         if (end.isAfter(at)) {
             String kind = task.status() == TaskStatus.NEEDS_CONFIRMATION ? com.superagent.api.timing.TaskTimingDto.WAIT_USER
+                    : task.status() == TaskStatus.WAITING ? com.superagent.api.timing.TaskTimingDto.WAIT_SUBTASKS
                     : task.status() == TaskStatus.RUNNING ? com.superagent.api.timing.TaskTimingDto.RUNNING
                     : out.isEmpty() ? com.superagent.api.timing.TaskTimingDto.WAIT_START : com.superagent.api.timing.TaskTimingDto.WAIT_QUEUE;
             if (open || kind.equals(com.superagent.api.timing.TaskTimingDto.WAIT_START)) {
@@ -801,6 +811,11 @@ public class TaskService implements TaskRecovery {
         int round = summaryRounds(parent.id()) + 1;
         String prompt = ComplexTaskPrompts.summary(results, round, round < ComplexTaskPrompts.MAX_ROUNDS ? subtaskRoom(parent.id()) : 0);
         log.info("complex task {}: its {} subtasks have finished, summing up (round {})", parent.id(), kids.size(), round);
+        long done = kids.stream().filter(k -> k.status() == TaskStatus.DONE).count();
+        // Said in its run before the summary starts: the summary can take minutes with nothing else to show.
+        runStore.appendEvent(AgentEvent.of(parent.id(), Long.MAX_VALUE, AgentEventType.SYSTEM,
+                "子任务都结束了（" + kids.size() + " 个，" + done + " 个完成" + (done < kids.size() ? "，" + (kids.size() - done) + " 个未完成" : "")
+                        + "），开始" + (round > 1 ? "第 " + round + " 轮" : "") + "汇总。"));
         carryOn(parent.id(), prompt);
     }
 
@@ -1902,7 +1917,7 @@ public class TaskService implements TaskRecovery {
                 t.agentType().name().toLowerCase(), sessionId, t.workspaceDir(), sessionState(t.id(), sessionId), t.tier(),
                 originMessageId, link == null ? null : link.parentId(), link == null ? null : link.continuesFrom(),
                 v.tags(t.id()), agentId, agentId == null ? null : v.agentName(agentId),
-                kids.size(), (int) kids.stream().filter(this::finished).count());
+                kids.size(), (int) kids.stream().filter(this::finished).count(), v.totalSpend(t));
     }
 
     // --- relations and tags ---

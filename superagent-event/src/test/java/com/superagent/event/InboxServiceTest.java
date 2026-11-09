@@ -76,13 +76,12 @@ class InboxServiceTest {
 
     private static final class Users implements UserStore {
         @Override public List<User> listUsers() { return List.of(); }
-        @Override public Optional<User> findById(String id) { return Optional.empty(); }
+        @Override public Optional<User> findById(String id) { return findByUsername(id); } // ids are the names here
         @Override public Optional<User> findByUsername(String name) {
             Instant now = Instant.now();
             return Optional.of(new User(name, name, "boss".equals(name) ? "老板" : null, Set.of("USER"), true,
                     null, null, null, UserSource.LOCAL, now, now));
         }
-        @Override public Optional<String> companyOfUsername(String name) { return Optional.empty(); }
         @Override public Optional<User> findByPhone(String phone) { return Optional.empty(); }
         @Override public Optional<User> findByExternalId(String id) { return Optional.empty(); }
         @Override public User save(User u) { return u; }

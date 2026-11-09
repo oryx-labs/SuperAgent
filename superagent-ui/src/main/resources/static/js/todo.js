@@ -260,7 +260,7 @@ tdel.readAll.addEventListener("click", async () => {
 
 // Keep the menu badge current while the user works elsewhere (agents finish work in the background).
 setInterval(() => {
-  if (!currentUsername) return;
+  if (!currentUserId) return;
   if (!todoPane.hidden) loadTodos();
   else api.listNotices().then(list => { notices = list || []; updateTodoBadge(); }).catch(() => {});
 }, 60000);

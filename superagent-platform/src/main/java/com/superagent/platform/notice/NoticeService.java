@@ -203,24 +203,19 @@ public class NoticeService {
                 "agent", e.agentId()));
     }
 
-    private com.superagent.core.user.UserStore users; // null in tests: only the built-in admin
-    private String adminUsername = "admin";
+    private com.superagent.core.user.UserStore users; // null in tests: no one to tell
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    void setUsers(com.superagent.core.user.UserStore users,
-                  @Value("${superagent.auth.admin.username:admin}") String adminUsername) {
+    void setUsers(com.superagent.core.user.UserStore users) {
         this.users = users;
-        this.adminUsername = adminUsername;
     }
 
     /** The admins hear when conversations leave the default model, and when they're back on it (same item). */
     @EventListener
     public void onDefaultModel(NoticeEvents.DefaultModelChanged e) {
         Set<String> admins = new LinkedHashSet<>();
-        admins.add(adminUsername);
         if (users != null) {
-            users.listUsers().stream().filter(u -> u.enabled() && u.roles() != null && u.roles().contains("ADMIN"))
-                    .forEach(u -> admins.add(u.username()));
+            users.listUsers().stream().filter(u -> u.enabled() && u.isAdmin()).forEach(u -> admins.add(u.id()));
         }
         String title = e.down() ? "默认模型 " + e.defaultModel() + " 用不了，对话已自动改用 " + e.inUse()
                 : "默认模型 " + e.defaultModel() + " 已恢复，对话已改回";

@@ -1,7 +1,7 @@
 # SuperAgent + MySQL on one host:
 #   cp docker/.env.example docker/.env   # then set the passwords in it
 #   docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
-# Open http://<host>:18080 and sign in as admin with SUPERAGENT_ADMIN_PASSWORD.
+# Open http://<host>:18080 and register your organization: the first one registered owns this host.
 services:
   mysql:
     image: mysql:8.4
@@ -29,7 +29,8 @@ services:
     ports:
       - "${SUPERAGENT_PORT:-18080}:18080"
     environment:
-      SUPERAGENT_ADMIN_PASSWORD: ${SUPERAGENT_ADMIN_PASSWORD:?set SUPERAGENT_ADMIN_PASSWORD in docker/.env}
+      SUPERAGENT_HOST_ORG: ${SUPERAGENT_HOST_ORG:-}
+      SUPERAGENT_REGISTRATION_ENABLED: ${SUPERAGENT_REGISTRATION_ENABLED:-true}
       SUPERAGENT_STORAGE_MYSQL_URL: jdbc:mysql://mysql:3306/superagent?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
       SUPERAGENT_STORAGE_MYSQL_USERNAME: superagent
       SUPERAGENT_STORAGE_MYSQL_PASSWORD: ${MYSQL_PASSWORD}

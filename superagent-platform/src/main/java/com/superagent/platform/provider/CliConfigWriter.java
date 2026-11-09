@@ -67,19 +67,31 @@ public class CliConfigWriter {
         this.machine = machine;
         this.enabled = enabled;
         if (enabled) {
-            // The CLI config files are the host's, so only the company that owns the host (the default one) writes
+            // The CLI config files are the host's, so only the company that owns the host (the first registered) writes
             // them; another company's key switch must never land in the machine's config.
             credentials.onSwitch("cli-config", key -> {
-                if (Company.DEFAULT_ID.equals(TenantContext.require())) {
+                if (isHost()) {
                     writer.execute(TenantContext.wrap(() -> apply(key)));
                 }
             });
         }
     }
 
+    private com.superagent.platform.tenant.CompanyService companyService; // null in tests: the default id is the host
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setCompanyService(com.superagent.platform.tenant.CompanyService companyService) {
+        this.companyService = companyService;
+    }
+
+    private boolean isHost() {
+        String id = TenantContext.require();
+        return companyService == null ? Company.DEFAULT_ID.equals(id) : companyService.isHost(id);
+    }
+
     /** Writes the pool's current entry into the CLI's config (or restores the original when there's none). */
     void apply(String providerKey) {
-        if (!enabled || !Company.DEFAULT_ID.equals(TenantContext.require())) {
+        if (!enabled || !isHost()) {
             return;
         }
         CredentialService.Choice choice = credentials.current(providerKey);

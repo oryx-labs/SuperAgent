@@ -90,12 +90,23 @@ public class CredentialService {
      * Startup: bring what the machine already has into the console (so it's managed in one place), then tell the
      * listeners — the CLI config writer among them — which entry each pool uses.
      *
-     * <p>The machine's own keys and CLI config are the host's, so only the company that runs the host (the
-     * default one) takes them; other companies bring their own keys.
+     * <p>The machine's own keys and CLI config are the host's, so only the company that owns the host (the first one
+     * registered) takes them; other companies bring their own keys.
      */
+    private com.superagent.platform.tenant.CompanyService companyService; // null in tests: the default id is the host
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setCompanyService(com.superagent.platform.tenant.CompanyService companyService) {
+        this.companyService = companyService;
+    }
+
+    private boolean isHost(String companyId) {
+        return companyService == null ? Company.DEFAULT_ID.equals(companyId) : companyService.isHost(companyId);
+    }
+
     @org.springframework.context.event.EventListener(CompanyStarted.class)
     void onReady(CompanyStarted started) {
-        if (!Company.DEFAULT_ID.equals(started.companyId())) {
+        if (!isHost(started.companyId())) {
             return;
         }
         for (String key : POOLED) {
@@ -193,9 +204,9 @@ public class CredentialService {
         if (healthy.isPresent()) {
             return new Choice(toRun(healthy.get()));
         }
-        // The server's own environment / CLI login is the host's, i.e. the default company's account: another
+        // The server's own environment / CLI login is the host's, i.e. the host company's account: another
         // company never falls back to it, it runs on its own keys only.
-        if (!Company.DEFAULT_ID.equals(TenantContext.require())) {
+        if (!isHost(TenantContext.require())) {
             if (pool.isEmpty()) {
                 throw new NoCompanyKeyException(providerKey);
             }

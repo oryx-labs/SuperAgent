@@ -86,7 +86,7 @@ public class AgentCollabMcpTools implements McpToolProvider {
                     List<String> names = new ArrayList<>();
                     args.path("usernames").forEach(n -> names.add(n.asText("")));
                     AgentInvite invite = invites.propose(agentId, user, names, grant.sessionId(), grant.messageId());
-                    yield "已在对话中生成邀请确认卡片（" + String.join("、", invite.usernames())
+                    yield "已在对话中生成邀请确认卡片（" + String.join("、", invite.usernames().stream().map(agents::displayName).toList())
                             + "）。需要所有者在卡片上点「确认邀请」后才会生效，请这样告诉用户。";
                 }
                 case "collab_remove" -> {

@@ -1042,12 +1042,12 @@ public class ChatService {
         return watcher;
     }
 
-    private String displayName(String username) {
-        if (username == null) {
+    private String displayName(String userId) {
+        if (userId == null) {
             return "有人";
         }
-        return users.findByUsername(username).map(u -> u.displayName() == null || u.displayName().isBlank()
-                ? u.username() : u.displayName()).orElse(username);
+        return users.findById(userId).map(u -> u.displayName() == null || u.displayName().isBlank()
+                ? u.username() : u.displayName()).orElse(userId);
     }
 
     @PreDestroy

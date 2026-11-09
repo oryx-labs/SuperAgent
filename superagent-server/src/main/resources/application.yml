@@ -33,6 +33,12 @@ logging:
     com.superagent: DEBUG
 
 superagent:
+  # The organization (its English name) that owns this host: installs the agent CLIs and may use the machine's own
+  # keys and CLI logins. Set it on any server others can reach; unset, the first organization registered is the host.
+  host-org: ${SUPERAGENT_HOST_ORG:}
+  registration:
+    # Whether the sign-in page lets anyone register an organization. Turn it off once the organizations you want exist.
+    enabled: ${SUPERAGENT_REGISTRATION_ENABLED:true}
   version: @project.version@
   # Each company's default limits; 0 = unlimited. A company's own limits (company table) override these.
   tenant:
@@ -52,10 +58,6 @@ superagent:
     dir: ./data/attachments
   files:
     dir: ./data/files
-  auth:
-    admin:
-      username: ${SUPERAGENT_ADMIN_USERNAME:admin}
-      password: ${SUPERAGENT_ADMIN_PASSWORD:admin}
   task:
     allowed-tools: ${SUPERAGENT_TASK_ALLOWED_TOOLS:Read,Glob,Grep,LS,Edit,Write,Bash}
     skip-permissions: ${SUPERAGENT_TASK_SKIP_PERMISSIONS:false}

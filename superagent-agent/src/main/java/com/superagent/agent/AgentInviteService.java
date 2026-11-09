@@ -44,7 +44,7 @@ public class AgentInviteService {
         if (q.isEmpty()) {
             throw new IllegalArgumentException("Say who to look for");
         }
-        return people.enabled().stream().filter(u -> !u.username().equals(caller))
+        return people.enabled().stream().filter(u -> !u.id().equals(caller))
                 .filter(u -> Stream.of(u.username(), u.displayName(), u.phone())
                         .anyMatch(v -> v != null && v.toLowerCase(Locale.ROOT).contains(q)))
                 .limit(MAX_MATCHES).toList();
@@ -61,14 +61,17 @@ public class AgentInviteService {
         }
         List<String> already = agents.memberUsernames(agentId);
         List<String> wanted = new ArrayList<>();
+        // Named by username (said to the agent) or id; kept as ids.
         for (String raw : new LinkedHashSet<>(usernames == null ? List.<String>of() : usernames)) {
             String name = raw == null ? "" : raw.strip();
-            if (name.isEmpty() || name.equals(caller) || already.contains(name)) {
+            if (name.isEmpty()) {
                 continue;
             }
-            people.find(name).filter(User::enabled)
+            User u = people.resolve(name).filter(User::enabled)
                     .orElseThrow(() -> new IllegalArgumentException("No such user: " + name + " (look them up first)"));
-            wanted.add(name);
+            if (!u.id().equals(caller) && !already.contains(u.id()) && !wanted.contains(u.id())) {
+                wanted.add(u.id());
+            }
         }
         if (wanted.isEmpty()) {
             throw new IllegalArgumentException("Everyone named is already in this agent");

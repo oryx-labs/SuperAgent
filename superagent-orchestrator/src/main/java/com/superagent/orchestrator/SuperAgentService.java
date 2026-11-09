@@ -113,7 +113,8 @@ public class SuperAgentService {
     static final List<String> CHAT_TOOLS = Stream.concat(BACKGROUND_TOOLS.stream()
             .filter(t -> !t.equals("mcp__superagent__" + SuperAgentTools.TELL_USER)),
             Stream.of(SuperAgentCollabTools.TOOLS, SuperAgentTaskTools.TOOLS, McpGrants.SUPER_FILE_TOOLS, McpGrants.SKILL_TOOLS,
-                    McpGrants.SKILL_CHAT_TOOLS, McpGrants.DOC_READ_TOOLS, com.superagent.agent.AgentSkillMcpTools.TOOLS).flatMap(List::stream)).toList();
+                    McpGrants.SKILL_CHAT_TOOLS, McpGrants.DOC_READ_TOOLS, com.superagent.agent.AgentSkillMcpTools.TOOLS,
+                    SuperAgentAutomationTools.TOOLS).flatMap(List::stream)).toList();
 
     /** Marks a delivery of received messages; such rounds can't touch the team or its tasks. */
     static final String EXTERNAL = "【外部消息】";

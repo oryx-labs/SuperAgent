@@ -196,7 +196,7 @@ async function openFile(fileOrId) {
   flOpen = f;
   flel.title.textContent = fileIcon(f) + " " + f.name;
   const link = f.kind === "link";
-  flel.meta.textContent = [fileSource(f), L(link ? "fl.sharedBy" : "fl.askedBy", { name: f.ownerName || f.owner }),
+  flel.meta.textContent = [fileSource(f), L(link ? "fl.sharedBy" : "fl.askedBy", { name: f.ownerName || personName(f.owner) }),
     link ? null : kbFormatSize(f.size), formatDateTime(f.updatedAt)].filter(Boolean).join(" · ");
   flel.download.href = fileContentUrl(f.id, true);
   flel.download.hidden = link; // a link has no content of its own

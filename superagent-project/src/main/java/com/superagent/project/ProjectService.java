@@ -104,11 +104,13 @@ public class ProjectService implements ProjectAccess {
         Project p = requireOwner(id, owner);
         Set<String> current = new LinkedHashSet<>(memberNames(id));
         Instant now = Instant.now();
-        for (String username : usernames == null ? List.<String>of() : usernames) {
-            User u = users.findByUsername(username == null ? "" : username.strip())
-                    .orElseThrow(() -> new IllegalArgumentException("没有这个用户：" + username));
-            if (current.add(u.username())) {
-                store.saveMember(new ProjectMember(id, u.username(), owner, true, now, now));
+        for (String who : usernames == null ? List.<String>of() : usernames) {
+            String key = who == null ? "" : who.strip();
+            // Named by user id (the picker) or username; kept as the id.
+            User u = users.findById(key).or(() -> users.findByUsername(key))
+                    .orElseThrow(() -> new IllegalArgumentException("没有这个用户：" + who));
+            if (current.add(u.id())) {
+                store.saveMember(new ProjectMember(id, u.id(), owner, true, now, now));
             }
         }
         return toDto(p, owner);
@@ -246,8 +248,9 @@ public class ProjectService implements ProjectAccess {
                 p.createdAt(), p.updatedAt(), p.archivedAt());
     }
 
-    private String displayName(String username) {
-        return users.findByUsername(username).map(User::displayName).filter(n -> n != null && !n.isBlank()).orElse(username);
+    private String displayName(String userId) {
+        return users.findById(userId).map(u -> u.displayName() != null && !u.displayName().isBlank() ? u.displayName()
+                : u.username()).orElse(userId);
     }
 
     private static String name(String name) {

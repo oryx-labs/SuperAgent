@@ -58,19 +58,18 @@ class AgentInviteServiceTest {
         when(agents.canShare("a1", "ada")).thenReturn(true);
         when(agents.memberUsernames("a1")).thenReturn(List.of("bob"));
         when(agents.displayName(any())).thenAnswer(i -> "zhang".equals(i.getArgument(0)) ? "张三" : i.getArgument(0));
-        // The built-in administrator lives in configuration, not the user table, and can be invited all the same.
-        UserStore users = mock(UserStore.class);
+        UserStore users = mock(UserStore.class); // ids equal usernames here, so either names a person
         List<User> all = List.of(user("ada", "Ada"), user("bob", "Bob"), user("carl", "Carl"), user("zhang", "张三"));
         when(users.listUsers()).thenReturn(all);
         when(users.findByUsername(any())).thenAnswer(i -> all.stream().filter(u -> u.username().equals(i.getArgument(0))).findFirst());
-        invites = new AgentInviteService(agents, store, new PeopleDirectory(users, "admin"));
+        when(users.findById(any())).thenAnswer(i -> all.stream().filter(u -> u.id().equals(i.getArgument(0))).findFirst());
+        invites = new AgentInviteService(agents, store, new PeopleDirectory(users));
     }
 
     @Test
     void anInviteWaitsForTheOwnerAndOnlyTheOwnerConfirmsIt() {
         assertThat(invites.findPeople("ada", "张")).extracting(User::username).containsExactly("zhang");
-        assertThat(invites.findPeople("ada", "adm")).extracting(User::username).containsExactly("admin");
-        assertThat(invites.propose("a1", "ada", List.of("admin"), "s1", "m0").usernames()).containsExactly("admin");
+        assertThat(invites.propose("a1", "ada", List.of("carl"), "s1", "m0").usernames()).containsExactly("carl");
 
         // Only the owner may propose; bob (a collaborator) is refused, and people already in are skipped.
         assertThatThrownBy(() -> invites.propose("a1", "bob", List.of("carl"), "s1", "m1"))

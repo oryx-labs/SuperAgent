@@ -30,31 +30,19 @@ public class UserService {
 
     private static final Logger log = LoggerFactory.getLogger(UserService.class);
 
-    /** The built-in administrator from configuration; listed, but not stored, so it can't be edited here. */
-    public static final String CONFIG_SOURCE = "CONFIG";
-
     private final UserStore users;
     private final PasswordEncoder encoder;
-    private final String adminUsername;
     private final QuotaService quotas;
 
-    public UserService(UserStore users, PasswordEncoder encoder, QuotaService quotas,
-                       @Value("${superagent.auth.admin.username:admin}") String adminUsername) {
+    public UserService(UserStore users, PasswordEncoder encoder, QuotaService quotas) {
         this.quotas = quotas;
         this.users = users;
         this.encoder = encoder;
-        this.adminUsername = adminUsername;
     }
 
-    /** Everyone who can sign in: the configured administrator first, then the provisioned users. */
+    /** Everyone in the company who can sign in. */
     public List<UserDto> list() {
-        List<UserDto> out = new ArrayList<>();
-        if (Company.DEFAULT_ID.equals(TenantContext.require()) && users.findByUsername(adminUsername).isEmpty()) {
-            out.add(new UserDto("config:" + adminUsername, adminUsername, null, List.of("ADMIN"), true, null, null,
-                    CONFIG_SOURCE, null));
-        }
-        users.listUsers().stream().map(UserService::toDto).forEach(out::add);
-        return out;
+        return users.listUsers().stream().map(UserService::toDto).toList();
     }
 
     public UserDto create(SaveUserRequest request) {
@@ -62,8 +50,8 @@ public class UserService {
         if (username.isEmpty()) {
             throw new IllegalArgumentException("username is required");
         }
-        // Usernames are unique across companies: signing in with one is how the company is known.
-        if (users.companyOfUsername(username).isPresent() || username.equals(adminUsername)) {
+        // Unique within the company (sign-in names the organization too).
+        if (users.findByUsername(username).isPresent()) {
             throw new UsernameTakenException(username);
         }
         quotas.checkCanAddUser(users.listUsers().size());
@@ -81,8 +69,8 @@ public class UserService {
                 hashIfPresent(request.password(), source),
                 blankToNull(request.phone()),
                 blankToNull(request.externalId()),
-                source, now, now);
-        users.save(user);
+                source, now, now, request.password() != null && !request.password().isBlank());
+        users.save(user); // a password the admin set: the user replaces it at first sign-in
         log.info("provisioned user {} ({}, {})", username, source, user.roles());
         return toDto(user);
     }
@@ -93,13 +81,13 @@ public class UserService {
         if (username.isEmpty()) {
             username = existing.username();
         } else if (!username.equals(existing.username())
-                && (users.companyOfUsername(username).isPresent() || username.equals(adminUsername))) {
+                && users.findByUsername(username).isPresent()) {
             throw new UsernameTakenException(username);
         }
         UserSource source = request.source() == null || request.source().isBlank()
                 ? existing.source() : parseSource(request.source());
-        String passwordHash = request.password() != null && !request.password().isBlank()
-                ? encoder.encode(request.password()) : existing.passwordHash();
+        boolean resetPassword = request.password() != null && !request.password().isBlank();
+        String passwordHash = resetPassword ? encoder.encode(request.password()) : existing.passwordHash();
         User updated = new User(
                 existing.id(), username,
                 request.displayName() != null ? blankToNull(request.displayName()) : existing.displayName(),
@@ -108,14 +96,26 @@ public class UserService {
                 passwordHash,
                 request.phone() != null ? blankToNull(request.phone()) : existing.phone(),
                 request.externalId() != null ? blankToNull(request.externalId()) : existing.externalId(),
-                source, existing.createdAt(), Instant.now());
+                source, existing.createdAt(), Instant.now(), resetPassword || existing.mustChangePassword());
+        requireAnAdminLeft(existing, updated);
         users.save(updated);
         return toDto(updated);
     }
 
     public void delete(String id) {
-        users.findById(id).orElseThrow(() -> new UserNotFoundException(id));
-        users.delete(id);
+        User existing = users.findById(id).orElseThrow(() -> new UserNotFoundException(id));
+        requireAnAdminLeft(existing, null);
+        users.delete(id); // its id is never given to anyone else, so nothing it owned passes to a newcomer
+    }
+
+    /** A company always keeps an enabled admin: otherwise no one could manage it again. */
+    private void requireAnAdminLeft(User before, User after) {
+        boolean wasAdmin = before.enabled() && before.isAdmin();
+        boolean stillAdmin = after != null && after.enabled() && after.isAdmin();
+        if (wasAdmin && !stillAdmin && users.listUsers().stream()
+                .noneMatch(u -> !u.id().equals(before.id()) && u.enabled() && u.isAdmin())) {
+            throw new IllegalArgumentException("这是公司唯一的管理员，不能删除、停用或取消管理员角色");
+        }
     }
 
     private String hashIfPresent(String password, UserSource source) {

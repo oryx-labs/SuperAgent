@@ -27,12 +27,13 @@ class AccountServiceTest {
     private static final class Users implements UserStore {
         final Map<String, User> rows = new LinkedHashMap<>();
         @Override public List<User> listUsers() { return List.copyOf(rows.values()); }
-        @Override public Optional<User> findById(String id) { return Optional.empty(); }
-        @Override public Optional<User> findByUsername(String name) { return Optional.ofNullable(rows.get(name)); }
-        @Override public Optional<String> companyOfUsername(String name) { return Optional.empty(); }
+        @Override public Optional<User> findById(String id) { return Optional.ofNullable(rows.get(id)); }
+        @Override public Optional<User> findByUsername(String name) {
+            return rows.values().stream().filter(u -> u.username().equals(name)).findFirst();
+        }
         @Override public Optional<User> findByPhone(String phone) { return Optional.empty(); }
         @Override public Optional<User> findByExternalId(String id) { return Optional.empty(); }
-        @Override public User save(User u) { rows.put(u.username(), u); return u; }
+        @Override public User save(User u) { rows.put(u.id(), u); return u; }
         @Override public void delete(String id) { }
     }
 
@@ -54,26 +55,27 @@ class AccountServiceTest {
         Users users = new Users();
         Instant now = Instant.now();
         users.save(new User("1", "ada", "Ada", Set.of("USER"), true, encoder.encode("old-password"), null, null,
-                UserSource.LOCAL, now, now));
+                UserSource.LOCAL, now, now, true)); // a password someone else set
         users.save(new User("2", "13800000000", "Bob", Set.of("USER"), true, null, "13800000000", null,
                 UserSource.PHONE, now, now));
-        AccountService svc = new AccountService(users, encoder, "admin", dir.toString());
+        AccountService svc = new AccountService(users, encoder, dir.toString());
 
-        assertThatThrownBy(() -> svc.changePassword("ada", "wrong", "new-password-1")).hasMessageContaining("当前密码");
-        assertThatThrownBy(() -> svc.changePassword("ada", "old-password", "short")).hasMessageContaining("至少");
-        svc.changePassword("ada", "old-password", "new-password-1");
-        assertThat(encoder.matches("new-password-1", users.rows.get("ada").passwordHash())).isTrue();
-        // Phone users and the configured admin have no password to change here.
-        assertThat(svc.canChangePassword("13800000000")).isFalse();
-        assertThat(svc.canChangePassword("admin")).isFalse();
-        assertThatThrownBy(() -> svc.changePassword("admin", "x", "new-password-1")).isInstanceOf(IllegalArgumentException.class);
+        // Accounts are addressed by user id, not username.
+        assertThat(svc.mustChangePassword("1")).isTrue();
+        assertThatThrownBy(() -> svc.changePassword("1", "wrong", "new-password-1")).hasMessageContaining("当前密码");
+        assertThatThrownBy(() -> svc.changePassword("1", "old-password", "short")).hasMessageContaining("至少");
+        svc.changePassword("1", "old-password", "new-password-1");
+        assertThat(encoder.matches("new-password-1", users.rows.get("1").passwordHash())).isTrue();
+        assertThat(svc.mustChangePassword("1")).isFalse(); // their own now
+        // Phone users have no password to change here.
+        assertThat(svc.canChangePassword("2")).isFalse();
 
-        assertThatThrownBy(() -> svc.setAvatar("ada", Base64.getEncoder().encodeToString("<svg/>".getBytes())))
+        assertThatThrownBy(() -> svc.setAvatar("1", Base64.getEncoder().encodeToString("<svg/>".getBytes())))
                 .isInstanceOf(IllegalArgumentException.class);
-        long v = svc.setAvatar("ada", Base64.getEncoder().encodeToString(PNG));
-        assertThat(svc.avatarVersions()).containsEntry("ada", v);
-        assertThat(svc.avatar("ada")).hasValueSatisfying(img -> assertThat(img.mediaType()).isEqualTo("image/png"));
-        svc.removeAvatar("ada");
-        assertThat(svc.avatarVersion("ada")).isNull();
+        long v = svc.setAvatar("1", Base64.getEncoder().encodeToString(PNG));
+        assertThat(svc.avatarVersions()).containsEntry("1", v);
+        assertThat(svc.avatar("1")).hasValueSatisfying(img -> assertThat(img.mediaType()).isEqualTo("image/png"));
+        svc.removeAvatar("1");
+        assertThat(svc.avatarVersion("1")).isNull();
     }
 }
