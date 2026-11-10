@@ -43,7 +43,7 @@ class SuperAgentTaskTools implements McpToolProvider {
 
     @Override
     public List<ObjectNode> tools() {
-        return List.of(tool("start_task", "把用户要求并确认过的任务开始执行：只有用户明确要建任务、并且确认了你列出的任务参数表后才能调用。不占用聊天，结束后你的后台会通知用户。",
+        return List.of(tool("start_task", "把用户确认过的任务开始执行：只有用户确认了你列出的任务参数表后才能调用，绝不跳过确认。不占用聊天，结束后你的后台会通知用户。",
                 props(req("title", "string", "任务标题"),
                         req("brief", "string", "任务说明，要写全：目标、资料（路径或 Files 文件 id，执行者用 file_get 取）、交付标准"),
                         req("kind", "string", com.superagent.task.TaskKinds.DESCRIPTION),

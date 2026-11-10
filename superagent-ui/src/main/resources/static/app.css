@@ -2184,6 +2184,10 @@ small.model-note { display: block; margin-top: 4px; }
   background: none; border: 0; border-radius: 6px; cursor: pointer; }
 .ff-node__actions button:hover { color: var(--ink); background: var(--line); }
 .ff-sep { height: 1px; margin: 10px 8px; background: var(--line); }
+/* Each agent's own folder: its avatar instead of a folder glyph, under a small section label. */
+.ff-section { margin: 14px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-2); }
+.ff-node--agent .ff-node__icon { background: none; -webkit-mask: none; mask: none; color: inherit;
+  font-size: 13px; line-height: 15px; text-align: center; }
 .ff-hint { margin: 4px 8px; padding: 12px; font-size: 12px; line-height: 1.5; color: var(--muted);
   border: 1px dashed var(--line-strong); border-radius: 9px; }
 .fl-row[draggable="true"] { cursor: grab; }
@@ -2546,3 +2550,7 @@ button.t-chip { font: inherit; font-size: 11.5px; cursor: pointer; }
 .prompt-log__count { font-size: 12.5px; color: var(--muted); }
 .prompt-line__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .prompt-line.is-open .prompt-line__text { color: var(--muted); }
+
+/* Next to the send button: how to send from the keyboard. */
+.composer__hint { font-size: 11.5px; color: var(--muted-2); white-space: nowrap; }
+@media (max-width: 640px) { .composer__hint { display: none; } }

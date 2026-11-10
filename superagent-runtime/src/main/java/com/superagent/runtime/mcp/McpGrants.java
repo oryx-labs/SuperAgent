@@ -111,7 +111,12 @@ public class McpGrants {
     }
 
     /** File and skill tool names, for chat and task allowlists. */
-    public static final List<String> WORK_TOOLS = java.util.stream.Stream.of(FILE_TOOLS, SKILL_TOOLS, DOC_TOOLS).flatMap(List::stream).toList();
+    /** The agent's past conversation (agent.chat.ChatHistoryMcpTools), for its chats and its tasks. */
+    public static final List<String> HISTORY_TOOLS = List.of("mcp__superagent__chat_history_search",
+            "mcp__superagent__chat_history_read");
+
+    public static final List<String> WORK_TOOLS = java.util.stream.Stream.of(FILE_TOOLS, SKILL_TOOLS, DOC_TOOLS, HISTORY_TOOLS)
+            .flatMap(List::stream).toList();
 
     /**
      * Told to every chat and task run that has the file tools: work results go to the user through them.

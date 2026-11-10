@@ -47,6 +47,45 @@ final class AgentMemoryRules {
         return fresh.size() >= minMessages || !last.plus(idle).isAfter(now);
     }
 
+    /** A long message carried over shows at least this much of itself (its start and its end). */
+    private static final int MIN_LONG_SHOWN = 4_000;
+
+    /**
+     * What a new session reads of the conversation so far: as many of the latest messages as fit in {@code budget}
+     * characters, oldest first. Whole messages, however long, while they fit; the one that doesn't is shown by its
+     * start and end with how much is left out (and its id, to read it in full). Short ones ("确认") cost next to nothing,
+     * so a budget goes much further than a fixed count of messages.
+     */
+    static String carryOver(List<ChatMessage> messages, ZoneId zone, int budget) {
+        List<String> lines = new ArrayList<>();
+        int left = budget;
+        for (int i = messages.size() - 1; i >= 0 && left > 0; i--) {
+            ChatMessage m = messages.get(i);
+            String body = m.content() == null ? "" : m.content().strip();
+            if (body.isEmpty()) {
+                continue;
+            }
+            String head = "[" + STAMP.format(m.createdAt().atZone(zone)) + "] " + who(m) + "：";
+            if (head.length() + body.length() > left) {
+                int room = Math.max(MIN_LONG_SHOWN, left - head.length() - 120);
+                if (room < body.length()) {
+                    int end = room / 3;
+                    body = body.substring(0, room - end) + "\n\n…（中间省略 " + (body.length() - room) + " 字；完整原文用 "
+                            + "chat_history_read 读取消息 " + m.id() + "）…\n\n" + body.substring(body.length() - end);
+                }
+                left = 0; // the oldest one that still shows: nothing before it fits
+            } else {
+                left -= head.length() + body.length();
+            }
+            lines.add(0, head + body);
+        }
+        return String.join("\n\n", lines);
+    }
+
+    private static String who(ChatMessage m) {
+        return m.role() == MessageRole.USER ? "用户" : m.role() == MessageRole.ASSISTANT ? "助手" : "系统";
+    }
+
     /** Oldest first, most recent kept when it doesn't all fit. */
     static String transcript(List<ChatMessage> messages, ZoneId zone) {
         List<String> lines = new ArrayList<>();

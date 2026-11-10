@@ -606,6 +606,53 @@ public class FileService {
         return files.stream().map(f -> toDto(f, user, refs.getOrDefault(f.id(), List.of()), placed)).toList();
     }
 
+    /**
+     * An agent's files, most recently changed first: everything it saved (its chats and tasks) and what was handed to
+     * it, for carrying context into its new session. Only for someone who may use the agent (who may see its files).
+     */
+    public List<WorkFile> recentForAgent(String agentId, String user, int limit) {
+        if (agentId == null || agentId.isBlank() || !canAccessAgent(agentId, user)) {
+            return List.of();
+        }
+        return store.listFor(null, List.of(agentId)).stream().filter(f -> agentId.equals(f.agentId()))
+                .limit(Math.max(0, limit)).toList();
+    }
+
+    /** The start of a text file {@code user} may see (as {@link #readText} reads it); null when it has no text. */
+    public String excerpt(WorkFile file, String user, int maxChars) {
+        WorkFile f;
+        try {
+            f = visible(file.id(), user);
+        } catch (WorkFileNotFoundException e) {
+            return null; // not theirs to read: left out of the context, not a failed turn
+        }
+        if (WorkFile.LINK.equals(f.storage()) || f.kind() != WorkFileKind.DOCUMENT || !(f.mimeType().startsWith("text/")
+                || f.name().toLowerCase(Locale.ROOT).matches(".*\\.(md|markdown|txt|csv|json|html?|xml|ya?ml)$"))) {
+            return null;
+        }
+        try (InputStream in = openContent(f)) {
+            String text = new String(in.readNBytes(maxChars * 4), StandardCharsets.UTF_8);
+            return text.length() <= maxChars ? text : text.substring(0, maxChars) + "\n…（后面还有内容，已截断）";
+        } catch (IOException | RuntimeException e) {
+            return null; // a file that can't be read now just isn't excerpted
+        }
+    }
+
+    /**
+     * Keeps a long text someone pasted into a chat as a Markdown file of the agent's, so it outlives the session and
+     * tasks and later sessions can read it whole. Named after its first line.
+     */
+    public WorkFile keepPasted(String user, String agentId, String sessionId, String messageId, String text) {
+        String first = text.strip().lines().map(String::strip).filter(l -> !l.isEmpty()).findFirst().orElse("对话中的长文");
+        first = first.replaceAll("^[#>*\\-\\s]+", "").replaceAll("[\\\\/:*?\"<>|]", " ").strip();
+        if (first.length() > 40) {
+            first = first.substring(0, 40);
+        }
+        WorkFile saved = writeText(new Origin(user, agentId, null, sessionId, messageId, WorkFile.ORIGIN_CHAT),
+                cleanName((first.isBlank() ? "对话中的长文" : first) + ".md"), text, null, List.of());
+        return saved;
+    }
+
     /** Copies a file the user can see into a run's workspace ({@code uploads/}), for it to work on; returns the relative path. */
     public String copyToWorkspace(String id, String user, Path workspace) {
         WorkFile f = visible(id, user);

@@ -105,6 +105,8 @@ public class ChatService {
     private final FileService files;
     private final String defaultModel;
     private final List<String> allowedTools;
+    /** A message at least this long is kept as a file of the agent's (see FileService#keepPasted). */
+    static final int LONG_PASTE_CHARS = 3_000;
     private final boolean skipPermissions;
     private final long sseTimeoutMs;
     private final McpGrants mcpGrants;   // null = chat agents get no SuperAgent MCP
@@ -565,10 +567,21 @@ public class ChatService {
         }
         String text = content == null ? "" : content;
         store.appendMessage(new ChatMessage(userMessageId, sessionId, MessageRole.USER, text, Instant.now(), user));
+        String keptAs = null;
         if (agent != null) {
             files.saveLinks(user, agent.id(), null, sessionId, userMessageId, text); // links are resources too
+            if (text.strip().length() >= LONG_PASTE_CHARS) {
+                // A long paste (an outline, a spec) is material: kept whole in the agent's files, it outlives this
+                // session, and tasks and later sessions can read it instead of a truncated copy.
+                com.superagent.core.file.WorkFile kept = files.keepPasted(user, agent.id(), sessionId, userMessageId, text);
+                keptAs = "（系统：这段长文已自动存为文件「" + kept.name() + "」，id " + kept.id()
+                        + "。开任务要用它时，在任务说明里写上这个文件 id，不要只说「用户发的内容」。）";
+            }
         }
         String prompt = text.isBlank() && !attached.isEmpty() ? ImageAttachmentStore.IMAGE_ONLY_PROMPT : text;
+        if (keptAs != null) {
+            prompt = prompt + "\n\n" + keptAs;
+        }
         if (delivered != null) {
             prompt = (text.isBlank() && attached.isEmpty() ? "" : prompt + "\n\n") + delivered.note();
         }
@@ -590,7 +603,7 @@ public class ChatService {
         // A session's first turn starts from memory plus the latest messages; later turns resume their history
         // (the memory alone still rides along, for when the CLI has to start over on its own).
         String agentMemory = agent == null ? null
-                : session.agentSessionId() == null ? memory.context(agent, Set.of(userMessageId)) : memory.read(agent);
+                : session.agentSessionId() == null ? memory.context(agent, Set.of(userMessageId), user) : memory.read(agent);
         String turnPrompt = prompt;
         executor.execute(TenantContext.wrap(() -> {
             try {
@@ -703,7 +716,7 @@ public class ChatService {
                 agentType = nextType;
                 runner = runners.get(nextType);
                 ChatSession moved = sessionForTurn(agent, next, true); // another model: a new session, from memory + recent messages
-                attempt = attempt(moved, agentType, runner, model, systemPrompt, memory.context(agent, Set.of(userMessageId)),
+                attempt = attempt(moved, agentType, runner, model, systemPrompt, memory.context(agent, Set.of(userMessageId), user),
                         prompt, attached, user, assistantMessageId, emitter, cancellation);
             }
             if (agent != null && !cancellation.isCancelled()) {
@@ -713,7 +726,7 @@ public class ChatService {
                     retried = true;
                     ChatSession fresh = rotateSession(agent);
                     attempt = attempt(fresh, agentType, runner, model, systemPrompt,
-                            memory.context(agent, Set.of(userMessageId)), prompt, attached, user, assistantMessageId,
+                            memory.context(agent, Set.of(userMessageId), user), prompt, attached, user, assistantMessageId,
                             emitter, cancellation);
                     if (attempt.failed()) {
                         memory.recordFailure(agent, attempt.error());

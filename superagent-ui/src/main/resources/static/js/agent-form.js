@@ -198,3 +198,16 @@ el.composer.addEventListener("submit", async e => {
 });
 
 el.input.addEventListener("input", autoGrow);
+// ⌘ Enter (Ctrl Enter on Windows/Linux) sends; Enter alone starts a new line, so long prompts are easy to write.
+el.input.addEventListener("keydown", e => {
+  if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || e.isComposing) return;
+  e.preventDefault();
+  if (!streaming) el.composer.requestSubmit(); // while a reply streams the button means Stop: don't stop by accident
+});
+// Off a Mac the key is Ctrl: say so.
+if (!/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) {
+  document.querySelectorAll(".composer__hint").forEach(h => {
+    h.textContent = h.textContent.replace("⌘", "Ctrl");
+    h.removeAttribute("data-i18n"); // so a language switch keeps Ctrl
+  });
+}

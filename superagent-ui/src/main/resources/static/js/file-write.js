@@ -35,7 +35,7 @@ const FW_MAX_BYTES = 50 * 1024 * 1024; // the server's limit per file
 let fwEditing = null; // the file being edited; null while writing a new one
 
 /** Where new files go: the folder picked in the tree, if it's a real one. */
-const fwFolder = () => (ffChosen !== FF_ALL && ffChosen !== FF_UNFILED ? ffChosen : null);
+const fwFolder = () => (ffChosen !== FF_ALL && ffChosen !== FF_UNFILED && !ffAgentId(ffChosen) ? ffChosen : null);
 
 // ---------- upload ----------
 

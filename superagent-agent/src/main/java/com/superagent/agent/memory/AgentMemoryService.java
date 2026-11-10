@@ -91,7 +91,19 @@ public class AgentMemoryService {
         return t;
     });
     private final int failureLimit;
+    /** How many characters of the latest conversation a new session reads verbatim. */
     private final int recentMessages;
+    private com.superagent.files.FileService files; // null in tests: no files carried over
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setFiles(com.superagent.files.FileService files) {
+        this.files = files;
+    }
+
+    /** How many of the agent's files a new session is told about, and how much of the newest text ones it reads. */
+    private static final int CARRIED_FILES = 20;
+    private static final int EXCERPTED_FILES = 3;
+    private static final int EXCERPT_CHARS = 6_000;
 
     public AgentMemoryService(AgentStore agents, ChatStore chats, AgentMemoryStateStore states,
                               ProviderService providers, SettingsService settings, List<AgentRunner> agentRunners,
@@ -101,7 +113,7 @@ public class AgentMemoryService {
                               @Value("${superagent.memory.agents-per-tick:3}") int perTick,
                               @Value("${superagent.memory.timezone:Asia/Shanghai}") String timezone,
                               @Value("${superagent.agent.session-failure-limit:10}") int failureLimit,
-                              @Value("${superagent.memory.recent-messages:10}") int recentMessages,
+                              @Value("${superagent.memory.carry-chars:60000}") int recentMessages,
                               AgentLogService runLog) {
         this.agents = agents;
         this.chats = chats;
@@ -124,22 +136,69 @@ public class AgentMemoryService {
     // --- reading, for a fresh session ---
 
     /**
-     * What a fresh session starts from: the long-term memory plus the last few messages verbatim — the
-     * part not distilled yet — so nothing between the last distillation and the switch is lost. Messages
-     * in {@code exclude} (the one being sent now) are left out. Null when there is nothing at all.
+     * What a fresh session starts from: the long-term memory, the latest conversation verbatim (as much as the budget
+     * holds, whole messages first), and the agent's files: what it made lately, the newest text ones read in part.
+     * Most of what earlier work came to lives in those files, listed as far as {@code user} (who the turn is for) may see
+     * them. Messages in {@code exclude} (the one being sent now) are left out. Null when there is nothing at all.
      */
-    public String context(Agent agent, Collection<String> exclude) {
+    public String context(Agent agent, Collection<String> exclude, String user) {
         String memory = read(agent);
         List<ChatMessage> all = messages(agent.id()).stream()
                 .filter(m -> exclude == null || !exclude.contains(m.id())).toList();
-        List<ChatMessage> recent = all.subList(Math.max(0, all.size() - recentMessages), all.size());
-        String transcript = recent.isEmpty() ? "" : AgentMemoryRules.transcript(recent, zone);
-        if (memory == null && transcript.isBlank()) {
+        String transcript = all.isEmpty() ? "" : AgentMemoryRules.carryOver(all, zone, recentMessages);
+        String madeFiles = filesSection(agent, user);
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        if (memory != null && !memory.isBlank()) {
+            parts.add(memory.strip());
+        }
+        if (!transcript.isBlank()) {
+            parts.add("## 最近的对话（原文，从较早到最新；更早的对话用 chat_history_search / chat_history_read 查）\n" + transcript);
+        }
+        if (madeFiles != null) {
+            parts.add(madeFiles);
+        }
+        return parts.isEmpty() ? null : String.join("\n\n", parts);
+    }
+
+    /** The agent's files, newest first, and the start of the newest text ones: where its earlier work ended up. */
+    private String filesSection(Agent agent, String user) {
+        if (files == null || user == null) {
             return null;
         }
-        return (memory == null ? "" : memory.strip())
-                + (transcript.isBlank() ? "" : (memory == null ? "" : "\n\n")
-                + "## 最近的对话（原文，最近 " + recent.size() + " 条）\n" + transcript);
+        List<com.superagent.core.file.WorkFile> made = files.recentForAgent(agent.id(), user, CARRIED_FILES);
+        if (made.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder("## 你的文件（「文件」里这个 Agent 的目录，最近的在前）\n"
+                + "之前任务和对话的成果大多在这些文件里。要用哪个，用 mcp__superagent__file_get 按 id 取到工作区再读。\n");
+        java.time.format.DateTimeFormatter stamp = java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm");
+        for (com.superagent.core.file.WorkFile f : made) {
+            sb.append("- ").append(f.name()).append(" · id ").append(f.id()).append(" · ")
+                    .append(stamp.format(f.updatedAt().atZone(zone))).append(" · ").append(originLabel(f))
+                    .append(f.tags().isEmpty() ? "" : " · 标签 " + String.join("、", f.tags())).append('\n');
+        }
+        int shown = 0;
+        for (com.superagent.core.file.WorkFile f : made) {
+            if (shown >= EXCERPTED_FILES) {
+                break;
+            }
+            String text = files.excerpt(f, user, EXCERPT_CHARS);
+            if (text == null || text.isBlank()) {
+                continue;
+            }
+            sb.append("\n### ").append(f.name()).append("（开头部分）\n").append(text.strip()).append('\n');
+            shown++;
+        }
+        return sb.toString().stripTrailing();
+    }
+
+    private static String originLabel(com.superagent.core.file.WorkFile f) {
+        return switch (f.origin() == null ? "" : f.origin()) {
+            case com.superagent.core.file.WorkFile.ORIGIN_TASK -> "任务产出";
+            case com.superagent.core.file.WorkFile.ORIGIN_CHAT -> "对话中保存";
+            case com.superagent.core.file.WorkFile.ORIGIN_UPLOAD -> "用户上传";
+            default -> "文件";
+        };
     }
 
     // --- session health ---

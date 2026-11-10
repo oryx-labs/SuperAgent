@@ -55,4 +55,27 @@ class AgentMemoryRulesTest {
         String transcript = AgentMemoryRules.transcript(messages(2, 0), ZoneId.of("Asia/Shanghai"));
         assertThat(transcript).startsWith("[2026-11-05 09:59] 用户：msg 0").contains("助手：msg 1");
     }
+
+    @Test
+    void aNewSessionReadsWholeMessagesUpToItsBudgetAndOnlyTheOldestThatDoesNotFitIsShortened() {
+        Instant t = Instant.parse("2026-11-09T06:58:00Z");
+        String outline = "大纲开头" + "课".repeat(9_600) + "第16节结尾";
+        List<ChatMessage> chat = List.of(
+                new ChatMessage("old", "s", MessageRole.USER, "很早的话", t.minusSeconds(600)),
+                new ChatMessage("outline", "s", MessageRole.USER, outline, t),
+                new ChatMessage("ok1", "s", MessageRole.USER, "确认", t.plusSeconds(30)),
+                new ChatMessage("done", "s", MessageRole.ASSISTANT, "任务完成了", t.plusSeconds(60)));
+        ZoneId zone = ZoneId.of("Asia/Shanghai");
+
+        // Room for everything: the ~9,600-character outline comes over whole, not cut at 2,000.
+        String all = AgentMemoryRules.carryOver(chat, zone, 60_000);
+        assertThat(all).contains(outline, "很早的话").endsWith("助手：任务完成了");
+        assertThat(all.indexOf("很早的话")).isLessThan(all.indexOf("大纲开头"));
+
+        // Too little room: the newest come first; the outline keeps its start and end and says how to read it all,
+        // and nothing older than it is carried.
+        String tight = AgentMemoryRules.carryOver(chat, zone, 5_000);
+        assertThat(tight).contains("大纲开头", "第16节结尾", "中间省略", "chat_history_read 读取消息 outline", "用户：确认")
+                .doesNotContain("很早的话");
+    }
 }
