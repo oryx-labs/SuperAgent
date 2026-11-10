@@ -3,6 +3,7 @@ package com.superagent.docs;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.superagent.core.link.LinkContent;
 import com.superagent.platform.connector.ConnectorService;
 import com.superagent.platform.connector.FeishuDocsOAuthClient;
 import com.superagent.platform.integration.IntegrationService;
@@ -71,7 +72,7 @@ public class FeishuDocTools implements McpToolProvider {
                 tool("feishu_doc_list", "列出用户飞书 / Lark 云空间里一个文件夹下的文件和子文件夹（名称、类型、链接）。不填 folder 列出「我的空间」根目录。",
                         props(opt("folder", "string", "文件夹链接（/drive/folder/…）或文件夹 token；不填为根目录"),
                                 opt("page_token", "string", "上一次结果给出的下一页标记")), (String[]) null),
-                tool("feishu_doc_read", "读取一篇飞书 / Lark 新版文档的纯文本内容（最多前 3 万字）。", props(req("doc", "string", doc)), "doc"),
+                tool("feishu_doc_read", "以用户本人的权限读取一篇飞书 / Lark 新版文档的纯文本内容（最多前 3 万字）。公开文档也可以直接用 read_link 读，不需要授权。", props(req("doc", "string", doc)), "doc"),
                 tool("feishu_doc_create", "以用户本人身份新建一篇飞书 / Lark 文档并写入内容，返回链接。",
                         props(req("title", "string", "标题"), req("content", "string", md),
                                 opt("folder", "string", "放到哪个云空间文件夹（文件夹链接或 token）；不填放在用户的我的空间")),
@@ -87,7 +88,8 @@ public class FeishuDocTools implements McpToolProvider {
         String owner = requireOwner(grant, "飞书文档");
         McpGrants.requireDocAccess(grant, name);
         String token = connectors.userToken(ConnectorService.FEISHU_DOCS_ID, owner).orElseThrow(() -> new McpToolException(
-                "用户还没有授权飞书文档。请让他在 SuperAgent 的「连接」页找到「飞书 / Lark」，在「文档」那里点授权，然后再试。"));
+                "用户还没有授权飞书文档。公开（互联网上获得链接的人可阅读）的文档不用授权，用 read_link 就能读；"
+                        + "其他文档请让用户在 SuperAgent 的「连接」页找到「飞书 / Lark」，在「文档」那里点授权，然后再试。"));
         Map<String, String> auth = Map.of("Authorization", "Bearer " + token);
         String base = oauth.base();
         return McpToolResult.ok(switch (name) {
@@ -130,6 +132,26 @@ public class FeishuDocTools implements McpToolProvider {
             }
             default -> throw new McpToolException("Unknown tool: " + name);
         });
+    }
+
+    /** Whether the company's Feishu app is set up and {@code user} authorized their documents. */
+    public boolean authorized(String user) {
+        return integrations.ready(IntegrationService.FEISHU)
+                && connectors.userToken(ConnectorService.FEISHU_DOCS_ID, user).isPresent();
+    }
+
+    /** A document's whole text, read as {@code user} through the Open API (whatever they can open). */
+    public LinkContent readAsUser(String user, String doc) {
+        String token = connectors.userToken(ConnectorService.FEISHU_DOCS_ID, user)
+                .orElseThrow(() -> new McpToolException("用户还没有授权飞书文档"));
+        Map<String, String> auth = Map.of("Authorization", "Bearer " + token);
+        String base = oauth.base();
+        String id = documentId(base, auth, doc);
+        String title = api.send("GET", base + "/open-apis/docx/v1/documents/" + id, auth, null)
+                .path("data").path("document").path("title").asText("飞书文档");
+        String text = api.send("GET", base + "/open-apis/docx/v1/documents/" + id + "/raw_content", auth, null)
+                .path("data").path("content").asText("");
+        return new LinkContent(doc, title, text, LinkContent.AUTHORIZED, true);
     }
 
     private String search(String base, Map<String, String> auth, String query) {

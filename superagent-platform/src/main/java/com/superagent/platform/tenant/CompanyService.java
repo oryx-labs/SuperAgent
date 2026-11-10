@@ -1,6 +1,5 @@
 package com.superagent.platform.tenant;
 
-import com.superagent.core.error.ForbiddenException;
 import com.superagent.core.tenant.Company;
 import com.superagent.core.tenant.CompanyStarted;
 import com.superagent.core.tenant.CompanyStore;
@@ -21,7 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <p>A company's id is its organization's short name, typed at sign-in next to the username (usernames are only
  * unique within a company). There is no built-in one: every organization is registered (see OrganizationService), and
- * the first one registered is the host's ({@link #isHost}).
+ * all are equal. Each treats the runtime as its own: today they share one machine, later each gets its own.
  */
 @Service
 public class CompanyService {
@@ -32,49 +31,10 @@ public class CompanyService {
     private final ApplicationEventPublisher events;
     private final AtomicInteger turn = new AtomicInteger();
 
-    /** The organization named to own the host (its English name); blank = the first one ever registered. */
-    private final String hostOrg;
-
     public CompanyService(CompanyStore companies, ApplicationEventPublisher events) {
-        this(companies, events, "");
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired
-    public CompanyService(CompanyStore companies, ApplicationEventPublisher events,
-                          @org.springframework.beans.factory.annotation.Value("${superagent.host-org:}") String hostOrg) {
         this.companies = companies;
         this.events = events;
-        this.hostOrg = hostOrg == null ? "" : hostOrg.strip().toLowerCase(java.util.Locale.ROOT);
     }
-
-    /**
-     * The company that owns the host: the one named by {@code superagent.host-org} ({@code SUPERAGENT_HOST_ORG}), or,
-     * with none named (a local install), the first one ever registered. Only it changes the software on the machine
-     * (CLI installs) and may run on the machine's own keys and CLI logins; every other company brings its own keys.
-     * Name it on a public server, so a stranger who registers first after a fresh install can't claim the host.
-     *
-     * <p>Unnamed, it is pinned to that first company for good (companies are never deleted, and the first one stays the first even
-     * when disabled): a disabled host means no host, never the next-oldest company, which could be a stranger's on a
-     * public server.
-     */
-    public boolean isHost(String companyId) {
-        if (companyId == null) {
-            return false;
-        }
-        if (!hostOrg.isEmpty()) {
-            return hostOrg.equals(companyId) && companies.find(companyId).map(Company::enabled).orElse(false);
-        }
-        Company first = hostCompany;
-        if (first == null) {
-            first = companies.list().stream().filter(c -> c.createdAt() != null)
-                    .min(java.util.Comparator.comparing(Company::createdAt).thenComparing(Company::id)).orElse(null);
-            hostCompany = first; // the first one can't change once there is one
-        }
-        return first != null && first.id().equals(companyId)
-                && companies.find(first.id()).map(Company::enabled).orElse(false);
-    }
-
-    private volatile Company hostCompany;
 
     /** Start-up work on company data runs once per company, as that company (see {@link CompanyStarted}). */
     @EventListener(ApplicationReadyEvent.class)
@@ -101,23 +61,6 @@ public class CompanyService {
         TenantContext.run(id, () -> events.publishEvent(new CompanyStarted(id)));
         log.info("company {} ({}) created", id, name);
         return c;
-    }
-
-    /**
-     * Installing or upgrading software changes the shared host, which belongs to the company that runs it (the
-     * default one) until a separate platform back office does this.
-     */
-    public void requireHostCompany() {
-        if (!isHost(TenantContext.require())) {
-            throw new HostOnlyException();
-        }
-    }
-
-    /** Only the company that runs the host may change the software on it. */
-    public static class HostOnlyException extends ForbiddenException {
-        HostOnlyException() {
-            super("安装和升级命令行工具会改动整台服务器，只有第一个注册的组织（部署这套系统的组织）能操作");
-        }
     }
 
     public List<String> enabledIds() {

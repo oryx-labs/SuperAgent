@@ -21,6 +21,11 @@ import com.superagent.core.chat.ChatMessage;
 import com.superagent.core.chat.ChatStore;
 import com.superagent.core.chat.ImageAttachment;
 import com.superagent.core.chat.MessageRole;
+import com.superagent.core.link.LinkContent;
+import com.superagent.core.link.LinkReader;
+import com.superagent.core.link.LinkUrls;
+import com.superagent.core.link.UnreadableLinkException;
+import com.superagent.core.link.UnreadableMaterialsException;
 import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.task.Task;
 import com.superagent.core.tenant.CompanyStarted;
@@ -180,6 +185,16 @@ public class TaskService implements TaskRecovery {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void useQuotas(QuotaService quotas) {
         this.quotas = quotas;
+    }
+
+    /** Links in a new task's materials checked before it is created; more than this are left to the run. */
+    private static final int MATERIAL_LINKS = 8;
+    private static final java.time.Duration MATERIAL_WAIT = java.time.Duration.ofSeconds(90);
+    private LinkReader linkReader; // null in tests: materials aren't checked
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void useLinkReader(LinkReader linkReader) {
+        this.linkReader = linkReader;
     }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -614,7 +629,90 @@ public class TaskService implements TaskRecovery {
      * chosen for the job.
      */
     public TaskDto create(CreateTaskRequest request, String owner, String agentId, String sessionId, String messageId) {
-        return create(request, owner, agentId, sessionId, messageId, null);
+        return create(request, owner, agentId, sessionId, messageId, (List<String>) null);
+    }
+
+    /**
+     * As above, with the links that are its materials ({@code materials}; null = every link in the brief). Each is read
+     * first: if any can't be, no task is made ({@link UnreadableMaterialsException} says which and how to fix it), so a
+     * task never sets off without what it needs. A subtask ({@link #createSubtask}) skips this: its complex task did it.
+     */
+    public TaskDto create(CreateTaskRequest request, String owner, String agentId, String sessionId, String messageId,
+                          List<String> materials) {
+        String who = owner == null || owner.isBlank() ? defaultOwner : owner;
+        return create(withMaterials(request, materials, who, agentId, sessionId, messageId), owner, agentId, sessionId,
+                messageId, (String) null);
+    }
+
+    /**
+     * Reads a new task's material links. What was read goes into Files and is named in the brief, so the run starts
+     * from it instead of fetching again; anything unreadable stops the task from being created.
+     */
+    private CreateTaskRequest withMaterials(CreateTaskRequest request, List<String> materials, String owner, String agentId,
+                                            String sessionId, String messageId) {
+        List<String> urls = materials != null
+                ? materials.stream().flatMap(m -> LinkUrls.in(m).stream()).distinct().toList()
+                : LinkUrls.in(request.brief());
+        if (linkReader == null || urls.isEmpty()) {
+            return request;
+        }
+        List<String> checked = urls.subList(0, Math.min(MATERIAL_LINKS, urls.size()));
+        String company = TenantContext.require();
+        Map<String, java.util.concurrent.Future<LinkContent>> reads = new java.util.LinkedHashMap<>();
+        List<LinkContent> read = new ArrayList<>();
+        List<UnreadableLinkException> unreadable = new ArrayList<>();
+        try (java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            for (String url : checked) {
+                reads.put(url, pool.submit(() -> TenantContext.call(company, () -> linkReader.read(url, owner))));
+            }
+            long deadline = System.nanoTime() + MATERIAL_WAIT.toNanos();
+            for (Map.Entry<String, java.util.concurrent.Future<LinkContent>> e : reads.entrySet()) {
+                try {
+                    read.add(e.getValue().get(Math.max(1, deadline - System.nanoTime()), java.util.concurrent.TimeUnit.NANOSECONDS));
+                } catch (java.util.concurrent.ExecutionException ex) {
+                    // Anything that stops a material from being read is reported with it, not as a server error.
+                    unreadable.add(ex.getCause() instanceof UnreadableLinkException u ? u
+                            : new UnreadableLinkException(e.getKey(), "读取出错：" + ex.getCause().getMessage(), "稍后再试"));
+                } catch (java.util.concurrent.TimeoutException ex) {
+                    e.getValue().cancel(true);
+                    unreadable.add(new UnreadableLinkException(e.getKey(), "读取超时", "稍后再试，或把内容导出成文件发过来"));
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("interrupted while reading the task's materials", ex);
+                }
+            }
+        }
+        if (!unreadable.isEmpty()) {
+            throw new UnreadableMaterialsException(unreadable);
+        }
+        StringBuilder note = new StringBuilder("\n\n## 已读取的外部资料\n建任务时已经读好下面这些链接");
+        note.append(files != null ? "，存进了 Files：用 file_get 取到工作区再看，不用再去抓链接。\n" : "。\n");
+        for (LinkContent c : read) {
+            note.append("- ").append(c.title()).append("（").append(c.url()).append("）");
+            if (files != null) {
+                com.superagent.core.file.WorkFile f = files.writeText(new FileService.Origin(owner, agentId, null, sessionId,
+                        messageId, com.superagent.core.file.WorkFile.ORIGIN_TASK), materialName(c), materialText(c), null);
+                note.append(" → 文件 ").append(f.id()).append("（").append(f.name()).append("）");
+            }
+            note.append(c.complete() ? "" : "，注意只读到了一部分").append('\n');
+        }
+        if (urls.size() > checked.size()) {
+            note.append("链接较多，只预读了前 ").append(checked.size()).append(" 个，其余的用 read_link 读。\n");
+        }
+        return new CreateTaskRequest(request.title(), (request.brief() == null ? "" : request.brief()) + note, request.source(),
+                request.repo(), request.branch(), request.flow(), request.model(), request.agentType(), request.kind(),
+                request.tier(), request.continuesFrom());
+    }
+
+    private static String materialName(LinkContent c) {
+        String title = c.title() == null || c.title().isBlank() ? "资料" : c.title().strip();
+        title = title.replaceAll("[\\\\/:*?\"<>|\\s]+", "_");
+        return (title.length() > 60 ? title.substring(0, 60) : title) + ".md";
+    }
+
+    private static String materialText(LinkContent c) {
+        return "# " + c.title() + "\n\n来源：" + c.url() + "\n读取方式：" + (LinkContent.AUTHORIZED.equals(c.via()) ? "用户本人的授权" : "公开内容")
+                + "\n读取时间：" + Instant.now() + (c.complete() ? "" : "\n注意：只读到了一部分") + "\n\n---\n\n" + c.text();
     }
 
     /**
@@ -1857,6 +1955,9 @@ public class TaskService implements TaskRecovery {
                 """ + CONFIRM_MARKER + """
 : 开头、后接你的具体问题，然后停止等待用户答复。用户会看到一个「确认继续」按钮，所以问题要写成能直接点确认的样子：\
                 写清你打算怎么做；有几个选项时列出来，并标出你推荐的那个（确认就按推荐的做）。否则请直接完成，并在结尾给出交付总结。
+                资料里的链接用 read_link 读。资料读不到时，同样输出一行以 \
+                """ + CONFIRM_MARKER + """
+: 开头的话停下来，写明哪份资料读不到、原因和用户可以怎么解决；不要在没读到资料的情况下凭猜测继续写。
 
                 任务说明：
                 """ + (brief == null ? "" : brief);

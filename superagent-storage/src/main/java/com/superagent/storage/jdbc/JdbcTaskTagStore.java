@@ -10,10 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * JDBC task tags: one row per task holding its tags, newline-separated (a tag never contains one). MySQL replaces
- * the row; ClickHouse keeps the newest version of it (ReplacingMergeTree, read with FINAL).
- */
+/** JDBC task tags on MySQL: one row per task holding its tags, newline-separated (a tag never contains one). */
 public class JdbcTaskTagStore implements TaskTagStore {
 
     static final String MYSQL_DDL = """
@@ -26,18 +23,11 @@ public class JdbcTaskTagStore implements TaskTagStore {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """;
 
-    static final String CLICKHOUSE_DDL = """
-            CREATE TABLE IF NOT EXISTS task_tag (
-              company_id String, task_id String, tags String, updated_at DateTime64(3, 'UTC')
-            ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (company_id, task_id)
-            """;
 
     private final JdbcTemplate jdbc;
-    private final boolean clickHouse;
 
     public JdbcTaskTagStore(JdbcTemplate jdbc, String ddl) {
         this.jdbc = jdbc;
-        this.clickHouse = ddl.contains("MergeTree");
         TenantSchema.create(jdbc, ddl);
     }
 
@@ -45,20 +35,20 @@ public class JdbcTaskTagStore implements TaskTagStore {
     public void set(String taskId, List<String> tags) {
         String joined = String.join("\n", tags);
         Timestamp now = Timestamp.from(Instant.now());
-        jdbc.update((clickHouse ? "INSERT" : "REPLACE") + " INTO task_tag (company_id, task_id, tags, updated_at) VALUES (?, ?, ?, ?)",
+        jdbc.update("REPLACE INTO task_tag (company_id, task_id, tags, updated_at) VALUES (?, ?, ?, ?)",
                 TenantSchema.company(), taskId, joined, now);
     }
 
     @Override
     public List<String> tags(String taskId) {
-        return jdbc.queryForList("SELECT tags FROM task_tag" + (clickHouse ? " FINAL" : "") + " WHERE company_id = ? AND task_id = ?",
+        return jdbc.queryForList("SELECT tags FROM task_tag WHERE company_id = ? AND task_id = ?",
                 String.class, TenantSchema.company(), taskId).stream().findFirst().map(JdbcTaskTagStore::split).orElse(List.of());
     }
 
     @Override
     public Map<String, List<String>> all() {
         Map<String, List<String>> out = new LinkedHashMap<>();
-        jdbc.query("SELECT task_id, tags FROM task_tag" + (clickHouse ? " FINAL" : "") + " WHERE company_id = ?", rs -> {
+        jdbc.query("SELECT task_id, tags FROM task_tag WHERE company_id = ?", rs -> {
             List<String> tags = split(rs.getString(2));
             if (!tags.isEmpty()) {
                 out.put(rs.getString(1), tags);

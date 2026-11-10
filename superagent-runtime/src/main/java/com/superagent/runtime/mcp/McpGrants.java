@@ -86,15 +86,15 @@ public class McpGrants {
     /** Deleting a skill needs a card the user confirms, so only conversations get it (not tasks). */
     public static final List<String> SKILL_CHAT_TOOLS = List.of("mcp__superagent__skill_delete");
 
-    /** Office document tools (Feishu / Lark, DingTalk); each only shows up once its app is set up. */
+    /** Office document tools (Feishu / Lark, DingTalk; each only once its app is set up) and reading any link. */
     public static final List<String> DOC_TOOLS = java.util.stream.Stream.of("feishu_doc_search", "feishu_doc_list",
             "feishu_doc_read", "feishu_doc_create", "feishu_doc_append", "feishu_doc_replace", "dingtalk_doc_spaces",
-            "dingtalk_doc_list", "dingtalk_doc_read", "dingtalk_doc_create", "dingtalk_doc_replace")
+            "dingtalk_doc_list", "dingtalk_doc_read", "dingtalk_doc_create", "dingtalk_doc_replace", "read_link")
             .map(n -> "mcp__superagent__" + n).toList();
 
     /** The reading half: the SuperAgent's chat looks things up itself and hands writing to its team. */
     public static final List<String> DOC_READ_TOOLS = java.util.stream.Stream.of("feishu_doc_search", "feishu_doc_list",
-            "feishu_doc_read", "dingtalk_doc_spaces", "dingtalk_doc_list", "dingtalk_doc_read")
+            "feishu_doc_read", "dingtalk_doc_spaces", "dingtalk_doc_list", "dingtalk_doc_read", "read_link")
             .map(n -> "mcp__superagent__" + n).toList();
 
     /** Whether a run may call this office document tool: the SuperAgent's chat only reads, its background never. */

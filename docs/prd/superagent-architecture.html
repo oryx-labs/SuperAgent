@@ -806,7 +806,10 @@ table.comps tr.grp td { background: var(--paper); font-family: var(--font-mono);
     <h3>4.9 存储与文件</h3>
     <div class="prose stack-text">
       <ul class="tight">
-        <li><b>MySQL</b>：一个库，存全部业务数据；<b>ClickHouse</b> 可选，用于用量分析；<b>对象存储</b>（本地盘或 S3 兼容）存文件和工作区快照，按公司分前缀。</li>
+        <li><b>MySQL</b>：一个库，所有公司共用，存全部业务数据（用户、公司、Agent、任务、对话、文件索引、连接、Key、设置），只有 MySQL 一种实现：这些数据要事务和唯一约束。</li>
+        <li><b>分析数据默认也在 MySQL</b>：token 用量、Agent 运行日志、耗时记录。量大以后可以设 <code>superagent.storage.analytics=clickhouse</code>，只把这几张只增不改的表放到 <b>ClickHouse</b>，其他数据不受影响（2026-11-10 起，取消了「整个系统切到 ClickHouse」的做法）。</li>
+        <li><b>对象存储</b>（本地盘或 S3 兼容）存文件和工作区快照，按公司分前缀。现在「文件」已支持两种；对话附件、头像、Logo、技能图片还只在本地盘（按公司分目录），工作区快照未做。</li>
+        <li><b>主密钥</b>：本地密钥文件或环境变量；每家公司一把数据密钥，由主密钥加密后存在公司表里。KMS 以后按需接在主密钥这一层。</li>
         <li><b>工作区在 Worker 本机</b>，每个员工一个独立的卷。不用共享目录（NFS）：那样每台 Worker 都能看到所有人的工作区，一台被攻破影响太大。</li>
         <li><b>文件进出只走协议</b>：附件、<code>file_get</code> 由控制面经 Worker 送进沙箱；Agent 的产出由 Worker 取回、存进对象存储，再登记到「文件」。控制面不再直接读写工作区路径。</li>
       </ul>
@@ -1193,14 +1196,17 @@ table.comps tr.grp td { background: var(--paper); font-family: var(--font-mono);
       <table>
         <thead><tr><th>方面</th><th>现状</th><th>目标</th></tr></thead>
         <tbody>
-          <tr><td>租户</td><td>单公司；约 40 张表，没有公司字段；系统设置全局唯一</td><td>所有表带公司字段，存储层统一加条件；设置归公司</td></tr>
+          <tr><td>租户</td><td><b>已完成（第一步）</b>：所有表带公司字段，存储层统一加条件、缺公司上下文直接报错；设置、Key、连接归公司；身份改为不可变的用户 id</td><td>保持；新表一律带公司字段</td></tr>
           <tr><td>Agent 执行</td><td>CLI 在控制面本机直接起进程，和服务同一个系统用户，没有隔离</td><td>经调度在员工沙箱里执行</td></tr>
           <tr><td>模型 Key</td><td>写进 CLI 的环境变量或运行配置文件，Agent 读得到</td><td>只在模型网关；沙箱拿不到</td></tr>
           <tr><td>工作区</td><td>控制面直接读写本机工作目录（附件、<code>file_get</code>、产出存档、编码仓库）</td><td>工作区在 Worker 本机；文件进出只走协议</td></tr>
           <tr><td>用量计量</td><td>从各家 CLI 的输出里换算</td><td>在模型网关统一计量</td></tr>
           <tr><td>进程内状态</td><td>输出流、后台循环、IM 长连接、会话池都在单个进程里</td><td>状态外置，支持多实例</td></tr>
           <tr><td>出网</td><td>不受限制，Agent 能访问内网和元数据地址</td><td>经出口代理，按策略放行</td></tr>
-          <tr><td>默认密码</td><td>管理员默认密码是 <code>admin</code></td><td>安装时生成，或首次登录强制修改</td></tr>
+          <tr><td>默认密码</td><td><b>已完成</b>：不再有内置管理员，组织自助注册；别人设的密码首次登录强制修改</td><td>保持</td></tr>
+          <tr><td>CLI 安装</td><td>装在控制面本机（私有 Node），所有公司共用一份；任何公司的管理员都能安装、升级</td><td>预装在沙箱镜像里，版本由平台统一发布；公司管理员不能改动整台机器</td></tr>
+          <tr><td>控制面自己起的进程</td><td>模型检测、Key 检测、模型列表、连接的「能力」列表（<code>tools/list</code>）都在控制面本机起 CLI 或 stdio MCP 进程；管理员添加的 stdio 连接是任意命令</td><td>凡是要执行 CLI 或第三方命令的，都放进沙箱；控制面只发 HTTP 请求</td></tr>
+          <tr><td>常驻进程</td><td>对话之间常驻的 Claude Code 进程在控制面本机，最多 20 个</td><td>常驻在员工沙箱里，随沙箱一起空闲回收</td></tr>
         </tbody>
       </table>
     </div>
@@ -1211,10 +1217,12 @@ table.comps tr.grp td { background: var(--paper); font-family: var(--font-mono);
     <h2><span class="num">9</span>演进路线</h2>
     <div class="prose stack-text">
       <p><b>从现在开始</b>，新写的代码就按目标架构来：数据带公司归属，不再新增全局设置；控制面不再新增直接读写工作区的代码。这样不打断现在的迭代，也不会继续积累要返工的代码。存量改造分四步，每一步都能单独上线：</p>
+      <p><b>第二步拆成两段</b>（2026-11-10 讨论）：先在现在的单进程里把运行时隔离做出来，再把执行拆到 Worker。2a 不碰文件进出，靠目录挂载让现有代码照常工作，所以改动集中、能尽早上线隔离；2a 先切出的执行接口，就是 2b 要变成网络协议的那一层，不会白做。代价是 2a 期间控制面仍直接读写挂载的工作区，必须防住沙箱里的符号链接把控制面引到工作区之外。</p>
     </div>
     <ol class="phases">
       <li><span class="ph">第一步</span><div><b>数据层多租户</b><span>公司表和公司上下文；所有表加公司字段，存储层统一加条件；登录时识别公司；两级管理员；设置、集成、Key、连接归公司。</span></div></li>
-      <li><span class="ph">第二步</span><div><b>执行后端、Worker 和模型网关</b><span>定好执行协议和插件接口；Worker 程序和 Docker 插件；出口代理；模型网关上线，Key 撤出沙箱；文件改走协议。私有化部署从这一步开始就获得隔离。</span></div></li>
+      <li><span class="ph">第二步 a</span><div><b>运行时插件和沙箱（仍在控制面进程里）</b><span>先在控制面里切出执行接口：控制面只组装一次运行（CLI、模型、提示词、MCP 配置、单次运行令牌、工作区），交给执行后端；第一个后端就是现在的本机进程，行为不变。再在它下面接运行时插件：本机进程（开发用）和 Docker（可选 gVisor）。每个员工一个沙箱，镜像预装全部 CLI；工作区先以目录挂载进沙箱，控制面现有的读写工作区代码不用改；沙箱只能连出口代理和控制面的 MCP 入口。上线后不同公司在进程、文件、网络上彼此隔离。详见 <a href="superagent-runtime-sandbox.html">运行时插件与沙箱</a>。</span></div></li>
+      <li><span class="ph">第二步 b</span><div><b>控制面与 Worker 分离</b><span>把 2a 的执行接口变成协议：Worker 主动长连接控制面，按指令启停沙箱、转发输出、上报心跳和容量；文件进出改走协议，控制面不再直接读写工作区路径；单机部署用 compose 同时拉起控制面和一个 Worker。模型网关在这一步或紧随其后上线，Key 撤出沙箱。私有化和多机部署从这一步开始可用。</span></div></li>
       <li><span class="ph">第三步</span><div><b>microVM 和调度器</b><span>Firecracker / Kata 插件；按隔离等级、配额、亲和、容量调度；工作区快照与故障迁移。之后不同公司可以混跑在同一台机器上。</span></div></li>
       <li><span class="ph">第四步</span><div><b>控制面高可用</b><span>事件总线；后台循环和 IM 长连接改用租约；先一主一备，再做多实例同时工作。</span></div></li>
     </ol>
@@ -1227,11 +1235,18 @@ table.comps tr.grp td { background: var(--paper); font-family: var(--font-mono);
       <table>
         <thead><tr><th>事项</th><th>说明</th></tr></thead>
         <tbody>
+          <tr><td>第二步 a 的决策</td><td>2026-11-10 已定：运行时全做成插件由部署方选（117 用 gVisor）；Key 进沙箱到 2b 为止；CLI 由平台统一发布；对话跑在 Agent 所有者的沙箱、任务跑在发起人的沙箱；资源和默认开关见 <a href="superagent-runtime-sandbox.html">运行时插件与沙箱</a>。</td></tr>
           <tr><td>开始时间</td><td>存量改造什么时候启动，与产品迭代怎么穿插。</td></tr>
           <tr><td>事件总线</td><td>数据库轮询、Redis 还是消息队列；影响控制面多实例的方案。</td></tr>
           <tr><td>协议转换</td><td>是否支持「上游只有 OpenAI 协议时也用 Claude Code」；如果要支持，选哪个开源组件。</td></tr>
           <tr><td>社区版与企业版</td><td>哪些能力放进企业版，按授权开关；最好在社区用户变多之前定下来。</td></tr>
           <tr><td>许可证</td><td>授权文件的形式和校验方式，后续再定。</td></tr>
+          
+          
+          
+          
+          
+          
           <tr><td>CLI 的使用条款</td><td>在商业产品里打包分发 Claude Code，以及让它对接国产模型，是否符合它的条款，需要核实；其他 CLI 的许可证也要逐个确认。</td></tr>
         </tbody>
       </table>

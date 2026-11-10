@@ -232,6 +232,31 @@ class TaskServiceTest {
     }
 
     @Test
+    void aTaskIsOnlyCreatedOnceItsMaterialsCanBeRead() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        TaskService service = service(new FakeRunner(() -> "done."), tasks);
+        service.useLinkReader((url, user) -> {
+            if (url.contains("private")) {
+                throw new com.superagent.core.link.UnreadableLinkException(url, "这篇飞书文档不是公开的", "在「连接」里授权飞书文档");
+            }
+            return new com.superagent.core.link.LinkContent(url, "课程介绍", "正文", com.superagent.core.link.LinkContent.PUBLIC, true);
+        });
+
+        assertThatThrownBy(() -> service.create(new CreateTaskRequest("写脚本",
+                "资料：https://x.feishu.cn/docx/public 和 https://x.feishu.cn/docx/private", null, null, null, null, null, null, null), "alice"))
+                .isInstanceOf(com.superagent.core.link.UnreadableMaterialsException.class)
+                .hasMessageContaining("https://x.feishu.cn/docx/private").hasMessageContaining("不是公开的").hasMessageContaining("授权");
+        assertThat(tasks.listTasks()).isEmpty();
+
+        // Only the links named as its materials are checked: the page it is to publish to isn't one of them.
+        TaskDto t = service.create(new CreateTaskRequest("写脚本",
+                "读 https://x.feishu.cn/docx/public，写完发到 https://admin.example.com/private", null, null, null, null, null, null, null),
+                "alice", null, null, null, List.of("https://x.feishu.cn/docx/public"));
+        assertThat(tasks.findTask(t.id()).orElseThrow().brief())
+                .contains("## 已读取的外部资料", "- 课程介绍（https://x.feishu.cn/docx/public）");
+    }
+
+    @Test
     void missingTaskYields404() {
         TaskService service = service(new FakeRunner(() -> "x"), new InMemoryTaskStore());
         assertThatThrownBy(() -> service.detail("nope", "tester")).isInstanceOf(TaskNotFoundException.class);

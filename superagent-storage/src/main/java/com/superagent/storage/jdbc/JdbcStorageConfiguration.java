@@ -20,11 +20,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import javax.sql.DataSource;
 
 /**
- * Wires the JDBC-backed {@link ChatStore} and {@link ConnectorStore} selected by
- * {@code superagent.storage.type}. Each backend builds one {@link DataSource}
- * shared by both stores (Spring Boot's {@code DataSourceAutoConfiguration} is
- * excluded by the server), so adding the JDBC drivers to the classpath never
- * forces a DataSource when the file backend is in use.
+ * The storage backends. Everything is kept in MySQL: the business data always (its stores need transactions and
+ * unique keys), and the analytics data (token usage, the agent run log, turn timings) by default too. Those
+ * append-only, high-volume tables alone can go to ClickHouse with {@code superagent.storage.analytics=clickhouse};
+ * only then is a ClickHouse connection opened. Spring Boot's {@code DataSourceAutoConfiguration} is excluded by the
+ * server, so the pools are built here.
  */
 @Configuration(proxyBeanMethods = false)
 public class JdbcStorageConfiguration {
@@ -42,7 +42,6 @@ public class JdbcStorageConfiguration {
     }
 
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(name = "superagent.storage.type", havingValue = "mysql", matchIfMissing = true)
     static class MysqlConfiguration {
 
         @Bean
@@ -92,52 +91,18 @@ public class JdbcStorageConfiguration {
         }
     }
 
+    /** ClickHouse, for the analytics tables only (see the class comment). */
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(name = "superagent.storage.type", havingValue = "clickhouse")
-    static class ClickHouseConfiguration {
+    @ConditionalOnProperty(name = "superagent.storage.analytics", havingValue = "clickhouse")
+    static class ClickHouseAnalyticsConfiguration {
 
         @Bean
         JdbcTemplate clickHouseJdbcTemplate(
                 @Value("${superagent.storage.clickhouse.url:jdbc:ch://127.0.0.1:8123/superagent?compress=0}") String url,
                 @Value("${superagent.storage.clickhouse.username:default}") String username,
                 @Value("${superagent.storage.clickhouse.password:}") String password) {
-            log.info("ClickHouse storage active, url={}", url);
+            log.info("ClickHouse analytics storage active, url={}", url);
             return new JdbcTemplate(hikari(url, username, password, "superagent-clickhouse"));
-        }
-
-        @Bean
-        ChatStore clickHouseChatStore(JdbcTemplate clickHouseJdbcTemplate) {
-            return new ClickHouseChatStore(clickHouseJdbcTemplate);
-        }
-
-        @Bean
-        AgentStore clickHouseAgentStore(JdbcTemplate clickHouseJdbcTemplate) {
-            return new ClickHouseAgentStore(clickHouseJdbcTemplate);
-        }
-
-        @Bean
-        ConnectorStore clickHouseConnectorStore(JdbcTemplate clickHouseJdbcTemplate) {
-            return new ClickHouseConnectorStore(clickHouseJdbcTemplate);
-        }
-
-        @Bean
-        ConnectorCredentialStore clickHouseConnectorCredentialStore(JdbcTemplate clickHouseJdbcTemplate) {
-            return new ClickHouseConnectorCredentialStore(clickHouseJdbcTemplate);
-        }
-
-        @Bean
-        TaskStore clickHouseTaskStore(JdbcTemplate clickHouseJdbcTemplate) {
-            return new ClickHouseTaskStore(clickHouseJdbcTemplate);
-        }
-
-        @Bean
-        TaskPhaseStore clickHouseTaskPhaseStore(JdbcTemplate clickHouseJdbcTemplate) {
-            return new ClickHouseTaskPhaseStore(clickHouseJdbcTemplate);
-        }
-
-        @Bean
-        UserStore clickHouseUserStore(JdbcTemplate clickHouseJdbcTemplate) {
-            return new ClickHouseUserStore(clickHouseJdbcTemplate);
         }
     }
 }

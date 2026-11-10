@@ -2,30 +2,16 @@ package com.superagent.storage.jdbc;
 
 import com.superagent.core.settings.SystemSettingStore;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-/** Wires the JDBC {@link SystemSettingStore} onto the active backend's {@link JdbcTemplate}. */
+/** Wires the JDBC {@link SystemSettingStore} onto MySQL. */
 @Configuration(proxyBeanMethods = false)
 public class SystemSettingStorageConfiguration {
 
-    @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(name = "superagent.storage.type", havingValue = "mysql", matchIfMissing = true)
-    static class Mysql {
-        @Bean
-        SystemSettingStore mysqlSystemSettingStore(@Qualifier("mysqlJdbcTemplate") JdbcTemplate jdbc) {
-            return new MysqlSystemSettingStore(jdbc);
-        }
-    }
-
-    @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(name = "superagent.storage.type", havingValue = "clickhouse")
-    static class ClickHouse {
-        @Bean
-        SystemSettingStore clickHouseSystemSettingStore(@Qualifier("clickHouseJdbcTemplate") JdbcTemplate jdbc) {
-            return new ClickHouseSystemSettingStore(jdbc);
-        }
+    @Bean
+    SystemSettingStore mysqlSystemSettingStore(@Qualifier("mysqlJdbcTemplate") JdbcTemplate jdbc) {
+        return new MysqlSystemSettingStore(jdbc);
     }
 }

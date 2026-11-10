@@ -8,10 +8,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 
-/**
- * JDBC task model choices for MySQL and ClickHouse: rows are only ever appended (a task's next choice gets the next
- * {@code seq}), so the same plain INSERT serves both.
- */
+/** JDBC task model choices on MySQL: rows are only ever appended (a task's next choice gets the next {@code seq}). */
 public class JdbcTaskModelChoiceStore implements TaskModelChoiceStore {
 
     static final String MYSQL_DDL = """
@@ -32,13 +29,6 @@ public class JdbcTaskModelChoiceStore implements TaskModelChoiceStore {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """;
 
-    static final String CLICKHOUSE_DDL = """
-            CREATE TABLE IF NOT EXISTS task_model_choice (
-              company_id String, task_id String, seq Int32, decided_by String, difficulty Nullable(String), tier Nullable(String),
-              model Nullable(String), cli Nullable(String), judge Nullable(String), candidates Nullable(String),
-              reasoning Nullable(String), created_at DateTime64(3, 'UTC')
-            ) ENGINE = MergeTree ORDER BY (company_id, task_id, seq)
-            """;
 
     private final JdbcTemplate jdbc;
 

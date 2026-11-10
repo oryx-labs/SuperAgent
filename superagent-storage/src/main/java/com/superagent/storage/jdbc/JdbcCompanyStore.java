@@ -12,8 +12,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * JDBC companies, one row each. A global table: the only store not scoped by the current company. MySQL replaces
- * the row; ClickHouse keeps its newest version (ReplacingMergeTree, read with FINAL).
+ * JDBC companies, one row each. A global table: the only store not scoped by the current company. Kept in MySQL
+ * (business data always is); a save replaces the row.
  */
 public class JdbcCompanyStore implements CompanyStore {
 
@@ -31,13 +31,6 @@ public class JdbcCompanyStore implements CompanyStore {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """;
 
-    static final String CLICKHOUSE_DDL = """
-            CREATE TABLE IF NOT EXISTS company (
-              id String, name String, enabled UInt8, data_key_cipher String,
-              max_users Nullable(Int32), max_running_tasks Nullable(Int32), monthly_tokens Nullable(Int64),
-              created_at DateTime64(3, 'UTC'), updated_at DateTime64(3, 'UTC')
-            ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY id
-            """;
 
     private static final String COLUMNS = "(id, name, enabled, data_key_cipher, max_users, max_running_tasks, monthly_tokens, "
             + "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
@@ -49,11 +42,9 @@ public class JdbcCompanyStore implements CompanyStore {
             rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
 
     private final JdbcTemplate jdbc;
-    private final boolean clickHouse;
 
     public JdbcCompanyStore(JdbcTemplate jdbc, String ddl) {
         this.jdbc = jdbc;
-        this.clickHouse = ddl.contains("MergeTree");
         jdbc.execute(ddl);
         addLimitColumns();
     }
@@ -66,26 +57,20 @@ public class JdbcCompanyStore implements CompanyStore {
         try {
             jdbc.queryForList("SELECT max_users, max_running_tasks, monthly_tokens FROM company WHERE 1 = 0");
         } catch (DataAccessException missing) {
-            if (clickHouse) {
-                jdbc.execute("ALTER TABLE company ADD COLUMN IF NOT EXISTS max_users Nullable(Int32), "
-                        + "ADD COLUMN IF NOT EXISTS max_running_tasks Nullable(Int32), "
-                        + "ADD COLUMN IF NOT EXISTS monthly_tokens Nullable(Int64)");
-            } else {
-                jdbc.execute("ALTER TABLE company ADD COLUMN max_users INT");
-                jdbc.execute("ALTER TABLE company ADD COLUMN max_running_tasks INT");
-                jdbc.execute("ALTER TABLE company ADD COLUMN monthly_tokens BIGINT");
-            }
+            jdbc.execute("ALTER TABLE company ADD COLUMN max_users INT");
+            jdbc.execute("ALTER TABLE company ADD COLUMN max_running_tasks INT");
+            jdbc.execute("ALTER TABLE company ADD COLUMN monthly_tokens BIGINT");
         }
     }
 
     @Override
     public List<Company> list() {
-        return jdbc.query("SELECT * FROM company" + readFinal() + " ORDER BY created_at", MAPPER);
+        return jdbc.query("SELECT * FROM company ORDER BY created_at", MAPPER);
     }
 
     @Override
     public Optional<Company> find(String id) {
-        return jdbc.query("SELECT * FROM company" + readFinal() + " WHERE id = ?", MAPPER, id).stream().findFirst();
+        return jdbc.query("SELECT * FROM company WHERE id = ?", MAPPER, id).stream().findFirst();
     }
 
     @Override
@@ -93,15 +78,10 @@ public class JdbcCompanyStore implements CompanyStore {
         Instant now = Instant.now();
         Company row = new Company(c.id(), c.name(), c.enabled(), c.dataKeyCipher(), c.maxUsers(), c.maxRunningTasks(),
                 c.monthlyTokens(), c.createdAt() == null ? now : c.createdAt(), now);
-        String cipher = row.dataKeyCipher() == null ? (clickHouse ? "" : null) : row.dataKeyCipher();
-        jdbc.update((clickHouse ? "INSERT" : "REPLACE") + " INTO company " + COLUMNS, row.id(), row.name(),
-                clickHouse ? (row.enabled() ? 1 : 0) : row.enabled(), cipher, row.maxUsers(), row.maxRunningTasks(),
+        jdbc.update("REPLACE INTO company " + COLUMNS, row.id(), row.name(),
+                row.enabled(), row.dataKeyCipher(), row.maxUsers(), row.maxRunningTasks(),
                 row.monthlyTokens(), Timestamp.from(row.createdAt()), Timestamp.from(row.updatedAt()));
         return row;
-    }
-
-    private String readFinal() {
-        return clickHouse ? " FINAL" : "";
     }
 
     private static String emptyToNull(String v) {

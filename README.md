@@ -143,7 +143,7 @@ bin/superagent-stop.sh           # stop
 - **force:** stops the running process with SIGTERM. The server shuts down gracefully; if it is still running after 35 seconds (`STOP_TIMEOUT`), it is killed. The server then starts again.
 - **Working directory:** the scripts can be run from any directory. Relative paths in the config, such as `./data`, resolve against the install directory.
 
-Once started, open `http://<host>:18080` and choose **Register an organization**: you get its admin account (the password is shown once, and you set your own at first sign-in). The organization named by `SUPERAGENT_HOST_ORG` (set it in `config/superagent.env` on any server others can reach) owns the host: it installs the agent CLIs and may use the machine's own keys. Unset, the first organization registered owns it. Every later organization is independent, with its own data, models and keys.
+Once started, open `http://<host>:18080` and choose **Register an organization**: you get its admin account (the password is shown once, and you set your own at first sign-in). Every organization is independent and equal: its own data, its own model keys (add them on the Models page), and any organization's admin can install the agent CLIs.
 
 ### Development
 

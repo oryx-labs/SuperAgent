@@ -7,12 +7,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-/** Wires the JDBC {@link TurnTimingStore} onto the active backend's {@link JdbcTemplate}. */
+/** Wires the JDBC {@link TurnTimingStore} onto MySQL, or onto ClickHouse when {@code superagent.storage.analytics=clickhouse} (analytics data). */
 @Configuration(proxyBeanMethods = false)
 public class TurnTimingStorageConfiguration {
 
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(name = "superagent.storage.type", havingValue = "mysql", matchIfMissing = true)
+    @ConditionalOnProperty(name = "superagent.storage.analytics", havingValue = "mysql", matchIfMissing = true)
     static class Mysql {
         @Bean
         TurnTimingStore mysqlTurnTimingStore(@Qualifier("mysqlJdbcTemplate") JdbcTemplate jdbc) {
@@ -21,7 +21,7 @@ public class TurnTimingStorageConfiguration {
     }
 
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(name = "superagent.storage.type", havingValue = "clickhouse")
+    @ConditionalOnProperty(name = "superagent.storage.analytics", havingValue = "clickhouse")
     static class ClickHouse {
         @Bean
         TurnTimingStore clickHouseTurnTimingStore(@Qualifier("clickHouseJdbcTemplate") JdbcTemplate jdbc) {

@@ -49,7 +49,7 @@ The start script checks for Java 21+ and reports success once the server answers
 
 ## Set it up (administrator)
 
-Open `http://<host>:18080` and choose **Register an organization**: you get its admin account, with a password shown once that you change at first sign-in. The first organization registered owns the host (it installs the agent CLIs); each later one is independent. Everything else is set up in the console, not in files:
+Open `http://<host>:18080` and choose **Register an organization**: you get its admin account, with a password shown once that you change at first sign-in. Every organization is independent, with its own data and model keys. Everything else is set up in the console, not in files:
 
 1. **Models** — install the CLIs you want and add the company's API keys. Each key is checked with a real request; a failing one tells you why.
 2. **System Settings → Basic** — company name, logo, the default model, and the public address if people reach the server through a proxy or a domain.

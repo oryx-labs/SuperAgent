@@ -14,12 +14,23 @@
   <packaging>jar</packaging>
 
   <name>superagent-docs</name>
-  <description>Office documents for agents: Feishu / Lark docs and DingTalk docs, as each employee</description>
+  <description>External documents and links for agents: Feishu / Lark and DingTalk docs as each employee, and reading public links on any platform without logging in</description>
 
   <dependencies>
     <dependency>
       <groupId>com.superagent</groupId>
       <artifactId>superagent-platform</artifactId>
+    </dependency>
+    <!-- Reading public links: HTML parsing / main-text extraction, and text from PDFs. -->
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+      <version>1.19.1</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox</artifactId>
+      <version>3.0.8</version>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>

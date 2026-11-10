@@ -53,7 +53,6 @@ public class ProviderController {
     /** Installs (or replaces) SuperAgent's private Node LTS; runs in the background, poll {@link #node()}. */
     @PostMapping(ApiPaths.PROVIDERS + "/node/install")
     public ApiResponse<NodeRuntimeDto> installNode() {
-        companies.requireHostCompany();
         return ApiResponse.ok(node.install());
     }
 
@@ -92,13 +91,11 @@ public class ProviderController {
 
     @PostMapping(ApiPaths.PROVIDERS + "/{id}/install")
     public ApiResponse<ProviderDto> install(@PathVariable String id) {
-        companies.requireHostCompany();
         return ApiResponse.ok(service.install(id));
     }
 
     @PostMapping(ApiPaths.PROVIDERS + "/{id}/upgrade")
     public ApiResponse<ProviderDto> upgrade(@PathVariable String id) {
-        companies.requireHostCompany();
         return ApiResponse.ok(service.upgrade(id));
     }
 

@@ -20,8 +20,8 @@ import java.util.regex.Pattern;
 /**
  * Organizations: anyone can register one with its name and an English name, and gets its admin account with a
  * generated password, shown once. The English name is the organization's identifier: what everyone types at sign-in
- * to say which organization they belong to, and the admin's username. There is no built-in account: the first
- * organization registered owns the host (see {@link CompanyService#isHost}).
+ * to say which organization they belong to, and the admin's username. There is no built-in account, and all
+ * organizations are equal.
  */
 @Service
 public class OrganizationService {

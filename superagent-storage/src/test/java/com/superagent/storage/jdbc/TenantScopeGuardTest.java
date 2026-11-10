@@ -53,7 +53,7 @@ class TenantScopeGuardTest {
         return src.contains("TenantContext.require()") || src.contains("TenantSchema.company()");
     }
 
-    /** The DDL may sit in a Mysql/ClickHouse subclass while the queries live in its Abstract base. */
+    /** The DDL may sit in a Mysql (or, for analytics tables, ClickHouse) subclass while the queries live in its Abstract base. */
     private static boolean usesTenantContext(Path f, String src) throws IOException {
         if (readsCompany(src)) {
             return true;

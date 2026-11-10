@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.superagent.api.task.CreateTaskRequest;
 import com.superagent.api.task.TaskDto;
+import com.superagent.core.link.UnreadableMaterialsException;
 import com.superagent.runtime.mcp.McpGrants;
 import com.superagent.runtime.mcp.McpToolException;
 import com.superagent.runtime.mcp.McpToolProvider;
@@ -43,7 +44,9 @@ public class TaskMcpTools implements McpToolProvider {
                         props(req("title", "string", "任务标题"), req("brief", "string", "任务说明：目标、范围、验收标准"),
                                 opt("repo", "string", "可选代码库"), opt("branch", "string", "可选分支"),
                                 req("kind", "string", TaskKinds.DESCRIPTION),
-                                opt("continues_from", "string", "接着哪个任务做（任务 id，用 list_tasks 查）：新任务会拿到它的结论，在它的基础上继续，而不是从头来")),
+                                opt("continues_from", "string", "接着哪个任务做（任务 id，用 list_tasks 查）：新任务会拿到它的结论，在它的基础上继续，而不是从头来"),
+                                opt("materials", "string", "要读的外部资料链接（参数表「资料」那一行里的链接），多个用换行分开；"
+                                        + "建任务前会逐个读，读不到就不建任务并说明原因。只是要操作的网址（比如要发布到的后台）不要放这里。不填则检查说明里的所有链接")),
                         "title", "brief", "kind"),
                 tool("list_tasks", "列出当前用户的任务及其状态。", props(), (String[]) null),
                 tool("get_task", "查看某个任务的状态与进度。", props(req("id", "string", "任务 id")), "id"),
@@ -57,11 +60,19 @@ public class TaskMcpTools implements McpToolProvider {
     public McpToolResult call(McpGrants.Grant grant, String name, JsonNode args) {
         String text = switch (name) {
             case "create_task" -> {
-                TaskDto t = tasks.create(new CreateTaskRequest(
-                        str(args, "title"), str(args, "brief"), "web_chat",
-                        strOrNull(args, "repo"), strOrNull(args, "branch"), null, null, null,
-                        TaskKinds.require(args), null, strOrNull(args, "continues_from")),
-                        grant.owner(), grant.agentId(), grant.sessionId(), grant.messageId());
+                String materials = strOrNull(args, "materials");
+                TaskDto t;
+                try {
+                    t = tasks.create(new CreateTaskRequest(
+                            str(args, "title"), str(args, "brief"), "web_chat",
+                            strOrNull(args, "repo"), strOrNull(args, "branch"), null, null, null,
+                            TaskKinds.require(args), null, strOrNull(args, "continues_from")),
+                            grant.owner(), grant.agentId(), grant.sessionId(), grant.messageId(),
+                            materials == null ? null : List.of(materials));
+                } catch (UnreadableMaterialsException e) {
+                    throw new McpToolException(e.getMessage() + "\n把读不到的资料、原因和解决办法照实告诉用户，等用户处理好（授权、改成公开或直接发文件）再重新确认建任务；"
+                            + "不要说任务已创建。");
+                }
                 // The agent does it itself (its character, memory, skills); the result comes back to this chat.
                 String how = "complex".equals(t.flow()) ? "它会先拆成子任务同时执行，全部完成后自动汇总。" : "";
                 yield "已创建" + TaskKinds.label(t.flow()) + "任务 " + t.id() + "（" + t.title() + "），状态 " + t.status() + "。" + how

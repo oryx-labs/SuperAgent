@@ -88,24 +88,24 @@ public class ProviderStatusChecker {
     }
 
     private void refreshLocal() {
-        try {
-            for (ModelProvider p : store.list()) {
+        for (ModelProvider p : store.list()) { // one CLI's failure mustn't leave the others stale
+            try {
                 service.refreshLocal(p);
+            } catch (RuntimeException e) {
+                log.warn("provider {} local refresh failed (will retry): {}", p.providerKey(), e.getMessage());
             }
-        } catch (RuntimeException e) {
-            log.warn("provider local refresh failed (will retry): {}", e.getMessage());
         }
     }
 
     private void refreshLatest() {
-        try {
-            for (ModelProvider p : store.list()) {
+        for (ModelProvider p : store.list()) {
+            try {
                 service.refreshLatest(p);
                 service.refreshLocal(p);
                 service.refreshModels(p);
+            } catch (RuntimeException e) {
+                log.warn("provider {} network refresh failed (will retry): {}", p.providerKey(), e.getMessage());
             }
-        } catch (RuntimeException e) {
-            log.warn("provider network refresh failed (will retry): {}", e.getMessage());
         }
     }
 

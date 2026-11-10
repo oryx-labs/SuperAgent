@@ -4,9 +4,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Persistence SPI for chat state. Pluggable: the active implementation (local
- * file, MySQL, ClickHouse, ...) is chosen by configuration in
- * {@code superagent-storage}. All methods are expected to be thread-safe.
+ * Persistence SPI for chat state, implemented on MySQL in {@code superagent-storage}.
+ * All methods are expected to be thread-safe.
  *
  * <p>The model is append-heavy: messages and events are only ever added, while
  * a session's metadata ({@code agentSessionId}, {@code title}, {@code status})

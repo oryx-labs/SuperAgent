@@ -102,6 +102,9 @@ public class ProviderService {
             // a model check is one inference per model.
             Map<String, String> seen = new java.util.concurrent.ConcurrentHashMap<>(); // company + "/" + CLI key
             credentials.onSwitch("models", key -> {
+                if (!credentials.hasOwnKey(key)) {
+                    return; // its last key was removed: nothing to check models with
+                }
                 String now = credentials.current(key).id();
                 String before = seen.put(TenantContext.require() + "/" + key, now);
                 // The first event per CLI is usually startup, except a CLI's first key: its list is still empty.
@@ -118,8 +121,17 @@ public class ProviderService {
         }
     }
 
+    /**
+     * Whether this company can authenticate this CLI with a key of its own. A status check: never throws (another
+     * company with no key yet is simply "no auth", not an error).
+     */
     private boolean hasKey(String providerKey) {
-        return credentials != null && currentCredential(providerKey) != null;
+        return credentials != null && credentials.hasOwnKey(providerKey);
+    }
+
+    /** Without a key store (tests), the machine's own CLI login stands in. */
+    private boolean machineLogin(ProviderCatalog.Entry entry) {
+        return credentials == null && probe.looksAuthenticated(entry);
     }
 
     /** The endpoint/key runs on this CLI use now (null = the server's environment / CLI login). */
@@ -429,7 +441,7 @@ public class ProviderService {
         Optional<Path> bin = probe.findBinary(entry.cli());
         boolean installed = bin.isPresent();
         String version = bin.flatMap(b -> probe.version(b, entry)).orElse(null);
-        boolean auth = installed && entry.supported() && (probe.looksAuthenticated(entry) || hasKey(entry.key()));
+        boolean auth = installed && entry.supported() && (hasKey(entry.key()) || machineLogin(entry));
         return update(p, cur -> {
             boolean outdated = ProviderProbe.isNewer(cur.latestVersion(), version);
             String status = !installed ? NOT_INSTALLED
@@ -458,6 +470,10 @@ public class ProviderService {
     ModelProvider refreshModels(ModelProvider p) {
         ProviderCatalog.Entry entry = entryOf(p);
         if (!entry.supported()) {
+            return p;
+        }
+        // A company with no key of its own (and no right to the machine's login) has nothing to list models with yet.
+        if (credentials != null && !credentials.hasOwnKey(entry.key())) {
             return p;
         }
         String json;
@@ -537,6 +553,9 @@ public class ProviderService {
     }
 
     private boolean sweep(ModelProvider p, ProviderCatalog.Entry entry, java.time.Duration freshEnough, Instant started) {
+        if (credentials != null && !credentials.hasOwnKey(entry.key())) {
+            return true; // no key of the company's own: nothing to test its models with (never the machine's login)
+        }
         Map<String, ProviderModelDto> results = new java.util.concurrent.ConcurrentHashMap<>();
         com.superagent.core.chat.RunCredential credential = currentCredential(entry.key());
         java.util.concurrent.atomic.AtomicInteger unreachableCount = new java.util.concurrent.atomic.AtomicInteger();

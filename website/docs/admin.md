@@ -60,4 +60,4 @@ Not built yet: enterprise approval workflows and isolating what agents run on th
 
 ## Deployment
 
-Self-hosted: a release tarball or a Docker image (with the coding CLIs preinstalled) and MySQL. ClickHouse is also supported as storage. See [Quick start](./getting-started).
+Self-hosted: a release tarball or a Docker image (with the coding CLIs preinstalled) and MySQL. Analytics data (token usage, run logs, turn timing) can optionally go to ClickHouse. See [Quick start](./getting-started).

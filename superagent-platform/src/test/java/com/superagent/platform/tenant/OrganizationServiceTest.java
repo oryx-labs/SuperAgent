@@ -18,7 +18,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Anyone registers an organization and gets its admin; the first one owns the host. */
+/** Anyone registers an organization and gets its admin; all organizations are equal. */
 class OrganizationServiceTest {
 
     private final Map<String, Company> companies = new LinkedHashMap<>();
@@ -65,7 +65,6 @@ class OrganizationServiceTest {
         assertThat(r.password()).hasSizeGreaterThanOrEqualTo(12);
         assertThat(companies).containsKey("okg");
         assertThat(started).containsExactly(new CompanyStarted("okg")); // its start-up work runs now, not at restart
-        assertThat(companyService.isHost("okg")).isTrue(); // no built-in account: the first organization owns the host
         User admin = TenantContext.call("okg", () -> userStore.findByUsername("okg")).orElseThrow();
         assertThat(admin.isAdmin()).isTrue();
         assertThat(admin.mustChangePassword()).isTrue();
@@ -77,13 +76,6 @@ class OrganizationServiceTest {
         assertThatThrownBy(() -> orgs.register("x", "9lives")).hasMessageContaining("小写字母");
         assertThatThrownBy(() -> orgs.register("x", " ")).hasMessageContaining("英文名");
         assertThatThrownBy(() -> orgs.register("", "acme")).hasMessageContaining("组织名称");
-        orgs.register("Acme", "acme");
-        assertThat(companyService.isHost("acme")).isFalse(); // later ones bring their own keys
-        // A disabled host means no host, never the next organization.
-        Company okg = companies.get("okg");
-        companies.put("okg", new Company(okg.id(), okg.name(), false, null, okg.createdAt(), okg.updatedAt()));
-        assertThat(companyService.isHost("okg")).isFalse();
-        assertThat(companyService.isHost("acme")).isFalse();
 
         // On a public server the host is named: registering first claims nothing.
         // A server can close registration.
@@ -92,8 +84,5 @@ class OrganizationServiceTest {
         assertThatThrownBy(() -> closed.register("新公司", "newco")).isInstanceOf(OrganizationService.RegistrationClosedException.class);
         assertThat(companies).doesNotContainKey("newco");
 
-        CompanyService named = new CompanyService(companyStore, started::add, "acme");
-        assertThat(named.isHost("acme")).isTrue();
-        assertThat(named.isHost("okg")).isFalse();
     }
 }

@@ -60,4 +60,4 @@ description: 用户与组织架构、系统设置、连接配置、文件存储,
 
 ## 部署
 
-自托管:发布包(tar 包)或 Docker 镜像(预装了编码 CLI),加 MySQL。也支持 ClickHouse 作为存储。见[快速开始](./getting-started)。
+自托管:发布包(tar 包)或 Docker 镜像(预装了编码 CLI),加 MySQL。可选把用量、运行日志、耗时等分析数据放到 ClickHouse。见[快速开始](./getting-started)。

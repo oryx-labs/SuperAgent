@@ -33,9 +33,6 @@ logging:
     com.superagent: DEBUG
 
 superagent:
-  # The organization (its English name) that owns this host: installs the agent CLIs and may use the machine's own
-  # keys and CLI logins. Set it on any server others can reach; unset, the first organization registered is the host.
-  host-org: ${SUPERAGENT_HOST_ORG:}
   registration:
     # Whether the sign-in page lets anyone register an organization. Turn it off once the organizations you want exist.
     enabled: ${SUPERAGENT_REGISTRATION_ENABLED:true}
@@ -47,7 +44,9 @@ superagent:
       max-running-tasks: ${SUPERAGENT_QUOTA_MAX_RUNNING_TASKS:0}
       monthly-tokens: ${SUPERAGENT_QUOTA_MONTHLY_TOKENS:0}
   storage:
-    type: mysql
+    # Business data is always in MySQL. Analytics data (token usage, the agent run log, turn timings) is too, unless
+    # this is clickhouse; then those tables alone go to superagent.storage.clickhouse.* (url, username, password).
+    analytics: ${SUPERAGENT_STORAGE_ANALYTICS:mysql}
     mysql:
       url: ${SUPERAGENT_STORAGE_MYSQL_URL:jdbc:mysql://127.0.0.1:3306/superagent?createDatabaseIfNotExist=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true}
       username: ${SUPERAGENT_STORAGE_MYSQL_USERNAME:root}

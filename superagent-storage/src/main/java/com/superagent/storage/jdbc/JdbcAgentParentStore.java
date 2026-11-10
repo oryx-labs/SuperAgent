@@ -9,10 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
-/**
- * JDBC agent parents: one row per agent. MySQL replaces the row; ClickHouse keeps its newest version
- * (ReplacingMergeTree, read with FINAL), where an empty parent means "none".
- */
+/** JDBC agent parents on MySQL: one row per agent, replaced on change and deleted when the parent is removed. */
 public class JdbcAgentParentStore implements AgentParentStore {
 
     static final String MYSQL_DDL = """
@@ -25,18 +22,11 @@ public class JdbcAgentParentStore implements AgentParentStore {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """;
 
-    static final String CLICKHOUSE_DDL = """
-            CREATE TABLE IF NOT EXISTS agent_parent (
-              company_id String, agent_id String, parent_id String, updated_at DateTime64(3, 'UTC')
-            ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (company_id, agent_id)
-            """;
 
     private final JdbcTemplate jdbc;
-    private final boolean clickHouse;
 
     public JdbcAgentParentStore(JdbcTemplate jdbc, String ddl) {
         this.jdbc = jdbc;
-        this.clickHouse = ddl.contains("MergeTree");
         TenantSchema.create(jdbc, ddl);
     }
 
@@ -44,10 +34,7 @@ public class JdbcAgentParentStore implements AgentParentStore {
     public void set(String agentId, String parentId) {
         Timestamp now = Timestamp.from(Instant.now());
         String company = TenantSchema.company();
-        if (clickHouse) {
-            jdbc.update("INSERT INTO agent_parent (company_id, agent_id, parent_id, updated_at) VALUES (?, ?, ?, ?)", company,
-                    agentId, parentId == null ? "" : parentId, now);
-        } else if (parentId == null) {
+        if (parentId == null) {
             jdbc.update("DELETE FROM agent_parent WHERE company_id = ? AND agent_id = ?", company, agentId);
         } else {
             jdbc.update("REPLACE INTO agent_parent (company_id, agent_id, parent_id, updated_at) VALUES (?, ?, ?, ?)", company,
@@ -57,7 +44,7 @@ public class JdbcAgentParentStore implements AgentParentStore {
 
     @Override
     public Optional<String> parentOf(String agentId) {
-        return jdbc.queryForList("SELECT parent_id FROM agent_parent" + (clickHouse ? " FINAL" : "")
+        return jdbc.queryForList("SELECT parent_id FROM agent_parent"
                         + " WHERE company_id = ? AND agent_id = ?", String.class, TenantSchema.company(), agentId)
                 .stream().filter(p -> p != null && !p.isBlank()).findFirst();
     }
@@ -65,7 +52,7 @@ public class JdbcAgentParentStore implements AgentParentStore {
     @Override
     public Map<String, String> all() {
         Map<String, String> out = new LinkedHashMap<>();
-        jdbc.query("SELECT agent_id, parent_id FROM agent_parent" + (clickHouse ? " FINAL" : "") + " WHERE company_id = ?",
+        jdbc.query("SELECT agent_id, parent_id FROM agent_parent" + " WHERE company_id = ?",
                 rs -> {
                     String parent = rs.getString(2);
                     if (parent != null && !parent.isBlank()) {

@@ -13,7 +13,6 @@ import com.superagent.core.provider.ProviderCredential;
 import com.superagent.core.provider.ProviderCredentialStore;
 import com.superagent.core.security.SecretCipher;
 import com.superagent.core.tenant.Company;
-import com.superagent.core.tenant.CompanyStarted;
 import com.superagent.core.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,39 +83,6 @@ public class CredentialService {
         this.cipher = cipher;
         this.probe = probe;
         this.machine = machine;
-    }
-
-    /**
-     * Startup: bring what the machine already has into the console (so it's managed in one place), then tell the
-     * listeners — the CLI config writer among them — which entry each pool uses.
-     *
-     * <p>The machine's own keys and CLI config are the host's, so only the company that owns the host (the first one
-     * registered) takes them; other companies bring their own keys.
-     */
-    private com.superagent.platform.tenant.CompanyService companyService; // null in tests: the default id is the host
-
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    void setCompanyService(com.superagent.platform.tenant.CompanyService companyService) {
-        this.companyService = companyService;
-    }
-
-    private boolean isHost(String companyId) {
-        return companyService == null ? Company.DEFAULT_ID.equals(companyId) : companyService.isHost(companyId);
-    }
-
-    @org.springframework.context.event.EventListener(CompanyStarted.class)
-    void onReady(CompanyStarted started) {
-        if (!isHost(started.companyId())) {
-            return;
-        }
-        for (String key : POOLED) {
-            try {
-                importMachine(key);
-            } catch (RuntimeException e) {
-                log.warn("{}: could not import the machine's credentials: {}", key, e.getMessage());
-            }
-            notifySwitch(key);
-        }
     }
 
     /**
@@ -194,6 +160,11 @@ public class CredentialService {
         return Optional.of(next);
     }
 
+    /** Whether this company has a key of its own for this CLI (an enabled pool entry); never throws. */
+    public boolean hasOwnKey(String providerKey) {
+        return POOLED.contains(providerKey) && store.list(providerKey).stream().anyMatch(ProviderCredential::enabled);
+    }
+
     private Choice choose(String providerKey, String excluding) {
         if (!POOLED.contains(providerKey)) {
             return new Choice(null);
@@ -204,18 +175,10 @@ public class CredentialService {
         if (healthy.isPresent()) {
             return new Choice(toRun(healthy.get()));
         }
-        // The server's own environment / CLI login is the host's, i.e. the host company's account: another
-        // company never falls back to it, it runs on its own keys only.
-        if (!isHost(TenantContext.require())) {
-            if (pool.isEmpty()) {
-                throw new NoCompanyKeyException(providerKey);
-            }
-            return new Choice(toRun(pool.get(0)));
-        }
-        // Every page key is failing: the server's own environment / login is the last resort, unless that
-        // is what just failed — then the best page key, which may have recovered since it was marked.
-        if (!ENV_ID.equals(excluding) || pool.isEmpty()) {
-            return new Choice(null);
+        // Every company runs on its own keys only: never on the machine's environment or CLI logins, which are no
+        // company's (each will have a runtime of its own; for now they share one machine).
+        if (pool.isEmpty()) {
+            throw new NoCompanyKeyException(providerKey);
         }
         return new Choice(toRun(pool.get(0)));
     }
@@ -224,7 +187,7 @@ public class CredentialService {
      * The vendor's official endpoint, from the catalogue. An entry without its own endpoint is always sent there
      * explicitly: left unset, a CLI would fall back to whatever the server's own CLI config points at (a relay, say).
      */
-    /** A company other than the host's has no key of its own for this CLI. */
+    /** The company has no key of its own for this CLI. */
     public static class NoCompanyKeyException extends ForbiddenException {
         NoCompanyKeyException(String providerKey) {
             super("本公司还没有配置 " + providerKey + " 的 API Key：请管理员在「模型」里为它添加 Key");
@@ -246,6 +209,9 @@ public class CredentialService {
     /** Re-tests every entry of every pool (the periodic sweep): failing ones come back once they answer. */
     public void checkAll() {
         for (String key : POOLED) {
+            if (!hasOwnKey(key)) {
+                continue; // nothing to check for a CLI this company has no key for
+            }
             String before = current(key).id();
             // A failing key every round (so a recovered one takes over again soon); a working one hourly.
             store.list(key).stream().filter(ProviderCredential::enabled).filter(this::dueForCheck).forEach(this::check);
@@ -328,13 +294,9 @@ public class CredentialService {
 
     public List<CredentialDto> list(String providerKey) {
         requirePooled(providerKey);
-        String current = current(providerKey).id();
-        List<CredentialDto> out = new ArrayList<>(store.list(providerKey).stream().map(c -> toDto(c, current)).toList());
-        // The machine's keys are entries above; what's left on the machine is the CLI's own login (a subscription).
-        out.add(new CredentialDto(ENV_ID, null, null, null, false, Integer.MAX_VALUE, true,
-                ProviderCredential.UNKNOWN, null, null, ENV_ID.equals(current), true, ProviderCredential.MACHINE,
-                defaultBaseUrl(providerKey)));
-        return out;
+        // The company's own keys only (an empty pool is simply empty, not an error: that's where keys get added).
+        String current = hasOwnKey(providerKey) ? current(providerKey).id() : null;
+        return store.list(providerKey).stream().map(c -> toDto(c, current)).toList();
     }
 
     public CredentialDto add(String providerKey, CredentialRequests.Save req) {

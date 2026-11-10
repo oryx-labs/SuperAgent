@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
-/** JDBC task links for MySQL and ClickHouse: one row per task, written once, so a plain INSERT serves both. */
+/** JDBC task links on MySQL: one row per task, written once. */
 public class JdbcTaskLinkStore implements TaskLinkStore {
 
     static final String MYSQL_DDL = """
@@ -25,12 +25,6 @@ public class JdbcTaskLinkStore implements TaskLinkStore {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """;
 
-    static final String CLICKHOUSE_DDL = """
-            CREATE TABLE IF NOT EXISTS task_link (
-              company_id String, task_id String, parent_id Nullable(String), continues_from Nullable(String),
-              created_at DateTime64(3, 'UTC')
-            ) ENGINE = MergeTree ORDER BY (company_id, task_id)
-            """;
 
     private static final String SELECT = "SELECT task_id, parent_id, continues_from, created_at FROM task_link";
 

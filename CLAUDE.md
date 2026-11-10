@@ -53,7 +53,7 @@ L2  superagent-project       projects: a set of agents and the people who use th
 L2  superagent-files         work files: what agents produce (documents, images, videos), their storage (local disk, S3-compatible) and agent tools
 L2  superagent-platform      administration: users, system settings, model providers, connectors (and the MCP servers runs get)
 L1  superagent-runtime       driving the coding-agent CLIs (Claude Code, Codex, DeepSeek, Kimi, Qwen; GLM via Claude Code), per-turn MCP grants, image attachments
-L1  superagent-storage       JDBC implementations of the core store interfaces (MySQL, ClickHouse)
+L1  superagent-storage       JDBC implementations of the core store interfaces: MySQL; ClickHouse optional for analytics data only
 L0  superagent-api           request/response DTOs and API paths
 L0  superagent-core          domain records, store interfaces, error base types, small shared utilities
 ```
