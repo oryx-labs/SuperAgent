@@ -760,7 +760,6 @@ img { max-width: 100%; }
   cursor: pointer; opacity: 0; transition: opacity .12s;
 }
 .msg--user .msg__edit { left: -32px; }
-.msg--agent .msg__edit { right: -32px; }
 .msg:hover .msg__edit { opacity: 1; }
 .msg__edit:hover { color: var(--ink); border-color: var(--line-strong); }
 
@@ -1818,6 +1817,7 @@ button.stat-card:hover { border-color: var(--line-strong); }
 .multi-select__text { display: flex; flex-direction: column; min-width: 0; }
 .multi-select__name { font-size: 13px; color: var(--ink); }
 .multi-select__desc { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.multi-select__group { margin: 4px 0 0; padding: 4px 8px; font-size: 11.5px; color: var(--muted-2); }
 .multi-select__empty { margin: 0; padding: 10px; font-size: 12.5px; color: var(--muted); }
 .name-row { display: flex; align-items: center; gap: 8px; }
 .name-row input { flex: 1 1 auto; min-width: 0; }
@@ -2223,6 +2223,8 @@ small.model-note { display: block; margin-top: 4px; }
 /* A reply whose turn failed: the error, kept after whatever was said. */
 .bubble__error { color: #b91c1c; white-space: pre-wrap; word-break: break-word; }
 .bubble__error:not(:first-child) { margin-top: 8px; }
+.bubble__stopped { color: var(--muted); font-size: 12.5px; }
+.bubble__stopped:not(:first-child) { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
 
 /* Task detail: how its model was chosen */
 .model-choices { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
@@ -2307,17 +2309,7 @@ small.model-note { display: block; margin-top: 4px; }
 .mt-panel--page { margin-top: 0; }
 
 /* Backup models: an ordered list under the default model */
-.backup-models { display: flex; flex-direction: column; gap: 6px; }
-.backup-models__list { display: flex; flex-direction: column; gap: 6px; }
-.backup-models__row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line);
-  border-radius: 8px; background: var(--paper); font-size: 13px; color: var(--ink); }
-.backup-models__n { width: 18px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.backup-models__id { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.backup-models__row button { padding: 0 6px; border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; }
-.backup-models__row button:hover { color: var(--ink); }
-.backup-models__row button:disabled { visibility: hidden; }
-.settings-form .backup-models { margin-top: 10px; }
-
+.settings-form 
 .status-badge.is-infer-checking { background: #eff6ff; color: #1d4ed8; }
 
 /* ---------- Where time went: under replies, and the task's Time tab ---------- */

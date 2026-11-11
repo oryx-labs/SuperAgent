@@ -228,6 +228,7 @@ async function selectSession(id) {
     el.messages.innerHTML = '<div class="empty-state"><p>' + L("chat.startState") + '</p></div>';
   }
   messages.forEach(renderHistoryItem);
+  markUnanswered(messages);
   scrollToBottom();
   if (activeAgent) attachFileCards(activeAgent); // each reply's files, under it
   if (activeAgent) attachTimings(activeAgent.id); // and where its time went
@@ -243,6 +244,26 @@ function flattenHistory(segments) {
   const out = [];
   segments.forEach(seg => seg.messages.forEach(m => out.push(Object.assign({ sessionId: seg.sessionId }, m))));
   return out;
+}
+
+// The conversation ends on the user's message with no reply, and no reply is being written: that turn was cut
+// off (the server restarted, say). Say so under it, so it doesn't look like the agent is still thinking.
+// A turn still running shows its live bubble instead (pollLive), so this waits for the live check first.
+async function markUnanswered(messages) {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user" || streaming || liveWatch || !activeSessionId) return;
+  const session = activeSessionId;
+  let live = null;
+  try { live = await fetch("/api/v1/sessions/" + session + "/live").then(kbJson); } catch (e) { return; }
+  if (session !== activeSessionId || streaming || liveWatch || (live && live.running)) return;
+  if (el.messages.querySelector(".msg--unanswered")) return;
+  const msg = document.createElement("div");
+  msg.className = "msg msg--agent msg--unanswered";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.appendChild(stoppedNote(true));
+  msg.appendChild(bubble);
+  el.messages.appendChild(msg);
 }
 
 function renderHistoryItem(m) {

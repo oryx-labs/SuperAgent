@@ -70,7 +70,7 @@ public class SettingsService {
             java.util.List<String> backups = new java.util.ArrayList<>();
             for (String m : request.backupModels()) {
                 String id = trimToNull(m);
-                if (id == null || backups.contains(id) || id.equals(model)) {
+                if (id == null || backups.contains(id)) {
                     continue;
                 }
                 // Like the default: only a model the probe saw answer, unless it was already saved.

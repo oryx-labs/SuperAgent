@@ -39,6 +39,7 @@ public class AgentLogService {
     public static final String TURN = "turn";
     public static final String MEMORY = "memory";
     public static final String SUPERAGENT = "superagent";
+    public static final String SETTINGS = "settings";
 
     private final AgentLogStore store;
     private final Duration retention;

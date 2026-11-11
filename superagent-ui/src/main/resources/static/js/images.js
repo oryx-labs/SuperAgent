@@ -76,7 +76,7 @@ function imageAttacher({ button, fileInput, tray, pasteTarget, dropZone, imagesO
   });
   fileInput.addEventListener("change", () => { add(Array.from(fileInput.files)); fileInput.value = ""; });
   pasteTarget.addEventListener("paste", e => {
-    const files = Array.from(e.clipboardData ? e.clipboardData.files : []);
+    const files = pastedFiles(e.clipboardData);
     if (files.length) { e.preventDefault(); add(files); }
   });
   dropZone.addEventListener("dragover", e => {
@@ -102,6 +102,22 @@ function imageAttacher({ button, fileInput, tray, pasteTarget, dropZone, imagesO
     clear() { picked = []; render(); },
     setDisabled(on) { button.disabled = on; },
   };
+}
+
+// Files on the clipboard. Screenshots and images copied from some apps (WeChat, Feishu, some browsers) arrive only as
+// clipboard items, not in .files; those come back as files named like a screenshot.
+function pastedFiles(data) {
+  if (!data) return [];
+  const files = Array.from(data.files || []);
+  if (files.length) return files;
+  const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+  return Array.from(data.items || [])
+    .filter(it => it.kind === "file")
+    .map(it => it.getAsFile())
+    .filter(Boolean)
+    .map((f, i) => f.name && f.name !== "image.png" ? f
+      : new File([f], "粘贴图片-" + stamp + (i ? "-" + (i + 1) : "") + "." + ((f.type.split("/")[1] || "png").replace("jpeg", "jpg")),
+        { type: f.type }));
 }
 
 async function uploadFile(file, target) {

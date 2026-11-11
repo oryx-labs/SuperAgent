@@ -67,51 +67,83 @@ async function loadSettingsForm() {
 }
 
 // Backup models: where conversations go, in order, when the default model can't run.
+// A multi-select dropdown; the order models are ticked in is the order they're tried.
 let backupModels = [];
 let backupGroups = [];
+const backupSelect = {
+  root: document.getElementById("sfBackup"),
+  trigger: document.getElementById("sfBackupTrigger"),
+  menu: document.getElementById("sfBackupMenu"),
+};
 function renderBackupModels() {
-  const list = document.getElementById("sfBackupList");
-  list.replaceChildren(...backupModels.map((id, i) => {
-    const row = document.createElement("div");
-    row.className = "backup-models__row";
-    const n = document.createElement("span");
-    n.className = "backup-models__n";
-    n.textContent = i + 1;
+  backupSelect.menu.replaceChildren();
+  const offered = backupGroups.flatMap(g => g.models.map(m => ({ group: g.label, model: m })));
+  // A saved backup that no longer passes the check stays listed, so it can be unticked.
+  backupModels.filter(id => !offered.some(o => o.model.id === id))
+    .forEach(id => offered.push({ group: L("settings.modelCurrent"), model: { id } }));
+  if (!offered.length) {
+    const p = document.createElement("p");
+    p.className = "multi-select__empty";
+    p.textContent = L("settings.modelsMissing");
+    backupSelect.menu.appendChild(p);
+  }
+  let lastGroup = null;
+  offered.forEach(({ group, model: m }) => {
+    if (group !== lastGroup) {
+      const h = document.createElement("p");
+      h.className = "multi-select__group";
+      h.textContent = group;
+      backupSelect.menu.appendChild(h);
+      lastGroup = group;
+    }
+    const label = document.createElement("label");
+    label.className = "multi-select__option";
+    label.setAttribute("role", "option");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = backupModels.includes(m.id);
+    label.setAttribute("aria-selected", String(cb.checked));
+    cb.addEventListener("change", () => {
+      backupModels = backupModels.filter(id => id !== m.id);
+      if (cb.checked) backupModels.push(m.id);
+      label.setAttribute("aria-selected", String(cb.checked));
+      renderBackupTrigger();
+    });
     const name = document.createElement("span");
-    name.className = "backup-models__id";
-    name.textContent = id;
-    const up = document.createElement("button");
-    up.type = "button";
-    up.textContent = "↑";
-    up.title = L("settings.backupUp");
-    up.disabled = i === 0;
-    up.addEventListener("click", () => { [backupModels[i - 1], backupModels[i]] = [backupModels[i], backupModels[i - 1]]; renderBackupModels(); });
-    const del = document.createElement("button");
-    del.type = "button";
-    del.textContent = "✕";
-    del.title = L("settings.backupRemove");
-    del.addEventListener("click", () => { backupModels.splice(i, 1); renderBackupModels(); });
-    row.append(n, name, up, del);
-    return row;
-  }));
-  const add = document.getElementById("sfBackupAdd");
-  add.replaceChildren();
-  const first = document.createElement("option");
-  first.value = "";
-  first.textContent = L(backupModels.length ? "settings.backupAddMore" : "settings.backupAuto");
-  add.appendChild(first);
-  const taken = new Set([...backupModels, sel.agentModel.value]);
-  fillModelGroups(add, backupGroups.map(g => Object.assign({}, g, { models: g.models.filter(m => !taken.has(m.id)) }))
-    .filter(g => g.models.length), m => m.displayName && m.displayName !== m.id ? m.displayName + " (" + m.id + ")" : m.id);
-  add.value = "";
+    name.className = "multi-select__name";
+    name.textContent = m.displayName && m.displayName !== m.id ? m.displayName + " (" + m.id + ")" : m.id;
+    label.append(cb, name);
+    backupSelect.menu.appendChild(label);
+  });
+  renderBackupTrigger();
 }
-document.getElementById("sfBackupAdd").addEventListener("change", e => {
-  if (e.target.value) { backupModels.push(e.target.value); renderBackupModels(); }
+function renderBackupTrigger() {
+  backupSelect.trigger.replaceChildren();
+  if (!backupModels.length) {
+    const ph = document.createElement("span");
+    ph.className = "multi-select__placeholder";
+    ph.textContent = L("settings.backupAuto");
+    backupSelect.trigger.appendChild(ph);
+    return;
+  }
+  backupModels.forEach((id, i) => {
+    const chip = document.createElement("span");
+    chip.className = "multi-select__chip";
+    chip.textContent = (i + 1) + ". " + id;
+    backupSelect.trigger.appendChild(chip);
+  });
+}
+function closeBackupMenu() {
+  backupSelect.menu.hidden = true;
+  backupSelect.trigger.setAttribute("aria-expanded", "false");
+}
+backupSelect.trigger.addEventListener("click", () => {
+  const open = backupSelect.menu.hidden;
+  backupSelect.menu.hidden = !open;
+  backupSelect.trigger.setAttribute("aria-expanded", String(open));
 });
-sel.agentModel.addEventListener("change", () => {
-  backupModels = backupModels.filter(m => m !== sel.agentModel.value);
-  renderBackupModels();
-});
+document.addEventListener("click", e => { if (!backupSelect.root.contains(e.target)) closeBackupMenu(); });
+backupSelect.root.addEventListener("keydown", e => { if (e.key === "Escape" && !backupSelect.menu.hidden) { e.stopPropagation(); closeBackupMenu(); backupSelect.trigger.focus(); } });
 
 sel.form.addEventListener("submit", async e => {
   e.preventDefault();
@@ -128,6 +160,8 @@ sel.form.addEventListener("submit", async e => {
     });
     if (!res || !res.data) throw new Error((res && res.message) || "no data");
     systemSettings = res.data;
+    backupModels = (systemSettings.backupModels || []).slice();
+    renderBackupModels();
     sel.status.textContent = L("settings.saved");
       if (currentMe) {
       currentMe.companyName = systemSettings.companyName;

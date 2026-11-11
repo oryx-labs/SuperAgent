@@ -117,17 +117,34 @@ const isUserRole = role => role === "user";
 function setBubbleContent(bubble, role, content) {
   bubble.dataset.md = content == null ? "" : String(content);
   if (isUserRole(role)) { bubble.textContent = content; return; }
+  let raw = content == null ? "" : String(content);
+  // A reply cut short ends with ChatService.STOPPED_MARK: show it as a note, not as part of the reply.
+  const stopped = raw.trimEnd().endsWith(REPLY_STOPPED_MARK);
+  if (stopped) raw = raw.trimEnd().slice(0, -REPLY_STOPPED_MARK.length).trimEnd();
+  if (stopped) bubble.dataset.md = raw; // copy and edit take the reply, not the note
   // A failed turn keeps its error after the reply (ChatService.ERROR_MARK): show it as an error, not as Markdown.
-  const raw = content == null ? "" : String(content);
   const at = raw.indexOf(REPLY_ERROR_MARK);
-  if (at < 0) { bubble.innerHTML = renderMarkdown(raw); return; }
-  bubble.innerHTML = at > 0 ? renderMarkdown(raw.slice(0, at)) : "";
-  const err = document.createElement("div");
-  err.className = "bubble__error";
-  err.textContent = L("chat.errored", { msg: raw.slice(at + REPLY_ERROR_MARK.length).trim() || L("chat.errGeneric") });
-  bubble.appendChild(err);
+  if (at < 0) {
+    bubble.innerHTML = renderMarkdown(raw);
+  } else {
+    bubble.innerHTML = at > 0 ? renderMarkdown(raw.slice(0, at)) : "";
+    const err = document.createElement("div");
+    err.className = "bubble__error";
+    err.textContent = L("chat.errored", { msg: raw.slice(at + REPLY_ERROR_MARK.length).trim() || L("chat.errGeneric") });
+    bubble.appendChild(err);
+  }
+  if (stopped) bubble.appendChild(stoppedNote(!raw));
+}
+
+/** Under a reply that was cut short; {@code empty}: nothing had been written yet. */
+function stoppedNote(empty) {
+  const note = document.createElement("div");
+  note.className = "bubble__stopped";
+  note.textContent = L(empty ? "chat.stoppedEmpty" : "chat.stoppedPartial");
+  return note;
 }
 const REPLY_ERROR_MARK = "⚠️ 出错了：";
+const REPLY_STOPPED_MARK = "⏸ 回复被中断";
 
 // ---------- shared request helpers and the small dialog ----------
 // Server errors come back as {code, message}; surface the message.

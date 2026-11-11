@@ -1,6 +1,7 @@
 package com.superagent.agent;
 
 import com.superagent.agent.chat.ChatService;
+import com.superagent.agent.log.AgentLogService;
 import com.superagent.agent.memory.AgentMemoryService;
 import com.superagent.api.agent.AgentDto;
 import com.superagent.api.agent.AgentMemoryDto;
@@ -63,6 +64,8 @@ public class AgentService {
             "👩‍🔧", "🧑‍⚕️", "🧑‍🍳", "🧑‍🎓", "🕵️", "🧙", "🦸", "🥷");
 
     public static final String SUPER_AGENT_NAME = "SuperAgent";
+    /** How many agents one person may have when agents make them in chat (a model looping can't fill the list). */
+    static final int MAX_AGENTS_PER_USER = 50;
     private static final String SUPER_AGENT_AVATAR = "🦸";
 
     private final AgentStore store;
@@ -74,6 +77,7 @@ public class AgentService {
     private final UserStore users;
     private final PeopleDirectory people;
     private final Object superLock = new Object();
+    private AgentLogService runLog; // null in tests: no audit trail
 
     public AgentService(AgentStore store, ChatService chatService, SkillService skills, AgentMemoryService memory,
                         AgentMemberStore members, UserStore users,
@@ -109,6 +113,41 @@ public class AgentService {
         Agent agent = newAgent(owner, name.trim(), avatar, null, persona, model, AgentKind.STANDARD, superAgentId);
         if (skillIds != null) {
             skills.setAgentSkills(agent.id(), skillIds, owner);
+        }
+        return agent;
+    }
+
+    /**
+     * An agent another agent made for {@code owner} in a chat. It is theirs like one they made themselves; when they
+     * own the agent that made it, it goes under that agent and into its project, otherwise (a collaborator asked) it
+     * stands on its own. No two of the owner's agents share a name, so the user can tell them apart.
+     */
+    public Agent createChild(String owner, String fromAgentId, String name, String persona, String character, String model,
+                             List<String> skillIds) {
+        String clean = trimToNull(name);
+        if (clean == null) {
+            throw new IllegalArgumentException("新 Agent 需要一个名称");
+        }
+        List<Agent> mine = owned(owner);
+        if (mine.size() >= MAX_AGENTS_PER_USER) {
+            throw new IllegalArgumentException("你已经有 " + mine.size() + " 个 Agent，到上限了；请复用已有的，或先删掉不用的");
+        }
+        if (mine.stream().anyMatch(a -> a.name().equalsIgnoreCase(clean))) {
+            throw new IllegalArgumentException("已经有一个叫「" + clean + "」的 Agent 了，换个名字，或者直接用它");
+        }
+        Agent from = store.find(fromAgentId).filter(a -> a.status() != AgentStatus.DELETED && Objects.equals(a.owner(), owner))
+                .orElse(null);
+        Agent agent = newAgent(owner, clean, null, character, persona, model, AgentKind.STANDARD, null);
+        if (skillIds != null && !skillIds.isEmpty()) {
+            skills.setAgentSkills(agent.id(), skillIds, owner);
+        }
+        if (from != null && !from.isSuper()) {
+            if (parents != null) {
+                setParent(agent.id(), owner, from.id());
+            }
+            if (projects != null) {
+                projects.projectOfAgent(from.id()).ifPresent(p -> projects.placeAgent(agent.id(), owner, p));
+            }
         }
         return agent;
     }
@@ -195,6 +234,60 @@ public class AgentService {
             skills.setAgentSkills(id, request.skillIds(), agent.owner());
         }
         return toDto(updated, chatService.currentSessionId(id), owner);
+    }
+
+    /**
+     * Merge-update from a chat tool: only the fields the caller passed are touched, the rest keep their value
+     * (unlike {@link #update}, which blanks persona/model/character when they are null). {@code skillIds} null keeps
+     * the bound skills; a list (empty or not) replaces them. A SuperAgent's name and character are platform-fixed and
+     * never change; if that's all the request wanted, nothing is written and a notice is returned.
+     *
+     * @return a short summary the tool hands back to the agent, naming what changed.
+     */
+    public String mergeUpdate(String owner, String id, String name, String persona, String character, String model,
+                              List<String> skillIds) {
+        Agent agent = require(id, owner);
+        boolean wantsName = name != null;
+        boolean wantsPersona = persona != null;
+        boolean wantsCharacter = character != null;
+        boolean wantsModel = model != null;
+        boolean wantsSkills = skillIds != null;
+        if (!wantsName && !wantsPersona && !wantsCharacter && !wantsModel && !wantsSkills) {
+            throw new IllegalArgumentException("没有要修改的字段");
+        }
+        boolean blockedName = agent.isSuper() && wantsName;
+        boolean blockedChar = agent.isSuper() && wantsCharacter;
+        boolean effective = wantsPersona || wantsModel || wantsSkills
+                || (wantsName && !agent.isSuper()) || (wantsCharacter && !agent.isSuper());
+        if (!effective) {
+            return "SuperAgent 的名称和性格是平台固定的，不能修改。";
+        }
+        // Fill the blanks with the current values so update's overwrite semantics leave them alone.
+        UpdateAgentRequest req = new UpdateAgentRequest(
+                wantsName ? name.trim() : agent.name(),
+                wantsPersona ? persona : agent.persona(),
+                wantsModel ? model : agent.model(),
+                agent.avatar(),
+                wantsCharacter ? character : agent.character(),
+                skillIds, null);
+        AgentDto dto = update(id, req, owner);
+        List<String> changed = new ArrayList<>();
+        if (wantsName && !agent.isSuper() && !Objects.equals(agent.name(), dto.name())) changed.add("名称");
+        if (wantsCharacter && !agent.isSuper() && !Objects.equals(agent.character(), dto.character())) changed.add("性格");
+        if (wantsPersona && !Objects.equals(agent.persona(), dto.persona())) changed.add("人设");
+        if (wantsModel && !Objects.equals(agent.model(), dto.model())) changed.add("模型");
+        if (wantsSkills) changed.add("技能");
+        if (runLog != null) {
+            runLog.info(agent, AgentLogService.SETTINGS,
+                    owner + " 修改了 " + (changed.isEmpty() ? "设定" : String.join("、", changed)), null);
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(changed.isEmpty() ? "设定没有变化。" : "已修改" + String.join("、", changed) + "。");
+        if (blockedName || blockedChar) {
+            sb.append("SuperAgent 的名称和性格不能修改。");
+        }
+        sb.append("用一两句话告诉用户改了什么。");
+        return sb.toString();
     }
 
     public void delete(String id, String owner) {
@@ -285,6 +378,11 @@ public class AgentService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setParents(com.superagent.core.agent.AgentParentStore parents) {
         this.parents = parents;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setRunLog(AgentLogService runLog) {
+        this.runLog = runLog;
     }
 
     // --- parent agents ---

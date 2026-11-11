@@ -22,7 +22,7 @@ function renderStoredMessage(role, content, id, images, sessionId) {
   bubble.hidden = !content && !!(images && images.length); // image-only message: no empty bubble
   msg.appendChild(bubble);
   if (role !== "user" && content) msg.appendChild(copyButton(bubble));
-  if (id) {
+  if (id && role === "user") { // what the model wrote is a record of what it said: not editable
     const edit = document.createElement("button");
     edit.className = "msg__edit";
     edit.title = L("common.edit");
@@ -376,7 +376,8 @@ function markActiveThread() {
 }
 
 async function selectAgent(agent) {
-  if (streaming) return;
+  if (activeAgent && agent && activeAgent.id === agent.id && streaming) return; // already here, mid-reply
+  detachStream(); // a reply still coming in carries on on the server; coming back picks it up again
   stopLiveWatch(); // was watching a turn on the previous agent
   activeAgentId = agent.id;
   activeAgent = agent;

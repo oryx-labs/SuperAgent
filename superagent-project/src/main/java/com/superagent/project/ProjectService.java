@@ -155,6 +155,11 @@ public class ProjectService implements ProjectAccess {
     // --- ProjectAccess ---
 
     @Override
+    public void placeAgent(String agentId, String user, String projectId) {
+        setAgentProject(agentId, user, projectId);
+    }
+
+    @Override
     public List<String> agentsThroughProjects(String user) {
         if (user == null) {
             return List.of();

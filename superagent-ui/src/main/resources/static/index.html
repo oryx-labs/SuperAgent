@@ -818,10 +818,12 @@
             <p class="field-hint" id="sfAgentModelHint" data-i18n="settings.agentModelHint"></p>
             <p class="field-hint" id="sfAgentModelMissing" data-i18n="settings.modelsMissing" hidden></p>
             <p class="field-hint" id="sfAgentModelFiltered" hidden></p>
-            <div class="field backup-models">
+            <div class="field">
               <span data-i18n="settings.backupModels">Backup models</span>
-              <div class="backup-models__list" id="sfBackupList"></div>
-              <select id="sfBackupAdd" aria-label="Add a backup model"></select>
+              <div class="multi-select" id="sfBackup">
+                <button type="button" class="multi-select__trigger" id="sfBackupTrigger" aria-haspopup="listbox" aria-expanded="false"></button>
+                <div class="multi-select__menu" id="sfBackupMenu" role="listbox" aria-multiselectable="true" hidden></div>
+              </div>
             </div>
             <p class="field-hint" data-i18n="settings.backupHint">If the default model can't run, conversations quietly use these, in order, and come back by themselves once it works.</p>
           </div>

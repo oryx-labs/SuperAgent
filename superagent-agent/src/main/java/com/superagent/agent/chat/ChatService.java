@@ -105,8 +105,6 @@ public class ChatService {
     private final FileService files;
     private final String defaultModel;
     private final List<String> allowedTools;
-    /** A message at least this long is kept as a file of the agent's (see FileService#keepPasted). */
-    static final int LONG_PASTE_CHARS = 3_000;
     private final boolean skipPermissions;
     private final long sseTimeoutMs;
     private final McpGrants mcpGrants;   // null = chat agents get no SuperAgent MCP
@@ -186,6 +184,8 @@ public class ChatService {
             tools.addAll(SUPERAGENT_MCP_TOOLS);
             tools.addAll(McpGrants.WORK_TOOLS);
             tools.addAll(AgentCollabMcpTools.TOOLS);
+            tools.addAll(com.superagent.agent.AgentCreateMcpTools.TOOLS);
+            tools.addAll(com.superagent.agent.AgentUpdateMcpTools.TOOLS);
             tools.addAll(McpGrants.SKILL_CHAT_TOOLS);
             tools.addAll(com.superagent.agent.AgentSkillMcpTools.TOOLS);
         } else {
@@ -567,21 +567,10 @@ public class ChatService {
         }
         String text = content == null ? "" : content;
         store.appendMessage(new ChatMessage(userMessageId, sessionId, MessageRole.USER, text, Instant.now(), user));
-        String keptAs = null;
         if (agent != null) {
             files.saveLinks(user, agent.id(), null, sessionId, userMessageId, text); // links are resources too
-            if (text.strip().length() >= LONG_PASTE_CHARS) {
-                // A long paste (an outline, a spec) is material: kept whole in the agent's files, it outlives this
-                // session, and tasks and later sessions can read it instead of a truncated copy.
-                com.superagent.core.file.WorkFile kept = files.keepPasted(user, agent.id(), sessionId, userMessageId, text);
-                keptAs = "（系统：这段长文已自动存为文件「" + kept.name() + "」，id " + kept.id()
-                        + "。开任务要用它时，在任务说明里写上这个文件 id，不要只说「用户发的内容」。）";
-            }
         }
         String prompt = text.isBlank() && !attached.isEmpty() ? ImageAttachmentStore.IMAGE_ONLY_PROMPT : text;
-        if (keptAs != null) {
-            prompt = prompt + "\n\n" + keptAs;
-        }
         if (delivered != null) {
             prompt = (text.isBlank() && attached.isEmpty() ? "" : prompt + "\n\n") + delivered.note();
         }
@@ -652,9 +641,17 @@ public class ChatService {
                 .map(this::currentSessionId).map(activeRuns::get).ifPresent(Cancellation::cancel);
     }
 
-    /** Edits a stored message's content in place (record only; does not re-run the agent). */
+    /**
+     * Edits one of the user's own messages in place (record only; does not re-run the agent). What the model wrote is
+     * the record of what it said, and isn't edited by anyone.
+     */
     public void editMessage(String sessionId, String messageId, String content) {
         store.findSession(sessionId).orElseThrow(() -> new SessionNotFoundException(sessionId));
+        ChatMessage m = store.listMessages(sessionId).stream().filter(x -> x.id().equals(messageId)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("No such message: " + messageId));
+        if (m.role() != MessageRole.USER) {
+            throw new IllegalArgumentException("模型输出的内容不能编辑");
+        }
         store.updateMessage(sessionId, messageId, content);
     }
 
@@ -664,10 +661,19 @@ public class ChatService {
      */
     public static final String ERROR_MARK = "⚠️ 出错了：";
 
-    /** The reply as stored: what was said, then the error if the turn failed (a stopped turn isn't an error). */
+    /**
+     * Ends a reply that stopped before it finished: the user stopped it, or the server went down mid-turn. The page
+     * shows it as a note under the reply; it reads as plain words where the history is carried into a new session.
+     */
+    public static final String STOPPED_MARK = "⏸ 回复被中断";
+
+    /** The reply as stored: what was said, then the error if the turn failed, or that it was stopped. */
     static String storedReply(String text, String error, boolean cancelled) {
         String said = text == null ? "" : text;
-        if (error == null || error.isBlank() || cancelled) {
+        if (cancelled) {
+            return (said.isBlank() ? "" : said.stripTrailing() + "\n\n") + STOPPED_MARK;
+        }
+        if (error == null || error.isBlank()) {
             return said;
         }
         return (said.isBlank() ? "" : said.stripTrailing() + "\n\n") + ERROR_MARK + error.strip();
