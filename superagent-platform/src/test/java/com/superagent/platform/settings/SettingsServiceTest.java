@@ -78,4 +78,21 @@ class SettingsServiceTest {
         }
         assertThat(service.update(new SystemSettingsDto(null, null, null, "")).publicUrl()).isNull();
     }
+
+    @Test
+    void fixedTaskModelsNeedAtLeastOneAndOnlyCountWhileOn() {
+        SystemSettingsDto none = new SystemSettingsDto(null, "OKG", null, null, null, null, null, true, java.util.List.of());
+        assertThatThrownBy(() -> service.update(none)).hasMessageContaining("至少要选一个模型");
+        assertThat(service.get().companyName()).isNull(); // refused before anything was written
+
+        service.update(new SystemSettingsDto(null, null, null, null, null, null, null, true,
+                java.util.List.of(" gpt-5.5 ", "claude-opus-5-5", "gpt-5.5")));
+        assertThat(service.taskFixedModels()).containsExactly("gpt-5.5", "claude-opus-5-5");
+
+        // Off: tasks pick freely again, but the list is kept for turning it back on.
+        SystemSettingsDto off = service.update(new SystemSettingsDto(null, null, null, null, null, null, null, false, null));
+        assertThat(service.taskFixedModels()).isEmpty();
+        assertThat(off.taskFixedModelsOn()).isFalse();
+        assertThat(off.taskFixedModels()).containsExactly("gpt-5.5", "claude-opus-5-5");
+    }
 }

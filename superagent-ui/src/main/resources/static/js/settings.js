@@ -64,6 +64,7 @@ async function loadSettingsForm() {
   backupModels = (systemSettings.backupModels || []).slice();
   backupGroups = groups;
   renderBackupModels();
+  loadFixedModels();
 }
 
 // Backup models: where conversations go, in order, when the default model can't run.
@@ -145,6 +146,97 @@ backupSelect.trigger.addEventListener("click", () => {
 document.addEventListener("click", e => { if (!backupSelect.root.contains(e.target)) closeBackupMenu(); });
 backupSelect.root.addEventListener("keydown", e => { if (e.key === "Escape" && !backupSelect.menu.hidden) { e.stopPropagation(); closeBackupMenu(); backupSelect.trigger.focus(); } });
 
+// Fixed task models: only models with "use for tasks" on can be picked; they're tried cheapest first, so they're
+// listed (and numbered) in price order rather than in the order ticked.
+let fixedModels = [];
+let fixedOffered = []; // model-price rows with forTasks on, cheapest first
+const fixedSelect = {
+  on: document.getElementById("sfFixedOn"),
+  field: document.getElementById("sfFixedField"),
+  root: document.getElementById("sfFixed"),
+  trigger: document.getElementById("sfFixedTrigger"),
+  menu: document.getElementById("sfFixedMenu"),
+};
+async function loadFixedModels() {
+  fixedModels = (systemSettings.taskFixedModels || []).slice();
+  fixedSelect.on.checked = !!systemSettings.taskFixedModelsOn;
+  fixedSelect.field.hidden = !fixedSelect.on.checked;
+  try { fixedOffered = ((await api.mpOverview()) || {}).models || []; } catch (e) { fixedOffered = []; }
+  fixedOffered = fixedOffered.filter(m => m.forTasks);
+  renderFixedModels();
+}
+const fixedOrder = () => fixedOffered.map(m => m.id).filter(id => fixedModels.includes(id))
+  .concat(fixedModels.filter(id => !fixedOffered.some(m => m.id === id)));
+function renderFixedModels() {
+  fixedSelect.menu.replaceChildren();
+  // A saved model that can't be used for tasks any more stays listed, so it can be unticked.
+  const stale = fixedModels.filter(id => !fixedOffered.some(m => m.id === id));
+  if (!fixedOffered.length && !stale.length) {
+    const p = document.createElement("p");
+    p.className = "multi-select__empty";
+    p.textContent = L("settings.fixedNone");
+    fixedSelect.menu.appendChild(p);
+  }
+  const option = (id, hint) => {
+    const label = document.createElement("label");
+    label.className = "multi-select__option";
+    label.setAttribute("role", "option");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = fixedModels.includes(id);
+    label.setAttribute("aria-selected", String(cb.checked));
+    cb.addEventListener("change", () => {
+      fixedModels = fixedModels.filter(x => x !== id);
+      if (cb.checked) fixedModels.push(id);
+      label.setAttribute("aria-selected", String(cb.checked));
+      renderFixedTrigger();
+    });
+    const name = document.createElement("span");
+    name.className = "multi-select__name";
+    name.textContent = hint ? id + " · " + hint : id;
+    label.append(cb, name);
+    fixedSelect.menu.appendChild(label);
+  };
+  fixedOffered.forEach(m => option(m.id, [m.cli, m.input == null ? null : "$" + m.input + " / $" + m.output].filter(Boolean).join(" · ")));
+  if (stale.length) {
+    const h = document.createElement("p");
+    h.className = "multi-select__group";
+    h.textContent = L("settings.fixedUnavailable");
+    fixedSelect.menu.appendChild(h);
+    stale.forEach(id => option(id, null));
+  }
+  renderFixedTrigger();
+}
+function renderFixedTrigger() {
+  fixedSelect.trigger.replaceChildren();
+  const ids = fixedOrder();
+  if (!ids.length) {
+    const ph = document.createElement("span");
+    ph.className = "multi-select__placeholder";
+    ph.textContent = L("settings.fixedPick");
+    fixedSelect.trigger.appendChild(ph);
+    return;
+  }
+  ids.forEach((id, i) => {
+    const chip = document.createElement("span");
+    chip.className = "multi-select__chip";
+    chip.textContent = (i + 1) + ". " + id;
+    fixedSelect.trigger.appendChild(chip);
+  });
+}
+function closeFixedMenu() {
+  fixedSelect.menu.hidden = true;
+  fixedSelect.trigger.setAttribute("aria-expanded", "false");
+}
+fixedSelect.on.addEventListener("change", () => { fixedSelect.field.hidden = !fixedSelect.on.checked; });
+fixedSelect.trigger.addEventListener("click", () => {
+  const open = fixedSelect.menu.hidden;
+  fixedSelect.menu.hidden = !open;
+  fixedSelect.trigger.setAttribute("aria-expanded", String(open));
+});
+document.addEventListener("click", e => { if (!fixedSelect.root.contains(e.target)) closeFixedMenu(); });
+fixedSelect.root.addEventListener("keydown", e => { if (e.key === "Escape" && !fixedSelect.menu.hidden) { e.stopPropagation(); closeFixedMenu(); fixedSelect.trigger.focus(); } });
+
 sel.form.addEventListener("submit", async e => {
   e.preventDefault();
   sel.status.textContent = "";
@@ -157,11 +249,16 @@ sel.form.addEventListener("submit", async e => {
       backupModels,
       complexMaxSubtasks: Number(sel.complexMaxSubtasks.value) || null,
       complexMaxParallel: Number(sel.complexMaxParallel.value) || null,
+      taskFixedModelsOn: fixedSelect.on.checked,
+      taskFixedModels: fixedOrder(),
     });
     if (!res || !res.data) throw new Error((res && res.message) || "no data");
     systemSettings = res.data;
     backupModels = (systemSettings.backupModels || []).slice();
     renderBackupModels();
+    fixedModels = (systemSettings.taskFixedModels || []).slice();
+    fixedSelect.on.checked = !!systemSettings.taskFixedModelsOn;
+    renderFixedModels();
     sel.status.textContent = L("settings.saved");
       if (currentMe) {
       currentMe.companyName = systemSettings.companyName;

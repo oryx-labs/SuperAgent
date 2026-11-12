@@ -501,7 +501,7 @@ function renderDetail(d) {
 
 // The "model choice" tab: before the task runs, how hard it was judged, what it could have run on and what was
 // picked, and why; then one more entry each time it failed and moved to a dearer model.
-const CHOICE_BY = ["judge", "user", "fallback", "escalation", "default"];
+const CHOICE_BY = ["judge", "user", "fallback", "escalation", "default", "fixed"];
 
 async function loadModelChoices(t) {
   const box = document.getElementById("taskModelChoices");

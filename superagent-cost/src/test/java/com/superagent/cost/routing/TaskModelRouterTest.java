@@ -71,6 +71,29 @@ class TaskModelRouterTest {
     }
 
     @Test
+    void fixedModelsRunCheapestFirstWithoutJudgingAndFailRatherThanFallBack() {
+        // gpt-big is off for tasks and "gone" can't run: both skipped.
+        when(settings.taskFixedModels()).thenReturn(List.of("sonnet", "gpt-big", "glm", "gone"));
+
+        TaskModelChoice first = router.choose(task("写周报", "opus")).orElseThrow();
+        assertThat(first).extracting(TaskModelChoice::by, TaskModelChoice::model, TaskModelChoice::difficulty)
+                .containsExactly(TaskModelChoice.BY_FIXED, "glm", null);
+        assertThat(first.reasoning()).contains("gpt-big", "gone");
+        assertThat(router.strongest(task("复杂任务", "opus")).orElseThrow().model()).isEqualTo("glm");
+        org.mockito.Mockito.verifyNoInteractions(call);
+
+        assertThat(router.escalate(task("x", "glm"), "boom").orElseThrow().model()).isEqualTo("sonnet");
+        TaskModelChoice out = router.escalate(task("x", "sonnet"), "boom").orElseThrow();
+        assertThat(out.refused()).isTrue();
+        assertThat(out.reasoning()).contains("没有更贵的");
+
+        when(settings.taskFixedModels()).thenReturn(List.of("gpt-big"));
+        TaskModelChoice none = router.choose(task("x", "opus")).orElseThrow();
+        assertThat(none.refused()).isTrue();
+        assertThat(none.reasoning()).contains("都用不了");
+    }
+
+    @Test
     void aFailedTaskMovesUpOneModelAtATimeUpToTheDefault() {
         assertThat(router.escalate(task("x", "haiku"), "boom").orElseThrow().model()).isEqualTo("glm");
         assertThat(router.escalate(task("x", "glm"), "boom").orElseThrow().model()).isEqualTo("sonnet");

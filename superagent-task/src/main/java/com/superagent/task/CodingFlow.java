@@ -30,8 +30,8 @@ final class CodingFlow {
     private static final int[] DONE_PROGRESS = {33, 66, 100};
 
     static final String PRD_RETRY_PROMPT = """
-            上一步没有检测到 PRD 内容。请立刻输出一份 PRD（Markdown：## 背景 / ## 需求 / ## 技术思路）作为回复，\
-            不要写文件，也不要只回复确认语。""";
+            上一步没有产出 PRD。请立刻按任务说明输出一份 PRD（Markdown，必须有 ## 背景 / ## 需求 / ## 技术思路 三个小节）\
+            作为回复，不要写文件，也不要只回复确认语或别的内容。""";
 
     /** Record-aware (parameter-names module) mapper for the phase JSON persisted via {@link TaskPhaseStore}. */
     private static final ObjectMapper PHASE_JSON = new ObjectMapper().findAndRegisterModules();
@@ -115,6 +115,41 @@ final class CodingFlow {
                     .formatted(TaskService.CONFIRM_MARKER);
             default -> spec;
         };
+    }
+
+    /**
+     * The prompt that picks a run up again at the step it stopped on ({@code null} once every step is done). A fresh
+     * session sees none of the earlier turns, so it gets the task and the PRD along with the step.
+     */
+    String resumePrompt(List<TaskPhase> phases, String brief, boolean freshSession) {
+        int i = currentIndex(phases);
+        if (i >= phases.size()) {
+            return null;
+        }
+        String key = phases.get(i).key();
+        StringBuilder sb = new StringBuilder();
+        if (!freshSession) {
+            sb.append("（上一次执行中断了。请从中断处继续当前这一步，已完成的部分不要重做。）\n\n");
+        } else {
+            sb.append(TaskService.FRESH_NOTE).append("\n\n");
+            if (!PRD.equals(key)) { // the PRD step's own prompt carries the task
+                sb.append("任务说明：\n").append(brief == null ? "" : brief).append("\n\n");
+                String prd = phases.get(0).content();
+                if (prd != null && !prd.isBlank()) {
+                    sb.append("已确认的 PRD：\n").append(prd).append("\n\n");
+                }
+            }
+        }
+        return sb.append(prompt(key, brief)).toString();
+    }
+
+    /** A PRD has its three sections as headings; anything else (a summary, a question) isn't one. */
+    static boolean isPrd(String text) {
+        if (text == null) {
+            return false;
+        }
+        List<String> headings = text.lines().map(String::strip).filter(l -> l.startsWith("#")).toList();
+        return List.of("背景", "需求", "技术思路").stream().allMatch(h -> headings.stream().anyMatch(l -> l.contains(h)));
     }
 
     private static String loadTemplate() {

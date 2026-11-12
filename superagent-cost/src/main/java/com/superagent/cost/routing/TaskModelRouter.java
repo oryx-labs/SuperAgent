@@ -30,6 +30,10 @@ import java.util.Optional;
  *
  * <p>When a task fails it moves to the next dearer model and starts over, step by step up to the default model: the
  * outcome stays in hand, and the cost only rises as far as it must.
+ *
+ * <p>When the admin holds tasks to fixed models, every task (plain, complex, subtask, automation) skips judging: it
+ * starts on the cheapest of them and moves up through them on failure. When none is left, the choice says the task
+ * fails, and why; it never falls back to a model outside the set.
  */
 @Service
 public class TaskModelRouter implements TaskModelSelector {
@@ -59,6 +63,10 @@ public class TaskModelRouter implements TaskModelSelector {
 
     @Override
     public Optional<TaskModelChoice> choose(Task task) {
+        List<String> fixed = settings.taskFixedModels();
+        if (!fixed.isEmpty()) {
+            return Optional.of(fixedStart(task, fixed, "不判断难度，"));
+        }
         List<Candidate> all = prices.candidates();
         List<Candidate> forTasks = all.stream().filter(Candidate::forTasks).toList();
         if (forTasks.isEmpty()) {
@@ -85,6 +93,10 @@ public class TaskModelRouter implements TaskModelSelector {
 
     @Override
     public Optional<TaskModelChoice> escalate(Task task, String failure) {
+        List<String> fixed = settings.taskFixedModels();
+        if (!fixed.isEmpty()) {
+            return Optional.of(fixedNext(task, fixed, failure));
+        }
         List<Candidate> forTasks = prices.candidates().stream().filter(Candidate::forTasks).toList();
         Candidate top = defaultFor(forTasks);
         if (top == null || top.id().equals(task.model())) {
@@ -107,6 +119,10 @@ public class TaskModelRouter implements TaskModelSelector {
 
     @Override
     public Optional<TaskModelChoice> strongest(Task task) {
+        List<String> fixed = settings.taskFixedModels();
+        if (!fixed.isEmpty()) {
+            return Optional.of(fixedStart(task, fixed, "复杂任务也不另选更强的模型，"));
+        }
         List<Candidate> forTasks = prices.candidates().stream().filter(Candidate::forTasks).toList();
         Candidate top = defaultFor(forTasks);
         if (top == null) {
@@ -116,6 +132,54 @@ public class TaskModelRouter implements TaskModelSelector {
                 null, describe(forTasks), "复杂任务：拆分子任务和最后汇总决定整体质量，不按难度省钱，直接用"
                 + (top.id().equals(defaultModel()) ? "默认模型 " : "最贵的 ") + top.id() + "；子任务各自按难度选最便宜够用的模型。",
                 Instant.now()));
+    }
+
+    // --- fixed models ---
+
+    /** The fixed models that can run now and that tasks may use, cheapest first (unpriced last). */
+    private List<Candidate> usable(List<String> fixed) {
+        return prices.candidates().stream().filter(c -> c.forTasks() && fixed.contains(c.id())).toList();
+    }
+
+    private TaskModelChoice fixedStart(Task task, List<String> fixed, String how) {
+        List<Candidate> usable = usable(fixed);
+        if (usable.isEmpty()) {
+            return refuse(task, fixed, "固定模型（" + String.join("、", fixed) + "）现在都用不了：没通过可用性检查，"
+                    + "或在「模型价格」里关掉了「用于任务」。任务不改用其他模型，直接失败。");
+        }
+        Candidate first = usable.get(0);
+        return new TaskModelChoice(task.id(), 0, TaskModelChoice.BY_FIXED, null, null, first.id(), first.cli(), null,
+                describe(usable), "系统设置开启了任务固定模型：" + how + "从固定模型里最便宜的 " + first.id()
+                + " 开始，失败再按价格换下一个。" + skipped(fixed, usable), Instant.now());
+    }
+
+    private TaskModelChoice fixedNext(Task task, List<String> fixed, String failure) {
+        List<Candidate> usable = usable(fixed);
+        int at = -1;
+        for (int i = 0; i < usable.size(); i++) {
+            if (usable.get(i).id().equals(task.model())) {
+                at = i;
+            }
+        }
+        String failed = "在 " + task.model() + " 上失败：" + clip(failure, 300) + "。";
+        if (at + 1 >= usable.size()) {
+            return refuse(task, fixed, failed + "固定模型里没有更贵的可以换了（" + String.join("、", fixed)
+                    + "），任务失败，不改用其他模型。");
+        }
+        Candidate next = usable.get(at + 1);
+        return new TaskModelChoice(task.id(), 0, TaskModelChoice.BY_FIXED, null, null, next.id(), next.cli(), null,
+                describe(usable), failed + "换固定模型里下一个更贵的 " + next.id()
+                + (at + 2 == usable.size() ? "（最后一个，再失败任务就失败）" : "") + " 重新执行。", Instant.now());
+    }
+
+    private TaskModelChoice refuse(Task task, List<String> fixed, String why) {
+        return new TaskModelChoice(task.id(), 0, TaskModelChoice.BY_FIXED, null, null, null, null, null,
+                String.join("\n", fixed), why, Instant.now());
+    }
+
+    private static String skipped(List<String> fixed, List<Candidate> usable) {
+        List<String> out = fixed.stream().filter(id -> usable.stream().noneMatch(c -> c.id().equals(id))).toList();
+        return out.isEmpty() ? "" : "（" + String.join("、", out) + " 现在用不了，跳过。）";
     }
 
     // --- judging ---

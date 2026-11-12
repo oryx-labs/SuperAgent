@@ -90,6 +90,8 @@ function renderFileTable() {
     t.querySelector("b").textContent = base.filter(f => !t.dataset.kind || f.kind === t.dataset.kind).length || "";
   });
   const shown = base.filter(f => !flKind || f.kind === flKind);
+  // "All" stays newest-first; inside a folder people look for a file by name.
+  if (ffChosen !== FF_ALL) shown.sort((a, b) => (a.name || "").localeCompare(b.name || "", undefined, { numeric: true, sensitivity: "base" }));
   flel.rows.replaceChildren(...shown.map(fileRow));
   flel.empty.hidden = shown.length > 0;
   flel.empty.textContent = L(files.length ? (ffChosen === FF_ALL ? "fl.noMatch" : "ff.empty") : "fl.empty");

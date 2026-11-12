@@ -18,6 +18,8 @@ public class SettingsService {
     static final String BACKUP_MODELS = "agent.backup-models";
     static final String COMPLEX_MAX_SUBTASKS = "task.complex.max-subtasks";
     static final String COMPLEX_MAX_PARALLEL = "task.complex.max-parallel";
+    static final String TASK_FIXED_ON = "task.fixed-models.on";
+    static final String TASK_FIXED_MODELS = "task.fixed-models";
     public static final int DEFAULT_MAX_SUBTASKS = 10;
     public static final int DEFAULT_MAX_PARALLEL = 5;
 
@@ -49,8 +51,9 @@ public class SettingsService {
     public SystemSettingsDto get() {
         Map<String, String> all = store.all();
         return new SystemSettingsDto(trimToNull(all.get(AGENT_DEFAULT_MODEL)), companyName(all),
-                trimToNull(all.get(COMPANY_SHORT_NAME)), trimToNull(all.get(PUBLIC_URL)), backupModels(all),
-                number(all, COMPLEX_MAX_SUBTASKS, DEFAULT_MAX_SUBTASKS), number(all, COMPLEX_MAX_PARALLEL, DEFAULT_MAX_PARALLEL));
+                trimToNull(all.get(COMPANY_SHORT_NAME)), trimToNull(all.get(PUBLIC_URL)), list(all, BACKUP_MODELS),
+                number(all, COMPLEX_MAX_SUBTASKS, DEFAULT_MAX_SUBTASKS), number(all, COMPLEX_MAX_PARALLEL, DEFAULT_MAX_PARALLEL),
+                "true".equals(all.get(TASK_FIXED_ON)), list(all, TASK_FIXED_MODELS));
     }
 
     /**
@@ -63,24 +66,22 @@ public class SettingsService {
         if (model != null && !model.equals(agentDefaultModel()) && providerService.cliFor(model).isEmpty()) {
             throw new IllegalArgumentException("Model " + model + " has not passed the inference check");
         }
+        // Checked before anything is written, so a refused save changes nothing.
+        java.util.List<String> fixed = request.taskFixedModels() == null ? savedTaskFixedModels()
+                : models(request.taskFixedModels(), savedTaskFixedModels());
+        boolean fixedOn = request.taskFixedModelsOn() != null ? request.taskFixedModelsOn()
+                : "true".equals(store.all().get(TASK_FIXED_ON));
+        if (fixedOn && fixed.isEmpty()) {
+            throw new IllegalArgumentException("开启任务固定模型时，至少要选一个模型");
+        }
         store.put(AGENT_DEFAULT_MODEL, model);
         store.put(COMPANY_NAME, name(request.companyName(), 100));
         store.put(COMPANY_SHORT_NAME, name(request.companyShortName(), 20));
         if (request.backupModels() != null) {
-            java.util.List<String> backups = new java.util.ArrayList<>();
-            for (String m : request.backupModels()) {
-                String id = trimToNull(m);
-                if (id == null || backups.contains(id)) {
-                    continue;
-                }
-                // Like the default: only a model the probe saw answer, unless it was already saved.
-                if (!backupModels().contains(id) && providerService.cliFor(id).isEmpty()) {
-                    throw new IllegalArgumentException("Model " + id + " has not passed the inference check");
-                }
-                backups.add(id);
-            }
-            store.put(BACKUP_MODELS, backups.isEmpty() ? null : String.join(",", backups));
+            store.put(BACKUP_MODELS, join(models(request.backupModels(), backupModels())));
         }
+        store.put(TASK_FIXED_MODELS, join(fixed));
+        store.put(TASK_FIXED_ON, fixedOn ? "true" : null);
         if (request.publicUrl() != null) {
             store.put(PUBLIC_URL, publicUrl(request.publicUrl()));
         }
@@ -91,6 +92,29 @@ public class SettingsService {
             store.put(COMPLEX_MAX_PARALLEL, String.valueOf(bounded(request.complexMaxParallel(), 1, 20, "同时运行的子任务数")));
         }
         return get();
+    }
+
+    /**
+     * Trimmed, without repeats; like the default model, only one the probe saw answer, unless it was already saved
+     * (one that has since failed mustn't block saving the rest).
+     */
+    private java.util.List<String> models(java.util.List<String> requested, java.util.List<String> saved) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (String m : requested) {
+            String id = trimToNull(m);
+            if (id == null || out.contains(id)) {
+                continue;
+            }
+            if (!saved.contains(id) && providerService.cliFor(id).isEmpty()) {
+                throw new IllegalArgumentException("Model " + id + " has not passed the inference check");
+            }
+            out.add(id);
+        }
+        return out;
+    }
+
+    private static String join(java.util.List<String> ids) {
+        return ids.isEmpty() ? null : String.join(",", ids);
     }
 
     /** The most subtasks a complex task may hand out. */
@@ -126,11 +150,24 @@ public class SettingsService {
 
     /** Where conversations go, in order, when the default model can't run. */
     public java.util.List<String> backupModels() {
-        return backupModels(store.all());
+        return list(store.all(), BACKUP_MODELS);
     }
 
-    private static java.util.List<String> backupModels(Map<String, String> all) {
-        String v = trimToNull(all.get(BACKUP_MODELS));
+    /**
+     * The models every task is held to, or empty when tasks get a model picked for them. Never empty while on (saving
+     * refuses that), but what's listed may since have stopped running: the router judges that.
+     */
+    public java.util.List<String> taskFixedModels() {
+        Map<String, String> all = store.all();
+        return "true".equals(all.get(TASK_FIXED_ON)) ? list(all, TASK_FIXED_MODELS) : java.util.List.of();
+    }
+
+    private java.util.List<String> savedTaskFixedModels() {
+        return list(store.all(), TASK_FIXED_MODELS);
+    }
+
+    private static java.util.List<String> list(Map<String, String> all, String key) {
+        String v = trimToNull(all.get(key));
         return v == null ? java.util.List.of() : java.util.Arrays.stream(v.split(",")).map(String::strip)
                 .filter(x -> !x.isEmpty()).toList();
     }

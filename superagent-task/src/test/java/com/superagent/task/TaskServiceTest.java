@@ -338,7 +338,9 @@ class TaskServiceTest {
     @Test
     void codingPausesAtGateWhenPrdMissing() {
         InMemoryTaskStore tasks = new InMemoryTaskStore();
-        TaskService service = service(new FakeRunner(() -> ""), tasks, new InMemoryTaskPhaseStore(), 50);
+        // Not a PRD: a summary of something else (what a confused run produced) must not pass as one.
+        TaskService service = service(new FakeRunner(() -> "这个任务其实已经做完了，11 份译文都在 Files 里。"), tasks,
+                new InMemoryTaskPhaseStore(), 50);
 
         String id = service.create(coding("写点代码")).id();
         await().atMost(Duration.ofSeconds(5)).until(() ->
@@ -507,6 +509,67 @@ class TaskServiceTest {
         assertThat(service.detail(b, "tester").task().model()).isEqualTo("gpt-6-sol");
     }
 
+    /** Records each run's wiring and prompt; what it answers is up to the test (by 0-based call index). */
+    private static final class PromptRunner implements AgentRunner {
+        record Call(String sessionId, String resumeId, String workspaceDir, String prompt) { }
+        final List<Call> calls = Collections.synchronizedList(new ArrayList<>());
+        final java.util.function.IntFunction<String> answer; // null: the turn fails with no output
+        PromptRunner(java.util.function.IntFunction<String> answer) { this.answer = answer; }
+        @Override public AgentType type() { return AgentType.CLAUDE; }
+        @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+            int n = calls.size();
+            calls.add(new Call(req.sessionId(), req.agentSessionId(), req.workspaceDir(), req.prompt()));
+            String out = answer.apply(n);
+            sink.emit(new AgentEvent(req.sessionId(), null, 0, out == null ? AgentEventType.ERROR : AgentEventType.RESULT,
+                    out == null ? "API Error: 400 Invalid `signature` in `thinking` block" : out, Instant.now()));
+        }
+    }
+
+    @Test
+    void aTaskOnAnotherModelGetsANewConversationInTheSameWorkspaceAndAReusedOneIsToldItIsANewTask() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        PromptRunner runner = new PromptRunner(n -> "done");
+        TaskService service = service(runner, tasks);
+
+        awaitStatus(tasks, service.create(briefFor("A", "claude", "claude-sonnet-5-5")).id(), "DONE");
+        awaitStatus(tasks, service.create(briefFor("B", "claude", "claude-opus-5-5")).id(), "DONE");
+        String c = service.create(briefFor("C", "claude", "claude-opus-5-5")).id();
+        awaitStatus(tasks, c, "DONE");
+
+        PromptRunner.Call a = runner.calls.get(0), b = runner.calls.get(1), third = runner.calls.get(2);
+        // B can't resume A's conversation on another model; it keeps the workspace in a conversation of its own.
+        assertThat(b.workspaceDir()).isEqualTo(a.workspaceDir());
+        assertThat(b.sessionId()).isNotEqualTo(a.sessionId());
+        assertThat(b.resumeId()).isNull();
+        // C, on B's model, carries on B's conversation and is told where its own task starts.
+        assertThat(third.resumeId()).isEqualTo(b.sessionId());
+        assertThat(third.prompt()).startsWith(TaskService.NEW_TASK_NOTE).contains("Do it.");
+        assertThat(service.detail(c, "tester").task().sessionId()).isEqualTo(b.sessionId());
+    }
+
+    @Test
+    void aFailedCodingRunGoesOnInAFreshSessionThatIsGivenTheTaskItsPrdAndTheStep() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        PromptRunner runner = new PromptRunner(n -> switch (n) {
+            case 0 -> "## 背景\nB\n## 需求\nR1 加按钮\n## 技术思路\nT";
+            case 1 -> null; // the develop step fails
+            default -> "已修改，测试通过。";
+        });
+        TaskService service = service(runner, tasks);
+        String id = service.create(coding("加个按钮")).id();
+        awaitStatus(tasks, id, "ERROR");
+
+        service.recover(id); // the watchdog's action
+        awaitStatus(tasks, id, "DONE");
+
+        PromptRunner.Call failed = runner.calls.get(1), again = runner.calls.get(2);
+        assertThat(again.sessionId()).isNotEqualTo(failed.sessionId()); // a broken conversation isn't resumed
+        assertThat(again.resumeId()).isNull();
+        assertThat(again.workspaceDir()).isEqualTo(failed.workspaceDir());
+        assertThat(again.prompt()).contains(TaskService.FRESH_NOTE, "实现并验收这个前端改动。", "R1 加按钮", "第2步：开发");
+        assertThat(service.detail(id, "tester").phases()).allMatch(p -> p.status().equals("done"));
+    }
+
     @Test
     void afterARestartNewTasksReuseSessionsFinishedTasksLeft() {
         InMemoryTaskStore tasks = new InMemoryTaskStore();
@@ -616,7 +679,8 @@ class TaskServiceTest {
             @Override public AgentType type() { return AgentType.CLAUDE; }
             @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
                 prompts.add(req.prompt());
-                sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.RESULT, "## 结果\n已完成，测试通过。", Instant.now()));
+                sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.RESULT,
+                        "## 背景\n.\n## 需求\n.\n## 技术思路\n.\n已完成，测试通过。", Instant.now()));
             }
         };
         TaskService service = service(runner, tasks);

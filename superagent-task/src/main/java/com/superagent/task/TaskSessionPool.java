@@ -18,7 +18,9 @@ import java.util.UUID;
 /**
  * Per-owner pool of reusable agent sessions for running tasks. A task prefers an idle
  * session of the same agent CLI (so it resumes that session's conversation context and
- * workspace); if none is idle and the owner is below {@code maxParallelPerOwner} busy
+ * workspace). An idle session last run on another model gives its workspace to a new
+ * conversation instead: a conversation can't be resumed on a different model (its thinking
+ * blocks are signed by the one that wrote them). If none is idle and the owner is below {@code maxParallelPerOwner} busy
  * sessions (across all CLIs), a new session is minted; otherwise {@link #acquire} returns
  * {@code null} and the caller queues the task. Sessions never cross CLIs: a Codex task
  * can't resume a Claude conversation.
@@ -43,6 +45,7 @@ class TaskSessionPool {
         final String owner;
         final AgentType agentType;
         final String workspaceDir;
+        String model;             // the model its conversation last ran on
         boolean initialized;      // false until the first turn runs (then resume, not a new session)
         State state = State.IDLE;
         String taskId;            // the task currently bound to this session, if any
@@ -70,18 +73,34 @@ class TaskSessionPool {
         this.workspaceRoot = workspaceRoot;
     }
 
-    /** Reuse an idle session of this CLI, else mint one under the cap, else {@code null} (caller should queue). */
-    Lease acquire(String owner, AgentType agentType, String taskId) {
+    /**
+     * Reuse an idle session of this CLI (on another model: its workspace, in a new conversation), else mint one under
+     * the cap, else {@code null} (caller should queue).
+     */
+    Lease acquire(String owner, AgentType agentType, String taskId, String model) {
         List<Session> sessions = sessionsOf(owner);
         Path company = TenantPaths.of(workspaceRoot);
-        for (Session s : sessions) {
-            // the company check is a backstop: owners are usernames, unique across companies
-            if (s.state == State.IDLE && s.agentType == agentType
-                    && s.workspaceDir != null && Path.of(s.workspaceDir).startsWith(company)) {
-                bind(s, taskId, State.BUSY);
-                log.info("task {} reusing session {} ({}, owner {})", taskId, s.id, agentType, owner);
-                return new Lease(s, !s.initialized);
-            }
+        // the company check is a backstop: owners are usernames, unique across companies
+        List<Session> idle = sessions.stream().filter(s -> s.state == State.IDLE && s.agentType == agentType
+                && s.workspaceDir != null && Path.of(s.workspaceDir).startsWith(company)).toList();
+        Session same = idle.stream().filter(s -> model == null || s.model == null || model.equals(s.model)).findFirst()
+                .orElse(null);
+        if (same != null) {
+            same.model = model;
+            bind(same, taskId, State.BUSY);
+            log.info("task {} reusing session {} ({}, owner {})", taskId, same.id, agentType, owner);
+            return new Lease(same, !same.initialized);
+        }
+        if (!idle.isEmpty()) {
+            Session old = idle.get(0);
+            sessions.remove(old);
+            Session s = new Session(UUID.randomUUID().toString(), owner, agentType, old.workspaceDir);
+            s.model = model;
+            sessions.add(s);
+            bind(s, taskId, State.BUSY);
+            log.info("task {} on a new conversation {} in session {}'s workspace ({} -> {}, owner {})",
+                    taskId, s.id, old.id, old.model, model, owner);
+            return new Lease(s, true);
         }
         long busy = sessions.stream().filter(s -> s.state == State.BUSY).count();
         if (busy >= maxParallelPerOwner) {
@@ -89,6 +108,7 @@ class TaskSessionPool {
         }
         String id = UUID.randomUUID().toString();
         Session s = new Session(id, owner, agentType, createWorkspace(id));
+        s.model = model;
         sessions.add(s);
         bind(s, taskId, State.BUSY);
         log.info("task {} on NEW session {} ({}, owner {}, busy now {}/{})",
@@ -204,7 +224,8 @@ class TaskSessionPool {
      * {@code reservedFor} task id the session stays held for that task (it is waiting on a
      * confirmation reply); otherwise it is idle. Missing workspaces are skipped.
      */
-    void restore(String owner, AgentType agentType, String sessionId, String workspaceDir, String reservedFor) {
+    void restore(String owner, AgentType agentType, String sessionId, String workspaceDir, String model,
+                 String reservedFor) {
         if (workspaceDir == null || !Files.isDirectory(Path.of(workspaceDir))) {
             return;
         }
@@ -214,6 +235,7 @@ class TaskSessionPool {
             s.initialized = true;
             sessionsOf(owner).add(s);
         }
+        s.model = model;
         if (reservedFor != null) {
             bind(s, reservedFor, State.RESERVED);
             s.reservedFor = reservedFor;

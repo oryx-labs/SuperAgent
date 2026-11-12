@@ -827,6 +827,15 @@
             </div>
             <p class="field-hint" data-i18n="settings.backupHint">If the default model can't run, conversations quietly use these, in order, and come back by themselves once it works.</p>
           </div>
+          <h3 class="settings-form__section" data-i18n="settings.sectionFixed">Task models</h3>
+          <label class="check-field"><input type="checkbox" id="sfFixedOn" /><span data-i18n="settings.fixedOn">Run tasks only on fixed models</span></label>
+          <div class="field" id="sfFixedField" hidden>
+            <div class="multi-select" id="sfFixed">
+              <button type="button" class="multi-select__trigger" id="sfFixedTrigger" aria-haspopup="listbox" aria-expanded="false"></button>
+              <div class="multi-select__menu" id="sfFixedMenu" role="listbox" aria-multiselectable="true" hidden></div>
+            </div>
+          </div>
+          <p class="field-hint" data-i18n="settings.fixedHint">On: tasks aren't judged; every task runs on these, cheapest first, and moves to the next dearer one when it fails; when none is left, the task fails. Off: each task gets a model picked for it.</p>
           <h3 class="settings-form__section" data-i18n="settings.sectionComplex">Complex tasks</h3>
           <div class="field-row">
             <label class="field"><span data-i18n="settings.complexMaxSubtasks">Most subtasks</span>
