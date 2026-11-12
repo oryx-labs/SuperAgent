@@ -141,13 +141,13 @@ public class McpClient {
             return converse(new Wire() {
                 @Override
                 public JsonNode request(int id, String method, JsonNode params) throws IOException {
-                    send(out, message(id, method, params));
+                    sendOrExplainExit(out, message(id, method, params), p);
                     return awaitId(incoming, id, deadline, p);
                 }
 
                 @Override
                 public void notify(String method) throws IOException {
-                    send(out, message(null, method, null));
+                    sendOrExplainExit(out, message(null, method, null), p);
                 }
             });
         } finally {
@@ -155,9 +155,18 @@ public class McpClient {
         }
     }
 
-    private void send(OutputStream out, JsonNode m) throws IOException {
-        out.write((json.writeValueAsString(m) + "\n").getBytes(StandardCharsets.UTF_8));
-        out.flush();
+    private void sendOrExplainExit(OutputStream out, JsonNode m, Process p) throws IOException {
+        try {
+            out.write((json.writeValueAsString(m) + "\n").getBytes(StandardCharsets.UTF_8));
+            out.flush();
+        } catch (IOException e) {
+            // A server that exits before reading its first request closes the pipe; reporting
+            // "Stream closed" hides the exit code that explains what actually happened.
+            if (!p.isAlive()) {
+                throw new IOException("MCP 服务启动后就退出了（退出码 " + p.exitValue() + "）", e);
+            }
+            throw e;
+        }
     }
 
     private void readLines(InputStream in, BlockingQueue<JsonNode> incoming) {
