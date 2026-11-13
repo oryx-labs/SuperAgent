@@ -86,6 +86,49 @@ class AcpEventMapperTest {
                 .isEqualTo("WebSearch");
     }
 
+    @Test
+    void mcpToolsDoNotInheritBuiltinPermissionsFromNameSubstrings() throws Exception {
+        AcpEventMapper.PermissionRequest corpRead = AcpEventMapper.mapPermission(JSON.readTree("""
+                {"toolCall":{"toolCallId":"1","name":"corp__read_file","title":"Read a CRM record","kind":"read"},
+                 "options":[{"optionId":"allow_once","name":"Allow","kind":"allow_once"}]}
+                """));
+        assertThat(AcpEventMapper.permissionTool(corpRead)).isEqualTo("MCPTool");
+        assertThat(corpRead.mcpTool()).isEqualTo("mcp__corp__read_file");
+        assertThat(AcpEventMapper.allowlistMatches(List.of("Read"), corpRead)).isFalse();
+        assertThat(AcpEventMapper.allowlistMatches(List.of("mcp__corp"), corpRead)).isTrue();
+    }
+
+    @Test
+    void serverAllowlistUsesExactServerBoundary() {
+        assertThat(AcpEventMapper.mcpRuleMatches("mcp__crm", "mcp__crm__list", "crm__list")).isTrue();
+        assertThat(AcpEventMapper.mcpRuleMatches("mcp__crm", "mcp__crm_admin__delete_all", "crm_admin__delete_all"))
+                .isFalse();
+        assertThat(AcpEventMapper.mcpRuleMatches("mcp__superagent__file_write",
+                "mcp__superagent__file_write", "superagent__file_write")).isTrue();
+        assertThat(AcpEventMapper.mcpRuleMatches("mcp__superagent__file_write",
+                "mcp__superagent__file_read", "superagent__file_read")).isFalse();
+    }
+
+    @Test
+    void useToolWrapperKeepsRealMcpIdentityForAllowlist() throws Exception {
+        AcpEventMapper.PermissionRequest req = AcpEventMapper.mapPermission(JSON.readTree("""
+                {"toolCall":{
+                   "toolCallId":"tc9",
+                   "name":"use_tool",
+                   "title":"use_tool superagent__file_write",
+                   "kind":"other",
+                   "rawInput":{"tool_name":"superagent__file_write","tool_input":{"path":"a.md"}}
+                 },
+                 "options":[{"optionId":"allow_once","name":"Allow","kind":"allow_once"}]}
+                """));
+        assertThat(req.label()).isEqualTo("superagent__file_write");
+        assertThat(req.mcpTool()).isEqualTo("mcp__superagent__file_write");
+        assertThat(AcpEventMapper.permissionTool(req)).isEqualTo("MCPTool");
+        assertThat(AcpEventMapper.allowlistMatches(List.of("mcp__superagent__file_write"), req)).isTrue();
+        assertThat(AcpEventMapper.allowlistMatches(List.of("mcp__superagent"), req)).isTrue();
+        assertThat(AcpEventMapper.allowlistMatches(List.of("Write"), req)).isFalse();
+    }
+
     private static ObjectNode params(String json) throws Exception {
         return (ObjectNode) JSON.readTree(json);
     }

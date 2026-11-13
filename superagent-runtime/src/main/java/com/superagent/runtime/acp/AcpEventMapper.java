@@ -233,14 +233,50 @@ public final class AcpEventMapper {
         return 0;
     }
 
+    /**
+     * Grok built-in tools → Claude allowlist names. Exact programmatic {@code name} only —
+     * never match substrings of titles, or an MCP tool like {@code corp__read_file} would
+     * inherit the built-in {@code Read} permission.
+     */
+    private static final java.util.Map<String, String> BUILTIN_TOOLS = java.util.Map.ofEntries(
+            java.util.Map.entry("run_terminal_command", "Bash"),
+            java.util.Map.entry("bash", "Bash"),
+            java.util.Map.entry("shell", "Bash"),
+            java.util.Map.entry("read_file", "Read"),
+            java.util.Map.entry("read_text_file", "Read"),
+            java.util.Map.entry("write_file", "Write"),
+            java.util.Map.entry("write_text_file", "Write"),
+            java.util.Map.entry("create_file", "Write"),
+            java.util.Map.entry("search_replace", "Edit"),
+            java.util.Map.entry("str_replace", "Edit"),
+            java.util.Map.entry("edit_file", "Edit"),
+            java.util.Map.entry("apply_patch", "Edit"),
+            java.util.Map.entry("list_directory", "LS"),
+            java.util.Map.entry("list_dir", "LS"),
+            java.util.Map.entry("ls", "LS"),
+            java.util.Map.entry("glob", "Glob"),
+            java.util.Map.entry("glob_files", "Glob"),
+            java.util.Map.entry("grep", "Grep"),
+            java.util.Map.entry("web_search", "WebSearch"),
+            java.util.Map.entry("web_fetch", "WebFetch"),
+            java.util.Map.entry("fetch_url", "WebFetch"));
+
     /** The permission an agent asks for, and the options it offers. */
-    public record PermissionRequest(String toolCallId, String title, String name, String kind, List<Option> options) {
+    public record PermissionRequest(String toolCallId, String title, String name, String kind,
+                                    String mcpTool, List<Option> options) {
         public record Option(String optionId, String name, String kind) {
         }
 
-        /** Prefer the programmatic tool name; fall back to the human title. */
+        /**
+         * Identity used for allowlist matching and denial messages. Prefer the real MCP
+         * {@code server__tool} (from {@code rawInput.tool_name} / title) over the {@code use_tool}
+         * wrapper name.
+         */
         public String label() {
-            if (name != null && !name.isBlank()) {
+            if (mcpTool != null && !mcpTool.isBlank()) {
+                return mcpTool.startsWith("mcp__") ? mcpTool.substring("mcp__".length()) : mcpTool;
+            }
+            if (name != null && !name.isBlank() && !"use_tool".equalsIgnoreCase(name)) {
                 return name;
             }
             return title == null ? "" : title;
@@ -249,7 +285,7 @@ public final class AcpEventMapper {
 
     /**
      * Reads a {@code session/request_permission} request. ACP puts {@code title}/{@code toolCallId}
-     * (and optional {@code name}/{@code kind}) under {@code params.toolCall}, not on {@code params}.
+     * (and optional {@code name}/{@code kind}/{@code rawInput}) under {@code params.toolCall}.
      */
     public static PermissionRequest mapPermission(JsonNode params) {
         JsonNode toolCall = params.path("toolCall");
@@ -264,71 +300,178 @@ public final class AcpEventMapper {
         if (toolCallId.isBlank()) {
             toolCallId = firstText(params, "toolCallId");
         }
-        return new PermissionRequest(
-                toolCallId,
-                firstText(toolCall, "title"),
-                firstText(toolCall, "name"),
-                firstText(toolCall, "kind"),
-                list);
+        String title = firstText(toolCall, "title");
+        String name = firstText(toolCall, "name");
+        String kind = firstText(toolCall, "kind");
+        String rawTool = firstText(toolCall.path("rawInput"), "tool_name");
+        return new PermissionRequest(toolCallId, title, name, kind, resolveMcpTool(name, title, rawTool), list);
     }
 
     /**
      * Maps a Grok / ACP tool identity onto SuperAgent's Claude-compatible allowlist vocabulary
      * ({@code Bash}, {@code Read}, {@code Edit}/{@code Write}, {@code Grep}/{@code Glob}/{@code LS},
      * {@code MCPTool}, {@code WebFetch}, {@code WebSearch}).
+     *
+     * <p>MCP is classified first (including {@code use_tool} and {@code server__tool} names), so a
+     * connector tool like {@code corp__read_file} cannot inherit the built-in {@code Read} rule.
      */
     public static String permissionTool(PermissionRequest request) {
+        if (request.mcpTool() != null && !request.mcpTool().isBlank()) {
+            return "MCPTool";
+        }
+        if ("use_tool".equalsIgnoreCase(request.name())) {
+            return "MCPTool";
+        }
         return permissionTool(request.name(), request.title(), request.kind());
     }
 
     static String permissionTool(String name, String title, String kind) {
-        String identity = ((name == null ? "" : name) + " " + (title == null ? "" : title))
-                .toLowerCase(java.util.Locale.ROOT);
-        if (identity.contains("run_terminal") || identity.contains("bash") || identity.contains("shell")
-                || "execute".equalsIgnoreCase(kind)) {
-            return "Bash";
-        }
-        if (identity.contains("search_replace") || identity.contains("str_replace")
-                || identity.contains("edit_file") || identity.contains("apply_patch")
-                || "edit".equalsIgnoreCase(kind) || "delete".equalsIgnoreCase(kind)
-                || "move".equalsIgnoreCase(kind)) {
-            return "Edit";
-        }
-        if (identity.contains("write_file") || identity.contains("create_file")
-                || identity.contains("write_text")) {
-            return "Write";
-        }
-        if (identity.contains("read_file") || identity.contains("read_text")
-                || "read".equalsIgnoreCase(kind)) {
-            return "Read";
-        }
-        if (identity.contains("list_dir") || identity.contains("list_directory")
-                || identity.matches(".*\\bls\\b.*")) {
-            return "LS";
-        }
-        if (identity.contains("glob")) {
-            return "Glob";
-        }
-        if (identity.contains("grep") || ("search".equalsIgnoreCase(kind) && !identity.contains("web"))) {
-            return "Grep";
-        }
-        if (identity.contains("web_search") || identity.contains("websearch")) {
-            return "WebSearch";
-        }
-        if (identity.contains("web_fetch") || identity.contains("webfetch") || identity.contains("fetch_url")
-                || "fetch".equalsIgnoreCase(kind)) {
-            return "WebFetch";
-        }
-        if (identity.contains("use_tool") || identity.contains("__") || identity.contains("mcp")) {
+        if (resolveMcpTool(name, title, null) != null || "use_tool".equalsIgnoreCase(name)) {
             return "MCPTool";
+        }
+        if (name != null && !name.isBlank()) {
+            String mapped = BUILTIN_TOOLS.get(name.toLowerCase(java.util.Locale.ROOT));
+            if (mapped != null) {
+                return mapped;
+            }
+        }
+        // Name missing/unknown: ACP ToolKind is a coarse fallback, never title substrings.
+        if (kind != null && !kind.isBlank()) {
+            return switch (kind.toLowerCase(java.util.Locale.ROOT)) {
+                case "execute" -> "Bash";
+                case "read" -> "Read";
+                case "edit", "delete", "move" -> "Edit";
+                case "search" -> "Grep";
+                case "fetch" -> "WebFetch";
+                default -> name != null && !name.isBlank() ? name : kind;
+            };
         }
         if (name != null && !name.isBlank()) {
             return name;
         }
-        if (title != null && !title.isBlank()) {
-            return title;
+        return title == null ? "" : title;
+    }
+
+    /**
+     * Whether {@code allowedTools} covers this permission. Built-ins match by mapped name;
+     * MCP matches by Claude {@code mcp__server} / {@code mcp__server__tool} rules with server
+     * boundaries (see {@link #mcpRuleMatches}).
+     */
+    public static boolean allowlistMatches(List<String> allowed, PermissionRequest permission) {
+        if (allowed == null || allowed.isEmpty() || permission == null) {
+            return false;
         }
-        return kind == null ? "" : kind;
+        String mapped = permissionTool(permission);
+        if (mapped.isBlank()) {
+            return false;
+        }
+        for (String rule : allowed) {
+            if (rule == null || rule.isBlank()) {
+                continue;
+            }
+            if (rule.equals("*") || rule.equals(mapped)) {
+                return true;
+            }
+            if ("MCPTool".equals(mapped) && mcpRuleMatches(rule, permission.mcpTool(), permission.label())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * ConnectorService emits server rules as {@code mcp__<server>} (no tool segment). Those must
+     * match {@code mcp__server} and {@code mcp__server__…} only — not a different server whose
+     * name merely contains the same prefix ({@code mcp__crm} ⊬ {@code mcp__crm_admin__…}).
+     */
+    static boolean mcpRuleMatches(String rule, String mcpTool, String label) {
+        if (rule.equals("MCPTool")) {
+            return true;
+        }
+        String form = canonicalMcp(mcpTool);
+        if (form == null) {
+            form = canonicalMcp(label);
+        }
+        if (form == null) {
+            return false;
+        }
+        if (rule.equals(form)) {
+            return true;
+        }
+        String bareRule = rule.startsWith("mcp__") ? rule.substring("mcp__".length()) : rule;
+        String bareTool = form.substring("mcp__".length());
+        if (rule.equals(bareTool) || bareRule.equals(bareTool)) {
+            return true;
+        }
+        if (rule.endsWith("*")) {
+            String prefix = rule.substring(0, rule.length() - 1);
+            return form.startsWith(prefix) || bareTool.startsWith(prefix.replace("mcp__", ""));
+        }
+        // Server-level allowlist entry: mcp__serverName (ConnectorService.toolPatterns).
+        if (rule.startsWith("mcp__") && !bareRule.contains("__")) {
+            return form.equals(rule) || form.startsWith(rule + "__");
+        }
+        // Exact server__tool without mcp__ prefix.
+        if (!rule.startsWith("mcp__") && rule.contains("__")) {
+            return bareTool.equals(rule);
+        }
+        return false;
+    }
+
+    /**
+     * Resolves the real MCP tool identity to Claude form {@code mcp__server__tool}.
+     * Grok wraps MCP as {@code use_tool} with {@code rawInput.tool_name = "server__tool"}.
+     */
+    static String resolveMcpTool(String name, String title, String rawToolName) {
+        if (rawToolName != null && looksLikeMcpName(rawToolName)) {
+            return canonicalMcp(rawToolName);
+        }
+        if (name != null && looksLikeMcpName(name) && !"use_tool".equalsIgnoreCase(name)) {
+            return canonicalMcp(name);
+        }
+        String fromTitle = mcpTokenIn(title);
+        if (fromTitle != null) {
+            return canonicalMcp(fromTitle);
+        }
+        return null;
+    }
+
+    private static boolean looksLikeMcpName(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String v = value.strip();
+        if (v.startsWith("mcp__")) {
+            return true;
+        }
+        // server__tool — not a known built-in exact name
+        return v.contains("__") && !BUILTIN_TOOLS.containsKey(v.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    private static String mcpTokenIn(String title) {
+        if (title == null || title.isBlank()) {
+            return null;
+        }
+        for (String token : title.split("[\\s:,]+")) {
+            if (looksLikeMcpName(token) && !"use_tool".equalsIgnoreCase(token)) {
+                return token;
+            }
+        }
+        return null;
+    }
+
+    private static String canonicalMcp(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String v = value.strip();
+        if (v.startsWith("mcp__")) {
+            return v;
+        }
+        if (v.contains("__")) {
+            return "mcp__" + v;
+        }
+        return null;
     }
 
     private static String firstText(JsonNode node, String field) {

@@ -512,8 +512,8 @@ public class GrokAcpAgentRunner implements AgentRunner {
     private void answerPermission(AgentRunRequest request, AgentEventSink sink, AtomicLong seq, AcpClient client,
                                   AcpClient.Message message) {
         AcpEventMapper.PermissionRequest permission = AcpEventMapper.mapPermission(message.params());
-        String mapped = AcpEventMapper.permissionTool(permission);
-        boolean allowed = request.skipPermissions() || permitted(request, mapped, permission);
+        boolean allowed = request.skipPermissions()
+                || AcpEventMapper.allowlistMatches(request.allowedTools(), permission);
         String option = AcpEventMapper.optionFor(permission, allowed);
         ObjectNode result = JSON.createObjectNode();
         result.set("outcome", JSON.createObjectNode()
@@ -521,73 +521,19 @@ public class GrokAcpAgentRunner implements AgentRunner {
                 .put("optionId", option == null ? AcpClient.PermissionDecision.REJECT_ONCE : option));
         client.respond(message.id(), result);
         if (!allowed) {
-            String label = permission.label().isBlank() ? mapped : permission.label();
+            String label = permission.label();
+            if (label.isBlank()) {
+                label = AcpEventMapper.permissionTool(permission);
+            }
             emit(sink, request, seq.getAndIncrement(), AgentEventType.TOOL_RESULT,
                     "Permission denied: " + label);
         }
     }
 
-    /**
-     * Whether the run's allowlist covers the tool. Matching is against the Claude-mapped
-     * rule ({@code Bash}, {@code Read}, …), not a substring of Grok's title.
-     */
-    private boolean permitted(AgentRunRequest request, String mappedTool, AcpEventMapper.PermissionRequest permission) {
-        List<String> allowed = request.allowedTools();
-        if (allowed == null || allowed.isEmpty() || mappedTool == null || mappedTool.isBlank()) {
-            return false;
-        }
-        String label = permission == null ? "" : permission.label();
-        String mcpForm = toClaudeMcpName(label);
-        for (String rule : allowed) {
-            if (rule == null || rule.isBlank()) {
-                continue;
-            }
-            if (rule.equals("*") || rule.equals(mappedTool)) {
-                return true;
-            }
-            if ("MCPTool".equals(mappedTool) && mcpRuleMatches(rule, label, mcpForm)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean mcpRuleMatches(String rule, String label, String mcpForm) {
-        if (rule.equals("MCPTool")) {
-            return true;
-        }
-        if (rule.equals(label) || (mcpForm != null && rule.equals(mcpForm))) {
-            return true;
-        }
-        if (rule.endsWith("*")) {
-            String prefix = rule.substring(0, rule.length() - 1);
-            return (mcpForm != null && mcpForm.startsWith(prefix)) || label.startsWith(prefix)
-                    || label.startsWith(prefix.replace("mcp__", ""));
-        }
-        // Claude allowlist entry mcp__server__tool vs Grok server__tool / use_tool title.
-        String bare = rule.startsWith("mcp__") ? rule.substring("mcp__".length()) : rule;
-        return !bare.isBlank() && (label.equals(bare) || label.endsWith("__" + bare) || label.contains(bare));
-    }
-
-    /** Claude-style {@code mcp__server__tool} form of a Grok {@code server__tool} name. */
-    private static String toClaudeMcpName(String label) {
-        if (label == null || label.isBlank() || label.startsWith("mcp__")) {
-            return label;
-        }
-        // "use_tool: superagent__echo …" → take the server__tool token if present
-        for (String token : label.split("[\\s:]+")) {
-            if (token.contains("__") && !token.startsWith("use_")) {
-                return "mcp__" + token;
-            }
-        }
-        if (label.contains("__") && !label.contains(" ")) {
-            return "mcp__" + label;
-        }
-        return null;
-    }
-
+    /** Whether the run's allowlist covers a built-in Claude tool name (used by ACP fs handlers). */
     private boolean permitted(AgentRunRequest request, String tool) {
-        return permitted(request, tool, new AcpEventMapper.PermissionRequest("", tool, tool, "", List.of()));
+        return AcpEventMapper.allowlistMatches(request.allowedTools(),
+                new AcpEventMapper.PermissionRequest("", tool, tool, "", null, List.of()));
     }
 
     private static String rpcError(JsonNode message) {
