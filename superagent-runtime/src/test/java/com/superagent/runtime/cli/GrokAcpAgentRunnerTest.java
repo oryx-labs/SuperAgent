@@ -39,6 +39,21 @@ class GrokAcpAgentRunnerTest {
     }
 
     @Test
+    void mapsStdioConnectorEnvFromObjectForm() {
+        String mcp = "{\"mcpServers\":{\"corp\":{\"type\":\"stdio\",\"command\":\"/bin/mcp\","
+                + "\"args\":[\"--flag\"],\"env\":{\"API_KEY\":\"k\"}}}}";
+        AgentRunRequest req = new AgentRunRequest("s1", null, "/w", "hi", null, List.of(), false, mcp, null);
+
+        List<AcpClient.McpServer> servers = GrokAcpAgentRunner.mcpServers(req);
+        assertThat(servers).singleElement().satisfies(s -> {
+            assertThat(s.type()).isEqualTo("stdio");
+            assertThat(s.command()).isEqualTo("/bin/mcp");
+            assertThat(s.args()).containsExactly("--flag");
+            assertThat(s.env()).containsEntry("API_KEY", "k");
+        });
+    }
+
+    @Test
     void grokHomeLivesUnderTheWorkspaceSoSessionLoadCanFindIt(@TempDir Path dir) {
         AgentRunRequest req = new AgentRunRequest("chat-9", null, dir.toString(), "hi", null, List.of(), false, null, null);
         assertThat(GrokAcpAgentRunner.grokHome(req))
@@ -54,7 +69,6 @@ class GrokAcpAgentRunnerTest {
                 .isEqualTo(file.toRealPath());
         assertThat(GrokAcpAgentRunner.resolveInWorkspace(req, dir.resolve("../outside.txt").toString(), false)).isNull();
         assertThat(GrokAcpAgentRunner.resolveInWorkspace(req, "/etc/passwd", false)).isNull();
-        // Grok's own home under the workspace is not readable through ACP fs.
         Path secret = dir.resolve(".superagent/grok-home/s1/.grok/auth.json");
         Files.createDirectories(secret.getParent());
         Files.writeString(secret, "secret");
@@ -62,15 +76,16 @@ class GrokAcpAgentRunnerTest {
     }
 
     @Test
-    void runsATurnAnsweringPermissionWithAJsonRpcResponseAndEmitsResult(@TempDir Path dir) throws Exception {
+    void runsATurnAnsweringNestedPermissionWithoutSkipPermissions(@TempDir Path dir) throws Exception {
         Path log = dir.resolve("stdin.log");
         Path fake = dir.resolve("grok");
-        Files.writeString(fake, fakeAgentScript(log));
+        Files.writeString(fake, fakeAgentScript(log, "happy"));
         fake.toFile().setExecutable(true);
 
         List<AgentEvent> events = new ArrayList<>();
+        // skipPermissions=false: must map run_terminal_command → Bash against the allowlist.
         AgentRunRequest req = new AgentRunRequest("s1", null, dir.toString(), "use echo", "mock-model",
-                List.of("*"), true, null, "You are terse.")
+                List.of("Bash", "Read"), false, null, "You are terse.")
                 .withCredential(new RunCredential("c1", "https://api.x.ai/v1", "xai-test", false));
 
         new GrokAcpAgentRunner(fake.toString(), 30).run(req, events::add, new Cancellation());
@@ -81,24 +96,63 @@ class GrokAcpAgentRunnerTest {
         assertThat(events.stream().filter(e -> e.type() == AgentEventType.RESULT).map(AgentEvent::payload))
                 .containsExactly("hello done via tool");
 
-        // Permission must be answered as a JSON-RPC response {id, result}, not a notification.
         String stdin = Files.readString(log);
         assertThat(stdin).contains("\"method\":\"session/new\"");
-        assertThat(stdin).contains("\"yoloMode\":true");
         assertThat(stdin).contains("\"rules\":\"You are terse.\"");
         assertThat(stdin).contains("\"id\":9001");
         assertThat(stdin).contains("\"optionId\":\"allow_once\"");
         assertThat(stdin).doesNotContain("session/request_permission/response");
+        assertThat(stdin).doesNotContain("--always-approve");
+    }
+
+    @Test
+    void loadReplayIsNotMixedIntoThisTurnResult(@TempDir Path dir) throws Exception {
+        Path log = dir.resolve("stdin.log");
+        Path fake = dir.resolve("grok");
+        Files.writeString(fake, fakeAgentScript(log, "load"));
+        fake.toFile().setExecutable(true);
+
+        List<AgentEvent> events = new ArrayList<>();
+        AgentRunRequest req = new AgentRunRequest("s1", "sess-fake-1", dir.toString(), "continue", "mock-model",
+                List.of("*"), true, null, null)
+                .withCredential(new RunCredential("c1", "https://api.x.ai/v1", "xai-test", false));
+
+        new GrokAcpAgentRunner(fake.toString(), 30).run(req, events::add, new Cancellation());
+
+        assertThat(events.stream().filter(e -> e.type() == AgentEventType.RESULT).map(AgentEvent::payload))
+                .containsExactly("NEW ANSWER");
+        assertThat(Files.readString(log)).contains("\"method\":\"session/load\"");
+    }
+
+    @Test
+    void promptJsonRpcErrorEmitsErrorNotResult(@TempDir Path dir) throws Exception {
+        Path log = dir.resolve("stdin.log");
+        Path fake = dir.resolve("grok");
+        Files.writeString(fake, fakeAgentScript(log, "auth-error"));
+        fake.toFile().setExecutable(true);
+
+        List<AgentEvent> events = new ArrayList<>();
+        AgentRunRequest req = new AgentRunRequest("s1", null, dir.toString(), "hi", "mock-model",
+                List.of("*"), true, null, null)
+                .withCredential(new RunCredential("c1", "https://api.x.ai/v1", "bad-key", false));
+
+        new GrokAcpAgentRunner(fake.toString(), 30).run(req, events::add, new Cancellation());
+
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.SYSTEM, AgentEventType.ERROR)
+                .doesNotContain(AgentEventType.RESULT);
+        assertThat(events.stream().filter(e -> e.type() == AgentEventType.ERROR).map(AgentEvent::payload))
+                .anyMatch(p -> p.contains("authentication") || p.contains("Unauthorized"));
     }
 
     /** A stand-in {@code grok}: speaks ACP on stdio and records every stdin line. */
-    private static String fakeAgentScript(Path log) {
-        // Node is available wherever the real @xai-official/grok package is; the script is self-contained.
+    private static String fakeAgentScript(Path log, String mode) {
         return """
                 #!/usr/bin/env node
                 const fs = require('fs');
                 const readline = require('readline');
                 const logPath = %s;
+                const mode = %s;
                 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
                 let promptId = null;
                 function send(obj) { process.stdout.write(JSON.stringify(obj) + '\\n'); }
@@ -106,7 +160,6 @@ class GrokAcpAgentRunnerTest {
                   if (!line.trim()) return;
                   fs.appendFileSync(logPath, line + '\\n');
                   let msg; try { msg = JSON.parse(line); } catch { return; }
-                  // Our permission answer arrives as a JSON-RPC response (has id+result, no method).
                   if (msg.id === 9001 && msg.result && !msg.method) {
                     send({ jsonrpc: '2.0', method: 'session/update', params: {
                       update: { sessionUpdate: 'agent_message_chunk',
@@ -127,22 +180,50 @@ class GrokAcpAgentRunnerTest {
                     send({ jsonrpc: '2.0', id: msg.id, result: {
                       protocolVersion: 1,
                       agentCapabilities: { loadSession: true, mcpCapabilities: { http: true } } } });
-                  } else if (msg.method === 'session/new' || msg.method === 'session/load') {
+                  } else if (msg.method === 'session/new') {
                     send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'sess-fake-1' } });
+                  } else if (msg.method === 'session/load') {
+                    // Historical replay arrives as session/update before / while the load result does.
+                    send({ jsonrpc: '2.0', method: 'session/update', params: {
+                      update: { sessionUpdate: 'agent_message_chunk',
+                        content: { type: 'text', text: 'OLD ANSWER' } } } });
+                    send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'sess-fake-1' } });
+                    send({ jsonrpc: '2.0', method: 'session/update', params: {
+                      update: { sessionUpdate: 'agent_message_chunk',
+                        content: { type: 'text', text: 'OLD ANSWER' } } } });
                   } else if (msg.method === 'session/prompt') {
                     promptId = msg.id;
+                    if (mode === 'auth-error') {
+                      send({ jsonrpc: '2.0', id: promptId, error: {
+                        code: -32000, message: 'Unauthorized: authentication failed' } });
+                      return;
+                    }
+                    if (mode === 'load') {
+                      send({ jsonrpc: '2.0', method: 'session/update', params: {
+                        update: { sessionUpdate: 'agent_message_chunk',
+                          content: { type: 'text', text: 'NEW ANSWER' } } } });
+                      send({ jsonrpc: '2.0', id: promptId, result: { stopReason: 'end_turn' } });
+                      return;
+                    }
                     send({ jsonrpc: '2.0', method: 'session/update', params: {
                       update: { sessionUpdate: 'agent_message_chunk',
                         content: { type: 'text', text: 'hello ' } } } });
+                    // ACP nests title / toolCallId under params.toolCall.
                     send({ jsonrpc: '2.0', id: 9001, method: 'session/request_permission', params: {
-                      toolCallId: 'tc1', title: 'use_tool superagent__echo',
+                      sessionId: 'sess-fake-1',
+                      toolCall: {
+                        toolCallId: 'tc1',
+                        title: 'Run a shell command',
+                        name: 'run_terminal_command',
+                        kind: 'execute'
+                      },
                       options: [
                         { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
                         { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' }
                       ] } });
                   }
                 });
-                """.formatted(toJsString(log.toString()));
+                """.formatted(toJsString(log.toString()), toJsString(mode));
     }
 
     private static String toJsString(String value) {

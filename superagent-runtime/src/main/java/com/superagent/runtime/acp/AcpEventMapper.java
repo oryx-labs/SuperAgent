@@ -234,18 +234,105 @@ public final class AcpEventMapper {
     }
 
     /** The permission an agent asks for, and the options it offers. */
-    public record PermissionRequest(String toolCallId, String title, List<Option> options) {
+    public record PermissionRequest(String toolCallId, String title, String name, String kind, List<Option> options) {
         public record Option(String optionId, String name, String kind) {
+        }
+
+        /** Prefer the programmatic tool name; fall back to the human title. */
+        public String label() {
+            if (name != null && !name.isBlank()) {
+                return name;
+            }
+            return title == null ? "" : title;
         }
     }
 
-    /** Reads a {@code session/request_permission} request. */
+    /**
+     * Reads a {@code session/request_permission} request. ACP puts {@code title}/{@code toolCallId}
+     * (and optional {@code name}/{@code kind}) under {@code params.toolCall}, not on {@code params}.
+     */
     public static PermissionRequest mapPermission(JsonNode params) {
+        JsonNode toolCall = params.path("toolCall");
+        if (!toolCall.isObject()) {
+            toolCall = params; // tolerate a flat shape some agents still send
+        }
         JsonNode options = params.path("options");
         List<PermissionRequest.Option> list = new ArrayList<>();
         options.forEach(o -> list.add(new PermissionRequest.Option(o.path("optionId").asText(""),
                 o.path("name").asText(""), o.path("kind").asText(""))));
-        return new PermissionRequest(params.path("toolCallId").asText(""), params.path("title").asText(""), list);
+        String toolCallId = firstText(toolCall, "toolCallId");
+        if (toolCallId.isBlank()) {
+            toolCallId = firstText(params, "toolCallId");
+        }
+        return new PermissionRequest(
+                toolCallId,
+                firstText(toolCall, "title"),
+                firstText(toolCall, "name"),
+                firstText(toolCall, "kind"),
+                list);
+    }
+
+    /**
+     * Maps a Grok / ACP tool identity onto SuperAgent's Claude-compatible allowlist vocabulary
+     * ({@code Bash}, {@code Read}, {@code Edit}/{@code Write}, {@code Grep}/{@code Glob}/{@code LS},
+     * {@code MCPTool}, {@code WebFetch}, {@code WebSearch}).
+     */
+    public static String permissionTool(PermissionRequest request) {
+        return permissionTool(request.name(), request.title(), request.kind());
+    }
+
+    static String permissionTool(String name, String title, String kind) {
+        String identity = ((name == null ? "" : name) + " " + (title == null ? "" : title))
+                .toLowerCase(java.util.Locale.ROOT);
+        if (identity.contains("run_terminal") || identity.contains("bash") || identity.contains("shell")
+                || "execute".equalsIgnoreCase(kind)) {
+            return "Bash";
+        }
+        if (identity.contains("search_replace") || identity.contains("str_replace")
+                || identity.contains("edit_file") || identity.contains("apply_patch")
+                || "edit".equalsIgnoreCase(kind) || "delete".equalsIgnoreCase(kind)
+                || "move".equalsIgnoreCase(kind)) {
+            return "Edit";
+        }
+        if (identity.contains("write_file") || identity.contains("create_file")
+                || identity.contains("write_text")) {
+            return "Write";
+        }
+        if (identity.contains("read_file") || identity.contains("read_text")
+                || "read".equalsIgnoreCase(kind)) {
+            return "Read";
+        }
+        if (identity.contains("list_dir") || identity.contains("list_directory")
+                || identity.matches(".*\\bls\\b.*")) {
+            return "LS";
+        }
+        if (identity.contains("glob")) {
+            return "Glob";
+        }
+        if (identity.contains("grep") || ("search".equalsIgnoreCase(kind) && !identity.contains("web"))) {
+            return "Grep";
+        }
+        if (identity.contains("web_search") || identity.contains("websearch")) {
+            return "WebSearch";
+        }
+        if (identity.contains("web_fetch") || identity.contains("webfetch") || identity.contains("fetch_url")
+                || "fetch".equalsIgnoreCase(kind)) {
+            return "WebFetch";
+        }
+        if (identity.contains("use_tool") || identity.contains("__") || identity.contains("mcp")) {
+            return "MCPTool";
+        }
+        if (name != null && !name.isBlank()) {
+            return name;
+        }
+        if (title != null && !title.isBlank()) {
+            return title;
+        }
+        return kind == null ? "" : kind;
+    }
+
+    private static String firstText(JsonNode node, String field) {
+        return node.path(field).asText("");
     }
 
     /** The permission options Grok offers, so a caller can pick one by name rather than by position. */

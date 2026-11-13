@@ -63,12 +63,27 @@ class AcpEventMapperTest {
     @Test
     void picksAllowOnceFromPermissionOptions() throws Exception {
         AcpEventMapper.PermissionRequest req = AcpEventMapper.mapPermission(JSON.readTree("""
-                {"toolCallId":"tc1","title":"run_terminal_command","options":[
+                {"toolCall":{"toolCallId":"tc1","title":"Run a shell command","name":"run_terminal_command","kind":"execute"},
+                 "options":[
                   {"optionId":"allow_once","name":"Allow once","kind":"allow_once"},
                   {"optionId":"reject_once","name":"Reject","kind":"reject_once"}]}
                 """));
+        assertThat(req.toolCallId()).isEqualTo("tc1");
+        assertThat(req.name()).isEqualTo("run_terminal_command");
+        assertThat(AcpEventMapper.permissionTool(req)).isEqualTo("Bash");
         assertThat(AcpEventMapper.optionFor(req, true)).isEqualTo("allow_once");
         assertThat(AcpEventMapper.optionFor(req, false)).isEqualTo("reject_once");
+    }
+
+    @Test
+    void mapsGrokToolsOntoClaudeAllowlistVocabulary() {
+        assertThat(AcpEventMapper.permissionTool("read_file", "Read README", "read")).isEqualTo("Read");
+        assertThat(AcpEventMapper.permissionTool("search_replace", "Edit file", "edit")).isEqualTo("Edit");
+        assertThat(AcpEventMapper.permissionTool("write_file", "Create file", null)).isEqualTo("Write");
+        assertThat(AcpEventMapper.permissionTool("use_tool", "use_tool superagent__echo", "other"))
+                .isEqualTo("MCPTool");
+        assertThat(AcpEventMapper.permissionTool("web_search", "Search the web", "fetch"))
+                .isEqualTo("WebSearch");
     }
 
     private static ObjectNode params(String json) throws Exception {

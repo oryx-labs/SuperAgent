@@ -265,7 +265,8 @@ public final class AcpClient implements AutoCloseable {
             return new McpServer(name, "stdio", null, command, args, Map.of(), env);
         }
 
-        ObjectNode toJson() {
+        /** ACP wire shape for {@code session/new|load} {@code mcpServers} entries. */
+        public ObjectNode toJson() {
             ObjectNode node = JSON.createObjectNode();
             node.put("type", type);
             node.put("name", name);
@@ -275,16 +276,22 @@ public final class AcpClient implements AutoCloseable {
             if (command != null) {
                 node.put("command", command);
             }
-            if (args != null && !args.isEmpty()) {
+            // ACP stdio schema: args and env are always arrays (env is [{name,value}], not a map).
+            if ("stdio".equals(type)) {
+                var argsArray = node.putArray("args");
+                if (args != null) {
+                    args.forEach(argsArray::add);
+                }
+                var envArray = node.putArray("env");
+                if (env != null) {
+                    env.forEach((n, v) -> envArray.addObject().put("name", n).put("value", v == null ? "" : v));
+                }
+            } else if (args != null && !args.isEmpty()) {
                 node.set("args", JSON.valueToTree(args));
             }
             if (headers != null && !headers.isEmpty()) {
                 var array = node.putArray("headers");
                 headers.forEach((name2, value) -> array.addObject().put("name", name2).put("value", value));
-            }
-            if (env != null && !env.isEmpty()) {
-                ObjectNode envNode = node.putObject("env");
-                env.forEach(envNode::put);
             }
             return node;
         }

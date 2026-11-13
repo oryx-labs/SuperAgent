@@ -197,11 +197,16 @@ public class GrokAcpAgentRunner implements AgentRunner {
         }
         String method = loading ? "session/load" : "session/new";
         try {
-            JsonNode result = client.request(method, params)
+            JsonNode message = client.request(method, params)
                     .orTimeout(60, TimeUnit.SECONDS)
                     .thenApply(AcpClient.Message::json)
-                    .thenApply(message -> message.path("result"))
                     .join();
+            if (message.has("error")) {
+                emit(sink, request, seq.getAndIncrement(), AgentEventType.ERROR,
+                        "grok " + method + " failed: " + rpcError(message));
+                return null;
+            }
+            JsonNode result = message.path("result");
             if (result.isMissingNode()) {
                 emit(sink, request, seq.getAndIncrement(), AgentEventType.ERROR,
                         "grok could not " + (loading ? "load" : "start") + " a session");
@@ -212,12 +217,40 @@ public class GrokAcpAgentRunner implements AgentRunner {
                 emit(sink, request, seq.getAndIncrement(), AgentEventType.ERROR, "grok returned no session id");
                 return null;
             }
+            if (loading) {
+                // session/load replays prior turns as session/update; drain them so they
+                // never mix into this turn's RESULT / usage.
+                discardLoadReplay(request, sink, seq, client);
+            }
             return sessionId;
         } catch (RuntimeException e) {
             log.warn("session {}: grok {} failed: {}", request.sessionId(), method, e.getMessage());
             emit(sink, request, seq.getAndIncrement(), AgentEventType.ERROR,
                     "grok " + method + " failed: " + e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Drops historical {@code session/update} traffic from {@code session/load}. Agent-side
+     * requests that arrive in the same window are still answered so the load cannot hang.
+     */
+    private void discardLoadReplay(AgentRunRequest request, AgentEventSink sink, AtomicLong seq, AcpClient client) {
+        try {
+            AcpClient.Message message;
+            while ((message = client.take(Duration.ofMillis(200))) != null) {
+                String method = message.method();
+                if ("session/request_permission".equals(method)) {
+                    answerPermission(request, sink, seq, client, message);
+                } else if ("fs/read_text_file".equals(method)) {
+                    answerRead(request, client, message);
+                } else if ("fs/write_text_file".equals(method)) {
+                    answerWrite(request, client, message);
+                }
+                // session/update and _x.ai/* replay notifications: discard
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -257,8 +290,14 @@ public class GrokAcpAgentRunner implements AgentRunner {
             Thread.currentThread().interrupt();
         }
         try {
-            JsonNode result = answer.orTimeout(Math.max(1, (deadline - System.nanoTime()) / 1_000_000),
-                    TimeUnit.MILLISECONDS).join().json().path("result");
+            JsonNode message = answer.orTimeout(Math.max(1, (deadline - System.nanoTime()) / 1_000_000),
+                    TimeUnit.MILLISECONDS).join().json();
+            if (message.has("error")) {
+                emit(sink, request, seq.getAndIncrement(), AgentEventType.ERROR,
+                        "grok turn failed: " + rpcError(message));
+                return;
+            }
+            JsonNode result = message.path("result");
             String stopReason = result.path("stopReason").asText("");
             if ("cancelled".equals(stopReason)) {
                 emit(sink, request, seq.getAndIncrement(), AgentEventType.ERROR, "grok stopped the turn: cancelled");
@@ -473,7 +512,8 @@ public class GrokAcpAgentRunner implements AgentRunner {
     private void answerPermission(AgentRunRequest request, AgentEventSink sink, AtomicLong seq, AcpClient client,
                                   AcpClient.Message message) {
         AcpEventMapper.PermissionRequest permission = AcpEventMapper.mapPermission(message.params());
-        boolean allowed = request.skipPermissions() || permitted(request, permission.title());
+        String mapped = AcpEventMapper.permissionTool(permission);
+        boolean allowed = request.skipPermissions() || permitted(request, mapped, permission);
         String option = AcpEventMapper.optionFor(permission, allowed);
         ObjectNode result = JSON.createObjectNode();
         result.set("outcome", JSON.createObjectNode()
@@ -481,27 +521,82 @@ public class GrokAcpAgentRunner implements AgentRunner {
                 .put("optionId", option == null ? AcpClient.PermissionDecision.REJECT_ONCE : option));
         client.respond(message.id(), result);
         if (!allowed) {
+            String label = permission.label().isBlank() ? mapped : permission.label();
             emit(sink, request, seq.getAndIncrement(), AgentEventType.TOOL_RESULT,
-                    "Permission denied: " + permission.title());
+                    "Permission denied: " + label);
         }
     }
 
-    /** Whether the run's allowlist covers the tool the agent wants to use. */
-    private boolean permitted(AgentRunRequest request, String title) {
+    /**
+     * Whether the run's allowlist covers the tool. Matching is against the Claude-mapped
+     * rule ({@code Bash}, {@code Read}, …), not a substring of Grok's title.
+     */
+    private boolean permitted(AgentRunRequest request, String mappedTool, AcpEventMapper.PermissionRequest permission) {
         List<String> allowed = request.allowedTools();
-        if (allowed == null || allowed.isEmpty()) {
+        if (allowed == null || allowed.isEmpty() || mappedTool == null || mappedTool.isBlank()) {
             return false;
         }
-        String tool = title == null ? "" : title;
+        String label = permission == null ? "" : permission.label();
+        String mcpForm = toClaudeMcpName(label);
         for (String rule : allowed) {
             if (rule == null || rule.isBlank()) {
                 continue;
             }
-            if (rule.equals("*") || tool.contains(rule) || tool.toLowerCase().contains(rule.toLowerCase())) {
+            if (rule.equals("*") || rule.equals(mappedTool)) {
+                return true;
+            }
+            if ("MCPTool".equals(mappedTool) && mcpRuleMatches(rule, label, mcpForm)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean mcpRuleMatches(String rule, String label, String mcpForm) {
+        if (rule.equals("MCPTool")) {
+            return true;
+        }
+        if (rule.equals(label) || (mcpForm != null && rule.equals(mcpForm))) {
+            return true;
+        }
+        if (rule.endsWith("*")) {
+            String prefix = rule.substring(0, rule.length() - 1);
+            return (mcpForm != null && mcpForm.startsWith(prefix)) || label.startsWith(prefix)
+                    || label.startsWith(prefix.replace("mcp__", ""));
+        }
+        // Claude allowlist entry mcp__server__tool vs Grok server__tool / use_tool title.
+        String bare = rule.startsWith("mcp__") ? rule.substring("mcp__".length()) : rule;
+        return !bare.isBlank() && (label.equals(bare) || label.endsWith("__" + bare) || label.contains(bare));
+    }
+
+    /** Claude-style {@code mcp__server__tool} form of a Grok {@code server__tool} name. */
+    private static String toClaudeMcpName(String label) {
+        if (label == null || label.isBlank() || label.startsWith("mcp__")) {
+            return label;
+        }
+        // "use_tool: superagent__echo …" → take the server__tool token if present
+        for (String token : label.split("[\\s:]+")) {
+            if (token.contains("__") && !token.startsWith("use_")) {
+                return "mcp__" + token;
+            }
+        }
+        if (label.contains("__") && !label.contains(" ")) {
+            return "mcp__" + label;
+        }
+        return null;
+    }
+
+    private boolean permitted(AgentRunRequest request, String tool) {
+        return permitted(request, tool, new AcpEventMapper.PermissionRequest("", tool, tool, "", List.of()));
+    }
+
+    private static String rpcError(JsonNode message) {
+        JsonNode error = message.path("error");
+        String text = error.path("message").asText("");
+        if (!text.isBlank()) {
+            return text;
+        }
+        return error.isMissingNode() ? "JSON-RPC error" : error.toString();
     }
 
     /** The MCP servers of this turn, in the shape ACP expects. */
