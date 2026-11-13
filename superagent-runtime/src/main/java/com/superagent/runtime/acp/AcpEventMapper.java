@@ -421,17 +421,29 @@ public final class AcpEventMapper {
     /**
      * Resolves the real MCP tool identity to Claude form {@code mcp__server__tool}.
      * Grok wraps MCP as {@code use_tool} with {@code rawInput.tool_name = "server__tool"}.
+     *
+     * <p>An explicit built-in {@code name} always wins: display titles like
+     * {@code echo crm__list} or {@code Read src/__init__.py} must not reclassify the call
+     * as MCP. Title parsing is only used for the {@code use_tool} wrapper.
      */
     static String resolveMcpTool(String name, String title, String rawToolName) {
-        if (rawToolName != null && looksLikeMcpName(rawToolName)) {
-            return canonicalMcp(rawToolName);
+        if (name != null && !name.isBlank()
+                && BUILTIN_TOOLS.containsKey(name.toLowerCase(java.util.Locale.ROOT))) {
+            return null;
         }
-        if (name != null && looksLikeMcpName(name) && !"use_tool".equalsIgnoreCase(name)) {
+        if ("use_tool".equalsIgnoreCase(name)) {
+            if (rawToolName != null && looksLikeMcpName(rawToolName)) {
+                return canonicalMcp(rawToolName);
+            }
+            String fromTitle = mcpTokenIn(title);
+            return fromTitle == null ? null : canonicalMcp(fromTitle);
+        }
+        if (name != null && looksLikeMcpName(name)) {
             return canonicalMcp(name);
         }
-        String fromTitle = mcpTokenIn(title);
-        if (fromTitle != null) {
-            return canonicalMcp(fromTitle);
+        // No programmatic name: trust rawInput only, never a free-form title.
+        if ((name == null || name.isBlank()) && rawToolName != null && looksLikeMcpName(rawToolName)) {
+            return canonicalMcp(rawToolName);
         }
         return null;
     }

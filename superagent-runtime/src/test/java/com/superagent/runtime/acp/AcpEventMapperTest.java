@@ -129,6 +129,28 @@ class AcpEventMapperTest {
         assertThat(AcpEventMapper.allowlistMatches(List.of("Write"), req)).isFalse();
     }
 
+    @Test
+    void displayTitleDoesNotOverrideBuiltinToolIdentity() throws Exception {
+        // Bash args mentioning an MCP-looking token must stay Bash — not sneak through mcp__crm.
+        AcpEventMapper.PermissionRequest bash = AcpEventMapper.mapPermission(JSON.readTree("""
+                {"toolCall":{"toolCallId":"1","name":"run_terminal_command","title":"echo crm__list","kind":"execute"},
+                 "options":[{"optionId":"allow_once","name":"Allow","kind":"allow_once"}]}
+                """));
+        assertThat(bash.mcpTool()).isNull();
+        assertThat(AcpEventMapper.permissionTool(bash)).isEqualTo("Bash");
+        assertThat(AcpEventMapper.allowlistMatches(List.of("mcp__crm"), bash)).isFalse();
+        assertThat(AcpEventMapper.allowlistMatches(List.of("Bash"), bash)).isTrue();
+
+        // Paths like src/__init__.py in the title must not turn read_file into MCP.
+        AcpEventMapper.PermissionRequest read = AcpEventMapper.mapPermission(JSON.readTree("""
+                {"toolCall":{"toolCallId":"2","name":"read_file","title":"Read src/__init__.py","kind":"read"},
+                 "options":[{"optionId":"allow_once","name":"Allow","kind":"allow_once"}]}
+                """));
+        assertThat(read.mcpTool()).isNull();
+        assertThat(AcpEventMapper.permissionTool(read)).isEqualTo("Read");
+        assertThat(AcpEventMapper.allowlistMatches(List.of("Read"), read)).isTrue();
+    }
+
     private static ObjectNode params(String json) throws Exception {
         return (ObjectNode) JSON.readTree(json);
     }
