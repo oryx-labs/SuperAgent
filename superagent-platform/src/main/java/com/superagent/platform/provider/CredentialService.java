@@ -48,8 +48,8 @@ public class CredentialService {
             .map(com.superagent.core.provider.ProviderCatalog.Entry::key).collect(java.util.stream.Collectors.toSet());
     public static final String ENV_ID = "env";
 
-    private static final Set<String> VENDOR_CHECKED = Set.of("deepseek", "glm", "kimi", "qwen");
-    private static final Set<String> CHECKED = Set.of("claude", "codex", "deepseek", "glm", "kimi", "qwen");
+    private static final Set<String> VENDOR_CHECKED = Set.of("deepseek", "glm", "kimi", "qwen", "grok");
+    private static final Set<String> CHECKED = Set.of("claude", "codex", "deepseek", "glm", "kimi", "qwen", "grok");
 
     private static final Logger log = LoggerFactory.getLogger(CredentialService.class);
     private static final TypeReference<List<ProviderModelDto>> MODEL_LIST = new TypeReference<>() {

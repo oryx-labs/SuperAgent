@@ -71,7 +71,7 @@ public class ProviderModelFetcher {
         return switch (providerKey) {
             case "codex" -> fetchCodex(credential);
             case "claude" -> fetchClaude(credential);
-            case "deepseek", "glm", "kimi", "qwen" -> fetchVendor(providerKey, credential);
+            case "deepseek", "glm", "kimi", "qwen", "grok" -> fetchVendor(providerKey, credential);
             default -> throw new IOException("Model listing is not available for " + providerKey + " yet");
         };
     }

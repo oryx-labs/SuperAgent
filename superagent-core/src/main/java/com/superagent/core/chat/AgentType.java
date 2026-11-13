@@ -13,7 +13,9 @@ public enum AgentType {
     DEEPSEEK("deepseek"),
     QWEN("qwen"),
     /** Zhipu has no agent CLI: Claude Code, pointed at GLM's Anthropic-compatible endpoint. */
-    GLM("glm");
+    GLM("glm"),
+    /** xAI's Grok Build. Speaks ACP rather than a CLI MCP flag, so its runner is a different shape. */
+    GROK("grok");
 
     private final String cliName;
 

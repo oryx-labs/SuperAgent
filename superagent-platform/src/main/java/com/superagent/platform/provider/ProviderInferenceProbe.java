@@ -105,7 +105,7 @@ public class ProviderInferenceProbe {
         check(providerKey, modelId, credential, SOURCE_KEY_CHECK);
     }
 
-    private static final java.util.Set<String> VENDORS = java.util.Set.of("deepseek", "glm", "kimi", "qwen");
+    private static final java.util.Set<String> VENDORS = java.util.Set.of("deepseek", "glm", "kimi", "qwen", "grok");
 
     /** Runs one inference against {@code modelId}; returns normally on success, throws with a readable reason. */
     public void check(String providerKey, String modelId) throws IOException, InterruptedException {
@@ -122,7 +122,7 @@ public class ProviderInferenceProbe {
         com.superagent.core.usage.TokenUsage used = switch (providerKey) {
             case "claude" -> checkClaude(modelId, credential);
             case "codex" -> checkCodex(modelId, credential);
-            case "deepseek", "glm", "kimi", "qwen" -> checkVendor(providerKey, modelId, credential);
+            case "deepseek", "glm", "kimi", "qwen", "grok" -> checkVendor(providerKey, modelId, credential);
             default -> throw new IOException("Inference check is not available for " + providerKey + " yet");
         };
         book(providerKey, source, used);
