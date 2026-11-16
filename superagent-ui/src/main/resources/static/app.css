@@ -2309,17 +2309,7 @@ small.model-note { display: block; margin-top: 4px; }
 .mt-panel--page { margin-top: 0; }
 
 /* Backup models: an ordered list under the default model */
-.backup-models { display: flex; flex-direction: column; gap: 6px; }
-.backup-models__list { display: flex; flex-direction: column; gap: 6px; }
-.backup-models__row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line);
-  border-radius: 8px; background: var(--paper); font-size: 13px; color: var(--ink); }
-.backup-models__n { width: 18px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.backup-models__id { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.backup-models__row button { padding: 0 6px; border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; }
-.backup-models__row button:hover { color: var(--ink); }
-.backup-models__row button:disabled { visibility: hidden; }
-.settings-form .backup-models { margin-top: 10px; }
-
+.settings-form 
 .status-badge.is-infer-checking { background: #eff6ff; color: #1d4ed8; }
 
 /* ---------- Where time went: under replies, and the task's Time tab ---------- */

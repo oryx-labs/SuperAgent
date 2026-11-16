@@ -35,10 +35,11 @@ public class ChatTaskResults {
 
     /** Joins an agent's system prompt when it has the task tools. */
     static final String GUIDE = TaskConfirmPrompt.rules("create_task", "")
-            + "任务由你自己执行（带着你的人设、记忆和技能）。完成、失败或需要确认时，结果会自动发到这个对话里（标着「任务通知」），用户可能接着它说。\n";
+            + "任务由你自己执行（带着你的人设、记忆和技能）。完成、失败或需要确认时，结果会自动发到这个对话里（标着「任务通知」），用户可能接着它说。\n"
+            + MaterialPrompt.RULES;
 
     /** Put right before every user message, next to the request: the system prompt alone loses to the wording. */
-    static final String TURN_CHECK = TaskConfirmPrompt.turnCheck("create_task");
+    static final String TURN_CHECK = TaskConfirmPrompt.turnCheck("create_task") + MaterialPrompt.TURN_CHECK;
 
     private static final Logger log = LoggerFactory.getLogger(ChatTaskResults.class);
     private static final int RESULT_CHARS = 1500;

@@ -18,6 +18,8 @@ public interface ProjectAccess {
 
     /** The project the agent is in, if any. */
     Optional<String> projectOfAgent(String agentId);
+    /** Puts the user's own agent into a project they are in (as the project page does); refused for an archived one. */
+    void placeAgent(String agentId, String user, String projectId);
 
     /** Whether the agent is in an archived project (then it is read-only). */
     boolean archived(String agentId);

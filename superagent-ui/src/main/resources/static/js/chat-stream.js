@@ -191,6 +191,8 @@ function autoGrow() {
 // When the latest reply asks whether to create a task, or ends a task's parameter table with "下一步：回复「…」",
 // a button sends that answer, so the user needn't type it. Only on the last message, and gone once anything is sent.
 const QUICK_CREATE = /要创建吗[？?]/;
+const QUICK_CONFIRM = /确认创建吗[？?]/; // an agent proposing a new agent
+const QUICK_CONFIRM_EDIT = /确认修改吗[？?]/; // an agent proposing to edit an agent
 const QUICK_NEXT = /下一步[：:]\s*回复\s*[「“"]([^」”"\n]{1,80})[」”"]/;
 
 function attachQuickReplies() {
@@ -201,7 +203,9 @@ function attachQuickReplies() {
   const bubble = last.querySelector(".bubble");
   const text = (bubble && (bubble.dataset.md || bubble.textContent)) || "";
   const next = QUICK_NEXT.exec(text);
-  const reply = next ? next[1].trim() : QUICK_CREATE.test(text) ? L("chat.quickCreate") : null;
+  const reply = next ? next[1].trim() : QUICK_CONFIRM_EDIT.test(text) ? L("chat.quickConfirmEdit")
+    : QUICK_CONFIRM.test(text) ? L("chat.quickConfirm")
+    : QUICK_CREATE.test(text) ? L("chat.quickCreate") : null;
   if (!reply) return;
   const row = document.createElement("div");
   row.className = "quick-replies";

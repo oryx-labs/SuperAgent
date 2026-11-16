@@ -80,14 +80,27 @@ class TaskSessionPool {
     Lease acquire(String owner, AgentType agentType, String taskId, String model) {
         List<Session> sessions = sessionsOf(owner);
         Path company = TenantPaths.of(workspaceRoot);
-        for (Session s : sessions) {
-            // the company check is a backstop: owners are usernames, unique across companies
-            if (s.state == State.IDLE && s.agentType == agentType
-                    && s.workspaceDir != null && Path.of(s.workspaceDir).startsWith(company)) {
-                bind(s, taskId, State.BUSY);
-                log.info("task {} reusing session {} ({}, owner {})", taskId, s.id, agentType, owner);
-                return new Lease(s, !s.initialized);
-            }
+        // the company check is a backstop: owners are usernames, unique across companies
+        List<Session> idle = sessions.stream().filter(s -> s.state == State.IDLE && s.agentType == agentType
+                && s.workspaceDir != null && Path.of(s.workspaceDir).startsWith(company)).toList();
+        Session same = idle.stream().filter(s -> model == null || s.model == null || model.equals(s.model)).findFirst()
+                .orElse(null);
+        if (same != null) {
+            same.model = model;
+            bind(same, taskId, State.BUSY);
+            log.info("task {} reusing session {} ({}, owner {})", taskId, same.id, agentType, owner);
+            return new Lease(same, !same.initialized);
+        }
+        if (!idle.isEmpty()) {
+            Session old = idle.get(0);
+            sessions.remove(old);
+            Session s = new Session(UUID.randomUUID().toString(), owner, agentType, old.workspaceDir);
+            s.model = model;
+            sessions.add(s);
+            bind(s, taskId, State.BUSY);
+            log.info("task {} on a new conversation {} in session {}'s workspace ({} -> {}, owner {})",
+                    taskId, s.id, old.id, old.model, model, owner);
+            return new Lease(s, true);
         }
         long busy = sessions.stream().filter(s -> s.state == State.BUSY).count();
         if (busy >= maxParallelPerOwner) {

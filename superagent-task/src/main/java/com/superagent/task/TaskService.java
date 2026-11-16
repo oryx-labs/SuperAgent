@@ -307,16 +307,8 @@ public class TaskService implements TaskRecovery {
             latest.values().forEach(t -> pool.restore(t.createdBy(), t.agentType(), boundSessionId(t), t.workspaceDir(),
                     t.model(), null));
             for (Task t : all) {
-                String sessionId = boundSessionId(t);
-                if (t.status() != TaskStatus.RUNNING && !holdsSession(t.status())
-                        && !running.contains(sessionId)) {
-                    pool.restore(t.createdBy(), t.agentType(), sessionId, t.workspaceDir(), null);
-                    restored++;
-                }
-            }
-            for (Task t : all) {
                 if (holdsSession(t.status())) {
-                    pool.restore(t.createdBy(), t.agentType(), boundSessionId(t), t.workspaceDir(), t.id());
+                    pool.restore(t.createdBy(), t.agentType(), boundSessionId(t), t.workspaceDir(), t.model(), t.id());
                 }
             }
         }
@@ -1213,6 +1205,9 @@ public class TaskService implements TaskRecovery {
         TaskSessionPool.Session session = lease.session();
         Task running = task.withWorkspaceDir(session.workspaceDir).started();
         tasks.save(running);
+        if (!session.id.equals(deriveSessionId(running))) {
+            runStates.save(TaskRunState.initial(running.id(), session.id)); // its conversation isn't named after the workspace
+        }
         executor.execute(TenantContext.wrap(() -> run(running, prompt, session.id, lease.firstTurn(), wrapBrief)));
     }
 
@@ -1476,7 +1471,7 @@ public class TaskService implements TaskRecovery {
         boolean ft = firstTurn;
         log.info("recovering task {} (attempt {}, failures {}, rotate={}, session {})",
                 id, next.attemptCount(), next.failureCount(), rotate, sid);
-        executor.execute(TenantContext.wrap(() -> run(running, prompt, sid, ft, false)));
+        executor.execute(TenantContext.wrap(() -> recoverRun(running, sid, ft)));
     }
 
     /** The pool session id equals the workspace dir's name (see TaskSessionPool), so it is recoverable without extra state. */
@@ -1634,7 +1629,9 @@ public class TaskService implements TaskRecovery {
         CredentialService.Choice choice = credentials == null ? new CredentialService.Choice(null) : credentials.current(cli);
         AgentRunRequest request = new AgentRunRequest(
                 agentSessionId, sessionFirstTurn ? null : agentSessionId, task.workspaceDir(),
-                wrapBriefPrompt ? wrapBrief(task, prompt) : prompt,
+                !wrapBriefPrompt ? prompt
+                        // a reused conversation holds the tasks before it: say where this one starts (coding: runCoding)
+                        : sessionFirstTurn ? wrapBrief(task, prompt) : NEW_TASK_NOTE + "\n\n" + wrapBrief(task, prompt),
                 effectiveModel(task),
                 tools, skipPermissions, McpGrants.withServers(grant == null ? null : mcpGrants.mcpConfig(grant), connected),
                 taskSystemPrompt(task, grant != null),
@@ -1755,6 +1752,9 @@ public class TaskService implements TaskRecovery {
 
                 String prompt = (i == start && resumePrompt != null)
                         ? resumePrompt : codingFlow.prompt(phase.key(), task.brief());
+                if (i == start && resumePrompt == null && !sessionFirstTurn) {
+                    prompt = NEW_TASK_NOTE + "\n\n" + prompt; // a reused conversation: this task starts here
+                }
                 TurnResult turn = executeTurn(task, prompt, agentSessionId, firstTurn, false, null, cancellation, phase.key());
                 firstTurn = false;
                 addSpend(task.id(), turn.cost());
