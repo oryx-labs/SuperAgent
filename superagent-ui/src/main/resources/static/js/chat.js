@@ -22,7 +22,7 @@ function renderStoredMessage(role, content, id, images, sessionId) {
   bubble.hidden = !content && !!(images && images.length); // image-only message: no empty bubble
   msg.appendChild(bubble);
   if (role !== "user" && content) msg.appendChild(copyButton(bubble));
-  if (id && role === "user") { // what the model wrote is a record of what it said: not editable
+  if (id) {
     const edit = document.createElement("button");
     edit.className = "msg__edit";
     edit.title = L("common.edit");

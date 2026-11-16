@@ -77,6 +77,11 @@ public final class ProviderCatalog {
                     new Access(OPENAI, "https://api.moonshot.cn/v1", "KIMI_API_KEY", "KIMI_CODE_BASE_URL")),
             npmEntry("qwen", "Qwen Code", "qwen", true, "@qwen-code/qwen-code", "22.0.0", false, List.of(),
                     new Access(OPENAI, "https://dashscope.aliyuncs.com/compatible-mode/v1", "DASHSCOPE_API_KEY", null)),
+            // Grok Build: xAI's agent CLI. It has no command-line MCP configuration, so its runner speaks ACP
+            // (grok agent stdio), where MCP servers are injected per session — the only way its per-turn
+            // bearer token can reach SuperAgent's own MCP endpoint.
+            npmEntry("grok", "Grok Build", "grok", true, "@xai-official/grok", "20.0.0", false,
+                    List.of("~/.grok/auth.json"), new Access(OPENAI, "https://api.x.ai/v1", "XAI_API_KEY", "XAI_BASE_URL")),
             // --- install-only: install / upgrade / version / keys from the Models page; not wired into tasks yet ---
             npmEntry("codebuddy", "CodeBuddy Code（腾讯）", "codebuddy", false, "@tencent-ai/codebuddy-code", "18.0.0", false,
                     List.of(), new Access(OTHER, null, "CODEBUDDY_API_KEY", "CODEBUDDY_BASE_URL")),

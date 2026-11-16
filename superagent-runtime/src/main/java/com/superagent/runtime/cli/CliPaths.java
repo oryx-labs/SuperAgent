@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
@@ -22,6 +23,9 @@ public class CliPaths {
 
     private static final List<String> EXTRA_BIN_DIRS = List.of("/opt/homebrew/bin", "/usr/local/bin",
             System.getProperty("user.home") + "/.npm-global/bin", System.getProperty("user.home") + "/.local/bin");
+
+    private static final boolean WINDOWS =
+            System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
 
     private final Path nodeRoot;
 
@@ -53,18 +57,42 @@ public class CliPaths {
         return List.copyOf(dirs);
     }
 
+    /**
+     * On Windows an npm global bin dir holds one launcher per CLI in three files — {@code codex} (a sh
+     * script), {@code codex.cmd} and {@code codex.ps1} — of which only the .exe (Volta's shims, some
+     * packages) and .cmd (npm's own) can be started: CreateProcess rejects the extensionless Unix script
+     * with error 193. Try the Windows-startable spellings before the bare name, which stays the only
+     * spelling (and the right one) on macOS/Linux.
+     */
+    private static List<String> candidates(String cli) {
+        return WINDOWS ? List.of(cli + ".exe", cli + ".cmd", cli + ".bat", cli) : List.of(cli);
+    }
+
+    private static boolean launcherFor(Path candidate) {
+        return Files.isRegularFile(candidate) && Files.isExecutable(candidate);
+    }
+
     public Optional<Path> find(String cli) {
         if (cli == null || cli.isBlank()) {
             return Optional.empty();
         }
-        if (cli.contains("/")) {
+        if (cli.contains("/") || cli.contains("\\")) {
             Path p = Path.of(cli);
-            return Files.isRegularFile(p) && Files.isExecutable(p) ? Optional.of(p) : Optional.empty();
+            Path dir = p.getParent() == null ? Path.of(".") : p.getParent();
+            for (String name : candidates(p.getFileName().toString())) {
+                Path candidate = dir.resolve(name);
+                if (launcherFor(candidate)) {
+                    return Optional.of(candidate);
+                }
+            }
+            return Optional.empty();
         }
         for (String dir : searchPath()) {
-            Path candidate = Path.of(dir, cli);
-            if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
-                return Optional.of(candidate);
+            for (String name : candidates(cli)) {
+                Path candidate = Path.of(dir, name);
+                if (launcherFor(candidate)) {
+                    return Optional.of(candidate);
+                }
             }
         }
         return Optional.empty();

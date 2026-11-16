@@ -20,14 +20,7 @@ public record SystemSettingsDto(String agentDefaultModel, String companyName, St
                                 /** A complex task: the most subtasks it may hand out (null on a save keeps it). */
                                 Integer complexMaxSubtasks,
                                 /** A complex task: how many of its subtasks run at once (null on a save keeps it). */
-                                Integer complexMaxParallel,
-                                /**
-                                 * Tasks run only on {@link #taskFixedModels}, cheapest first, instead of a model
-                                 * picked per task (null on a save keeps it).
-                                 */
-                                Boolean taskFixedModelsOn,
-                                /** The models tasks are held to while that's on (null on a save keeps them). */
-                                java.util.List<String> taskFixedModels) {
+                                Integer complexMaxParallel) {
 
     public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName) {
         this(agentDefaultModel, companyName, companyShortName, null, null);
@@ -39,6 +32,6 @@ public record SystemSettingsDto(String agentDefaultModel, String companyName, St
 
     public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl,
                              java.util.List<String> backupModels) {
-        this(agentDefaultModel, companyName, companyShortName, publicUrl, backupModels, null, null, null, null);
+        this(agentDefaultModel, companyName, companyShortName, publicUrl, backupModels, null, null);
     }
 }

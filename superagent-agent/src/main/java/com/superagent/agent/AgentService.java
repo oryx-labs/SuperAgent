@@ -380,11 +380,6 @@ public class AgentService {
         this.parents = parents;
     }
 
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    void setRunLog(AgentLogService runLog) {
-        this.runLog = runLog;
-    }
-
     // --- parent agents ---
 
     /**
