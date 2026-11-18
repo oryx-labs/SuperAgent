@@ -381,12 +381,21 @@
             <button class="btn" id="taskDeleteBtn" type="button" data-i18n="tasks.delete">Delete</button>
           </div>
         </div>
+        <!-- A coding task run by the harness: where it works, and its seven steps. -->
+        <section class="hn" id="taskHarness" hidden>
+          <div class="hn-env" id="hnEnv"></div>
+          <ol class="hn-pipe" id="hnPipe"></ol>
+        </section>
         <div class="task-detail__body">
           <div class="task-main">
             <div class="model-tabs task-tabs" id="taskTabs">
               <button type="button" class="model-tab" data-tab="prompt" data-i18n="tasks.tabPrompt">Prompt</button>
               <button type="button" class="model-tab" data-tab="model" data-i18n="tasks.tabModel">Model choice</button>
               <button type="button" class="model-tab is-active" data-tab="run" data-i18n="tasks.tabRun">Conversation</button>
+              <button type="button" class="model-tab hn-tab" data-tab="hspec" id="hnTabSpec" hidden>Spec</button>
+              <button type="button" class="model-tab hn-tab" data-tab="hdiff" id="hnTabDiff" hidden>Changes</button>
+              <button type="button" class="model-tab hn-tab" data-tab="hverify" id="hnTabVerify" hidden>Checks</button>
+              <button type="button" class="model-tab hn-tab" data-tab="hreview" id="hnTabReview" hidden>Review</button>
               <button type="button" class="model-tab" data-tab="output" data-i18n="tasks.tabOutput">Output</button>
               <button type="button" class="model-tab" data-tab="subtasks" id="taskSubtasksTab" hidden>Subtasks</button>
               <button type="button" class="model-tab" data-tab="usage" data-i18n="tasks.tabUsage">Cost</button>
@@ -399,6 +408,10 @@
             <div class="task-pane" data-pane-tab="model" hidden>
               <div class="model-choices" id="taskModelChoices"></div>
             </div>
+            <div class="task-pane" data-pane-tab="hspec" hidden><div class="hn-spec" id="hnSpec"></div></div>
+            <div class="task-pane" data-pane-tab="hdiff" hidden><div id="hnDiff"></div></div>
+            <div class="task-pane" data-pane-tab="hverify" hidden><div id="hnVerify"></div></div>
+            <div class="task-pane" data-pane-tab="hreview" hidden><div id="hnReview"></div></div>
             <div class="task-pane" data-pane-tab="run" id="taskRunPane">
               <section class="task-phases" id="taskPhasesPanel" hidden>
                 <h3 class="task-section__title" data-i18n="tasks.phases">Flow</h3>
@@ -844,6 +857,10 @@
               <input type="number" id="sfComplexMaxParallel" min="1" max="20" step="1" /></label>
           </div>
           <p class="field-hint" data-i18n="settings.complexHint">A complex task splits its work into subtasks that run side by side, then sums up. These cap how many it may hand out and how many run at the same time.</p>
+          <h3 class="settings-form__section" data-i18n="settings.sectionCoding">Coding tasks</h3>
+          <label class="field"><span data-i18n="settings.codeRoots">Local code directories</span>
+            <textarea id="sfCodeRoots" rows="3" spellcheck="false" placeholder="/data/projects"></textarea></label>
+          <p class="field-hint" data-i18n="settings.codeRootsHint">One full path per line. A coding task may work on a git repository on this server only if it sits under one of these. Leave empty to allow remote repositories only.</p>
           <div class="settings-form__actions">
             <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
             <span class="settings-form__status" id="sfStatus" role="status"></span>
@@ -1151,7 +1168,7 @@
       <h3 class="modal__title" id="connTokenTitle"></h3>
       <p class="field-hint" id="connTokenHint" data-i18n="conn.tokenHint"></p>
       <p class="field-hint" id="connTokenWhere" hidden><a id="connTokenLink" target="_blank" rel="noopener noreferrer"></a></p>
-      <label class="field" id="connTokenAccountField" hidden><span data-i18n="conn.accountEmail">Email</span><input type="email" id="connTokenAccount" autocomplete="username" /></label>
+      <label class="field" id="connTokenAccountField" hidden><span id="connTokenAccountLabel" data-i18n="conn.accountEmail">Email</span><input type="email" id="connTokenAccount" autocomplete="username" /></label>
       <label class="field"><span>Token</span><input type="password" id="connTokenInput" autocomplete="new-password" required /></label>
       <p class="field-hint kb-modal__error" id="connTokenError" hidden></p>
       <div class="modal__actions">
@@ -1601,6 +1618,7 @@
   <script src="/js/connectors.js"></script>
   <script src="/js/projects.js"></script>
   <script src="/js/tasks.js"></script>
+  <script src="/js/task-harness.js"></script>
   <script src="/js/timing.js"></script>
   <script src="/js/auth.js"></script>
   <script src="/js/models.js"></script>

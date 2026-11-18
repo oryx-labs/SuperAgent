@@ -479,11 +479,14 @@ function renderDetail(d) {
   tel.subtasksTab.hidden = t.flow !== "complex";
   tel.subtasksTab.textContent = L("tasks.tabSubtasks", { n: t.subtasks || 0 });
   loadTaskRelations(t);
-  renderPhases(d.phases);
+  task.harness = !!d.harness;
+  renderPhases(d.harness ? [] : d.phases); // a harness-run task shows its steps in the pipeline above instead
   task.hasPhases = !!(d.phases && d.phases.length);
   // Only a task with a flow of its own (coding) has phases; the rest just run.
   tel.tabs.querySelector('[data-tab="run"]').textContent = task.hasPhases
     ? L("tasks.tabRunPhased", { n: d.phases.length }) : L("tasks.tabRun");
+  if (task.harnessFor !== t.id) { hnOpenFiles = new Set(); task.harnessFor = t.id; }
+  renderHarness(d.harness, t);
   if (tel.promptBody) tel.promptBody.innerHTML = renderMarkdown(d.brief || t.title || "");
   // A finished task opens on what it came up with; one still at work on its run log.
   const last = [...(d.events || [])].reverse().find(e => e.type === "result");
@@ -1031,11 +1034,20 @@ async function pollTask() {
     loadTaskRelations(t); // refetched only when its subtasks or its status moved on
     // The model is decided before the task starts, and again whenever it moves to a dearer one after failing.
     if (task.choiceKey !== t.status + "|" + t.model) { task.choiceKey = t.status + "|" + t.model; loadModelChoices(t); loadTaskUsage(t.id); }
-    // Phases only change when the task moves on: refetch the (large) detail then, not every poll.
+    // Phases only change when the task moves on: refetch the (large) detail then, not every poll. A harness-run task
+    // also records each check as it runs, so new events mean its checks may have moved on.
     const phaseKey = t.status + "|" + t.progress;
-    if (task.hasPhases && phaseKey !== task.lastPhaseKey) {
+    const harnessMoved = task.harness && newEvents.length && Date.now() - (task.harnessAt || 0) > 4000;
+    if (task.hasPhases && (phaseKey !== task.lastPhaseKey || harnessMoved)) {
       task.lastPhaseKey = phaseKey;
-      try { const dRes = await api.taskDetail(id); if (dRes && dRes.data) renderPhases(dRes.data.phases); } catch (e) { /* ignore */ }
+      task.harnessAt = Date.now();
+      try {
+        const dRes = await api.taskDetail(id);
+        if (dRes && dRes.data && task.id === id) {
+          renderPhases(dRes.data.harness ? [] : dRes.data.phases);
+          renderHarness(dRes.data.harness, t);
+        }
+      } catch (e) { /* ignore */ }
     }
     if (task.timingKey !== t.status) { task.timingKey = t.status; loadTaskTiming(id); } // a turn ended or the task moved on
     if (!isActiveStatus(t.status)) { stopTaskPolling(); loadTaskFiles(id); }

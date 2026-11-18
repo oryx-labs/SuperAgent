@@ -22,6 +22,10 @@ public final class NoticeEvents {
         }
     }
 
+    /** A running task's milestone worth telling the chat that set it off (not a status change). */
+    public record TaskNote(String taskId, String owner, String title, String text) {
+    }
+
     /** The user's SuperAgent proposed a plan ({@code open}) or the plan was approved / replaced. */
     public record PlanChanged(String owner, String planId, String summary, boolean open) {
     }

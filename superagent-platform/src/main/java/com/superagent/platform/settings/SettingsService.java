@@ -20,6 +20,7 @@ public class SettingsService {
     static final String COMPLEX_MAX_PARALLEL = "task.complex.max-parallel";
     static final String TASK_FIXED_ON = "task.fixed-models.on";
     static final String TASK_FIXED_MODELS = "task.fixed-models";
+    static final String CODE_ROOTS = "task.coding.local-roots";
     public static final int DEFAULT_MAX_SUBTASKS = 10;
     public static final int DEFAULT_MAX_PARALLEL = 5;
 
@@ -53,7 +54,7 @@ public class SettingsService {
         return new SystemSettingsDto(trimToNull(all.get(AGENT_DEFAULT_MODEL)), companyName(all),
                 trimToNull(all.get(COMPANY_SHORT_NAME)), trimToNull(all.get(PUBLIC_URL)), list(all, BACKUP_MODELS),
                 number(all, COMPLEX_MAX_SUBTASKS, DEFAULT_MAX_SUBTASKS), number(all, COMPLEX_MAX_PARALLEL, DEFAULT_MAX_PARALLEL),
-                "true".equals(all.get(TASK_FIXED_ON)), list(all, TASK_FIXED_MODELS));
+                "true".equals(all.get(TASK_FIXED_ON)), list(all, TASK_FIXED_MODELS), lines(all, CODE_ROOTS));
     }
 
     /**
@@ -84,6 +85,9 @@ public class SettingsService {
         store.put(TASK_FIXED_ON, fixedOn ? "true" : null);
         if (request.publicUrl() != null) {
             store.put(PUBLIC_URL, publicUrl(request.publicUrl()));
+        }
+        if (request.codeRoots() != null) {
+            store.put(CODE_ROOTS, codeRoots(request.codeRoots()));
         }
         if (request.complexMaxSubtasks() != null) {
             store.put(COMPLEX_MAX_SUBTASKS, String.valueOf(bounded(request.complexMaxSubtasks(), 1, 50, "子任务上限")));
@@ -170,6 +174,45 @@ public class SettingsService {
         String v = trimToNull(all.get(key));
         return v == null ? java.util.List.of() : java.util.Arrays.stream(v.split(",")).map(String::strip)
                 .filter(x -> !x.isEmpty()).toList();
+    }
+
+    /** Directories a coding task may use a local repository under; empty = local projects are off. */
+    public java.util.List<String> codeRoots() {
+        return lines(store.all(), CODE_ROOTS);
+    }
+
+    // One per line: a path may hold a comma.
+    private static java.util.List<String> lines(Map<String, String> all, String key) {
+        String v = trimToNull(all.get(key));
+        return v == null ? java.util.List.of() : v.lines().map(String::strip).filter(x -> !x.isEmpty()).toList();
+    }
+
+    /** Each an existing directory, saved as its real path (no links, no ..), so a check against it can't be walked around. */
+    private static String codeRoots(java.util.List<String> requested) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (String r : requested) {
+            String v = trimToNull(r);
+            if (v == null) {
+                continue;
+            }
+            java.nio.file.Path p = java.nio.file.Path.of(v);
+            if (!p.isAbsolute()) {
+                throw new IllegalArgumentException("代码目录要写完整路径：" + v);
+            }
+            String real;
+            try {
+                real = p.toRealPath().toString();
+            } catch (java.io.IOException e) {
+                throw new IllegalArgumentException("这台服务器上没有目录 " + v);
+            }
+            if (!java.nio.file.Files.isDirectory(p) || real.equals(p.getRoot().toString())) {
+                throw new IllegalArgumentException("代码目录要是一个具体的目录（不能是根目录）：" + v);
+            }
+            if (!out.contains(real)) {
+                out.add(real);
+            }
+        }
+        return out.isEmpty() ? null : String.join("\n", out);
     }
 
     /** How people reach this server from outside, set by the admin; null when it should follow the request. */

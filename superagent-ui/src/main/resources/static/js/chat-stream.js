@@ -193,7 +193,24 @@ function autoGrow() {
 const QUICK_CREATE = /要创建吗[？?]/;
 const QUICK_CONFIRM = /确认创建吗[？?]/; // an agent proposing a new agent
 const QUICK_CONFIRM_EDIT = /确认修改吗[？?]/; // an agent proposing to edit an agent
-const QUICK_NEXT = /下一步[：:]\s*回复\s*[「“"]([^」”"\n]{1,80})[」”"]/;
+const QUICK_NEXT = /下一步[：:]\s*回复\s*([^\n]+)/;
+
+/** The answers a "下一步：回复「A」或「B」" line offers, at most three. */
+function nextReplies(text) {
+  const line = QUICK_NEXT.exec(text || "");
+  if (!line) return [];
+  return [...line[1].matchAll(/[「“"]([^」”"\n]{1,80})[」”"]/g)].map(m => m[1].trim()).filter(Boolean).slice(0, 3);
+}
+
+function quickReplyButton(reply, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "quick-reply";
+  btn.textContent = reply;
+  btn.title = L("chat.quickReplyHint");
+  btn.addEventListener("click", onClick);
+  return btn;
+}
 
 function attachQuickReplies() {
   el.messages.querySelectorAll(".quick-replies").forEach(x => x.remove());
@@ -202,24 +219,18 @@ function attachQuickReplies() {
   if (!last || !last.classList.contains("msg--agent") || last.classList.contains("msg--background") || streaming) return;
   const bubble = last.querySelector(".bubble");
   const text = (bubble && (bubble.dataset.md || bubble.textContent)) || "";
-  const next = QUICK_NEXT.exec(text);
-  const reply = next ? next[1].trim() : QUICK_CONFIRM_EDIT.test(text) ? L("chat.quickConfirmEdit")
-    : QUICK_CONFIRM.test(text) ? L("chat.quickConfirm")
-    : QUICK_CREATE.test(text) ? L("chat.quickCreate") : null;
-  if (!reply) return;
+  const next = nextReplies(text);
+  const replies = next.length ? next : QUICK_CONFIRM_EDIT.test(text) ? [L("chat.quickConfirmEdit")]
+    : QUICK_CONFIRM.test(text) ? [L("chat.quickConfirm")]
+    : QUICK_CREATE.test(text) ? [L("chat.quickCreate")] : [];
+  if (!replies.length) return;
   const row = document.createElement("div");
   row.className = "quick-replies";
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "quick-reply";
-  btn.textContent = reply;
-  btn.title = L("chat.quickReplyHint");
-  btn.addEventListener("click", () => {
+  replies.forEach(reply => row.appendChild(quickReplyButton(reply, () => {
     if (streaming) return;
     row.remove();
     el.input.value = reply;
     el.composer.requestSubmit();
-  });
-  row.appendChild(btn);
+  })));
   last.appendChild(row);
 }

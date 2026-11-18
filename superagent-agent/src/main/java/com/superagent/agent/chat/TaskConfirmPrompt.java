@@ -10,6 +10,12 @@ public final class TaskConfirmPrompt {
     private TaskConfirmPrompt() {
     }
 
+    // Only where the coding_targets tool is there (an agent's own chat).
+    private static final String CODING_TARGETS = """
+            列编码任务的表格前先调用 coding_targets，看哪些目录能用、有哪些仓库、用户最近用过什么、授权了哪些平台：代码位置只能填允许的目录下的仓库或远程地址；
+            用户没说清时，推荐最近用过的或最像的那个，并在「可选项」里列出其他候选；远程仓库要开 PR 而用户没授权对应平台时，标 ❓ 并说明先去「连接」页授权。
+            """;
+
     /**
      * The rule and the reply format. {@code tool}: the tool that creates the task; {@code extraRows}: table rows of
      * parameters only this kind of agent has (e.g. who does it), each a full {@code | … | … | … |} line, or "".
@@ -41,12 +47,23 @@ public final class TaskConfirmPrompt {
                 | 交付物 | … | 产出什么、什么格式 |
                 | 验收标准 | … | 怎样算做完 |
 
+                任务类型是编码时，表格换成下面这样（不列「交付物」「验收标准」：任务建好后会先写一份规格，验收标准和验证命令在那里请用户确认）：
+                | 任务标题 | … | … |
+                | 任务类型 | ✅ 已确定 | 编码 |
+                %2$s| 要做什么 | … | 一两句话的目标和范围 |
+                | 代码位置 | … | 本地仓库路径，或 git 仓库地址（https://…） |
+                | 分支 | … | 从哪个分支开始；不填＝本地仓库当前分支 / 远程默认分支 |
+                | 交付方式 | … | 合并回本地分支（本地仓库只能这样）/ 推送新分支并开 PR（远程仓库推荐） |
+                | 资料 | … | 需求文档等链接；没有就写「无」 |
+%3$s                编码任务的「下一步」可以给多个可选回复，例如：👉 下一步：回复「确认」或「确认，交付方式改为开 PR」或「确认，代码位置用 /path/other」（每个都会变成按钮，最多 3 个）。
+                建任务时平台会先检查代码位置、分支和授权；检查不过不会创建，把原因告诉用户并更新表格。
+
                 ### 推荐
                 只为 ❓ 待确认的参数各写一行；全部已确定就省略这一节。
                 | 参数 | 推荐值 | 理由 | 可选项 |
                 | --- | --- | --- | --- |
 
-                👉 下一步：回复「…」——引号里写一句用户可以直接发出的确认语，例如「确认，类型用复杂」或「确认」；严格用这个写法（页面会把它变成一个按钮）。最后加粗写明 **目前尚未创建任务**。
+                👉 下一步：回复「…」——引号里写一句用户可以直接发出的确认语，例如「确认，类型用复杂」或「确认」；严格用这个写法（页面会把它变成按钮；有几个常见选择时可以写成 回复「A」或「B」，最多 3 个）。最后加粗写明 **目前尚未创建任务**。
 
                 从对话里能确定的标 ✅，不确定的标 ❓ 并给出推荐。用户回答或修改后，按同样格式给出更新后的表格。
                 「资料」里有链接时，列表格之前先用 read_link 逐个试读：都读得到才标 ✅；有读不到的标 ❓，在表格下面写明哪个读不到、原因和办法（在「连接」里授权、把文档设为公开，或直接把文件发过来），等用户处理好再建任务。
@@ -62,7 +79,8 @@ public final class TaskConfirmPrompt {
 
                 再用一两句话概括这个任务会做什么。最后写：「当前已成功提交，**不代表已经完成**。结果出来后会发到这个对话里。」
                 如果创建失败，照实说明原因和用户可以怎么做，不要说已创建。
-                """.formatted(tool, extraRows == null || extraRows.isBlank() ? "" : extraRows.strip() + "\n");
+                """.formatted(tool, extraRows == null || extraRows.isBlank() ? "" : extraRows.strip() + "\n",
+                        "create_task".equals(tool) ? CODING_TARGETS : "");
     }
 
     /** The per-turn reminder, next to the user's words. */

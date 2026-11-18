@@ -21,6 +21,7 @@ const sel = {
   publicUrl: document.getElementById("sfPublicUrl"),
   complexMaxSubtasks: document.getElementById("sfComplexMaxSubtasks"),
   complexMaxParallel: document.getElementById("sfComplexMaxParallel"),
+  codeRoots: document.getElementById("sfCodeRoots"),
   missing: document.getElementById("sfAgentModelMissing"),
   filtered: document.getElementById("sfAgentModelFiltered"),
   status: document.getElementById("sfStatus"),
@@ -41,6 +42,7 @@ async function loadSettingsForm() {
   sel.publicUrl.value = systemSettings.publicUrl || "";
   sel.complexMaxSubtasks.value = systemSettings.complexMaxSubtasks || 10;
   sel.complexMaxParallel.value = systemSettings.complexMaxParallel || 5;
+  sel.codeRoots.value = (systemSettings.codeRoots || []).join("\n");
 
   sel.agentModel.innerHTML = "";
   const def = document.createElement("option");
@@ -251,9 +253,11 @@ sel.form.addEventListener("submit", async e => {
       complexMaxParallel: Number(sel.complexMaxParallel.value) || null,
       taskFixedModelsOn: fixedSelect.on.checked,
       taskFixedModels: fixedOrder(),
+      codeRoots: sel.codeRoots.value.split("\n").map(s => s.trim()).filter(Boolean),
     });
     if (!res || !res.data) throw new Error((res && res.message) || "no data");
     systemSettings = res.data;
+    sel.codeRoots.value = (systemSettings.codeRoots || []).join("\n");
     backupModels = (systemSettings.backupModels || []).slice();
     renderBackupModels();
     fixedModels = (systemSettings.taskFixedModels || []).slice();

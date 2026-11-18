@@ -14,5 +14,12 @@ public record TaskDetailDto(
         String brief,
         List<MessageDto> messages,
         List<TaskEventDto> events,
-        List<TaskPhaseDto> phases) {
+        List<TaskPhaseDto> phases,
+        /** A task run by a built-in harness (coding): its steps, workspace, checks and review; null otherwise. */
+        HarnessDto harness) {
+
+    public TaskDetailDto(TaskDto task, String brief, List<MessageDto> messages, List<TaskEventDto> events,
+                         List<TaskPhaseDto> phases) {
+        this(task, brief, messages, events, phases, null);
+    }
 }
