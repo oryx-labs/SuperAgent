@@ -185,46 +185,88 @@ function renderThreads(list) {
   projectList.forEach(p => {
     const inIt = list.filter(a => a.kind !== "super" && (p.agentIds || []).includes(a.id));
     if (!inIt.length) return;
-    const head = threadGroup(p.name + (p.status === "archived" ? " · " + L("proj.archived") : ""), inIt.length);
+    const key = "p:" + p.id;
+    const head = threadGroup(p.name + (p.status === "archived" ? " · " + L("proj.archived") : ""), inIt.length, key);
     head.classList.add("thread-group--project");
     head.title = L("proj.sidebarHint");
     head.addEventListener("click", () => { setView("projects"); refreshProjects().then(() => openProject(p)); });
     el.threadList.appendChild(head);
-    inIt.forEach(renderThread);
+    inIt.forEach(a => renderThread(a, key));
   });
   // Both groups always show, so it's clear where shared agents will appear even before there are any.
-  el.threadList.appendChild(threadGroup(L("co.myAgents"), mine.length));
-  if (mine.length) mine.forEach(renderThread);
-  else el.threadList.appendChild(threadEmpty(L("co.myEmpty")));
-  el.threadList.appendChild(threadGroup(L("co.sharedAgents"), shared.length));
-  if (shared.length) shared.forEach(renderThread);
-  else el.threadList.appendChild(threadEmpty(L("co.sharedEmpty")));
+  const mineHead = threadGroup(L("co.myAgents"), mine.length, "mine");
+  mineHead.addEventListener("click", () => toggleThreadGroup("mine"));
+  el.threadList.appendChild(mineHead);
+  if (mine.length) mine.forEach(a => renderThread(a, "mine"));
+  else el.threadList.appendChild(threadEmpty(L("co.myEmpty"), "mine"));
+  const sharedHead = threadGroup(L("co.sharedAgents"), shared.length, "shared");
+  sharedHead.addEventListener("click", () => toggleThreadGroup("shared"));
+  el.threadList.appendChild(sharedHead);
+  if (shared.length) shared.forEach(a => renderThread(a, "shared"));
+  else el.threadList.appendChild(threadEmpty(L("co.sharedEmpty"), "shared"));
+  applyThreadFolds();
 }
 
-function threadGroup(label, count) {
+// Folded sidebar groups are a personal preference, remembered on this browser only.
+const THREAD_FOLD_KEY = "superagent.threadGroupsFolded";
+const foldedThreadGroups = new Set((() => { try { return JSON.parse(localStorage.getItem(THREAD_FOLD_KEY) || "[]"); } catch (e) { return []; } })());
+
+function toggleThreadGroup(key) {
+  if (foldedThreadGroups.has(key)) foldedThreadGroups.delete(key); else foldedThreadGroups.add(key);
+  try { localStorage.setItem(THREAD_FOLD_KEY, JSON.stringify([...foldedThreadGroups])); } catch (e) { /* not remembered */ }
+  applyThreadFolds();
+}
+
+// The group holding the open chat always shows, so the current agent is never hidden.
+function applyThreadFolds() {
+  el.threadList.querySelectorAll(".thread-group[data-group]").forEach(head => {
+    const key = head.dataset.group;
+    const rows = [...el.threadList.children].filter(r => r !== head && r.dataset.group === key);
+    const folded = foldedThreadGroups.has(key) && !rows.some(r => r.dataset.id && r.dataset.id === activeAgentId);
+    rows.forEach(r => { r.hidden = folded; });
+    head.classList.toggle("is-folded", folded);
+    const btn = head.querySelector(".thread-group__fold");
+    btn.textContent = folded ? "▸" : "▾";
+    btn.title = L(folded ? "co.groupExpand" : "co.groupCollapse");
+    btn.setAttribute("aria-label", btn.title);
+    btn.setAttribute("aria-expanded", String(!folded));
+  });
+}
+
+function threadGroup(label, count, key) {
   const li = document.createElement("li");
   li.className = "thread-group";
+  li.dataset.group = key;
   const name = document.createElement("span");
   name.textContent = label;
   const n = document.createElement("span");
   n.className = "thread-group__count";
   n.textContent = count;
-  li.append(name, n);
+  const fold = document.createElement("button");
+  fold.type = "button";
+  fold.className = "thread-group__fold";
+  fold.addEventListener("click", e => { e.stopPropagation(); toggleThreadGroup(key); });
+  const end = document.createElement("span");
+  end.className = "thread-group__end";
+  end.append(n, fold);
+  li.append(name, end);
   return li;
 }
 
-function threadEmpty(text) {
+function threadEmpty(text, key) {
   const li = document.createElement("li");
   li.className = "thread-empty";
+  li.dataset.group = key;
   li.textContent = text;
   return li;
 }
 
-function renderThread(a) {
+function renderThread(a, group) {
   {
     const li = document.createElement("li");
     li.className = "thread" + (a.id === activeAgentId ? " is-active" : "");
     li.dataset.id = a.id;
+    li.dataset.group = group;
 
     const avatar = document.createElement("span");
     avatar.className = "agent-avatar";
@@ -373,6 +415,7 @@ async function deleteThread(li, agent) {
 function markActiveThread() {
   el.threadList.querySelectorAll(".thread").forEach(t =>
     t.classList.toggle("is-active", t.dataset.id === activeAgentId));
+  applyThreadFolds();
 }
 
 async function selectAgent(agent) {

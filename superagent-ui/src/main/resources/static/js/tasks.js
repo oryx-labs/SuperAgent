@@ -492,7 +492,8 @@ function renderDetail(d) {
   const last = [...(d.events || [])].reverse().find(e => e.type === "result");
   renderTaskOutput(last ? last.payload : null, t);
   // A complex task still at work opens on its subtasks: that is where its progress is.
-  setTaskTab(last && t.status === "done" ? "output" : t.flow === "complex" && t.subtasks ? "subtasks" : "run");
+  const answered = last || (d.harness && d.harness.delivery);
+  setTaskTab(answered && t.status === "done" ? "output" : t.flow === "complex" && t.subtasks ? "subtasks" : "run");
   loadTaskFiles(t.id);
   task.choiceKey = t.status + "|" + t.model;
   loadModelChoices(t);
@@ -564,6 +565,8 @@ function modelChoiceCard(c) {
 // The task's output: its final reply (what it came up with). Not a file: files are what it saved on purpose.
 function renderTaskOutput(text, t) {
   const box = document.getElementById("taskOutput");
+  // A coding task's answer is its delivery, not the reviewer's last words.
+  if (task.harness && renderHarnessOutput(box)) return;
   if (text) { box.innerHTML = renderMarkdown(text); return; }
   box.innerHTML = "";
   const p = document.createElement("p");

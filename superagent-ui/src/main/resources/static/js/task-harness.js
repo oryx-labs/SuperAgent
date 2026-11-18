@@ -19,6 +19,7 @@ const hnEl = {
     hverify: document.getElementById("hnTabVerify"), hreview: document.getElementById("hnTabReview") },
 };
 let hnOpenFiles = new Set(); // diffs kept open across refreshes
+let hnShown = null; // the harness last drawn, for the Output tab
 
 const hnEl2 = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -36,6 +37,7 @@ const hnDuration = (a, b) => {
 /** Shows (or hides, for any other task) the coding view; {@code h} is the detail's harness, {@code t} the task. */
 function renderHarness(h, t) {
   const on = !!h;
+  hnShown = h || null;
   hnEl.box.hidden = !on;
   Object.values(hnEl.tabs).forEach(b => { b.hidden = !on; });
   if (!on) return;
@@ -45,7 +47,8 @@ function renderHarness(h, t) {
   hnEl.tabs.hdiff.innerHTML = "";
   hnEl.tabs.hdiff.append(L("hn.tabDiff"), hnCount(h.files.length));
   hnEl.tabs.hverify.innerHTML = "";
-  hnEl.tabs.hverify.append(L("hn.tabVerify"), hnCount(h.rounds.length ? L("hn.rounds", { n: h.rounds.length }) : ""));
+  hnEl.tabs.hverify.append(L("hn.tabVerify"), hnCount(h.rounds.length || ""));
+  hnEl.tabs.hverify.title = h.rounds.length ? L("hn.rounds", { n: h.rounds.length }) : "";
   hnEl.tabs.hreview.innerHTML = "";
   hnEl.tabs.hreview.append(L("hn.tabReview"), hnCount(h.findings.length || ""));
   renderHarnessSpec(h);
@@ -65,20 +68,32 @@ function renderHarnessEnv(h) {
   const w = h.workspace;
   hnEl.env.replaceChildren();
   if (!w) return;
-  const kv = (label, value, mono) => {
-    const d = hnEl2("div", "hn-kv");
+  // {@code shown}: a short form for a long value; {@code full}: what the tooltip shows and a click copies.
+  const kv = (label, shown, mono, full) => {
+    const d = hnEl2("div", "hn-kv" + (full ? " is-copy" : ""));
     d.append(hnEl2("span", null, label));
     const b = hnEl2("b");
-    if (mono) b.append(hnEl2("code", null, value || "—")); else b.textContent = value || "—";
+    if (mono) b.append(hnEl2("code", null, shown || "—")); else b.textContent = shown || "—";
+    d.dataset.tip = (full || shown || "—") + (full ? "\n— " + L("hn.clickCopy") : "");
+    // Near the right edge the tip opens leftwards, so it stays on screen.
+    d.addEventListener("mouseenter", () => {
+      d.classList.toggle("tip-left", d.getBoundingClientRect().left > window.innerWidth / 2);
+    });
+    if (full) {
+      b.addEventListener("click", () => navigator.clipboard.writeText(full).then(() => showToast(L("hn.copied"))).catch(() => {}));
+    }
     d.appendChild(b);
     hnEl.env.appendChild(d);
   };
-  kv(L(w.mode === "local" ? "hn.repoLocal" : "hn.repoRemote"), w.repo, true);
+  const cmds = h.verifyCommands || [];
+  kv(L(w.mode === "local" ? "hn.repoLocal" : "hn.repoRemote"), w.repo, true, w.repo);
   kv(L("hn.base"), w.baseBranch ? w.baseBranch + (w.baseSha ? " @ " + hnShort(w.baseSha) : "") : "", true);
-  kv(L("hn.branch"), w.branch, true);
-  kv(L("hn.dir"), w.dir, true);
+  kv(L("hn.branch"), w.branch, true, w.branch);
+  // The task's own copy lives deep under the server's data directory: what tells it apart is its last folder.
+  kv(L("hn.dir"), w.dir ? "…/" + w.dir.split("/").filter(Boolean).slice(-2).join("/") : "", true, w.dir);
   kv(L("hn.delivery"), L(w.delivery === "pr" ? "hn.deliveryPr" : "hn.deliveryMerge", { base: w.baseBranch || "" }));
-  kv(L("hn.verifyCmds"), (h.verifyCommands || []).join(" · ") || L("hn.fromSpec"), true);
+  kv(L("hn.verifyCmds"), cmds.length ? L("hn.cmdCount", { n: cmds.length }) + " · " + cmds[0] : L("hn.fromSpec"),
+    cmds.length > 0, cmds.length ? cmds.join("\n") : null);
 }
 
 function renderHarnessPipe(h) {
@@ -86,13 +101,15 @@ function renderHarnessPipe(h) {
     const li = hnEl2("li", "hn-step is-" + s.status);
     const top = hnEl2("div", "hn-step__top");
     const dot = hnEl2("span", "hn-dot", s.status === "done" ? "✓" : s.status === "failed" ? "✕" : String(i + 1));
-    top.append(dot, hnEl2("span", "hn-step__name", s.name));
+    const name = L("hn.step." + s.key);
+    top.append(dot, hnEl2("span", "hn-step__name", name === "hn.step." + s.key ? s.name : name));
     const meta = hnEl2("span", "hn-step__meta");
     meta.textContent = s.status === "waiting" ? L("hn.waiting")
       : s.status === "running" ? L("hn.running") + " · " + hnDuration(s.startedAt)
       : s.status === "done" ? hnDuration(s.startedAt, s.finishedAt)
       : s.status === "failed" ? L("hn.failed") : "";
     if (s.note) li.title = s.note;
+    if (s.status === "done" && s.finishedAt) li.title = (s.note ? s.note + "\n" : "") + formatDateTime(s.finishedAt);
     li.append(top, meta);
     return li;
   }));
@@ -244,4 +261,102 @@ function renderHarnessReview(h) {
     }
     hnEl.review.appendChild(d);
   }
+}
+
+/**
+ * The Output tab of a coding task: what was delivered (the merge commit or the PR), then what changed, what it was
+ * held to and how the platform checked it. Without a delivery yet, false (the caller shows its usual text).
+ */
+function renderHarnessOutput(box) {
+  const h = hnShown;
+  if (!h || !h.delivery) return false;
+  box.replaceChildren();
+  const out = hnEl2("div", "hn-out");
+  const merged = h.delivery.result && !/^https?:/.test(h.delivery.result);
+  const head = hnEl2("div", "hn-out__head");
+  head.append(hnEl2("span", "hn-out__icon", "✓"));
+  const text = hnEl2("div");
+  text.append(hnEl2("p", "hn-out__title", L("hn.outDelivered")));
+  const note = hnEl2("p", "hn-out__note", h.delivery.note || "");
+  if (h.delivery.result && /^https?:/.test(h.delivery.result)) {
+    note.append(" · ");
+    const a = hnEl2("a", null, L("hn.openPr"));
+    a.href = h.delivery.result;
+    a.target = "_blank";
+    a.rel = "noopener";
+    note.appendChild(a);
+  }
+  text.appendChild(note);
+  const add = h.files.reduce((n, f) => n + f.added, 0), del = h.files.reduce((n, f) => n + f.removed, 0);
+  const met = h.criteria.filter(c => c.met).length;
+  const last = h.rounds[h.rounds.length - 1];
+  const stats = hnEl2("div", "hn-out__stats");
+  const stat = (label, value) => {
+    const s = hnEl2("span", null, label + " ");
+    s.appendChild(hnEl2("b", null, value));
+    stats.appendChild(s);
+  };
+  stat(L("hn.tabDiff"), L("hn.filesShort", { n: h.files.length }) + " · +" + add + " −" + del);
+  if (h.criteria.length) stat(L("hn.criteria"), met + " / " + h.criteria.length);
+  if (last) stat(L("hn.tabVerify"), L(last.passed ? "hn.outPassed" : "hn.outFailed", { n: last.round }));
+  if (merged) stat(L("hn.commit"), hnShort(h.delivery.result));
+  text.appendChild(stats);
+  head.appendChild(text);
+  out.appendChild(head);
+
+  if (h.criteria.length) {
+    const sec = hnEl2("section");
+    const sh = hnEl2("div", "hn-section__head");
+    sh.append(hnEl2("h3", null, L("hn.criteria")), hnEl2("span", "hn-section__sum", L("hn.criteriaMet", { met, n: h.criteria.length })));
+    const ul = hnEl2("ul", "hn-list");
+    h.criteria.forEach(c => {
+      const li = hnEl2("li", "hn-ac");
+      li.append(hnEl2("span", "hn-ac__mark " + (c.met ? "is-ok" : "is-wait"), c.met ? "✓" : "…"));
+      const t = hnEl2("div", "hn-ac__text", c.text);
+      if (c.evidence) t.append(hnEl2("span", "hn-ac__evidence", c.evidence));
+      li.appendChild(t);
+      ul.appendChild(li);
+    });
+    sec.append(sh, ul);
+    out.appendChild(sec);
+  }
+  if (h.files.length) {
+    const sec = hnEl2("section");
+    const sh = hnEl2("div", "hn-section__head");
+    const sum = hnEl2("span", "hn-delta");
+    sum.append(hnEl2("span", "a", "+" + add), hnEl2("span", "d", "−" + del));
+    sh.append(hnEl2("h3", null, L("hn.filesN", { n: h.files.length })), sum);
+    const ul = hnEl2("ul", "hn-list");
+    h.files.forEach(f => {
+      const li = hnEl2("li", "hn-file hn-file--static");
+      const slash = f.path.lastIndexOf("/");
+      const path = hnEl2("span", "hn-path");
+      if (slash >= 0) path.append(hnEl2("span", "hn-dir", f.path.slice(0, slash + 1)));
+      path.append(f.path.slice(slash + 1));
+      const d = hnEl2("span", "hn-delta");
+      d.append(hnEl2("span", "a", "+" + f.added), hnEl2("span", "d", "−" + f.removed));
+      li.append(hnEl2("span", "hn-chev", "·"), path, d);
+      ul.appendChild(li);
+    });
+    sec.append(sh, ul);
+    out.appendChild(sec);
+  }
+  if (last) {
+    const sec = hnEl2("section");
+    const sh = hnEl2("div", "hn-section__head");
+    sh.append(hnEl2("h3", null, L("hn.lastChecks", { n: last.round })), hnEl2("span", "hn-section__sum", L("hn.verifyHint")));
+    const box2 = hnEl2("div", "hn-box");
+    last.checks.forEach((c, i) => {
+      const row = hnEl2("div", "hn-check");
+      if (i === 0) row.style.borderTop = "0";
+      row.append(hnEl2("code", null, c.command),
+        hnEl2("span", "hn-exit " + (c.exitCode === 0 ? "is-ok" : "is-bad"), L(c.exitCode === 0 ? "hn.passed" : "hn.exitFailed", { code: c.exitCode })),
+        hnEl2("span", "hn-check__time", tmDuration(c.millis)));
+      box2.appendChild(row);
+    });
+    sec.append(sh, box2);
+    out.appendChild(sec);
+  }
+  box.appendChild(out);
+  return true;
 }
