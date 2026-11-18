@@ -1748,8 +1748,16 @@ public class TaskService implements TaskRecovery {
      * Where this user's coding tasks can work, for the agent filling in the confirm table: the admin's directories, the
      * repositories under them, the ones the user used lately, and which code hosts the user has authorized.
      */
-    public String codingTargets(String owner) {
+    public String codingTargets(String owner, String agentId) {
         StringBuilder sb = new StringBuilder();
+        List<com.superagent.core.project.ProjectRepo> projectRepos = projects == null ? List.of() : projects.reposOfAgent(agentId);
+        if (!projectRepos.isEmpty()) {
+            sb.append("本项目的仓库（项目内的编码任务优先用这些；一个任务只改一个仓库，要改多个仓库就每个仓库建一个子任务）：\n");
+            projectRepos.forEach(r -> sb.append("- ").append(r.name()).append("：").append(r.location())
+                    .append("（默认分支 ").append(r.defaultBranch() == null ? "仓库默认" : r.defaultBranch())
+                    .append("，交付方式 ").append(r.delivery()).append("）")
+                    .append(r.purpose() == null ? "" : " 用途：" + r.purpose()).append("\n"));
+        }
         List<Path> roots = harnessHost.localRoots();
         if (roots.isEmpty()) {
             sb.append("本地代码目录：管理员没有开放（只能用远程 git 仓库地址；要用本地仓库请管理员在「系统设置 → 编码任务」里加目录）\n");
@@ -2001,8 +2009,20 @@ public class TaskService implements TaskRecovery {
     /** The task's skills index, plus how to hand over files when the run has the file tools. */
     private String taskSystemPrompt(Task task, boolean withTools) {
         String index = skills == null ? null : skills.install(task.workspaceDir(), skills.forTask(task.id(), task.createdBy()), withTools);
-        String prompt = join(doerPrompt(task), index);
+        String prompt = join(join(doerPrompt(task), projectPrompt(task)), index);
         return withTools ? join(prompt, McpGrants.FILES_HINT) : prompt;
+    }
+
+    /**
+     * The shared context of the project this task is in (brief, index, memory), every turn: a reused session may have
+     * run another project's task before, and the context changes while the project goes on.
+     */
+    private String projectPrompt(Task task) {
+        if (projects == null) {
+            return null;
+        }
+        String agentId = taskAgents == null ? null : taskAgents.agentOf(task.id()).orElse(null);
+        return projects.context(agentId, task.id()).orElse(null);
     }
 
     /**

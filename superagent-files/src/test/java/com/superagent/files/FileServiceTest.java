@@ -53,7 +53,7 @@ class FileServiceTest {
         com.superagent.core.tenant.TenantContext.clear();
     }
 
-    private static final class InMemoryFiles implements WorkFileStore {
+    static final class InMemoryFiles implements WorkFileStore {
         final Map<String, WorkFile> rows = new LinkedHashMap<>();
         final Map<String, Set<String>> refs = new LinkedHashMap<>();
         @Override public void save(WorkFile f) { rows.put(f.id(), f); }
@@ -111,7 +111,7 @@ class FileServiceTest {
     private final Map<String, String> settingRows = new LinkedHashMap<>();
     private final InMemoryFolders folderStore = new InMemoryFolders();
 
-    private static final class InMemoryFolders implements com.superagent.core.file.FileFolderStore {
+    static final class InMemoryFolders implements com.superagent.core.file.FileFolderStore {
         final Map<String, com.superagent.core.file.FileFolder> rows = new LinkedHashMap<>();
         final Map<String, Map<String, String>> placed = new HashMap<>();
         @Override public void save(com.superagent.core.file.FileFolder f) { rows.put(f.id(), f); }

@@ -50,7 +50,7 @@ public class TaskMcpTools implements McpToolProvider {
                                 opt("materials", "string", "要读的外部资料链接（参数表「资料」那一行里的链接），多个用换行分开；"
                                         + "建任务前会逐个读，读不到就不建任务并说明原因。只是要操作的网址（比如要发布到的后台）不要放这里。不填则检查说明里的所有链接")),
                         "title", "brief", "kind"),
-                tool("coding_targets", "编码任务能在哪里做：允许的本地代码目录和其中的 git 仓库、用户最近用过的代码位置、是否授权了 GitHub/GitLab。"
+                tool("coding_targets", "编码任务能在哪里做：你所在项目配置的仓库（优先用）、允许的本地代码目录和其中的 git 仓库、用户最近用过的代码位置、是否授权了 GitHub/GitLab。"
                         + "列编码任务的参数表之前先调用，用它填「代码位置」并给出可选项。", props(), (String[]) null),
                 tool("list_tasks", "列出当前用户的任务及其状态。", props(), (String[]) null),
                 tool("get_task", "查看某个任务的状态与进度。", props(req("id", "string", "任务 id")), "id"),
@@ -86,7 +86,7 @@ public class TaskMcpTools implements McpToolProvider {
                 yield "已创建" + TaskKinds.label(t.flow()) + "任务 " + t.id() + "（" + t.title() + "），状态 " + t.status() + "。" + how
                         + "结果出来后会自动发到这个对话里。现在用一两句话告诉用户任务名和要做什么，然后结束这一轮，不要在对话里接着做。";
             }
-            case "coding_targets" -> tasks.codingTargets(grant.owner());
+            case "coding_targets" -> tasks.codingTargets(grant.owner(), grant.agentId());
             case "list_tasks" -> {
                 List<TaskDto> list = tasks.list(grant.owner());
                 if (list.isEmpty()) {

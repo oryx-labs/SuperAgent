@@ -2711,3 +2711,30 @@ button.t-chip { font: inherit; font-size: 11.5px; cursor: pointer; }
 .hn-deliver h3 { margin: 0; font-size: 13.5px; font-weight: 650; }
 .hn-deliver p { margin: 0; font-size: 13px; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .hn-chev { transition: none; } }
+
+/* Project v2: shared folders in Files, the project's repositories, brief and memory. */
+.ff-node.is-archived .ff-node__name { color: var(--muted); }
+.ff-node--out { justify-content: center; margin: 6px 8px; padding: 8px; font-size: 12px; color: var(--muted);
+  border: 1px dashed var(--line-strong); border-radius: 8px; }
+.ff-node--out.is-drop { color: var(--accent); }
+.ff-projects { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.ff-projects[hidden] { display: none; }
+.ff-projects__chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 8px; color: var(--ink);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px; }
+.ff-projects__chip button { width: 18px; height: 18px; padding: 0; font-size: 12px; line-height: 1; color: var(--muted);
+  background: none; border: 0; border-radius: 50%; cursor: pointer; }
+.ff-projects__chip button:hover { color: var(--ink); background: var(--line); }
+.ff-projects select { max-width: 200px; padding: 2px 6px; font: inherit; font-size: 12px; color: var(--ink); background: var(--paper);
+  border: 1px solid var(--line); border-radius: 6px; }
+.proj-tabbar { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 10px; }
+.proj-tabbar[hidden], .proj-brief[hidden], .proj-subhead[hidden] { display: none; }
+.proj-brief { display: grid; gap: 10px; max-width: 760px; margin-bottom: 22px; }
+.proj-brief textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit; font-size: 13px; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--line); border-radius: 8px; resize: vertical; }
+.proj-brief textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+.proj-brief textarea[readonly] { background: var(--panel); }
+.proj-brief .btn { justify-self: start; }
+.proj-subhead { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink); }
+#projFieldsBody { display: grid; gap: 12px; }
+#projFieldsBody textarea { padding: 8px 10px; font: inherit; font-size: 13px; color: var(--ink); background: var(--paper);
+  border: 1px solid var(--line); border-radius: 8px; resize: vertical; }

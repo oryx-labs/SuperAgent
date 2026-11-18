@@ -3,10 +3,12 @@ package com.superagent.web.file;
 import com.superagent.api.ApiPaths;
 import com.superagent.api.ApiResponse;
 import com.superagent.api.file.FileFolderDto;
+import com.superagent.api.file.ProjectTreeDto;
 import com.superagent.api.file.WorkFileDto;
 import com.superagent.api.file.WorkFileRequests;
 import com.superagent.files.FileFolderService;
 import com.superagent.files.FileService;
+import com.superagent.files.ProjectFolderService;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -50,10 +52,49 @@ public class FileController {
 
     private final FileService files;
     private final FileFolderService folders;
+    private final ProjectFolderService projectFolders;
 
-    public FileController(FileService files, FileFolderService folders) {
+    public FileController(FileService files, FileFolderService folders, ProjectFolderService projectFolders) {
         this.files = files;
         this.folders = folders;
+        this.projectFolders = projectFolders;
+    }
+
+    /** The shared folder trees of the caller's projects, with where each mounted file sits. */
+    @GetMapping(ApiPaths.PROJECT_FOLDERS)
+    public ApiResponse<List<ProjectTreeDto>> projectFolders(Authentication auth) {
+        return ApiResponse.ok(projectFolders.trees(auth.getName()));
+    }
+
+    @PostMapping(ApiPaths.PROJECT_FOLDERS)
+    public ApiResponse<FileFolderDto> createProjectFolder(@RequestBody WorkFileRequests.SaveProjectFolder request, Authentication auth) {
+        return ApiResponse.ok(projectFolders.create(auth.getName(), request.projectId(), request.name(), request.parentId()));
+    }
+
+    @PutMapping(ApiPaths.PROJECT_FOLDERS + "/{id}")
+    public ApiResponse<FileFolderDto> renameProjectFolder(@PathVariable String id, @RequestBody WorkFileRequests.SaveFolder request,
+                                                          Authentication auth) {
+        return ApiResponse.ok(projectFolders.rename(auth.getName(), id, request.name()));
+    }
+
+    @DeleteMapping(ApiPaths.PROJECT_FOLDERS + "/{id}")
+    public ApiResponse<Void> deleteProjectFolder(@PathVariable String id, Authentication auth) {
+        projectFolders.delete(auth.getName(), id);
+        return ApiResponse.empty();
+    }
+
+    /** Puts the file in a project's folders (or moves it there within the project). */
+    @PutMapping(ApiPaths.FILES + "/{id}/projects")
+    public ApiResponse<Void> mount(@PathVariable String id, @RequestBody WorkFileRequests.Mount request, Authentication auth) {
+        projectFolders.mount(auth.getName(), id, request.projectId(), request.folderId());
+        return ApiResponse.empty();
+    }
+
+    /** Takes the file out of the project's folders; the file is kept. */
+    @DeleteMapping(ApiPaths.FILES + "/{id}/projects/{projectId}")
+    public ApiResponse<Void> unmount(@PathVariable String id, @PathVariable String projectId, Authentication auth) {
+        projectFolders.unmount(auth.getName(), id, projectId);
+        return ApiResponse.empty();
     }
 
     @GetMapping(ApiPaths.FILE_FOLDERS)

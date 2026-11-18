@@ -6,10 +6,17 @@ import com.superagent.core.agent.AgentStatus;
 import com.superagent.core.agent.AgentStore;
 import com.superagent.core.error.ForbiddenException;
 import com.superagent.core.error.NotFoundException;
+import com.superagent.api.project.ProjectRequests;
+import com.superagent.core.file.WorkFile;
+import com.superagent.core.file.WorkFileKind;
+import com.superagent.core.file.WorkFileStore;
 import com.superagent.core.project.ProjectItemKind;
+import com.superagent.core.project.ProjectMemory;
 import com.superagent.core.tenant.TenantContext;
 import com.superagent.core.user.User;
 import com.superagent.core.user.UserStore;
+import com.superagent.storage.jdbc.MysqlProjectContextStore;
+import com.superagent.storage.jdbc.MysqlProjectFolderStore;
 import com.superagent.storage.jdbc.MysqlProjectItemStore;
 import com.superagent.storage.jdbc.MysqlProjectStore;
 import org.junit.jupiter.api.AfterEach;
@@ -33,7 +40,10 @@ import static org.mockito.Mockito.when;
 class ProjectServiceTest {
 
     private ProjectService service;
+    private MysqlProjectFolderStore folders;
+    private MysqlProjectItemStore items;
     private final AgentStore agents = mock(AgentStore.class);
+    private final WorkFileStore files = mock(WorkFileStore.class);
 
     @BeforeEach
     void setUp() {
@@ -50,7 +60,10 @@ class ProjectServiceTest {
         agent("a1", "ada", AgentKind.STANDARD);
         agent("a2", "bob", AgentKind.STANDARD);
         agent("sa", "ada", AgentKind.SUPER);
-        service = new ProjectService(new MysqlProjectStore(jdbc), new MysqlProjectItemStore(jdbc), agents, users);
+        folders = new MysqlProjectFolderStore(jdbc);
+        items = new MysqlProjectItemStore(jdbc);
+        service = new ProjectService(new MysqlProjectStore(jdbc), items, new MysqlProjectContextStore(jdbc), folders,
+                files, agents, users);
     }
 
     @AfterEach
@@ -109,5 +122,119 @@ class ProjectServiceTest {
         assertThat(service.archived("a2")).isFalse();
         service.setAgentProject("a2", "bob", null);
         assertThat(service.projectOfAgent("a2")).isEmpty();
+    }
+
+    private void file(String id, String name) {
+        Instant now = Instant.now();
+        when(files.find(id)).thenReturn(Optional.of(new WorkFile(id, name, WorkFileKind.of(name), "text/markdown", 1, "internal", id,
+                "ada", "a1", null, "chat", false, now, now, List.of("设计"), "agent")));
+    }
+
+    @Test
+    void ownerConfiguresReposAndBriefMembersKeepTheMemory() {
+        String pid = service.create("ada", "看板", null).id();
+        service.addMembers(pid, "ada", List.of("bob"));
+        service.saveRepo(pid, "ada", null, new ProjectRequests.Repo("api", "/code/api", "main", "merge", "后端服务"));
+        service.saveRepo(pid, "ada", null, new ProjectRequests.Repo("web", "git@github.com:x/web.git", null, "pr", null));
+        assertThat(service.repos(pid, "bob")).satisfiesExactly(
+                r -> assertThat(r).extracting("name", "location", "defaultBranch", "delivery", "purpose")
+                        .containsExactly("api", "/code/api", "main", "merge", "后端服务"),
+                r -> assertThat(r).extracting("name", "delivery").containsExactly("web", "pr"));
+        assertThat(service.reposOfAgent("a1")).isEmpty(); // not in the project yet
+        service.setAgentProject("a1", "ada", pid);
+        assertThat(service.reposOfAgent("a1")).hasSize(2);
+
+        assertThatThrownBy(() -> service.saveRepo(pid, "bob", null, new ProjectRequests.Repo("x", "/x", null, null, null)))
+                .isInstanceOf(ForbiddenException.class);
+        assertThatThrownBy(() -> service.saveRepo(pid, "ada", null, new ProjectRequests.Repo("x", "/x", null, "push", null)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.saveRepo(pid, "ada", null, new ProjectRequests.Repo("x", " ", null, null, null)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.saveBrief(pid, "bob", new ProjectRequests.Brief("g", null, null, null)))
+                .isInstanceOf(ForbiddenException.class);
+
+        String mid = service.addMemory(pid, "bob", new ProjectRequests.Memory("用 UTC", "时间一律存 UTC")).id();
+        service.updateMemory(pid, mid, "ada", new ProjectRequests.Memory("时间用 UTC", "库里和接口都用 UTC"));
+        assertThat(service.memories(pid, "bob")).singleElement().satisfies(m -> {
+            assertThat(m.title()).isEqualTo("时间用 UTC");
+            assertThat(m.createdBy()).isEqualTo("bob");
+            assertThat(m.updatedBy()).isEqualTo("ada");
+        });
+        service.deleteMemory(pid, mid, "bob");
+        assertThat(service.memories(pid, "ada")).isEmpty();
+        assertThatThrownBy(() -> service.memories(pid, "cat")).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void agentsInTheProjectGetItsContextAndWriteItsMemory() {
+        String pid = service.create("ada", "看板", null).id();
+        service.setAgentProject("a1", "ada", pid);
+        service.saveBrief(pid, "ada", new ProjectRequests.Brief("十二月上线看板", "给 A 客户", "金额保留两位", "GMV：成交额"));
+        service.saveRepo(pid, "ada", null, new ProjectRequests.Repo("api", "/code/api", "main", "merge", "后端服务"));
+        file("f1", "需求.md");
+        service.recordFile("f1", "a1", null); // a new file of a project agent lands in the project's root
+        assertThat(folders.placements(pid)).containsEntry("f1", "");
+
+        ProjectMemory m = service.writeMemoryAsAgent("a1", null, "s1", "ada", null, "接口统一返回 ApiResponse", "不要裸返回");
+        assertThat(m).extracting("agentId", "sessionId", "taskId", "createdBy").containsExactly("a1", "s1", null, "ada");
+        service.recordTask("t1", "a1");
+        assertThat(service.writeMemoryAsAgent(null, "t1", null, "bob", null, "测试用 H2", null).taskId()).isEqualTo("t1");
+        assertThatThrownBy(() -> service.writeMemoryAsAgent("a2", null, "s2", "bob", null, "x", null))
+                .isInstanceOf(IllegalArgumentException.class); // a2 is in no project
+
+        String ctx = service.context("a1", null).orElseThrow();
+        assertThat(ctx).contains("十二月上线看板", "GMV：成交额", "需求.md", "仓库「api」", "后端服务", "接口统一返回 ApiResponse", "不要裸返回");
+        assertThat(service.context(null, "t1")).isPresent();
+        assertThat(service.context("a2", null)).isEmpty();
+
+        String longText = "很长的说明".repeat(80);
+        for (int i = 0; i < 40; i++) {
+            service.writeMemoryAsAgent("a1", null, "s1", "ada", null, "约定" + i, longText);
+        }
+        String capped = service.context("a1", null).orElseThrow();
+        assertThat(capped.length()).isLessThanOrEqualTo(ProjectContextBuilder.MAX);
+        assertThat(capped).contains("十二月上线看板", "约定", "project_context_read").doesNotContain(longText);
+        assertThat(service.readContext("a1", null, null)).contains(longText); // the tool reads it all
+    }
+
+    @Test
+    void archivedProjectsAreReadOnlyAndEarlierFilesMoveIntoTheirFolders() {
+        String pid = service.create("ada", "看板", null).id();
+        service.setAgentProject("a1", "ada", pid);
+        items.assign(ProjectItemKind.FILE, "old1", pid); // recorded before shared folders existed
+        file("old1", "旧方案.md");
+        items.assign(ProjectItemKind.FILE, "gone", pid); // deleted since: not mounted
+        Instant now = Instant.now();
+        when(files.find("gone")).thenReturn(Optional.of(new WorkFile("gone", "删了.md", WorkFileKind.of("删了.md"), "text/markdown",
+                1, "internal", "gone", "ada", "a1", null, "chat", true, now, now, List.of(), "agent")));
+        assertThat(service.mountLegacyFiles()).isEqualTo(1);
+        assertThat(service.mountLegacyFiles()).isZero();
+        assertThat(folders.placements(pid)).containsEntry("old1", "").doesNotContainKey("gone");
+        service.forgetFile(pid, "old1");
+        folders.unplace(pid, "old1");
+        assertThat(service.mountLegacyFiles()).isZero(); // taken out stays out
+
+        String mid = service.addMemory(pid, "ada", new ProjectRequests.Memory("坑", null)).id();
+        service.archive(pid, "ada");
+        assertThatThrownBy(() -> service.saveBrief(pid, "ada", new ProjectRequests.Brief("g", null, null, null)))
+                .isInstanceOf(ProjectArchivedException.class);
+        assertThatThrownBy(() -> service.saveRepo(pid, "ada", null, new ProjectRequests.Repo("x", "/x", null, null, null)))
+                .isInstanceOf(ProjectArchivedException.class);
+        assertThatThrownBy(() -> service.updateMemory(pid, mid, "ada", new ProjectRequests.Memory("y", null)))
+                .isInstanceOf(ProjectArchivedException.class);
+        assertThatThrownBy(() -> service.writeMemoryAsAgent("a1", null, "s1", "ada", null, "x", null))
+                .isInstanceOf(ProjectArchivedException.class);
+        assertThatThrownBy(() -> service.requireWritable(pid, "ada")).isInstanceOf(ProjectArchivedException.class);
+        assertThat(service.projectArchived(pid)).isTrue();
+        service.recordFile("new1", "a1", null); // an agent's output doesn't go into an archived project either
+        assertThat(folders.placements(pid)).doesNotContainKey("new1");
+        assertThat(service.visibleThroughProject(ProjectItemKind.FILE, "new1", "ada")).isFalse();
+        assertThat(service.memories(pid, "ada")).hasSize(1); // still readable
+        assertThat(service.context("a1", null)).isPresent();
+
+        TenantContext.run("beta", () -> { // another company sees none of it
+            assertThat(service.list("ada")).isEmpty();
+            assertThat(service.context("a1", null)).isEmpty();
+        });
     }
 }

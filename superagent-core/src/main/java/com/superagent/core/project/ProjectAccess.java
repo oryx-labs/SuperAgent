@@ -35,4 +35,31 @@ public interface ProjectAccess {
 
     /** Records a new file in its task's project, else its agent's (no-op when neither is in one). */
     void recordFile(String fileId, String agentId, String taskId);
+
+    /** Projects the user is an active member of. */
+    List<Project> projectsOf(String user);
+
+    /** Whether the user is an active member of the project. */
+    boolean member(String projectId, String user);
+
+    /** Whether the project is archived (then everything in it is read-only). */
+    boolean projectArchived(String projectId);
+
+    /** Throws unless the user is a member of the project and it isn't archived (archived projects are read-only). */
+    void requireWritable(String projectId, String user);
+
+    /** Forgets that the file was made in this project, once it's taken out of the project's folders. */
+    void forgetFile(String projectId, String fileId);
+
+    /** The project a task was made in. */
+    Optional<String> projectOfTask(String taskId);
+
+    /** Repositories of the project the agent is in (empty when it's in none). */
+    List<ProjectRepo> reposOfAgent(String agentId);
+
+    /**
+     * The project's shared context (brief, index of its files and repositories, memory) for a run of this agent, or
+     * of this task (its own project first): capped in length, the rest by title only. Empty outside any project.
+     */
+    Optional<String> context(String agentId, String taskId);
 }

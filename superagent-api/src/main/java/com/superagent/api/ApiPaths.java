@@ -29,6 +29,7 @@ public final class ApiPaths {
     public static final String FILES = V1 + "/files";
     public static final String PROJECTS = V1 + "/projects";
     public static final String FILE_FOLDERS = FILES + "/folders";
+    public static final String PROJECT_FOLDERS = FILES + "/project-folders";
 
     /** Saved prompts that run as tasks by schedule or API call. */
     public static final String AUTOMATIONS = V1 + "/automations";

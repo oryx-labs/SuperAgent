@@ -36,11 +36,13 @@ public class FileMcpTools implements McpToolProvider {
     private final FileService files;
     private final McpGrants grants;
     private final FileFolderService folders;
+    private final ProjectFolderService projectFolders;
 
-    public FileMcpTools(FileService files, McpGrants grants, FileFolderService folders) {
+    public FileMcpTools(FileService files, McpGrants grants, FileFolderService folders, ProjectFolderService projectFolders) {
         this.files = files;
         this.grants = grants;
         this.folders = folders;
+        this.projectFolders = projectFolders;
     }
 
     @Override
@@ -54,7 +56,7 @@ public class FileMcpTools implements McpToolProvider {
         String tags = "1~3 个主题标签，逗号分隔，如「课程,讲义」。按内容主题打（不要写文件类型或 Agent 名），"
                 + "优先复用 file_list 里列出的已有标签，不要造同义词";
         String folder = "放到用户的哪个目录，写完整路径，如「项目/Q4」（只能用 file_list 列出的已有目录）。用户说了放哪就填，"
-                + "没说就不填，系统会自动归档";
+                + "没说就不填，系统会自动归档。你在项目里时也可以填 file_list 列出的项目目录（拿不准就不填，文件会放在项目根下）";
         return List.of(
                 tool("file_write", "把工作成果（文章、报告、方案等，通常是 Markdown）写成一个文件交给用户。用户会在「文件」里看到它，对话里也会出现文件卡片。",
                         props(req("name", "string", "文件名，含扩展名，如 第01节讲义.md"),
@@ -85,9 +87,9 @@ public class FileMcpTools implements McpToolProvider {
                 WorkFile.ORIGIN_CHAT);
         try {
             String text = switch (name) {
-                case "file_write" -> placed(owner, files.writeText(origin, require(args, "name"),
+                case "file_write" -> placed(grant, owner, files.writeText(origin, require(args, "name"),
                         args.path("content").asText(""), strOrNull(args, "replace_id"), tags(args)), strOrNull(args, "folder"));
-                case "file_save" -> placed(owner, files.saveFrom(origin, grants.workspaceFile(grant, require(args, "file")),
+                case "file_save" -> placed(grant, owner, files.saveFrom(origin, grants.workspaceFile(grant, require(args, "file")),
                         strOrNull(args, "name"), strOrNull(args, "replace_id"), tags(args)), strOrNull(args, "folder"));
                 case "file_get" -> {
                     if (grant.workspace() == null) {
@@ -99,8 +101,11 @@ public class FileMcpTools implements McpToolProvider {
                     List<WorkFile> list = files.producedBy(origin).stream().limit(50).toList();
                     List<String> inUse = files.tagsInUse(owner, origin.agentId());
                     List<String> paths = folders.paths(owner);
+                    List<String> shared = projectFolders.projectOfRun(grant.agentId(), grant.taskId()).map(projectFolders::paths)
+                            .orElse(List.of());
                     String vocabulary = (inUse.isEmpty() ? "" : "\n已在用的标签：" + String.join("，", inUse.stream().limit(40).toList()))
-                            + (paths.isEmpty() ? "" : "\n用户的目录：" + String.join("，", paths.stream().limit(100).toList()));
+                            + (paths.isEmpty() ? "" : "\n用户的目录：" + String.join("，", paths.stream().limit(100).toList()))
+                            + (shared.isEmpty() ? "" : "\n项目目录：" + String.join("，", shared.stream().limit(100).toList()));
                     if (list.isEmpty()) {
                         yield "还没有文件。" + vocabulary;
                     }
@@ -121,9 +126,13 @@ public class FileMcpTools implements McpToolProvider {
     }
 
     /** The file is saved whatever happens with the folder: a wrong folder name mustn't cost the work. */
-    private String placed(String owner, WorkFile f, String folder) {
+    private String placed(McpGrants.Grant grant, String owner, WorkFile f, String folder) {
         if (folder == null || folder.isBlank()) {
             return saved(f);
+        }
+        java.util.Optional<String> project = projectFolders.projectOfRun(grant.agentId(), grant.taskId());
+        if (project.isPresent() && projectFolders.placeByAgent(project.get(), f.id(), folder)) {
+            return saved(f) + "已放进项目目录「" + folder.strip() + "」。";
         }
         return saved(f) + (folders.placeByAgent(owner, f.id(), folder) ? "已放进目录「" + folder.strip() + "」。"
                 : "没有目录「" + folder.strip() + "」，文件先留在未归档（用 file_list 查看已有目录）。");

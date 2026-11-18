@@ -545,15 +545,16 @@ public class ChatService {
         if (runner == null) {
             throw new IllegalStateException("No runner for agent type " + agentType);
         }
-        // Character first, then the index of the agent's skills (their full text is read on demand).
+        // Character first, then its project's shared context (every turn, so a resumed session sees it current),
+        // then the index of the agent's skills (their full text is read on demand).
         String systemPrompt;
         if (special != null) {
             systemPrompt = special.systemPrompt(agent);
         } else {
-            String character = agent == null ? null : AgentCharacters.systemPrompt(agent);
             String skillIndex = skills.install(session.workspaceDir(),
                     agent == null ? List.of() : skills.forAgent(agent.id(), agent.owner()), mcpGrants != null);
-            systemPrompt = joinPrompt(joinPrompt(joinPrompt(character, skillIndex), mcpGrants == null ? null : McpGrants.FILES_HINT),
+            systemPrompt = joinPrompt(joinPrompt(joinPrompt(characterAndProject(agent, projects), skillIndex),
+                            mcpGrants == null ? null : McpGrants.FILES_HINT),
                     worksInTasks(agent) ? ChatTaskResults.GUIDE : null);
         }
 
@@ -604,6 +605,15 @@ public class ChatService {
             }
         }));
         return emitter;
+    }
+
+    /** Who the agent is, then the shared context of its project (none outside a project). */
+    static String characterAndProject(Agent agent, com.superagent.core.project.ProjectAccess projects) {
+        if (agent == null) {
+            return null;
+        }
+        String project = projects == null ? null : projects.context(agent.id(), null).orElse(null);
+        return joinPrompt(AgentCharacters.systemPrompt(agent), project);
     }
 
     private static String joinPrompt(String a, String b) {

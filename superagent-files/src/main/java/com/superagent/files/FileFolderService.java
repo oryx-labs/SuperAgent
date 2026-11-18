@@ -249,7 +249,7 @@ public class FileFolderService {
         }
     }
 
-    private static String cleanName(String name) {
+    static String cleanName(String name) {
         String clean = name == null ? "" : name.strip();
         if (clean.isEmpty()) {
             throw new IllegalArgumentException("目录名不能为空");

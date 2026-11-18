@@ -994,4 +994,37 @@ class TaskServiceTest {
         assertThat(service.page("tester", null, "定价", null, null, 1, 20).items()).extracting(TaskDto::id).containsExactly(first);
         assertThat(service.facets("tester").tags()).extracting(f -> f.key() + "×" + f.count()).containsExactly("竞品×2", "定价×1");
     }
+
+    @Test
+    void projectTasksCarryTheProjectContextAndListItsReposFirst() {
+        List<String> prompts = Collections.synchronizedList(new ArrayList<>());
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                prompts.add(req.prompt() + "\n@@\n" + req.systemPrompt());
+                sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.RESULT, "交付完成。", Instant.now()));
+            }
+        };
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        TaskService service = service(runner, tasks, 1); // one pool session: the second task reuses it
+        com.superagent.core.project.ProjectAccess projects = org.mockito.Mockito.mock(com.superagent.core.project.ProjectAccess.class);
+        org.mockito.Mockito.when(projects.context(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(i -> tasks.findTask(i.getArgument(1)).filter(t -> t.title().equals("项目里的活")).isPresent() ? Optional.of("## 项目共同上下文（项目「看板」）\n约定：金额两位小数")
+                        : Optional.empty());
+        org.mockito.Mockito.when(projects.reposOfAgent("a1")).thenReturn(List.of(new com.superagent.core.project.ProjectRepo(
+                "r1", "p1", "api", "/code/api", "main", "pr", "后端服务", 0, Instant.now(), Instant.now())));
+        service.setProjects(projects);
+
+        String first = service.create(new CreateTaskRequest("项目里的活", "项目里的活：做完并验证。", null, "my-repo", "main", null, null, null, "general")).id();
+        await().atMost(Duration.ofSeconds(5)).until(() -> tasks.findTask(first).map(t -> t.status().name()).orElse("").equals("DONE"));
+        String second = service.create(new CreateTaskRequest("项目外的活", "项目外的活：做完并验证。", null, "my-repo", "main", null, null, null, "general")).id();
+        await().atMost(Duration.ofSeconds(5)).until(() -> tasks.findTask(second).map(t -> t.status().name()).orElse("").equals("DONE"));
+
+        assertThat(prompts.stream().filter(p -> p.contains("项目里的活"))).isNotEmpty().allMatch(p -> p.contains("金额两位小数"));
+        assertThat(prompts.stream().filter(p -> p.contains("项目外的活"))).isNotEmpty().noneMatch(p -> p.contains("项目共同上下文"));
+
+        String targets = service.codingTargets("tester", "a1");
+        assertThat(targets).startsWith("本项目的仓库").contains("api：/code/api", "交付方式 pr", "后端服务", "每个仓库建一个子任务");
+        assertThat(service.codingTargets("tester", "a2")).doesNotContain("本项目的仓库").contains("最近用过的代码位置");
+    }
 }

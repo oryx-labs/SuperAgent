@@ -1,5 +1,6 @@
 // SuperAgent UI — Projects: a set of agents and the people who use them. Members can use every agent in a project and see
-// every task and file made in it; only the owner names it, adds or removes people and archives it.
+// every task and file made in it; only the owner names it, adds or removes people and archives it. A project also has
+// what its agents share: repositories and a brief (the owner's), materials and a memory (every member's). Archived = read-only.
 // Classic script sharing one global scope with the others; index.html loads them in order.
 "use strict";
 
@@ -20,6 +21,24 @@ Object.assign(api, {
   }).then(kbJson),
   projectTasks: id => fetch("/api/v1/tasks?page=1&size=100&project=" + encodeURIComponent(id)).then(kbJson),
   projectFiles: id => fetch("/api/v1/files?project=" + encodeURIComponent(id)).then(kbJson),
+  projectRepos: id => fetch("/api/v1/projects/" + id + "/repos").then(kbJson),
+  saveProjectRepo: (id, repoId, body) => repoId
+    ? fetch("/api/v1/projects/" + id + "/repos/" + repoId, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(kbJson)
+    : kbPost("/api/v1/projects/" + id + "/repos", body),
+  deleteProjectRepo: (id, repoId) => fetch("/api/v1/projects/" + id + "/repos/" + repoId, { method: "DELETE" }).then(kbJson),
+  projectBrief: id => fetch("/api/v1/projects/" + id + "/brief").then(kbJson),
+  saveProjectBrief: (id, body) => fetch("/api/v1/projects/" + id + "/brief", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }).then(kbJson),
+  projectMemory: id => fetch("/api/v1/projects/" + id + "/memory").then(kbJson),
+  saveProjectMemory: (id, memoryId, body) => memoryId
+    ? fetch("/api/v1/projects/" + id + "/memory/" + memoryId, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(kbJson)
+    : kbPost("/api/v1/projects/" + id + "/memory", body),
+  deleteProjectMemory: (id, memoryId) => fetch("/api/v1/projects/" + id + "/memory/" + memoryId, { method: "DELETE" }).then(kbJson),
 });
 
 const projPane = document.querySelector('[data-pane="projects"]');
@@ -55,6 +74,14 @@ const pjel = {
   pickSearch: document.getElementById("projPickSearch"),
   pickList: document.getElementById("projPickList"),
   pickError: document.getElementById("projPickError"),
+  tabBar: document.getElementById("projTabBar"),
+  brief: document.getElementById("projBrief"),
+  rowsHead: document.getElementById("projRowsHead"),
+  fields: document.getElementById("projFieldsModal"),
+  fieldsForm: document.getElementById("projFieldsForm"),
+  fieldsTitle: document.getElementById("projFieldsTitle"),
+  fieldsBody: document.getElementById("projFieldsBody"),
+  fieldsError: document.getElementById("projFieldsError"),
 };
 
 /** The user's projects, kept for the agent sidebar and the task filter as well as this page. */
@@ -181,6 +208,11 @@ async function renderProjectTab() {
   const p = projOpen;
   pjel.rows.replaceChildren();
   pjel.rowsEmpty.hidden = true;
+  pjel.tabBar.replaceChildren();
+  pjel.tabBar.hidden = true;
+  pjel.brief.replaceChildren();
+  pjel.brief.hidden = true;
+  pjel.rowsHead.hidden = true;
   let rows = [];
   if (projTab === "agents") {
     const all = await api.listAgents().then(r => (r && r.data) || []).catch(() => []);
@@ -191,9 +223,31 @@ async function renderProjectTab() {
     rows = ((page && page.items) || []).map(projectTaskRow);
     pjel.rowsEmpty.textContent = L("proj.noTasks");
   } else if (projTab === "files") {
-    const files = await api.projectFiles(p.id).catch(e => { showToast(e.message, true); return []; });
-    rows = (files || []).map(projectFileRow);
+    const [files, trees] = await Promise.all([
+      api.projectFiles(p.id).catch(e => { showToast(e.message, true); return []; }),
+      api.pfList().catch(() => []),
+    ]);
+    const tree = (trees || []).find(t => t.projectId === p.id);
+    projTabButtons([[L("proj.manageFiles"), () => openProjectInFiles(p.id)]]);
+    rows = (files || []).map(f => projectFileRow(f, tree));
     pjel.rowsEmpty.textContent = L("proj.noFiles");
+  } else if (projTab === "repos") {
+    const repos = await api.projectRepos(p.id).catch(e => { showToast(e.message, true); return []; });
+    if (p.mine && !projArchived(p)) projTabButtons([[L("proj.addRepo"), () => editProjectRepo(null)]]);
+    rows = (repos || []).map(projectRepoRow);
+    pjel.rowsEmpty.textContent = L("proj.noRepos");
+  } else if (projTab === "context") {
+    const [brief, memory] = await Promise.all([
+      api.projectBrief(p.id).catch(e => { showToast(e.message, true); return null; }),
+      api.projectMemory(p.id).catch(e => { showToast(e.message, true); return []; }),
+    ]);
+    if (projOpen !== p) return;
+    renderProjectBrief(p, brief || {});
+    pjel.rowsHead.textContent = L("proj.memoryTitle");
+    pjel.rowsHead.hidden = false;
+    if (!projArchived(p)) projTabButtons([[L("proj.addMemory"), () => editProjectMemory(null)]]);
+    rows = (memory || []).map(projectMemoryRow);
+    pjel.rowsEmpty.textContent = L("proj.noMemory");
   } else {
     rows = (p.members || []).map(projectMemberRow);
   }
@@ -260,10 +314,194 @@ function projectTaskRow(t) {
     [statusBadge(t.status)], [], () => { setView("tasks"); openTask(t.id); });
 }
 
-function projectFileRow(f) {
-  return projRow(fileIcon(f) + " " + f.name, [f.agentName, f.ownerName].filter(Boolean).join(" · "),
-    formatDateTime(f.updatedAt), [], () => openFile(f));
+function projectFileRow(f, tree) {
+  const at = tree ? tree.placements[f.id] : undefined;
+  const folder = at ? (tree.folders.find(x => x.id === at) || {}).path : "";
+  const actions = tree && tree.writable && at !== undefined
+    ? [[L("proj.takeOut"), () => takeFileOutOfProject(f), "link-btn--muted"]] : [];
+  return projRow(fileIcon(f) + " " + f.name, [folder ? "📁 " + folder : L("proj.rootFolder"), f.agentName, f.ownerName]
+    .filter(Boolean).join(" · "), formatDateTime(f.updatedAt), actions, () => openFile(f));
 }
+
+async function takeFileOutOfProject(f) {
+  try { await api.pfUnmount(f.id, projOpen.id); } catch (e) { showToast(e.message, true); return; }
+  showToast(L("ff.unmounted", { name: projOpen.name }));
+  await reloadOpenProject();
+}
+
+function openProjectInFiles(projectId) {
+  setView("files");
+  ffChosen = FF_PROJECT + projectId;
+  loadFiles();
+}
+
+const projArchived = p => p.status === "archived";
+
+/** Buttons above the table for what the current tab can add. */
+function projTabButtons(buttons) {
+  pjel.tabBar.replaceChildren(...buttons.map(([label, fn]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn btn--sm";
+    b.textContent = label;
+    b.addEventListener("click", fn);
+    return b;
+  }));
+  pjel.tabBar.hidden = !buttons.length;
+}
+
+// ---------- repositories ----------
+
+function projectRepoRow(r) {
+  const actions = projOpen.mine && !projArchived(projOpen) ? [
+    [L("common.edit"), () => editProjectRepo(r)],
+    [L("common.delete"), () => deleteProjectRepo(r), "link-btn--danger"],
+  ] : [];
+  const meta = [r.defaultBranch || L("proj.repoDefaultBranch"), L(r.delivery === "pr" ? "proj.deliveryPr" : "proj.deliveryMerge")].join(" · ");
+  return projRow(r.name, [r.location, r.purpose].filter(Boolean).join(" — "), meta, actions);
+}
+
+function editProjectRepo(r) {
+  openProjectFields(L(r ? "proj.editRepo" : "proj.addRepoTitle"), [
+    { key: "name", label: L("proj.repoName"), value: r && r.name, required: true, max: 80 },
+    { key: "location", label: L("proj.repoLocation"), value: r && r.location, required: true, ph: L("proj.repoLocationPh") },
+    { key: "defaultBranch", label: L("proj.repoBranch"), value: r && r.defaultBranch, ph: "main" },
+    { key: "delivery", label: L("proj.repoDelivery"), value: (r && r.delivery) || "merge",
+      options: [["merge", L("proj.deliveryMerge")], ["pr", L("proj.deliveryPr")]] },
+    { key: "purpose", label: L("proj.repoPurpose"), value: r && r.purpose, area: true, ph: L("proj.repoPurposePh") },
+  ], body => api.saveProjectRepo(projOpen.id, r && r.id, body));
+}
+
+async function deleteProjectRepo(r) {
+  if (!window.confirm(L("proj.deleteRepoConfirm", { name: r.name }))) return;
+  try { await api.deleteProjectRepo(projOpen.id, r.id); } catch (e) { showToast(e.message, true); return; }
+  renderProjectTab();
+}
+
+// ---------- brief and memory ----------
+
+const PROJ_BRIEF_FIELDS = ["goal", "background", "norms", "glossary"];
+
+function renderProjectBrief(p, brief) {
+  const editable = p.mine && !projArchived(p);
+  const head = document.createElement("h4");
+  head.className = "proj-subhead";
+  head.textContent = L("proj.briefTitle");
+  const hint = document.createElement("p");
+  hint.className = "field-hint";
+  hint.textContent = L(editable ? "proj.briefHint" : "proj.briefReadOnly");
+  pjel.brief.append(head, hint);
+  const inputs = {};
+  PROJ_BRIEF_FIELDS.forEach(k => {
+    const label = document.createElement("label");
+    label.className = "field";
+    const span = document.createElement("span");
+    span.textContent = L("proj.brief_" + k);
+    const area = document.createElement("textarea");
+    area.rows = 3;
+    area.value = brief[k] || "";
+    area.readOnly = !editable;
+    area.placeholder = editable ? L("proj.brief_" + k + "Ph") : "";
+    inputs[k] = area;
+    label.append(span, area);
+    pjel.brief.appendChild(label);
+  });
+  if (editable) {
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn btn--primary btn--sm";
+    save.textContent = L("common.save");
+    save.addEventListener("click", async () => {
+      const body = {};
+      PROJ_BRIEF_FIELDS.forEach(k => { body[k] = inputs[k].value.trim(); });
+      try { await api.saveProjectBrief(p.id, body); showToast(L("proj.briefSaved")); } catch (e) { showToast(e.message, true); }
+    });
+    pjel.brief.appendChild(save);
+  }
+  if (brief.updatedAt) {
+    const meta = document.createElement("p");
+    meta.className = "proj-meta";
+    meta.textContent = L("proj.briefUpdated", { name: brief.updatedByName || "", when: formatDateTime(brief.updatedAt) });
+    pjel.brief.appendChild(meta);
+  }
+  pjel.brief.hidden = false;
+}
+
+function projectMemoryRow(m) {
+  const source = m.agentId
+    ? L("proj.memoryByAgent", { agent: m.agentName || m.agentId, name: m.createdByName || "" })
+      + (m.taskId ? " · " + L("proj.memoryInTask") : m.sessionId ? " · " + L("proj.memoryInChat") : "")
+    : L("proj.memoryByPerson", { name: m.createdByName || "" });
+  const actions = projArchived(projOpen) ? [] : [
+    [L("common.edit"), () => editProjectMemory(m)],
+    [L("common.delete"), () => deleteProjectMemory(m), "link-btn--danger"],
+  ];
+  return projRow(m.title, m.content || "", [source + " · " + formatDateTime(m.updatedAt)], actions);
+}
+
+function editProjectMemory(m) {
+  openProjectFields(L(m ? "proj.editMemory" : "proj.addMemoryTitle"), [
+    { key: "title", label: L("proj.memoryTitleField"), value: m && m.title, required: true, max: 120 },
+    { key: "content", label: L("proj.memoryContent"), value: m && m.content, area: true, ph: L("proj.memoryContentPh") },
+  ], body => api.saveProjectMemory(projOpen.id, m && m.id, body));
+}
+
+async function deleteProjectMemory(m) {
+  if (!window.confirm(L("proj.deleteMemoryConfirm", { name: m.title }))) return;
+  try { await api.deleteProjectMemory(projOpen.id, m.id); } catch (e) { showToast(e.message, true); return; }
+  renderProjectTab();
+}
+
+// ---------- the small form dialog ----------
+
+let projFieldsSave = null;
+let projFieldsInputs = {};
+
+/** fields: [{ key, label, value, required, max, ph, area, options: [[value, label]] }]; save(body) returns a promise. */
+function openProjectFields(title, fields, save) {
+  pjel.fieldsTitle.textContent = title;
+  pjel.fieldsError.hidden = true;
+  projFieldsInputs = {};
+  pjel.fieldsBody.replaceChildren(...fields.map(f => {
+    const label = document.createElement("label");
+    label.className = "field";
+    const span = document.createElement("span");
+    span.textContent = f.label;
+    let input;
+    if (f.options) {
+      input = document.createElement("select");
+      f.options.forEach(([v, t]) => input.appendChild(new Option(t, v)));
+    } else {
+      input = document.createElement(f.area ? "textarea" : "input");
+      if (f.area) input.rows = 3; else input.type = "text";
+      if (f.max) input.maxLength = f.max;
+      if (f.ph) input.placeholder = f.ph;
+    }
+    input.value = f.value || (f.options ? f.options[0][0] : "");
+    input.required = !!f.required;
+    projFieldsInputs[f.key] = input;
+    label.append(span, input);
+    return label;
+  }));
+  projFieldsSave = save;
+  pjel.fields.hidden = false;
+  const first = Object.values(projFieldsInputs)[0];
+  if (first) first.focus();
+}
+pjel.fields.querySelectorAll("[data-close]").forEach(x => x.addEventListener("click", () => { pjel.fields.hidden = true; }));
+pjel.fieldsForm.addEventListener("submit", async e => {
+  e.preventDefault();
+  const body = {};
+  Object.entries(projFieldsInputs).forEach(([k, input]) => { body[k] = input.value.trim(); });
+  try {
+    await projFieldsSave(body);
+    pjel.fields.hidden = true;
+    renderProjectTab();
+  } catch (err) {
+    pjel.fieldsError.textContent = err.message;
+    pjel.fieldsError.hidden = false;
+  }
+});
 
 function projectMemberRow(m) {
   const actions = projOpen.mine && !m.owner && projOpen.status !== "archived"

@@ -81,7 +81,7 @@ function renderFileTable() {
   const q = flel.search.value.trim().toLowerCase();
   const agent = flel.agent.value;
   ffRenderTree();
-  const scoped = files.filter(f => ffInScope(f) && (!agent || f.agentId === agent)
+  const scoped = ffPool().filter(f => ffInScope(f) && (!agent || f.agentId === agent)
     && (!q || [f.name, f.agentName, f.taskTitle, ...(f.tags || [])].some(v => (v || "").toLowerCase().includes(q))));
   renderTagBar(scoped);
   const base = scoped.filter(f => [...flTags].every(t => (f.tags || []).includes(t)));
@@ -94,7 +94,7 @@ function renderFileTable() {
   if (ffChosen !== FF_ALL) shown.sort((a, b) => (a.name || "").localeCompare(b.name || "", undefined, { numeric: true, sensitivity: "base" }));
   flel.rows.replaceChildren(...shown.map(fileRow));
   flel.empty.hidden = shown.length > 0;
-  flel.empty.textContent = L(files.length ? (ffChosen === FF_ALL ? "fl.noMatch" : "ff.empty") : "fl.empty");
+  flel.empty.textContent = L(ffPool().length ? (ffChosen === FF_ALL ? "fl.noMatch" : "ff.empty") : ffProjectTree(ffChosen) ? "ff.empty" : "fl.empty");
 }
 
 // The tags on the files in view, most used first, each with its count; picked ones stay visible even at zero.

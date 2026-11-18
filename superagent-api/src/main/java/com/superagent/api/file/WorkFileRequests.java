@@ -6,6 +6,14 @@ public final class WorkFileRequests {
     private WorkFileRequests() {
     }
 
+    /** A folder in a project's shared tree; {@code parentId} null = its top level. */
+    public record SaveProjectFolder(String projectId, String name, String parentId) {
+    }
+
+    /** Mounts a file in a project, in {@code folderId} (blank = the project's root). */
+    public record Mount(String projectId, String folderId) {
+    }
+
     public record Rename(String name) {
     }
 

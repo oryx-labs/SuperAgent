@@ -225,10 +225,16 @@
         <div class="model-tabs page-tabs" id="projDetailTabs" role="tablist">
           <button type="button" class="model-tab is-active" data-tab="agents"><span data-i18n="proj.tabAgents">Agents</span> <b></b></button>
           <button type="button" class="model-tab" data-tab="tasks"><span data-i18n="proj.tabTasks">Tasks</span> <b></b></button>
-          <button type="button" class="model-tab" data-tab="files"><span data-i18n="proj.tabFiles">Files</span> <b></b></button>
+          <button type="button" class="model-tab" data-tab="files"><span data-i18n="proj.tabFiles">Materials</span> <b></b></button>
+          <button type="button" class="model-tab" data-tab="repos"><span data-i18n="proj.tabRepos">Repositories</span> <b></b></button>
+          <button type="button" class="model-tab" data-tab="context"><span data-i18n="proj.tabContext">Brief &amp; memory</span> <b></b></button>
           <button type="button" class="model-tab" data-tab="members"><span data-i18n="proj.tabMembers">Members</span> <b></b></button>
         </div>
         <div class="admin__body">
+          <!-- What the current tab can add (a repository, a memory entry…), and the brief on the context tab. -->
+          <div class="proj-tabbar" id="projTabBar" hidden></div>
+          <div class="proj-brief" id="projBrief" hidden></div>
+          <h4 class="proj-subhead" id="projRowsHead" hidden></h4>
           <table class="ctable proj-table"><tbody id="projRows"></tbody></table>
           <p class="kb-empty" id="projRowsEmpty" hidden></p>
         </div>
@@ -1019,6 +1025,7 @@
           <div class="fl-tags" id="flTags"></div>
           <label class="ff-move"><span data-i18n="ff.folder">Folder</span>
             <select id="ffMove"></select></label>
+          <div class="ff-projects" id="ffProjects" hidden></div>
         </div>
         <span class="agent-detail__actions">
           <a class="btn btn--sm" id="flDownload" href="#" data-i18n="fl.download">Download</a>
@@ -1273,6 +1280,20 @@
         <button type="button" class="btn proj-modal__archive" id="projFormArchive" data-i18n="proj.archiveProject" hidden>Archive project</button>
         <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
         <button type="submit" class="btn btn--primary" id="projFormSubmit" data-i18n="common.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- A small form for a project's repository or memory entry; its fields are built by projects.js. -->
+  <div class="modal" id="projFieldsModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card" id="projFieldsForm">
+      <h3 class="modal__title" id="projFieldsTitle"></h3>
+      <div id="projFieldsBody"></div>
+      <p class="field-hint kb-modal__error" id="projFieldsError" hidden></p>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
       </div>
     </form>
   </div>
