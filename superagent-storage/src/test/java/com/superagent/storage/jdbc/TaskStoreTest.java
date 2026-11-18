@@ -29,9 +29,12 @@ class TaskStoreTest {
     }
 
     private static Task task(String id, String title) {
-        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        return task(id, title, Instant.now().truncatedTo(ChronoUnit.MILLIS));
+    }
+
+    private static Task task(String id, String title, Instant created) {
         return new Task(id, title, null, TaskSource.TASK_FORM, null, null, null, TaskStatus.PENDING, 0, BigDecimal.ZERO,
-                null, AgentType.CLAUDE, null, "ada", null, now, null, null, now);
+                null, AgentType.CLAUDE, null, "ada", null, created, null, null, created);
     }
 
     @Test
@@ -47,6 +50,44 @@ class TaskStoreTest {
         });
 
         assertThat(store.listTasks()).singleElement().extracting(Task::title).isEqualTo("ours");
+    }
+
+    @Test
+    void eachCompanyNumbersItsTasksFromOneAndNeverReusesANumber() {
+        MysqlTaskStore store = new MysqlTaskStore(h2());
+        for (String id : List.of("a", "b", "c")) {
+            store.save(task(id, id));
+            store.assignNumber(id);
+        }
+        store.delete("c");
+        store.save(task("d", "d"));
+        store.assignNumber("d");
+        store.assignNumber("d"); // a second call keeps the number it has
+        TenantContext.run(InCompany.OTHER, () -> {
+            store.save(task("x", "theirs"));
+            store.assignNumber("x");
+            assertThat(store.numbers()).containsExactly(java.util.Map.entry("x", 1L));
+        });
+
+        assertThat(store.numbers()).containsOnly(java.util.Map.entry("a", 1L), java.util.Map.entry("b", 2L),
+                java.util.Map.entry("d", 4L));
+    }
+
+    @Test
+    void tasksMadeBeforeNumberingAreNumberedInTheOrderTheyWereCreated() {
+        JdbcTemplate db = h2();
+        MysqlTaskStore before = new MysqlTaskStore(db);
+        Instant t0 = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        before.save(task("late", "late", t0.plusSeconds(60)));
+        before.save(task("early", "early", t0));
+        db.update("UPDATE task SET seq = NULL");
+
+        MysqlTaskStore after = new MysqlTaskStore(db); // starting up again numbers what has none
+        after.save(task("new", "new"));
+        after.assignNumber("new");
+
+        assertThat(after.numbers()).containsOnly(java.util.Map.entry("early", 1L), java.util.Map.entry("late", 2L),
+                java.util.Map.entry("new", 3L));
     }
 
     @Test

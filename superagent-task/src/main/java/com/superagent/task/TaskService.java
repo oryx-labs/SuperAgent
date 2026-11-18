@@ -792,6 +792,7 @@ public class TaskService implements TaskRecovery {
                 TaskStatus.PENDING, 0, BigDecimal.ZERO, model, agentType,
                 null, who, null, now, null, null, now, null);
         tasks.save(task);
+        tasks.assignNumber(id);
         if (links != null && (parentId != null || continuesFrom != null)) {
             // Before the scheduler can see it: admission holds subtasks back to the parallel limit.
             links.save(new com.superagent.core.task.TaskLink(id, parentId, continuesFrom, now));
@@ -2175,7 +2176,7 @@ public class TaskService implements TaskRecovery {
                 t.agentType().name().toLowerCase(), sessionId, t.workspaceDir(), sessionState(t.id(), sessionId), t.tier(),
                 originMessageId, link == null ? null : link.parentId(), link == null ? null : link.continuesFrom(),
                 v.tags(t.id()), agentId, agentId == null ? null : v.agentName(agentId),
-                kids.size(), (int) kids.stream().filter(this::finished).count(), v.totalSpend(t));
+                kids.size(), (int) kids.stream().filter(this::finished).count(), v.totalSpend(t), v.number(t.id()));
     }
 
     // --- relations and tags ---
@@ -2248,7 +2249,7 @@ public class TaskService implements TaskRecovery {
                         });
             }
         }
-        return new Views(byTask, kids, tagStore == null ? Map.of() : tagStore.all());
+        return new Views(byTask, kids, tagStore == null ? Map.of() : tagStore.all(), tasks.numbers());
     }
 
     /** As {@link #views()}, for one task only (a detail page polling its status). */
@@ -2261,7 +2262,7 @@ public class TaskService implements TaskRecovery {
                 kids.put(t.id(), children(t.id()));
             }
         }
-        return new Views(byTask, kids, tagStore == null ? Map.of() : Map.of(t.id(), tagStore.tags(t.id())));
+        return new Views(byTask, kids, tagStore == null ? Map.of() : Map.of(t.id(), tagStore.tags(t.id())), tasks.numbers());
     }
 
     private final class Views {
@@ -2270,11 +2271,18 @@ public class TaskService implements TaskRecovery {
         private final Map<String, List<String>> tags;
         private final Map<String, java.util.Optional<String>> agents = new HashMap<>();
         private final Map<String, String> names = new HashMap<>();
+        private final Map<String, Long> numbers;
 
-        Views(Map<String, com.superagent.core.task.TaskLink> links, Map<String, List<Task>> kids, Map<String, List<String>> tags) {
+        Views(Map<String, com.superagent.core.task.TaskLink> links, Map<String, List<Task>> kids, Map<String, List<String>> tags,
+              Map<String, Long> numbers) {
             this.links = links;
             this.kids = kids;
             this.tags = tags;
+            this.numbers = numbers;
+        }
+
+        Long number(String id) {
+            return numbers.get(id);
         }
 
         com.superagent.core.task.TaskLink link(String id) {

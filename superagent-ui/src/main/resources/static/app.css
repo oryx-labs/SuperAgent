@@ -1007,16 +1007,36 @@ button.stat-card:hover { border-color: var(--line-strong); }
 
 .ttable { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ttable thead th {
-  position: sticky; top: 0; z-index: 1; background: var(--panel);
-  text-align: left; font-weight: 600; color: var(--muted);
-  padding: 12px 14px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  position: sticky; top: 0; z-index: 1; background: var(--paper);
+  text-align: left; font-weight: 600; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted-2);
+  padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap;
 }
-.ttable tbody td { padding: 13px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-.ttable tbody tr { cursor: pointer; }
+.ttable tbody td { padding: 13px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+/* The title takes what's left and stays on one line; everything else sizes to its content. */
+.ttable .t-col-task { width: 100%; }
+.ttable td.t-task { max-width: 0; }
+.ttable .t-col-num, .ttable td.t-spend { text-align: right; }
+.ttable.is-solo .t-col-by { display: none; }
+.ttable tbody tr { cursor: pointer; transition: background .12s; }
 .ttable tbody tr:hover { background: var(--panel); }
-.t-title { display: flex; align-items: center; gap: 6px; font-weight: 600; }
-.t-title__text { min-width: 0; }
-.t-task .t-chips, .t-task .t-sub, .t-task .t-session { margin-left: 24px; }
+.ttable tbody tr:hover .t-title__text { color: var(--accent); }
+/* Delete: there when the row is pointed at, not on every line. */
+.ttable tbody tr .link-btn--danger { opacity: 0; transition: opacity .12s; }
+.ttable tbody tr:hover .link-btn--danger, .ttable tbody tr .link-btn--danger:focus-visible { opacity: 1; }
+@media (hover: none) { .ttable tbody tr .link-btn--danger { opacity: 1; } }
+.t-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; min-width: 0; }
+.t-title__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; transition: color .12s; }
+.t-src {
+  flex: none; font-size: 11px; font-weight: 500; color: var(--muted); padding: 0 6px; border-radius: 4px;
+  border: 1px solid var(--line); line-height: 1.6;
+}
+.t-id {
+  all: unset; flex: none; cursor: copy; padding: 0 5px; border-radius: 4px; color: var(--muted-2);
+  font: 400 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.t-id:hover { color: var(--accent); background: #eff6ff; }
+.task-detail__title .t-id { margin-left: 8px; font-size: 13px; vertical-align: 2px; }
+.t-id:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* The tree: a complex task opens to show its subtasks right under it. */
 .t-tree, .t-tree-pad { flex: none; width: 18px; height: 18px; }
@@ -1041,29 +1061,24 @@ button.stat-card:hover { border-color: var(--line-strong); }
   content: ""; position: absolute; left: 23px; top: 50%; width: 14px; border-top: 1px solid var(--line-strong);
 }
 .t-row--child .t-title { font-weight: 500; font-size: 12.5px; }
-.t-row--child .t-chips, .t-row--child .t-sub, .t-row--child .t-session { margin-left: 0; }
 
 /* Type and subtasks columns */
-.t-col-kind, .t-col-subs { white-space: nowrap; }
+.t-col-kind { white-space: nowrap; }
 .t-kind {
-  display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
-  border: 1px solid var(--line-strong); color: var(--muted); background: var(--paper);
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 6px; font-size: 11.5px;
+  font-weight: 600; white-space: nowrap; border: 1px solid var(--line); color: var(--muted); background: var(--panel);
 }
-.t-kind.is-complex { color: var(--ink); border-color: var(--ink); }
-.t-kind.is-coding { color: var(--ink); background: var(--line); border-color: var(--line); }
+.t-kind::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--muted-2); }
+.t-kind.is-complex { color: #6d28d9; background: #f5f3ff; border-color: #ede9fe; }
+.t-kind.is-complex::before { background: #7c3aed; }
+.t-kind.is-coding { color: #1d4ed8; background: #eff6ff; border-color: #dbeafe; }
+.t-kind.is-coding::before { background: #2563eb; }
 .t-kind.is-subtask { border-style: dashed; }
-.t-subs { white-space: nowrap; font-variant-numeric: tabular-nums; }
-.t-subs.is-muted { color: var(--muted-2); }
-.t-subs__n { display: block; font-size: 12.5px; font-weight: 600; }
-.t-subs__bar { display: block; width: 56px; height: 4px; margin-top: 5px; border-radius: 999px; background: var(--line); overflow: hidden; }
-.t-subs__bar i { display: block; height: 100%; background: var(--ink); }
-.t-sub { display: block; font-weight: 400; color: var(--muted); font-size: 12px; margin-top: 3px; }
-.t-sub code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.t-kind b { font-weight: 600; font-variant-numeric: tabular-nums; opacity: .75; margin-left: 2px; }
 .t-created { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.t-created small { display: block; color: var(--muted-2); }
-.t-spend { font-variant-numeric: tabular-nums; }
+.t-spend { font-variant-numeric: tabular-nums; font-weight: 600; }
 .ttable__status-col { min-width: 150px; }
-.t-status-cell { display: flex; flex-direction: column; gap: 6px; }
+.t-status-cell { display: flex; flex-direction: column; gap: 6px; min-width: 150px; }
 .t-status-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .t-elapsed { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .t-row-actions { display: flex; gap: 4px; justify-content: flex-end; }
@@ -1682,6 +1697,25 @@ button.stat-card:hover { border-color: var(--line-strong); }
   padding: 8px 10px; border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .model-tab.is-active { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+/* A task's tabs: grouped (what it was asked · how it went · what it made · what it cost), a soft hover, and the
+   brand blue under the one that's open. */
+.task-tabs { gap: 2px; padding-top: 12px; overflow-x: auto; scrollbar-width: none; }
+.task-tabs .model-tab {
+  display: inline-flex; align-items: center; position: relative; white-space: nowrap;
+  padding: 7px 12px 9px; border-radius: 8px 8px 0 0; transition: color .12s, background .12s;
+}
+.task-tabs .model-tab:hover { color: var(--ink); background: var(--panel); }
+.task-tabs .model-tab.is-active { color: var(--ink); border-bottom-color: var(--accent); background: none; }
+.task-tabs .model-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.task-tabs .model-tab[data-tab="hspec"], .task-tabs .model-tab[data-tab="output"], .task-tabs .model-tab[data-tab="usage"] {
+  margin-left: 13px;
+}
+.task-tabs .model-tab[data-tab="hspec"]::before, .task-tabs .model-tab[data-tab="output"]::before,
+.task-tabs .model-tab[data-tab="usage"]::before {
+  content: ""; position: absolute; left: -8px; top: 9px; bottom: 11px; width: 1px; background: var(--line-strong);
+}
+.task-tabs .model-tab[data-tab="output"].is-active, .task-tabs .model-tab[data-tab="output"]:not(.is-active):hover { color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .task-tabs .model-tab, .ttable tbody tr { transition: none; } }
 .model-facts { max-width: 640px; margin-top: 12px; }
 .model-facts dd { text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 .model-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-width: 480px; }
@@ -1778,12 +1812,9 @@ button.stat-card:hover { border-color: var(--line-strong); }
 .task-facts dd[title] { cursor: help; }
 
 /* ---------- Task list: session + agent/model ---------- */
-.t-session {
-  display: block; margin-top: 3px; color: var(--muted-2); font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
 .t-agent { white-space: nowrap; }
-.t-agent small { display: block; color: var(--muted); font-size: 11.5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.t-model { white-space: nowrap; color: var(--muted); font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.t-by { white-space: nowrap; }
 .field select { width: 100%; }
 .field-hint { margin: -6px 0 0; font-size: 12px; color: var(--muted); }
 
@@ -2430,6 +2461,7 @@ small.model-note { display: block; margin-top: 4px; }
 /* Tasks: narrowing the list, chips under a title, a complex task's subtasks, tags, carrying on. */
 .task-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 10px; }
 .tag-bar { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.tag-bar__more { color: var(--accent); border-style: dashed; }
 .tag-bar__chip {
   display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px;
   font: inherit; font-size: 12.5px; color: var(--muted); white-space: nowrap; cursor: pointer;
@@ -2629,7 +2661,7 @@ button.t-chip { font: inherit; font-size: 11.5px; cursor: pointer; }
   border: 1px solid var(--line); font-variant-numeric: tabular-nums;
 }
 .hn-count:empty { display: none; }
-.model-tab.is-active .hn-count { color: var(--ink); border-color: var(--line-strong); }
+.model-tab.is-active .hn-count { color: var(--accent); background: #eff6ff; border-color: #dbeafe; }
 
 .hn-section__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 4px 0 10px; }
 .hn-section__head h3 { margin: 0; font-size: 13.5px; font-weight: 650; }

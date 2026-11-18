@@ -51,5 +51,7 @@ public record TaskDto(
         int subtasks,
         int subtasksFinished,
         /** What it cost with its subtasks' spend added in (equal to {@code spend} for any other task). */
-        BigDecimal totalSpend) {
+        BigDecimal totalSpend,
+        /** Its number in the company (1, 2, 3…), the short id people quote; null if it has none yet. */
+        Long number) {
 }

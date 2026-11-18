@@ -126,6 +126,8 @@ async function loadTasks() {
   renderTaskPager(page);
   tel.rows.innerHTML = "";
   tel.empty.hidden = list.length > 0;
+  // Who made it matters only when the page holds more than one person's tasks (a project's, say).
+  tel.rows.closest("table").classList.toggle("is-solo", new Set(list.map(t => t.createdBy)).size <= 1);
   list.forEach(t => {
     tel.rows.appendChild(taskRow(t));
     if (taskExpanded.has(t.id)) showSubtaskRows(t); // kept open across reloads
@@ -185,9 +187,25 @@ async function loadTaskFacets() {
   // Keep a chosen tag even once it has no tasks left, so the filter doesn't silently drop.
   if (taskNarrow.tag && !tags.some(t => t.key === taskNarrow.tag)) tags.push({ key: taskNarrow.tag, label: taskNarrow.tag, count: 0 });
   // Always there, with "All" even before any task is tagged: the list keeps its shape.
-  tfEl.bar.replaceChildren(tagBarChip(L("tasks.filterAll"), null, ""),
-    ...tags.map(t => tagBarChip("#" + t.label, t.count, t.key)));
+  const TOP = 8;
+  const sorted = [...tags].sort((a, b) => b.count - a.count);
+  const shown = sorted.slice(0, TOP);
+  const chosen = sorted.find(t => t.key === taskNarrow.tag);
+  if (chosen && !shown.includes(chosen)) shown.push(chosen); // the tag in use always shows
+  const rest = sorted.filter(t => !shown.includes(t));
+  const chips = [tagBarChip(L("tasks.filterAll"), null, ""), ...shown.map(t => tagBarChip("#" + t.label, t.count, t.key))];
+  if (rest.length) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "tag-bar__chip tag-bar__more";
+    more.textContent = (taskTagsOpen ? L("tasks.tagsLess") : L("tasks.tagsMore", { n: rest.length }));
+    more.addEventListener("click", () => { taskTagsOpen = !taskTagsOpen; loadTaskFacets(); });
+    if (taskTagsOpen) chips.push(...rest.map(t => tagBarChip("#" + t.label, t.count, t.key)));
+    chips.push(more);
+  }
+  tfEl.bar.replaceChildren(...chips);
 }
+let taskTagsOpen = false;
 
 function tagBarChip(label, count, key) {
   const b = document.createElement("button");
@@ -226,30 +244,6 @@ function taskKind(t) {
   return t.flow === "coding" || t.flow === "complex" ? t.flow : "general";
 }
 
-/** Small chips under a task's title: its kind (a complex one with how far its subtasks are), a follow-up, its tags. */
-function taskChips(t) {
-  const row = document.createElement("div");
-  row.className = "t-chips";
-  const chip = (text, hint) => {
-    const c = document.createElement("span");
-    c.className = "t-chip t-chip--kind";
-    c.textContent = text;
-    c.title = hint;
-    row.appendChild(c);
-  };
-  if (t.continuesFrom) chip(L("tasks.chipFollowUp"), L("tasks.chipFollowUpHint"));
-  (t.tags || []).forEach(tag => {
-    const c = document.createElement("button");
-    c.type = "button";
-    c.className = "t-chip t-chip--tag";
-    c.textContent = "#" + tag;
-    c.title = L("tasks.tagFilterHint");
-    c.addEventListener("click", e => { e.stopPropagation(); filterByTag(tag); });
-    row.appendChild(c);
-  });
-  return row.childElementCount ? row : null;
-}
-
 /** {@code opts.child}: a subtask drawn under its complex task ({@code opts.last}: the last of them). */
 function taskRow(t, opts = {}) {
   const tr = document.createElement("tr");
@@ -281,55 +275,31 @@ function taskRow(t, opts = {}) {
   const name = document.createElement("span");
   name.className = "t-title__text";
   name.textContent = t.title;
+  name.title = t.title;
   title.appendChild(name);
-  tdTask.appendChild(title);
-  const chips = taskChips(t);
-  if (chips) tdTask.appendChild(chips);
-  const metaBits = [t.repo, t.branch].filter(Boolean); // the kind is a chip above
-  if (metaBits.length) {
-    const sub = document.createElement("small");
-    sub.className = "t-sub";
-    const code = document.createElement("code");
-    code.textContent = metaBits.join(" · ");
-    sub.appendChild(code);
-    tdTask.appendChild(sub);
+  // Chat is where tasks usually come from: only another source is marked.
+  if (t.source && t.source !== "web_chat") {
+    const src = document.createElement("span");
+    src.className = "t-src";
+    src.textContent = TASK_SOURCE_LABEL[t.source] || t.source;
+    title.appendChild(src);
   }
-  // Short session id under the title: equal ids across rows mean the tasks shared (reused) a session.
-  const sess = document.createElement("small");
-  sess.className = "t-session";
-  sess.textContent = t.sessionId ? "session " + t.sessionId.slice(0, 8) : L("tasks.sessionNone");
-  if (t.sessionId) sess.title = t.sessionId;
-  tdTask.appendChild(sess);
+  title.appendChild(taskNumberEl(t));
+  tdTask.appendChild(title);
 
   const tdKind = document.createElement("td");
   const kindPill = document.createElement("span");
   kindPill.className = "t-kind is-" + kind;
   kindPill.textContent = L("tasks.kind_" + kind);
   kindPill.title = L("tasks.kindHint_" + kind);
-  tdKind.appendChild(kindPill);
-
-  // How many subtasks and how many are over, for a complex task; nothing for the rest.
-  const tdSubs = document.createElement("td");
-  tdSubs.className = "t-subs";
-  if (kind === "complex") {
-    if (t.subtasks) {
-      const n = document.createElement("span");
-      n.className = "t-subs__n";
-      n.textContent = t.subtasksFinished + " / " + t.subtasks;
-      const mini = document.createElement("span");
-      mini.className = "t-subs__bar";
-      const fill = document.createElement("i");
-      fill.style.width = Math.round(t.subtasksFinished / t.subtasks * 100) + "%";
-      mini.appendChild(fill);
-      tdSubs.append(n, mini);
-    } else {
-      tdSubs.textContent = L(t.status === "done" ? "tasks.subtasksNoneShort" : "tasks.subtasksPlanningShort");
-      tdSubs.classList.add("is-muted");
-    }
-  } else {
-    tdSubs.textContent = "—";
-    tdSubs.classList.add("is-muted");
+  // A complex task: how many of its subtasks are over, in the same pill.
+  if (kind === "complex" && t.subtasks) {
+    const n = document.createElement("b");
+    n.textContent = t.subtasksFinished + "/" + t.subtasks;
+    kindPill.appendChild(n);
+    kindPill.title += " · " + L("tasks.colSubtasks") + " " + t.subtasksFinished + "/" + t.subtasks;
   }
+  tdKind.appendChild(kindPill);
 
   const tdAgent = document.createElement("td");
   tdAgent.className = "t-agent";
@@ -337,17 +307,20 @@ function taskRow(t, opts = {}) {
   // The agent it ran as, when an agent set it off; else the CLI it ran in.
   agentName.textContent = t.agentName || agentLabel(t.agentType);
   if (t.agentName) agentName.title = agentLabel(t.agentType);
-  const modelName = document.createElement("small");
-  modelName.textContent = taskModelLabel(t);
-  tdAgent.append(agentName, modelName);
+  tdAgent.appendChild(agentName);
 
-  const tdSource = document.createElement("td");
-  tdSource.textContent = TASK_SOURCE_LABEL[t.source] || t.source;
+  const tdModel = document.createElement("td");
+  tdModel.className = "t-model";
+  tdModel.textContent = taskModelLabel(t);
 
   const tdCreated = document.createElement("td");
   tdCreated.className = "t-created";
-  tdCreated.textContent = formatDateTime(t.createdAt);
-  if (t.createdBy) { const by = document.createElement("small"); by.textContent = personName(t.createdBy); tdCreated.appendChild(by); }
+  tdCreated.textContent = shortWhen(t.createdAt);
+  tdCreated.title = formatDateTime(t.createdAt);
+
+  const tdBy = document.createElement("td");
+  tdBy.className = "t-by t-col-by";
+  tdBy.textContent = t.createdBy ? personName(t.createdBy) : "—";
 
   const tdSpend = document.createElement("td");
   tdSpend.className = "t-spend";
@@ -363,7 +336,8 @@ function taskRow(t, opts = {}) {
   top.appendChild(listStatusBadge(t));
   const elapsed = document.createElement("span");
   elapsed.className = "t-elapsed";
-  elapsed.textContent = formatElapsed(t);
+  elapsed.textContent = shortElapsed(t);
+  elapsed.title = formatElapsed(t);
   top.appendChild(elapsed);
   const bar = document.createElement("div");
   bar.className = "progress" + (t.status === "error" ? " is-error" : isActiveStatus(t.status) ? " is-running" : "");
@@ -371,7 +345,9 @@ function taskRow(t, opts = {}) {
   fill.className = "progress__bar";
   fill.style.width = (t.progress || 0) + "%";
   bar.appendChild(fill);
-  cell.append(top, bar);
+  // Only a task under way needs a bar: a full green one says what "Done" already does.
+  cell.appendChild(top);
+  if (isActiveStatus(t.status)) cell.appendChild(bar);
   tdStatus.appendChild(cell);
 
   const tdActions = document.createElement("td");
@@ -386,7 +362,7 @@ function taskRow(t, opts = {}) {
   tdActions.appendChild(wrap);
 
   if (opts.child) del.hidden = true; // a subtask goes with its complex task
-  tr.append(tdTask, tdKind, tdSubs, tdAgent, tdSource, tdCreated, tdSpend, tdStatus, tdActions);
+  tr.append(tdTask, tdKind, tdAgent, tdModel, tdBy, tdCreated, tdSpend, tdStatus, tdActions);
   return tr;
 }
 
@@ -445,7 +421,7 @@ async function openTask(id, opts = {}) {
 
 function renderDetail(d) {
   const t = d.task;
-  tel.dTitle.textContent = t.title;
+  tel.dTitle.replaceChildren(t.title, taskNumberEl(t));
   const meta = [L("tasks.kind_" + taskKind(t)), TASK_SOURCE_LABEL[t.source] || t.source, t.repo, t.branch].filter(Boolean).join(" · ");
   tel.dMeta.textContent = meta;
   if (t.source === "automation") linkScheduledTask(t.id);
@@ -652,6 +628,38 @@ function formatDateTime(iso) {
   const p = n => String(n).padStart(2, "0");
   return d.getFullYear() + "/" + p(d.getMonth() + 1) + "/" + p(d.getDate())
     + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+}
+
+/** The task's number ("#12"), what people quote; a click copies it. Before numbering existed: the short uuid. */
+function taskNumberEl(t) {
+  const label = t.number ? "#" + t.number : t.id.slice(0, 8);
+  const el = document.createElement("button");
+  el.type = "button";
+  el.className = "t-id";
+  el.textContent = label;
+  el.title = label + " · " + t.id + "\n" + L("hn.clickCopy");
+  el.addEventListener("click", e => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(label).then(() => showToast(L("hn.copied"))).catch(() => {});
+  });
+  return el;
+}
+
+/** "14:15" today, "11/11 13:31" this year, "2025/11/11" before. */
+function shortWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "—";
+  const now = new Date();
+  const hm = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  if (d.toDateString() === now.toDateString()) return hm;
+  if (d.getFullYear() === now.getFullYear()) return (d.getMonth() + 1) + "/" + d.getDate() + " " + hm;
+  return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
+}
+
+/** The list's elapsed time: the two largest units ("1h 30m", "21m 40s"). */
+function shortElapsed(task) {
+  const full = formatElapsed(task);
+  return full.split(" ").slice(0, 2).join(" ");
 }
 
 function formatElapsed(task) {
