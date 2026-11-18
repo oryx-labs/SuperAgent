@@ -38,6 +38,7 @@
     <module>superagent-project</module>
     <module>superagent-cost</module>
     <module>superagent-docs</module>
+    <module>superagent-media</module>
     <module>superagent-agent</module>
     <module>superagent-task</module>
     <module>superagent-orchestrator</module>
@@ -109,6 +110,11 @@
       <dependency>
         <groupId>com.superagent</groupId>
         <artifactId>superagent-docs</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-media</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

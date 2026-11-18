@@ -671,10 +671,16 @@ const MD_KINDS = { text: 1, result: 1 };
 // Fill an event body. Markdown kinds keep the full source in dataset.md and
 // re-render sanitized HTML each tick (like renderStreamText) to avoid flicker;
 // other kinds stay plain text.
+// How a task agent marks the question it stops on: the platform reads it, people needn't see it.
+const ASK_MARKER = /^[ \t]*NEEDS_CONFIRMATION[ \t]*[:：][ \t]*/gm;
+
 function setEvBody(bodyEl, kind, fullRaw) {
   if (MD_KINDS[kind]) {
-    bodyEl.dataset.md = fullRaw;
-    bodyEl.innerHTML = renderMarkdown(fullRaw);
+    bodyEl.dataset.raw = fullRaw;
+    const shown = fullRaw.replace(ASK_MARKER, "");
+    if (shown !== fullRaw) bodyEl.dataset.ask = "1"; else delete bodyEl.dataset.ask;
+    bodyEl.dataset.md = shown;
+    bodyEl.innerHTML = renderMarkdown(shown);
   } else {
     bodyEl.textContent = fullRaw;
   }
@@ -697,10 +703,20 @@ function appendStreamItem(item) {
   const mergeable = type === "text" || type === "thinking";
   if (mergeable && task.mergeType === type && task.mergeEl) {
     const bodyEl = task.mergeEl.querySelector(".ev__body");
-    const prev = MD_KINDS[type] ? (bodyEl.dataset.md || "") : bodyEl.textContent;
+    const prev = MD_KINDS[type] ? (bodyEl.dataset.raw || "") : bodyEl.textContent;
     setEvBody(bodyEl, type, prev + (item.payload || ""));
+    if (bodyEl.dataset.ask) refreshConfirmChoices();
     scrollStream();
     return;
+  }
+  // The final answer comes twice (as the text streamed in, then as the run's result): show it once.
+  if (type === "result") {
+    const said = [...tel.stream.querySelectorAll(".ev--text .ev__body")].pop();
+    if (said && (said.dataset.raw || "").trim() === (item.payload || "").trim()) {
+      task.mergeEl = null;
+      task.mergeType = null;
+      return;
+    }
   }
   const placeholder = tel.stream.querySelector(".task-stream__empty");
   if (placeholder) placeholder.remove();
@@ -728,6 +744,7 @@ function appendStreamItem(item) {
 
   if (mergeable) { task.mergeEl = ev; task.mergeType = type; }
   else { task.mergeEl = null; task.mergeType = null; }
+  if (body.dataset.ask) refreshConfirmChoices();
   scrollStream();
 }
 
@@ -884,17 +901,36 @@ function renderConfirmBar(t) {
   tel.confirmBar.hidden = !waiting;
   tel.steerForm.classList.toggle("has-confirm", waiting);
   if (waiting) tel.confirmGo.disabled = false;
+  refreshConfirmChoices();
 }
 
-tel.confirmGo.addEventListener("click", async () => {
+// The answers the task's question offers ("👉 下一步：回复「A」或「B」") become the buttons; without any, the
+// generic "confirm and continue".
+function refreshConfirmChoices() {
+  tel.confirmBar.querySelectorAll(".task-confirm__choice").forEach(b => b.remove());
+  const asked = [...tel.stream.querySelectorAll('.ev__body[data-ask]')].pop();
+  const replies = asked ? nextReplies(asked.dataset.raw) : [];
+  tel.confirmGo.hidden = replies.length > 0;
+  replies.forEach((reply, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "task-confirm__btn task-confirm__choice" + (i === 0 ? " task-confirm__btn--go" : "");
+    b.textContent = reply;
+    b.addEventListener("click", () => sendConfirm(reply, b));
+    tel.confirmBar.insertBefore(b, tel.confirmEdit);
+  });
+}
+
+tel.confirmGo.addEventListener("click", () => sendConfirm(L("tasks.confirmReply"), tel.confirmGo));
+
+async function sendConfirm(text, btn) {
   if (!task.id) return;
-  const text = L("tasks.confirmReply");
-  tel.confirmGo.disabled = true;
+  btn.disabled = true;
   const res = await api.taskMessage(task.id, text, [], []).catch(() => null);
   if (!res || !res.ok) {
     const body = res && await res.json().catch(() => null);
     showToast((body && body.message) || L("tasks.steerFailed"), true);
-    tel.confirmGo.disabled = false;
+    btn.disabled = false;
     return;
   }
   tel.confirmBar.hidden = true;
@@ -902,7 +938,7 @@ tel.confirmGo.addEventListener("click", async () => {
   setTaskTab("run");
   appendStreamItem({ kind: "cmd", payload: text });
   startTaskPolling();
-});
+}
 tel.confirmEdit.addEventListener("click", () => {
   tel.steerInput.focus();
   tel.steerInput.placeholder = L("tasks.confirmEditPh");

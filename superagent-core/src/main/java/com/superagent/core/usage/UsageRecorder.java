@@ -14,6 +14,13 @@ public interface UsageRecorder {
     /** {@code tokensJson}: a TOKENS event's payload. Returns its estimated cost in USD, null when no price is known. */
     Double record(UsageContext context, String tokensJson);
 
+    /**
+     * A call priced by something other than tokens (minutes of audio transcribed, say): kept as a record with no tokens
+     * and this cost, so it shows on the person, the task and the usage page like any other.
+     */
+    default void recordCost(UsageContext context, String model, double usd) {
+    }
+
     /** {@code sink} with the TOKENS events taken out and recorded ({@code recorder} null: just taken out). */
     static AgentEventSink tap(UsageRecorder recorder, UsageContext context, AgentEventSink sink) {
         return event -> {

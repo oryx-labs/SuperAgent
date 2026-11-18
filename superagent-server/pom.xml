@@ -57,6 +57,11 @@
       <artifactId>superagent-docs</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <dependency>
+      <groupId>com.superagent</groupId>
+      <artifactId>superagent-media</artifactId>
+      <version>${project.version}</version>
+    </dependency>
 
     <dependency>
       <groupId>io.micrometer</groupId>

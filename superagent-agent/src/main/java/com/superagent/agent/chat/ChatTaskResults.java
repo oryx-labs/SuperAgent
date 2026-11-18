@@ -91,7 +91,8 @@ public class ChatTaskResults {
             case "error" -> "任务" + title + "失败了" + (e.error() == null || e.error().isBlank() ? "。" : "：" + clip(e.error().strip()));
             case "needs_confirmation" -> e.result() == null || e.result().isBlank()
                     ? "任务" + title + "在等你确认，打开任务看它的问题并回复。"
-                    : "任务" + title + "在等你确认：\n\n" + clip(e.result().strip());
+                    : "任务" + title + "在等你确认：\n\n"
+                    + clip(e.result().replaceAll("(?m)^[ \t]*NEEDS_CONFIRMATION[ \t]*[:：][ \t]*", "").strip());
             default -> null; // pending, running, stopped (the user stopped it), deleted
         };
     }
