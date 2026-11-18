@@ -528,11 +528,17 @@ function openTokenModal(c) {
       : site + "/plugins/personalaccesstokens/usertokens.action";
     cel.tokenLink.textContent = L(c.needsAccount ? "conn.confluenceLinkCloud" : "conn.confluenceLinkServer");
   }
+  // GitLab: the address of the GitLab the token was made on (empty = gitlab.com); the token is only ever sent there.
+  const gitlab = c.id === "gitlab";
+  if (gitlab) cel.tokenHint.textContent = L("conn.gitlabHint");
+  document.getElementById("connTokenAccountLabel").textContent = L(gitlab ? "conn.gitlabSite" : "conn.accountEmail");
+  cel.tokenAccount.type = gitlab ? "url" : "email";
+  cel.tokenAccount.placeholder = gitlab ? "https://gitlab.com" : "";
   cel.tokenAccountField.hidden = !c.needsAccount;
-  cel.tokenAccount.required = !!c.needsAccount;
+  cel.tokenAccount.required = !!c.needsAccount && !gitlab;
   cel.tokenAccount.value = c.needsAccount && c.account ? c.account : "";
   cel.tokenModal.hidden = false;
-  (c.needsAccount && !cel.tokenAccount.value ? cel.tokenAccount : cel.tokenInput).focus();
+  (c.needsAccount && !gitlab && !cel.tokenAccount.value ? cel.tokenAccount : cel.tokenInput).focus();
 }
 
 cel.tokenForm.addEventListener("submit", async e => {

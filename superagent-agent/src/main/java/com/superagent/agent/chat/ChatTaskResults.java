@@ -35,10 +35,12 @@ public class ChatTaskResults {
 
     /** Joins an agent's system prompt when it has the task tools. */
     static final String GUIDE = TaskConfirmPrompt.rules("create_task", "")
-            + "任务由你自己执行（带着你的人设、记忆和技能）。完成、失败或需要确认时，结果会自动发到这个对话里（标着「任务通知」），用户可能接着它说。\n";
+            + "任务由你自己执行（带着你的人设、记忆和技能）。完成、失败或需要确认时，结果会自动发到这个对话里（标着「任务通知」），用户可能接着它说。"
+            + "任务在等确认（比如编码任务的规格）而用户在对话里回了意见或确认时，用 send_task_message 把原话转给那个任务（任务 id 在通知里），然后简短告诉用户已转达。\n"
+            + MaterialPrompt.RULES;
 
     /** Put right before every user message, next to the request: the system prompt alone loses to the wording. */
-    static final String TURN_CHECK = TaskConfirmPrompt.turnCheck("create_task");
+    static final String TURN_CHECK = TaskConfirmPrompt.turnCheck("create_task") + MaterialPrompt.TURN_CHECK;
 
     private static final Logger log = LoggerFactory.getLogger(ChatTaskResults.class);
     private static final int RESULT_CHARS = 1500;
@@ -55,11 +57,19 @@ public class ChatTaskResults {
 
     @EventListener
     public void onTaskStatus(NoticeEvents.TaskStatusChanged e) {
-        String text = report(e);
+        post(e.taskId(), e.status(), report(e));
+    }
+
+    @EventListener
+    public void onTaskNote(NoticeEvents.TaskNote e) {
+        post(e.taskId(), "note", "任务「" + e.title() + "」：" + e.text());
+    }
+
+    private void post(String taskId, String status, String text) {
         if (text == null) {
             return;
         }
-        TaskOrigin origin = taskAgents.origin(e.taskId()).filter(o -> o.sessionId() != null).orElse(null);
+        TaskOrigin origin = taskAgents.origin(taskId).filter(o -> o.sessionId() != null).orElse(null);
         Agent agent = origin == null ? null : agents.find(origin.agentId()).filter(a -> !a.isSuper()).orElse(null);
         if (agent == null) {
             return;
@@ -69,8 +79,8 @@ public class ChatTaskResults {
                 .filter(s -> s.status() != SessionStatus.DELETED)
                 .max(Comparator.comparing(ChatSession::createdAt)).map(ChatSession::id).orElse(origin.sessionId());
         chats.appendMessage(new ChatMessage(UUID.randomUUID().toString(), sessionId, MessageRole.ASSISTANT, text,
-                Instant.now(), AUTHOR_PREFIX + e.taskId()));
-        log.info("task {} ({}) reported back to agent {}'s chat", e.taskId(), e.status(), agent.id());
+                Instant.now(), AUTHOR_PREFIX + taskId));
+        log.info("task {} ({}) reported back to agent {}'s chat", taskId, status, agent.id());
     }
 
     private static String report(NoticeEvents.TaskStatusChanged e) {
@@ -79,7 +89,10 @@ public class ChatTaskResults {
             case "done" -> "任务" + title + "完成了。" + (e.result() == null || e.result().isBlank() ? ""
                     : "\n\n" + clip(e.result().strip()));
             case "error" -> "任务" + title + "失败了" + (e.error() == null || e.error().isBlank() ? "。" : "：" + clip(e.error().strip()));
-            case "needs_confirmation" -> "任务" + title + "在等你确认，打开任务看它的问题并回复。";
+            case "needs_confirmation" -> e.result() == null || e.result().isBlank()
+                    ? "任务" + title + "在等你确认，打开任务看它的问题并回复。"
+                    : "任务" + title + "在等你确认：\n\n"
+                    + clip(e.result().replaceAll("(?m)^[ \t]*NEEDS_CONFIRMATION[ \t]*[:：][ \t]*", "").strip());
             default -> null; // pending, running, stopped (the user stopped it), deleted
         };
     }
@@ -112,7 +125,7 @@ public class ChatTaskResults {
             if (m.role() != MessageRole.ASSISTANT || m.author() == null || !m.author().startsWith(AUTHOR_PREFIX)) {
                 break;
             }
-            posts.add(0, m.content());
+            posts.add(0, "（任务 " + m.author().substring(AUTHOR_PREFIX.length()) + "）" + m.content());
         }
         return posts;
     }

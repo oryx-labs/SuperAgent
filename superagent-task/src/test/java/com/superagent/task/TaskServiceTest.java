@@ -140,6 +140,57 @@ class TaskServiceTest {
         return new CreateTaskRequest(title, "Do the thing and verify it.", null, "my-repo", "main", null, null, null, "general");
     }
 
+    @Test
+    void aCodingTaskRunsThroughItsHarnessWorkingApartAndWaitingOnTheUser(@org.junit.jupiter.api.io.TempDir java.nio.file.Path tmp)
+            throws Exception {
+        java.nio.file.Path repo = java.nio.file.Files.createDirectories(tmp.resolve("app"));
+        for (String[] cmd : new String[][]{{"git", "init", "-q", "-b", "main"},
+                {"git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"}}) {
+            Process p = new ProcessBuilder(cmd).directory(repo.toFile()).redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+            p.getOutputStream().close();
+            assertThat(p.waitFor()).isZero();
+        }
+        List<String> cwds = Collections.synchronizedList(new ArrayList<>());
+        String spec = "## 目标\n加文件\n## 不做\n无\n## 验收标准\n1. 有 x.txt\n## 验证命令\n```\ntest -f x.txt\n```\n";
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                cwds.add(req.workspaceDir());
+                sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.RESULT, spec, Instant.now()));
+            }
+        };
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        TaskService service = service(runner, tasks);
+        service.setHarnesses(List.of(new com.superagent.task.harness.coding.CodingHarness(60)));
+        java.util.Map<String, String> saved = new java.util.HashMap<>();
+        com.superagent.platform.settings.SettingsService settings = new com.superagent.platform.settings.SettingsService(
+                new com.superagent.core.settings.SystemSettingStore() {
+                    @Override public java.util.Map<String, String> all() { return saved; }
+                    @Override public void put(String key, String value) { saved.put(key, value); }
+                }, null);
+        settings.update(new com.superagent.api.settings.SystemSettingsDto(null, null, null, null, null, null, null, null,
+                null, List.of(tmp.toString()))); // local projects are allowed only under the admin's directories
+        service.setSettings(settings);
+
+        String id = service.create(new CreateTaskRequest("加 x.txt", "加一个文件", null, repo.toString(), null, null, null,
+                null, "coding")).id();
+        awaitStatus(tasks, id, "NEEDS_CONFIRMATION");
+        TaskDetailDto d = service.detail(id, "tester");
+        assertThat(d.harness().steps()).extracting(com.superagent.api.task.HarnessDto.Step::status)
+                .containsExactly("done", "done", "waiting", "pending", "pending", "pending", "pending");
+        assertThat(d.harness().verifyCommands()).containsExactly("test -f x.txt");
+        assertThat(cwds).singleElement().isEqualTo(d.harness().workspace().dir()); // the agent ran in the task's own worktree
+        assertThat(d.harness().workspace().dir()).isNotEqualTo(repo.toString());
+        assertThat(tasks.findTask(id).orElseThrow().workspaceDir()).isNotEqualTo(d.harness().workspace().dir()); // never pooled
+
+        service.sendMessage(id, "tester", "确认"); // approves the spec: development starts
+        await().pollInSameThread().atMost(Duration.ofSeconds(10)).until(() -> service.detail(id, "tester").harness().steps().get(3).status()
+                .equals("waiting")); // the scripted agent changed nothing: the harness says so instead of passing it
+        assertThat(service.detail(id, "tester").harness().specApproved()).isTrue();
+        assertThat(cwds).hasSize(2).allMatch(c -> c.equals(cwds.get(0)));
+    }
+
     private static CreateTaskRequest coding(String title) {
         return new CreateTaskRequest(title, "实现并验收这个前端改动。", null, "my-repo", "main", null, null, null, "coding");
     }
@@ -309,47 +360,7 @@ class TaskServiceTest {
                 tasks.findTask(b).map(t -> t.status().name()).orElse("").equals("DONE"));
     }
 
-    @Test
-    void codingRunsThreeStepsToDoneWithPrdAndEvidence() {
-        InMemoryTaskStore tasks = new InMemoryTaskStore();
-        InMemoryTaskPhaseStore phases = new InMemoryTaskPhaseStore();
-        AtomicInteger turn = new AtomicInteger();
-        // One turn per phase: PRD markdown, dev summary, acceptance evidence.
-        AgentRunner runner = new FakeRunner(() -> switch (turn.getAndIncrement()) {
-            case 0 -> "## 背景\n...\n## 需求\n...\n## 技术思路\n...";
-            case 1 -> "已修改 app.js、index.html。";
-            default -> "构建通过；关键 DOM 断言通过。";
-        });
-        TaskService service = service(runner, tasks, phases, 50);
 
-        String id = service.create(coding("改一个前端按钮")).id();
-        await().atMost(Duration.ofSeconds(5)).until(() ->
-                tasks.findTask(id).map(t -> t.status().name()).orElse("").equals("DONE"));
-
-        assertThat(tasks.findTask(id).orElseThrow().progress()).isEqualTo(100);
-
-        TaskDetailDto detail = service.detail(id, "tester");
-        assertThat(detail.phases()).hasSize(3);
-        assertThat(detail.phases()).allMatch(p -> p.status().equals("done"));
-        assertThat(detail.phases().get(0).content()).contains("## 背景");   // PRD stored in DB
-        assertThat(detail.phases().get(2).evidence()).isNotBlank();         // acceptance evidence
-    }
-
-    @Test
-    void codingPausesAtGateWhenPrdMissing() {
-        InMemoryTaskStore tasks = new InMemoryTaskStore();
-        // Not a PRD: a summary of something else (what a confused run produced) must not pass as one.
-        TaskService service = service(new FakeRunner(() -> "这个任务其实已经做完了，11 份译文都在 Files 里。"), tasks,
-                new InMemoryTaskPhaseStore(), 50);
-
-        String id = service.create(coding("写点代码")).id();
-        await().atMost(Duration.ofSeconds(5)).until(() ->
-                tasks.findTask(id).map(t -> t.status().name()).orElse("").equals("NEEDS_CONFIRMATION"));
-
-        TaskDetailDto detail = service.detail(id, "tester");
-        assertThat(detail.messages()).anyMatch(m -> m.content().contains("第1步未产出 PRD"));
-        assertThat(detail.phases().get(0).status()).isEqualTo("running"); // stays on the PRD step for resume
-    }
 
     @Test
     void recoverResumesAnOrphanedRunningTask() {
@@ -547,28 +558,6 @@ class TaskServiceTest {
         assertThat(service.detail(c, "tester").task().sessionId()).isEqualTo(b.sessionId());
     }
 
-    @Test
-    void aFailedCodingRunGoesOnInAFreshSessionThatIsGivenTheTaskItsPrdAndTheStep() {
-        InMemoryTaskStore tasks = new InMemoryTaskStore();
-        PromptRunner runner = new PromptRunner(n -> switch (n) {
-            case 0 -> "## 背景\nB\n## 需求\nR1 加按钮\n## 技术思路\nT";
-            case 1 -> null; // the develop step fails
-            default -> "已修改，测试通过。";
-        });
-        TaskService service = service(runner, tasks);
-        String id = service.create(coding("加个按钮")).id();
-        awaitStatus(tasks, id, "ERROR");
-
-        service.recover(id); // the watchdog's action
-        awaitStatus(tasks, id, "DONE");
-
-        PromptRunner.Call failed = runner.calls.get(1), again = runner.calls.get(2);
-        assertThat(again.sessionId()).isNotEqualTo(failed.sessionId()); // a broken conversation isn't resumed
-        assertThat(again.resumeId()).isNull();
-        assertThat(again.workspaceDir()).isEqualTo(failed.workspaceDir());
-        assertThat(again.prompt()).contains(TaskService.FRESH_NOTE, "实现并验收这个前端改动。", "R1 加按钮", "第2步：开发");
-        assertThat(service.detail(id, "tester").phases()).allMatch(p -> p.status().equals("done"));
-    }
 
     @Test
     void afterARestartNewTasksReuseSessionsFinishedTasksLeft() {

@@ -127,7 +127,7 @@ class ConnectorServiceTest {
     @Test
     void seedsGitHubAndGiteeAsPersonallyAuthorizedConnectors() {
         assertThat(service.list("ada", false)).filteredOn(c -> c.kind().equals("mcp")).extracting(ConnectorDto::id)
-                .containsExactly("github", "gitee", "feishu-docs", "notion", "confluence", "dingtalk-tools");
+                .containsExactly("github", "gitee", "feishu-docs", "notion", "confluence", "gitlab", "dingtalk-tools");
         assertThat(service.list("ada", false)).filteredOn(c -> c.kind().equals("mcp") && !c.id().equals("dingtalk-tools")).allSatisfy(c -> {
             assertThat(c.needsAuthorization()).isTrue();
             assertThat(c.authorized()).isFalse();

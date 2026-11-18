@@ -56,8 +56,25 @@ class ChatTaskResultsTest {
         List<ChatMessage> history = new ArrayList<>(List.of(
                 msg(MessageRole.ASSISTANT, "已开任务「竞品分析」", null), posted.getValue(), msg(MessageRole.USER, "好的，接着说", "ada")));
         when(chats.listMessages("new")).thenReturn(history);
-        assertThat(results.prompt("new", "好的，接着说")).contains("Files/竞品.md", "回复前先判断", "## 用户说\n好的，接着说")
-                .doesNotContain("已开任务");
+        assertThat(results.prompt("new", "好的，接着说")).contains("（任务 t1）", "Files/竞品.md", "回复前先判断",
+                "## 用户说\n好的，接着说").doesNotContain("已开任务");
+    }
+
+    @Test
+    void aTaskWaitingOnTheUserBringsItsQuestionAndAMilestoneIsToldToo() {
+        when(taskAgents.origin("t3")).thenReturn(Optional.of(new TaskOrigin("t3", "dev", "s", "m")));
+        when(agents.find("dev")).thenReturn(Optional.of(agent("dev", AgentKind.STANDARD)));
+        when(chats.listSessionsByAgent("dev")).thenReturn(List.of(session("s", 1)));
+
+        results.onTaskNote(new NoticeEvents.TaskNote("t3", "ada", "加登录", "验证第 1 轮没通过，正在自动修复"));
+        results.onTaskStatus(new NoticeEvents.TaskStatusChanged("t3", "ada", "加登录", "web_chat", "needs_confirmation",
+                null, null, "规格写好了，请确认。\n\n👉 下一步：回复「确认规格」开始开发"));
+
+        ArgumentCaptor<ChatMessage> posted = ArgumentCaptor.forClass(ChatMessage.class);
+        verify(chats, org.mockito.Mockito.times(2)).appendMessage(posted.capture());
+        assertThat(posted.getAllValues()).allMatch(m -> "task:t3".equals(m.author()));
+        assertThat(posted.getAllValues().get(0).content()).contains("加登录", "正在自动修复");
+        assertThat(posted.getAllValues().get(1).content()).contains("在等你确认", "回复「确认规格」");
     }
 
     @Test

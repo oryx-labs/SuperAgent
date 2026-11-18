@@ -479,11 +479,14 @@ function renderDetail(d) {
   tel.subtasksTab.hidden = t.flow !== "complex";
   tel.subtasksTab.textContent = L("tasks.tabSubtasks", { n: t.subtasks || 0 });
   loadTaskRelations(t);
-  renderPhases(d.phases);
+  task.harness = !!d.harness;
+  renderPhases(d.harness ? [] : d.phases); // a harness-run task shows its steps in the pipeline above instead
   task.hasPhases = !!(d.phases && d.phases.length);
   // Only a task with a flow of its own (coding) has phases; the rest just run.
   tel.tabs.querySelector('[data-tab="run"]').textContent = task.hasPhases
     ? L("tasks.tabRunPhased", { n: d.phases.length }) : L("tasks.tabRun");
+  if (task.harnessFor !== t.id) { hnOpenFiles = new Set(); task.harnessFor = t.id; }
+  renderHarness(d.harness, t);
   if (tel.promptBody) tel.promptBody.innerHTML = renderMarkdown(d.brief || t.title || "");
   // A finished task opens on what it came up with; one still at work on its run log.
   const last = [...(d.events || [])].reverse().find(e => e.type === "result");
@@ -668,10 +671,16 @@ const MD_KINDS = { text: 1, result: 1 };
 // Fill an event body. Markdown kinds keep the full source in dataset.md and
 // re-render sanitized HTML each tick (like renderStreamText) to avoid flicker;
 // other kinds stay plain text.
+// How a task agent marks the question it stops on: the platform reads it, people needn't see it.
+const ASK_MARKER = /^[ \t]*NEEDS_CONFIRMATION[ \t]*[:：][ \t]*/gm;
+
 function setEvBody(bodyEl, kind, fullRaw) {
   if (MD_KINDS[kind]) {
-    bodyEl.dataset.md = fullRaw;
-    bodyEl.innerHTML = renderMarkdown(fullRaw);
+    bodyEl.dataset.raw = fullRaw;
+    const shown = fullRaw.replace(ASK_MARKER, "");
+    if (shown !== fullRaw) bodyEl.dataset.ask = "1"; else delete bodyEl.dataset.ask;
+    bodyEl.dataset.md = shown;
+    bodyEl.innerHTML = renderMarkdown(shown);
   } else {
     bodyEl.textContent = fullRaw;
   }
@@ -694,10 +703,20 @@ function appendStreamItem(item) {
   const mergeable = type === "text" || type === "thinking";
   if (mergeable && task.mergeType === type && task.mergeEl) {
     const bodyEl = task.mergeEl.querySelector(".ev__body");
-    const prev = MD_KINDS[type] ? (bodyEl.dataset.md || "") : bodyEl.textContent;
+    const prev = MD_KINDS[type] ? (bodyEl.dataset.raw || "") : bodyEl.textContent;
     setEvBody(bodyEl, type, prev + (item.payload || ""));
+    if (bodyEl.dataset.ask) refreshConfirmChoices();
     scrollStream();
     return;
+  }
+  // The final answer comes twice (as the text streamed in, then as the run's result): show it once.
+  if (type === "result") {
+    const said = [...tel.stream.querySelectorAll(".ev--text .ev__body")].pop();
+    if (said && (said.dataset.raw || "").trim() === (item.payload || "").trim()) {
+      task.mergeEl = null;
+      task.mergeType = null;
+      return;
+    }
   }
   const placeholder = tel.stream.querySelector(".task-stream__empty");
   if (placeholder) placeholder.remove();
@@ -725,6 +744,7 @@ function appendStreamItem(item) {
 
   if (mergeable) { task.mergeEl = ev; task.mergeType = type; }
   else { task.mergeEl = null; task.mergeType = null; }
+  if (body.dataset.ask) refreshConfirmChoices();
   scrollStream();
 }
 
@@ -881,17 +901,36 @@ function renderConfirmBar(t) {
   tel.confirmBar.hidden = !waiting;
   tel.steerForm.classList.toggle("has-confirm", waiting);
   if (waiting) tel.confirmGo.disabled = false;
+  refreshConfirmChoices();
 }
 
-tel.confirmGo.addEventListener("click", async () => {
+// The answers the task's question offers ("👉 下一步：回复「A」或「B」") become the buttons; without any, the
+// generic "confirm and continue".
+function refreshConfirmChoices() {
+  tel.confirmBar.querySelectorAll(".task-confirm__choice").forEach(b => b.remove());
+  const asked = [...tel.stream.querySelectorAll('.ev__body[data-ask]')].pop();
+  const replies = asked ? nextReplies(asked.dataset.raw) : [];
+  tel.confirmGo.hidden = replies.length > 0;
+  replies.forEach((reply, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "task-confirm__btn task-confirm__choice" + (i === 0 ? " task-confirm__btn--go" : "");
+    b.textContent = reply;
+    b.addEventListener("click", () => sendConfirm(reply, b));
+    tel.confirmBar.insertBefore(b, tel.confirmEdit);
+  });
+}
+
+tel.confirmGo.addEventListener("click", () => sendConfirm(L("tasks.confirmReply"), tel.confirmGo));
+
+async function sendConfirm(text, btn) {
   if (!task.id) return;
-  const text = L("tasks.confirmReply");
-  tel.confirmGo.disabled = true;
+  btn.disabled = true;
   const res = await api.taskMessage(task.id, text, [], []).catch(() => null);
   if (!res || !res.ok) {
     const body = res && await res.json().catch(() => null);
     showToast((body && body.message) || L("tasks.steerFailed"), true);
-    tel.confirmGo.disabled = false;
+    btn.disabled = false;
     return;
   }
   tel.confirmBar.hidden = true;
@@ -899,7 +938,7 @@ tel.confirmGo.addEventListener("click", async () => {
   setTaskTab("run");
   appendStreamItem({ kind: "cmd", payload: text });
   startTaskPolling();
-});
+}
 tel.confirmEdit.addEventListener("click", () => {
   tel.steerInput.focus();
   tel.steerInput.placeholder = L("tasks.confirmEditPh");
@@ -1031,11 +1070,20 @@ async function pollTask() {
     loadTaskRelations(t); // refetched only when its subtasks or its status moved on
     // The model is decided before the task starts, and again whenever it moves to a dearer one after failing.
     if (task.choiceKey !== t.status + "|" + t.model) { task.choiceKey = t.status + "|" + t.model; loadModelChoices(t); loadTaskUsage(t.id); }
-    // Phases only change when the task moves on: refetch the (large) detail then, not every poll.
+    // Phases only change when the task moves on: refetch the (large) detail then, not every poll. A harness-run task
+    // also records each check as it runs, so new events mean its checks may have moved on.
     const phaseKey = t.status + "|" + t.progress;
-    if (task.hasPhases && phaseKey !== task.lastPhaseKey) {
+    const harnessMoved = task.harness && newEvents.length && Date.now() - (task.harnessAt || 0) > 4000;
+    if (task.hasPhases && (phaseKey !== task.lastPhaseKey || harnessMoved)) {
       task.lastPhaseKey = phaseKey;
-      try { const dRes = await api.taskDetail(id); if (dRes && dRes.data) renderPhases(dRes.data.phases); } catch (e) { /* ignore */ }
+      task.harnessAt = Date.now();
+      try {
+        const dRes = await api.taskDetail(id);
+        if (dRes && dRes.data && task.id === id) {
+          renderPhases(dRes.data.harness ? [] : dRes.data.phases);
+          renderHarness(dRes.data.harness, t);
+        }
+      } catch (e) { /* ignore */ }
     }
     if (task.timingKey !== t.status) { task.timingKey = t.status; loadTaskTiming(id); } // a turn ended or the task moved on
     if (!isActiveStatus(t.status)) { stopTaskPolling(); loadTaskFiles(id); }

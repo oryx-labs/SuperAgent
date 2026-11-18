@@ -227,7 +227,13 @@ public class TaskService implements TaskRecovery {
     }
 
     private final ApplicationEventPublisher events;   // null = no to-do items (tests)
-    private final CodingFlow codingFlow;
+    /** Built-in flows by task kind (coding today): they run the task step by step and judge each step themselves. */
+    private final Map<String, com.superagent.task.harness.TaskHarness> harnesses = new HashMap<>();
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setHarnesses(List<com.superagent.task.harness.TaskHarness> list) {
+        list.forEach(h -> harnesses.put(h.kind(), h));
+    }
 
     // Session reuse + per-owner parallelism. All pool/queue access is under schedulerLock.
     private final TaskSessionPool pool;
@@ -261,7 +267,6 @@ public class TaskService implements TaskRecovery {
             FileService files) {
         this.tasks = tasks;
         this.phaseStore = phaseStore;
-        this.codingFlow = new CodingFlow(phaseStore);
         this.runStates = runStates;
         this.runStore = runStore;
         this.images = images;
@@ -307,16 +312,8 @@ public class TaskService implements TaskRecovery {
             latest.values().forEach(t -> pool.restore(t.createdBy(), t.agentType(), boundSessionId(t), t.workspaceDir(),
                     t.model(), null));
             for (Task t : all) {
-                String sessionId = boundSessionId(t);
-                if (t.status() != TaskStatus.RUNNING && !holdsSession(t.status())
-                        && !running.contains(sessionId)) {
-                    pool.restore(t.createdBy(), t.agentType(), sessionId, t.workspaceDir(), null);
-                    restored++;
-                }
-            }
-            for (Task t : all) {
                 if (holdsSession(t.status())) {
-                    pool.restore(t.createdBy(), t.agentType(), boundSessionId(t), t.workspaceDir(), t.id());
+                    pool.restore(t.createdBy(), t.agentType(), boundSessionId(t), t.workspaceDir(), t.model(), t.id());
                 }
             }
         }
@@ -588,10 +585,17 @@ public class TaskService implements TaskRecovery {
         Task task = requireVisible(id, owner);
         List<MessageDto> messages = runStore.listMessages(id).stream().map(m -> toMessageDto(id, m)).toList();
         List<TaskEventDto> events = runStore.listEvents(id).stream().map(TaskService::toEventDto).toList();
-        List<TaskPhaseDto> phases = TaskKind.fromStorage(task.flow()) == TaskKind.CODING
-                ? codingFlow.load(id).stream().map(TaskService::toPhaseDto).toList()
-                : List.of();
-        return new TaskDetailDto(toDto(task), task.brief(), messages, events, phases);
+        com.superagent.task.harness.HarnessState state = harnessState(id).orElse(null);
+        List<TaskPhaseDto> phases = state == null ? List.of() : state.steps.stream()
+                .map(st -> new TaskPhaseDto(st.key, st.name, st.status.name().toLowerCase(), null, st.note)).toList();
+        return new TaskDetailDto(toDto(task), task.brief(), messages, events, phases,
+                state == null ? null : com.superagent.task.harness.HarnessViews.dto(state));
+    }
+
+    /** One changed file's diff in a harness-run task (empty when it has none). */
+    public String harnessDiff(String id, String owner, String path) {
+        requireVisible(id, owner);
+        return harnessState(id).map(s -> s.patches.getOrDefault(path, "")).orElse("");
     }
 
     /** Events from {@code offset} onward (chronological), for incremental polling of a running task. */
@@ -775,6 +779,10 @@ public class TaskService implements TaskRecovery {
         }
         TaskSource source = parseSource(request.source());
         TaskKind kind = parentId != null ? TaskKind.GENERAL : resolveKind(request); // one level: a subtask doesn't split
+        com.superagent.task.harness.TaskHarness harness = harnesses.get(kind.storageName());
+        if (harness != null) {
+            harness.precheck(blankToNull(request.repo()), blankToNull(request.branch()), request.delivery(), who, harnessHost);
+        }
         Instant now = Instant.now();
         // No workspace yet: it comes from the session this task is scheduled onto.
         // The kind is stored in the (otherwise unused) flow column — zero migration.
@@ -788,8 +796,8 @@ public class TaskService implements TaskRecovery {
             // Before the scheduler can see it: admission holds subtasks back to the parallel limit.
             links.save(new com.superagent.core.task.TaskLink(id, parentId, continuesFrom, now));
         }
-        if (kind == TaskKind.CODING) {
-            codingFlow.persist(id, CodingFlow.initialPhases());
+        if (harness != null) {
+            phaseStore.save(id, harness.start(task, request.delivery()).toJson());
         }
         if (agentId != null && skills != null) {
             skills.bindTaskToAgent(id, agentId); // before scheduling, so the first turn already has them
@@ -1171,11 +1179,10 @@ public class TaskService implements TaskRecovery {
             }
         }
         runStates.delete(task.id());
-        if (TaskKind.fromStorage(task.flow()) == TaskKind.CODING) {
-            codingFlow.persist(task.id(), CodingFlow.initialPhases());
-        }
+        boolean harnessed = harnessState(task.id()).isPresent();
         runStore.appendEvent(AgentEvent.of(task.id(), Long.MAX_VALUE, AgentEventType.SYSTEM,
-                "在 " + task.model() + " 上失败，改用更贵的 " + up.model() + " 从头重新执行。"));
+                "在 " + task.model() + " 上失败，改用更贵的 " + up.model()
+                        + (harnessed ? " 从出错的那一步接着做。" : " 从头重新执行。")));
         Task again = task.requeuedOn(up.model(), AgentType.fromString(up.cli()), up.tier());
         tasks.save(again);
         publish(again, null);
@@ -1213,6 +1220,9 @@ public class TaskService implements TaskRecovery {
         TaskSessionPool.Session session = lease.session();
         Task running = task.withWorkspaceDir(session.workspaceDir).started();
         tasks.save(running);
+        if (!session.id.equals(deriveSessionId(running))) {
+            runStates.save(TaskRunState.initial(running.id(), session.id)); // its conversation isn't named after the workspace
+        }
         executor.execute(TenantContext.wrap(() -> run(running, prompt, session.id, lease.firstTurn(), wrapBrief)));
     }
 
@@ -1402,6 +1412,10 @@ public class TaskService implements TaskRecovery {
             pool.dropReservation(id);    // a reservation it held while another task ran in the session
         }
         nextTurnImages.remove(id);
+        com.superagent.task.harness.TaskHarness harness = harnesses.get(task.flow());
+        if (harness != null && task.status() != TaskStatus.RUNNING) {
+            harnessState(id).ifPresent(harness::discard); // its worktree or clone; a running one is cleaned up when it stops
+        }
         tasks.save(task.withStatus(TaskStatus.DELETED));
         tryDispatch(task.createdBy());
     }
@@ -1476,7 +1490,7 @@ public class TaskService implements TaskRecovery {
         boolean ft = firstTurn;
         log.info("recovering task {} (attempt {}, failures {}, rotate={}, session {})",
                 id, next.attemptCount(), next.failureCount(), rotate, sid);
-        executor.execute(TenantContext.wrap(() -> run(running, prompt, sid, ft, false)));
+        executor.execute(TenantContext.wrap(() -> recoverRun(running, sid, ft)));
     }
 
     /** The pool session id equals the workspace dir's name (see TaskSessionPool), so it is recoverable without extra state. */
@@ -1492,12 +1506,9 @@ public class TaskService implements TaskRecovery {
      * given the task again (and a coding task its PRD and the step it is on), never just "carry on".
      */
     private void recoverRun(Task task, String sessionId, boolean freshSession) {
-        if (TaskKind.fromStorage(task.flow()) == TaskKind.CODING) {
-            String prompt = codingFlow.resumePrompt(codingFlow.load(task.id()), task.brief(), freshSession);
-            if (prompt != null) {
-                run(task, prompt, sessionId, freshSession, false);
-                return;
-            }
+        if (harnesses.containsKey(task.flow())) {
+            run(task, task.brief(), sessionId, freshSession, true); // the harness picks up at the step it stopped on
+            return;
         }
         if (!freshSession) {
             run(task, RESUME_NOTE, sessionId, false, false);
@@ -1520,15 +1531,10 @@ public class TaskService implements TaskRecovery {
         Cancellation cancellation = new Cancellation();
         activeRuns.put(task.id(), cancellation);
         try {
-            boolean coding = TaskKind.fromStorage(task.flow()) == TaskKind.CODING;
-            if (coding && !wrapBriefPrompt && CodingFlow.currentIndex(codingFlow.load(task.id())) >= codingFlow.load(task.id()).size()) {
-                // Rework on a finished coding task: every phase is done, so there's no phase to resume —
-                // without this the message would settle DONE without the agent ever seeing it.
-                runFollowUp(task, prompt, agentSessionId, sessionFirstTurn, cancellation);
-            } else if (coding) {
-                // wrapBrief=true marks the initial execution (run phases from the start); false is a
-                // post-confirmation resume carrying the user's reply for the current phase.
-                runCoding(task, wrapBriefPrompt ? null : prompt, agentSessionId, sessionFirstTurn, cancellation);
+            com.superagent.task.harness.TaskHarness harness = harnesses.get(task.flow());
+            if (harness != null) {
+                // wrapBrief=true is a first or recovered run; false carries the user's reply to the step it waits on.
+                driveHarness(task, harness, wrapBriefPrompt ? null : prompt, cancellation);
             } else {
                 runTurn(task, prompt, agentSessionId, sessionFirstTurn, wrapBriefPrompt, cancellation);
             }
@@ -1634,7 +1640,9 @@ public class TaskService implements TaskRecovery {
         CredentialService.Choice choice = credentials == null ? new CredentialService.Choice(null) : credentials.current(cli);
         AgentRunRequest request = new AgentRunRequest(
                 agentSessionId, sessionFirstTurn ? null : agentSessionId, task.workspaceDir(),
-                wrapBriefPrompt ? wrapBrief(task, prompt) : prompt,
+                !wrapBriefPrompt ? prompt
+                        // a reused conversation holds the tasks before it: say where this one starts (coding: runCoding)
+                        : sessionFirstTurn ? wrapBrief(task, prompt) : NEW_TASK_NOTE + "\n\n" + wrapBrief(task, prompt),
                 effectiveModel(task),
                 tools, skipPermissions, McpGrants.withServers(grant == null ? null : mcpGrants.mcpConfig(grant), connected),
                 taskSystemPrompt(task, grant != null),
@@ -1734,88 +1742,157 @@ public class TaskService implements TaskRecovery {
         return isComplex(task) || isSubtask(task.id());
     }
 
+    // --- harness-run tasks ---
+
     /**
-     * Backend-enforced coding flow: PRD → develop → verify, each a resumed turn on the
-     * same session. Resumes at the first non-DONE phase, so a post-confirmation reply
-     * (passed as {@code resumePrompt}) continues the phase it paused on. Gates: the PRD
-     * step must produce PRD content (one auto-retry), and the verify step must produce
-     * evidence, else the task pauses at NEEDS_CONFIRMATION with the reason.
+     * Where this user's coding tasks can work, for the agent filling in the confirm table: the admin's directories, the
+     * repositories under them, the ones the user used lately, and which code hosts the user has authorized.
      */
-    private void runCoding(Task task, String resumePrompt, String agentSessionId,
-                           boolean sessionFirstTurn, Cancellation cancellation) {
-        List<TaskPhase> phases = new ArrayList<>(codingFlow.load(task.id()));
-        int start = CodingFlow.currentIndex(phases);
-        boolean firstTurn = sessionFirstTurn;
-        try {
-            for (int i = start; i < phases.size(); i++) {
-                TaskPhase phase = phases.get(i).withStatus(TaskPhaseStatus.RUNNING);
-                phases.set(i, phase);
-                codingFlow.persist(task.id(), phases);
-                persistProgress(task.id(), CodingFlow.runningProgress(i));
-
-                String prompt = (i == start && resumePrompt != null)
-                        ? resumePrompt : codingFlow.prompt(phase.key(), task.brief());
-                TurnResult turn = executeTurn(task, prompt, agentSessionId, firstTurn, false, null, cancellation, phase.key());
-                firstTurn = false;
-                addSpend(task.id(), turn.cost());
-
-                if (turn.cancelled()) {
-                    settle(task, TaskStatus.STOPPED, CodingFlow.runningProgress(i), null, BigDecimal.ZERO);
-                    return;
-                }
-                if (turn.needsConfirmation()) {
-                    settle(task, TaskStatus.NEEDS_CONFIRMATION, CodingFlow.runningProgress(i), null, BigDecimal.ZERO);
-                    return; // phase stays RUNNING; a user reply resumes it here
-                }
-
-                if (CodingFlow.PRD.equals(phase.key())) {
-                    String prd = CodingFlow.isPrd(turn.finalText()) ? turn.finalText() : null;
-                    if (prd == null) {
-                        TurnResult retry = executeTurn(task, CodingFlow.PRD_RETRY_PROMPT, agentSessionId, false, false, null, cancellation, phase.key());
-                        addSpend(task.id(), retry.cost());
-                        if (retry.cancelled()) {
-                            settle(task, TaskStatus.STOPPED, CodingFlow.runningProgress(i), null, BigDecimal.ZERO);
-                            return;
-                        }
-                        prd = CodingFlow.isPrd(retry.finalText()) ? retry.finalText() : null;
-                        if (prd == null) {
-                            pauseForGate(task, phases, i, "第1步未产出 PRD");
-                            return;
-                        }
-                    }
-                    phase = phase.withContent(prd);
-                } else if (CodingFlow.ACCEPT.equals(phase.key())) {
-                    String evidence = firstNonBlank(turn.finalText());
-                    if (evidence == null) {
-                        pauseForGate(task, phases, i, "缺少验收证据");
-                        return;
-                    }
-                    phase = phase.withEvidence(evidence);
-                }
-
-                phase = phase.withStatus(TaskPhaseStatus.DONE);
-                phases.set(i, phase);
-                codingFlow.persist(task.id(), phases);
-                persistProgress(task.id(), CodingFlow.doneProgress(i));
+    public String codingTargets(String owner) {
+        StringBuilder sb = new StringBuilder();
+        List<Path> roots = harnessHost.localRoots();
+        if (roots.isEmpty()) {
+            sb.append("本地代码目录：管理员没有开放（只能用远程 git 仓库地址；要用本地仓库请管理员在「系统设置 → 编码任务」里加目录）\n");
+        } else {
+            sb.append("允许的本地代码目录：").append(roots.stream().map(Path::toString).collect(java.util.stream.Collectors.joining("、"))).append("\n");
+            List<String> repos = new ArrayList<>();
+            for (Path root : roots) {
+                gitReposUnder(root, 2, repos);
             }
-        } catch (Exception e) {
-            codingFlow.persist(task.id(), phases);
-            failTurn(task, task.progress(), e);
+            sb.append("其中的 git 仓库：").append(repos.isEmpty() ? "没找到" : String.join("、", repos)).append("\n");
+        }
+        List<String> recent = tasks.listTasks().stream()
+                .filter(t -> owner.equals(t.createdBy()) && TaskKind.CODING.storageName().equals(t.flow()) && t.repo() != null)
+                .sorted(Comparator.comparing(Task::createdAt).reversed()).map(Task::repo).distinct().limit(5).toList();
+        sb.append("最近用过的代码位置：").append(recent.isEmpty() ? "无" : String.join("、", recent)).append("\n");
+        boolean github = harnessHost.connectorToken("github", owner).isPresent();
+        String gitlab = harnessHost.connectorSite("gitlab", owner).orElse(null);
+        sb.append("已授权：GitHub ").append(github ? "是" : "否（远程仓库开 PR 需要先在「连接」页授权）")
+                .append("；GitLab ").append(gitlab != null ? "是（" + gitlab + "）" : "否").append("\n");
+        return sb.toString();
+    }
+
+    private static void gitReposUnder(Path dir, int depth, List<String> out) {
+        if (out.size() >= 15 || !java.nio.file.Files.isDirectory(dir)) {
             return;
         }
-        writeOutput(task, phases.get(phases.size() - 1).evidence());
-        settle(task, TaskStatus.DONE, 100, null, BigDecimal.ZERO);
+        if (java.nio.file.Files.exists(dir.resolve(".git"))) {
+            out.add(dir.toString());
+            return;
+        }
+        if (depth == 0) {
+            return;
+        }
+        try (java.util.stream.Stream<Path> kids = java.nio.file.Files.list(dir)) {
+            kids.filter(java.nio.file.Files::isDirectory).filter(p -> !p.getFileName().toString().startsWith("."))
+                    .sorted().forEach(p -> gitReposUnder(p, depth - 1, out));
+        } catch (java.io.IOException e) {
+            // an unreadable directory has no repositories to offer
+        }
     }
 
-    /** Pauses a coding task at NEEDS_CONFIRMATION, surfacing a gate reason into the visible stream. */
-    private void pauseForGate(Task task, List<TaskPhase> phases, int phaseIndex, String reason) {
-        codingFlow.persist(task.id(), phases); // current phase stays RUNNING, so a reply resumes it
-        String text = CONFIRM_MARKER + ": " + reason;
-        runStore.appendEvent(AgentEvent.of(task.id(), Long.MAX_VALUE, AgentEventType.TEXT, text));
-        runStore.appendMessage(new ChatMessage(UUID.randomUUID().toString(), task.id(),
-                MessageRole.ASSISTANT, text, Instant.now()));
-        settle(task, TaskStatus.NEEDS_CONFIRMATION, CodingFlow.runningProgress(phaseIndex), null, BigDecimal.ZERO);
+    private java.util.Optional<com.superagent.task.harness.HarnessState> harnessState(String taskId) {
+        return phaseStore.findPhasesJson(taskId).filter(com.superagent.task.harness.HarnessState::isState)
+                .map(com.superagent.task.harness.HarnessState::fromJson);
     }
+
+    private void driveHarness(Task task, com.superagent.task.harness.TaskHarness harness, String reply,
+                              Cancellation cancellation) {
+        com.superagent.task.harness.HarnessState state = harnessState(task.id()).orElseGet(() -> {
+            com.superagent.task.harness.HarnessState s = harness.start(task, null);
+            phaseStore.save(task.id(), s.toJson());
+            return s;
+        });
+        if (state.finished() && reply != null) {
+            String text = "这个任务已经交付了（" + (state.deliveryNote == null ? "已完成" : state.deliveryNote)
+                    + "）。要接着改，请在任务上点「接续」新建一个任务，它会从这次的结果开始。";
+            runStore.appendMessage(new ChatMessage(UUID.randomUUID().toString(), task.id(), MessageRole.ASSISTANT, text, Instant.now()));
+            settle(task, TaskStatus.DONE, 100, null, BigDecimal.ZERO);
+            return;
+        }
+        // The harness works in its own directory (a worktree or clone), which the session pool never sees: the task
+        // row keeps the pool's workspace, so no other task can be scheduled into this one.
+        Task working = state.dir == null ? task : task.withWorkspaceDir(state.dir);
+        harness.drive(new com.superagent.task.harness.HarnessRun(harnessHost, working, state, reply, cancellation));
+    }
+
+    private final com.superagent.task.harness.HarnessHost harnessHost = new com.superagent.task.harness.HarnessHost() {
+        @Override
+        public Turn turn(Task task, String prompt, String conversation, boolean first, String label, Cancellation c) {
+            TurnResult r = executeTurn(task, prompt, conversation, first, false, null, c, label);
+            addSpend(task.id(), r.cost());
+            return new Turn(r.finalText(), r.cost(), r.cancelled());
+        }
+
+        @Override
+        public Task workIn(Task task, String dir) {
+            return task.withWorkspaceDir(dir);
+        }
+
+        @Override
+        public void progress(Task task, int percent) {
+            persistProgress(task.id(), percent);
+        }
+
+        @Override
+        public void note(Task task, String text) {
+            runStore.appendEvent(AgentEvent.of(task.id(), Long.MAX_VALUE, AgentEventType.SYSTEM, text));
+        }
+
+        @Override
+        public void ask(Task task, String text) {
+            String line = CONFIRM_MARKER + ": " + text;
+            runStore.appendEvent(AgentEvent.of(task.id(), Long.MAX_VALUE, AgentEventType.TEXT, line));
+            runStore.appendMessage(new ChatMessage(UUID.randomUUID().toString(), task.id(), MessageRole.ASSISTANT, line,
+                    Instant.now()));
+            lastReply.put(task.id(), text); // what the chat that set it off is told it waits on
+        }
+
+        @Override
+        public void tell(Task task, String text) {
+            note(task, text);
+            if (events != null && !isSubtask(task.id())) {
+                events.publishEvent(new NoticeEvents.TaskNote(task.id(), task.createdBy(), task.title(), text));
+            }
+        }
+
+        @Override
+        public void save(Task task, com.superagent.task.harness.HarnessState state) {
+            phaseStore.save(task.id(), state.toJson());
+        }
+
+        @Override
+        public void settle(Task task, TaskStatus status, int progress, String output, String error) {
+            Task stored = tasks.findTask(task.id()).orElse(task);
+            if (output != null) {
+                writeOutput(stored, output);
+                lastReply.put(task.id(), output); // the delivered summary, not the reviewer's last words
+                runStore.appendMessage(new ChatMessage(UUID.randomUUID().toString(), task.id(), MessageRole.ASSISTANT,
+                        output, Instant.now()));
+            }
+            TaskService.this.settle(stored, status, progress, error, BigDecimal.ZERO);
+        }
+
+        @Override
+        public java.util.Optional<String> connectorToken(String connectorId, String owner) {
+            return connectors == null ? java.util.Optional.empty() : connectors.userToken(connectorId, owner);
+        }
+
+        @Override
+        public java.util.List<Path> localRoots() {
+            return settings == null ? java.util.List.of() : settings.codeRoots().stream().map(Path::of).toList();
+        }
+
+        @Override
+        public java.util.Optional<String> connectorSite(String connectorId, String owner) {
+            return connectors == null ? java.util.Optional.empty() : connectors.authorizedSite(connectorId, owner);
+        }
+
+        @Override
+        public Path workRoot() {
+            return com.superagent.core.tenant.TenantPaths.of(workspaceRoot);
+        }
+    };
 
     private void failTurn(Task task, int progress, Exception e) {
         log.error("task {} failed", task.id(), e);
@@ -1896,7 +1973,9 @@ public class TaskService implements TaskRecovery {
     private void publish(Task t, String agentId) {
         if (events != null && !isSubtask(t.id())) {
             boolean settled = t.status() != TaskStatus.PENDING && t.status() != TaskStatus.RUNNING;
-            String result = t.status() == TaskStatus.DONE ? lastReply.get(t.id()) : null;
+            // Done: its answer; waiting on the user: its question.
+            String result = t.status() == TaskStatus.DONE || t.status() == TaskStatus.NEEDS_CONFIRMATION
+                    ? lastReply.get(t.id()) : null;
             if (settled) {
                 lastReply.remove(t.id());
             }
@@ -2009,8 +2088,10 @@ public class TaskService implements TaskRecovery {
                 你在执行一个任务。请先理解下面的任务说明，然后直接完成它；交付前自己检查一遍是否满足要求。
                 如果说明存在歧义，或有需要用户拍板才能继续的关键决策，不要擅自假设——请输出一行以 \
                 """ + CONFIRM_MARKER + """
-: 开头、后接你的具体问题，然后停止等待用户答复。用户会看到一个「确认继续」按钮，所以问题要写成能直接点确认的样子：\
-                写清你打算怎么做；有几个选项时列出来，并标出你推荐的那个（确认就按推荐的做）。否则请直接完成，并在结尾给出交付总结。
+: 开头、后接你的具体问题，然后停止等待用户答复。写清你打算怎么做；有几个选项时列出来，并标出你推荐的那个。\
+                问题最后单独一行写用户可以直接点的回复：👉 下一步：回复「…」或「…」（每个都会变成按钮，最多 3 个，第一个放推荐的）。\
+                卡在缺工具、缺权限、缺文件这类用户点「确认」也解决不了的事时，按钮写用户能做的事（例如「我上传逐字稿」「停止任务」），不要写「确认继续」。\
+                否则请直接完成，并在结尾给出交付总结。
                 资料里的链接用 read_link 读。资料读不到时，同样输出一行以 \
                 """ + CONFIRM_MARKER + """
 : 开头的话停下来，写明哪份资料读不到、原因和用户可以怎么解决；不要在没读到资料的情况下凭猜测继续写。
@@ -2235,10 +2316,6 @@ public class TaskService implements TaskRecovery {
 
     private static TaskEventDto toEventDto(AgentEvent e) {
         return new TaskEventDto(e.type().name().toLowerCase(), e.seq(), e.payload(), e.createdAt());
-    }
-
-    private static TaskPhaseDto toPhaseDto(TaskPhase p) {
-        return new TaskPhaseDto(p.key(), p.name(), p.status().name().toLowerCase(), p.content(), p.evidence());
     }
 
     @PreDestroy

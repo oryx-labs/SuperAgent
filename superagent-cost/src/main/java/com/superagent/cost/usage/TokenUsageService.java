@@ -106,6 +106,12 @@ public class TokenUsageService implements UsageRecorder {
         return total;
     }
 
+    @Override
+    public void recordCost(UsageContext context, String model, double usd) {
+        store.save(new UsageRecord(UUID.randomUUID().toString(), Instant.now(), context.user(), context.source(),
+                context.agentId(), context.taskId(), context.sessionId(), context.cli(), model, 0, 0, 0, 0, 0, 0, usd, null));
+    }
+
     /** USD by list price; null when the model has none. */
     Double cost(TokenUsage u) {
         Optional<ModelPriceService.Price> found = prices.price(u.model());

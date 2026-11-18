@@ -188,7 +188,10 @@ public class ConnectorService {
             throw new IllegalArgumentException("Token is required");
         }
         String label = null;
-        if (CONFLUENCE_ID.equals(id)) {
+        if (GITLAB_ID.equals(id)) {
+            // The token is only ever sent to the GitLab it was made on: the address is checked here and kept with it.
+            label = GitLabSite.verify(blank(account), token.strip());
+        } else if (CONFLUENCE_ID.equals(id)) {
             String site = confluenceSite().orElseThrow(() ->
                     new IllegalArgumentException("管理员还没在系统设置里填 Confluence 的地址"));
             label = confluence.verify(site, blank(account), token.strip());
@@ -416,6 +419,12 @@ public class ConnectorService {
                 "以员工本人身份搜索、阅读、新建和修改 Confluence 页面（公司自建版和 Cloud 都支持）。管理员在系统设置里填站点地址，员工用自己的令牌授权。",
                 ConnectorKind.MCP, ConnectorAuthMethod.PERSONAL_TOKEN, true, ConnectorTransport.STDIO, CONFLUENCE_COMMAND,
                 "CONFLUENCE_PERSONAL_TOKEN", now, now));
+        // Each employee's own GitLab token (any host: the company's own GitLab or gitlab.com). Coding tasks push their
+        // branch and open the merge request with it, as that employee; it starts no MCP server of its own.
+        seedOnce(GITLAB_ID, new Connector(GITLAB_ID, "GitLab",
+                "编码任务用你自己的 GitLab 身份推送分支、创建 Merge Request（公司自建的 GitLab 和 gitlab.com 都行）。"
+                        + "在 GitLab 的「偏好设置 → 访问令牌」里建一个带 api、write_repository 权限的个人访问令牌，粘贴到这里。",
+                ConnectorKind.MCP, ConnectorAuthMethod.PERSONAL_TOKEN, true, ConnectorTransport.HTTP, null, null, now, now));
         // App identity, not each employee's: off until an administrator turns it on knowingly.
         seedOnce(DINGTALK_TOOLS_ID, new Connector(DINGTALK_TOOLS_ID, "钉钉工具",
                 "钉钉官方 MCP：通讯录、日程、待办、日志。以公司钉钉应用的身份调用，所有员工的 Agent 共用这个身份，开启前请确认应用权限。",
@@ -424,7 +433,8 @@ public class ConnectorService {
 
     /** The connectors the system ships: an administrator can turn them on or off, nothing else. */
     static final java.util.Set<String> SYSTEM_IDS = java.util.Set.of(ConnectorOAuthService.GITHUB,
-            ConnectorOAuthService.GITEE, FeishuDocsOAuthClient.KEY, NotionOAuthClient.KEY, "dingtalk-tools", "confluence");
+            ConnectorOAuthService.GITEE, FeishuDocsOAuthClient.KEY, NotionOAuthClient.KEY, "dingtalk-tools", "confluence",
+            "gitlab");
 
     static boolean isSystem(String id) {
         return SYSTEM_IDS.contains(id);
@@ -462,6 +472,7 @@ public class ConnectorService {
     public static final String NOTION_ID = NotionOAuthClient.KEY;
     public static final String DINGTALK_TOOLS_ID = "dingtalk-tools";
     public static final String CONFLUENCE_ID = "confluence";
+    public static final String GITLAB_ID = "gitlab";
     /** mcp-atlassian (Confluence and Jira, Cloud and self-hosted), pinned: run by uv, which fetches it on first use. */
     static final String CONFLUENCE_COMMAND = "uvx mcp-atlassian@0.23.1";
     static final String DINGTALK_TOOLS_COMMAND = "npx -y dingtalk-mcp@latest";
@@ -473,6 +484,14 @@ public class ConnectorService {
      * never started as an MCP server of their own.
      */
     private static final java.util.Set<String> OWN_TOOLS = java.util.Set.of(FEISHU_DOCS_ID);
+
+    /**
+     * The address an employee's authorization of a connector is bound to (GitLab: the site its token was made on), so a
+     * caller never sends that token anywhere else.
+     */
+    public Optional<String> authorizedSite(String connectorId, String owner) {
+        return credentials.find(connectorId, owner).map(ConnectorCredential::accountLabel).filter(s -> !s.isBlank());
+    }
 
     /** The employee's usable token for a connector they authorized themselves (renewed first if it's about to expire). */
     public Optional<String> userToken(String connectorId, String owner) {
@@ -512,7 +531,8 @@ public class ConnectorService {
                 admin ? c.endpoint() : null, admin ? c.tokenEnv() : null, secretSet,
                 authorizedCount, c.createdAt(), c.updatedAt(), isSystem(c.id()), setUp(c),
                 CONFLUENCE_ID.equals(c.id()) ? confluenceSite().orElse(null) : null,
-                CONFLUENCE_ID.equals(c.id()) && confluenceSite().map(ConfluenceSite::isCloud).orElse(false));
+                CONFLUENCE_ID.equals(c.id()) && confluenceSite().map(ConfluenceSite::isCloud).orElse(false)
+                        || GITLAB_ID.equals(c.id()));
     }
 
     /** Whether employees can authorize yet: the OAuth app or the Confluence site is set up under System Settings. */

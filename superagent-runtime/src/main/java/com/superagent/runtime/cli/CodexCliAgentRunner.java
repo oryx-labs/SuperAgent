@@ -192,6 +192,9 @@ public class CodexCliAgentRunner implements AgentRunner {
             // SuperAgent's own run config and are already scoped per turn — the same trust as Claude's allowlist.
             cmd.add("-c");
             cmd.add("mcp_servers." + server.name() + ".default_tools_approval_mode=\"approve\"");
+            // Some platform tools take minutes (transcribing an hour of audio): Codex gives up after 60 s by default.
+            cmd.add("-c");
+            cmd.add("mcp_servers." + server.name() + ".tool_timeout_sec=" + com.superagent.runtime.mcp.McpGrants.TOOL_TIMEOUT_SECONDS);
             if (server.token() != null) {
                 cmd.add("-c");
                 cmd.add("mcp_servers." + server.name() + ".bearer_token_env_var=" + jsonString(server.tokenEnvVar()));

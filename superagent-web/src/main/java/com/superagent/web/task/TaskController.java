@@ -109,6 +109,13 @@ public class TaskController {
         return ApiResponse.ok(taskService.detail(id, auth.getName()));
     }
 
+    /** One changed file's diff in a coding task (the detail lists the files; each diff is fetched when opened). */
+    @GetMapping(ApiPaths.TASKS + "/{id}/diff")
+    public ApiResponse<String> diff(@PathVariable String id, @org.springframework.web.bind.annotation.RequestParam String path,
+                                    Authentication auth) {
+        return ApiResponse.ok(taskService.harnessDiff(id, auth.getName(), path));
+    }
+
     @GetMapping(ApiPaths.TASKS + "/{id}/events")
     public ApiResponse<List<TaskEventDto>> events(@PathVariable String id,
                                                   @RequestParam(defaultValue = "0") int offset, Authentication auth) {

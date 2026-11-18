@@ -115,7 +115,14 @@ public class McpGrants {
     public static final List<String> HISTORY_TOOLS = List.of("mcp__superagent__chat_history_search",
             "mcp__superagent__chat_history_read");
 
-    public static final List<String> WORK_TOOLS = java.util.stream.Stream.of(FILE_TOOLS, SKILL_TOOLS, DOC_TOOLS, HISTORY_TOOLS)
+    /** How long a CLI waits for one platform tool call: some take minutes (transcribing an hour of audio). */
+    public static final int TOOL_TIMEOUT_SECONDS = 1800;
+
+    /** Audio and video (media.TranscribeMcpTools), for chats and tasks. */
+    public static final List<String> MEDIA_TOOLS = List.of("mcp__superagent__audio_transcribe");
+
+    public static final List<String> WORK_TOOLS = java.util.stream.Stream.of(FILE_TOOLS, SKILL_TOOLS, DOC_TOOLS, HISTORY_TOOLS,
+                    MEDIA_TOOLS)
             .flatMap(List::stream).toList();
 
     /**

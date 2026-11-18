@@ -53,6 +53,20 @@ superagent:
       password: ${SUPERAGENT_STORAGE_MYSQL_PASSWORD:}
   agent:
     workspace-dir: ./data/workspaces
+    # How long one agent turn may run before it is stopped. A coding task's development step can take a long time;
+    # a stuck turn is still stopped, just later. One value for every CLI.
+    claude:
+      timeout-seconds: ${SUPERAGENT_AGENT_TIMEOUT_SECONDS:3600}
+    codex:
+      timeout-seconds: ${SUPERAGENT_AGENT_TIMEOUT_SECONDS:3600}
+    deepseek:
+      timeout-seconds: ${SUPERAGENT_AGENT_TIMEOUT_SECONDS:3600}
+    grok:
+      timeout-seconds: ${SUPERAGENT_AGENT_TIMEOUT_SECONDS:3600}
+    kimi:
+      timeout-seconds: ${SUPERAGENT_AGENT_TIMEOUT_SECONDS:3600}
+    qwen:
+      timeout-seconds: ${SUPERAGENT_AGENT_TIMEOUT_SECONDS:3600}
   attachments:
     dir: ./data/attachments
   files:

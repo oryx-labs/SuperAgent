@@ -13,7 +13,8 @@ import java.util.Locale;
 public final class TaskKinds {
 
     /** For a tool's {@code kind} field. */
-    public static final String DESCRIPTION = "任务类型，必须三选一：coding = 写或改代码（按 PRD → 开发 → 验收三步执行，耗时和花费都更高）；"
+    public static final String DESCRIPTION = "任务类型，必须三选一：coding = 在一个代码仓库里写或改代码（要给 repo）。平台在单独的工作区里按"
+            + "「需求 → 环境 → 规格（用户确认）→ 开发 → 验证（平台自己跑命令，失败自动修）→ 独立审查 → 交付」执行，做完合并回本地分支或开 PR；"
             + "general = 其他所有工作（写文档、做 PPT、调研、整理资料、生成 skill 等），直接执行；"
             + "complex = 大而复杂、能拆成多块同时做的研究或执行（多方面调研、批量处理、多份材料分头分析等）："
             + "它先拆成子任务并行执行，全部完成后自动汇总出结论。拿不准就选 general";

@@ -134,6 +134,8 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         applyCredential(pb, request.credential());
         // No update check, telemetry or error reporting on each run: measured 4.7s → 3.2s to the CLI's first event.
         pb.environment().put("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
+        // Some platform tools take minutes (transcribing an hour of audio).
+        pb.environment().put("MCP_TOOL_TIMEOUT", String.valueOf(com.superagent.runtime.mcp.McpGrants.TOOL_TIMEOUT_SECONDS * 1000L));
     }
 
     static void applyCredential(ProcessBuilder pb, com.superagent.core.chat.RunCredential credential) {
