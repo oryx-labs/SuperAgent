@@ -25,8 +25,12 @@ public class SettingsService {
     static final String REVIEW_MAX_SPEND = "task.coding.review-max-spend";
     public static final int DEFAULT_REVIEW_MAX_ROUNDS = 8;
     public static final double DEFAULT_REVIEW_MAX_SPEND = 30;
+    /** Matches {@code CodeBuddyCliAgentRunner.INTERNET_ENV_SETTING}. */
+    static final String CODEBUDDY_INTERNET_ENV = "codebuddy.internet-environment";
     public static final int DEFAULT_MAX_SUBTASKS = 10;
     public static final int DEFAULT_MAX_PARALLEL = 5;
+    private static final java.util.Set<String> CODEBUDDY_INTERNET_ENVS =
+            java.util.Set.of("internal", "public", "ioa", "cloudhosted", "selfhosted");
 
     private final SystemSettingStore store;
     private final ProviderService providerService;
@@ -59,7 +63,7 @@ public class SettingsService {
                 trimToNull(all.get(COMPANY_SHORT_NAME)), trimToNull(all.get(PUBLIC_URL)), list(all, BACKUP_MODELS),
                 number(all, COMPLEX_MAX_SUBTASKS, DEFAULT_MAX_SUBTASKS), number(all, COMPLEX_MAX_PARALLEL, DEFAULT_MAX_PARALLEL),
                 "true".equals(all.get(TASK_FIXED_ON)), list(all, TASK_FIXED_MODELS), lines(all, CODE_ROOTS),
-                number(all, REVIEW_MAX_ROUNDS, DEFAULT_REVIEW_MAX_ROUNDS), decimal(all, REVIEW_MAX_SPEND, DEFAULT_REVIEW_MAX_SPEND));
+                number(all, REVIEW_MAX_ROUNDS, DEFAULT_REVIEW_MAX_ROUNDS), decimal(all, REVIEW_MAX_SPEND, DEFAULT_REVIEW_MAX_SPEND), codebuddyInternetEnvironment(all));
     }
 
     /**
@@ -92,6 +96,9 @@ public class SettingsService {
         String companyName = name(request.companyName(), 100);
         String shortName = name(request.companyShortName(), 20);
 
+        String codebuddyEnv = request.codebuddyInternetEnvironment() == null ? null
+                : requireCodebuddyInternetEnvironment(request.codebuddyInternetEnvironment());
+
         store.put(AGENT_DEFAULT_MODEL, model);
         store.put(COMPANY_NAME, companyName);
         store.put(COMPANY_SHORT_NAME, shortName);
@@ -118,6 +125,9 @@ public class SettingsService {
         if (spend != null) {
             store.put(REVIEW_MAX_SPEND, String.valueOf(spend));
         }
+        if (request.codebuddyInternetEnvironment() != null) {
+            store.put(CODEBUDDY_INTERNET_ENV, codebuddyEnv);
+        }
         return get();
     }
 
@@ -142,6 +152,28 @@ public class SettingsService {
 
     private static String join(java.util.List<String> ids) {
         return ids.isEmpty() ? null : String.join(",", ids);
+    }
+
+    /** CodeBuddy region for this company; unset → China ({@code internal}). */
+    public String codebuddyInternetEnvironment() {
+        return codebuddyInternetEnvironment(store.all());
+    }
+
+    private static String codebuddyInternetEnvironment(Map<String, String> all) {
+        String v = trimToNull(all.get(CODEBUDDY_INTERNET_ENV));
+        if (v == null) {
+            return "internal";
+        }
+        String lower = v.toLowerCase(java.util.Locale.ROOT);
+        return CODEBUDDY_INTERNET_ENVS.contains(lower) ? lower : "internal";
+    }
+
+    private static String requireCodebuddyInternetEnvironment(String value) {
+        String v = value.strip().toLowerCase(java.util.Locale.ROOT);
+        if (!CODEBUDDY_INTERNET_ENVS.contains(v)) {
+            throw new IllegalArgumentException("CodeBuddy 网络环境只能是 internal / public / ioa / cloudhosted / selfhosted");
+        }
+        return v;
     }
 
     /** The most subtasks a complex task may hand out. */

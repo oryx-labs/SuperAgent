@@ -15,7 +15,7 @@ On the Models page, administrators manage the coding-agent CLIs that do the work
 
 - **Install and upgrade** with one click, from each vendor's official package. A server without Node.js gets a private copy installed for SuperAgent.
 - **Model list** — fetched from each CLI and its keys, and checked with a real request, so the list shows what actually works.
-- **Supported**: Claude Code, OpenAI Codex, DeepSeek Harness, Kimi Code, Qwen Code, and GLM through Claude Code. CodeBuddy, MiniMax Code and Gemini CLI can be installed and given keys; running work on them comes later.
+- **Supported**: Claude Code, OpenAI Codex, DeepSeek Harness, Kimi Code, Qwen Code, Grok Build, CodeBuddy Code, Gemini CLI, MiniMax Code, and GLM through Claude Code.
 
 ## API keys
 

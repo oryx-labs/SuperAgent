@@ -15,7 +15,7 @@ description: SuperAgent 运行的编码 Agent CLI、公司的 API Key、模型�
 
 - **一键安装和升级**,使用各家官方的安装包。服务器没有 Node.js 时,会为 SuperAgent 单独装一个。
 - **模型列表**:从每个 CLI 和它的 Key 拉取,并用真实请求验证,列出来的就是确实能用的。
-- **已支持**:Claude Code、OpenAI Codex、DeepSeek Harness、Kimi Code、Qwen Code,以及通过 Claude Code 运行的 GLM。CodeBuddy、MiniMax Code、Gemini CLI 可以安装、配置 Key,执行工作稍后支持。
+- **已支持**:Claude Code、OpenAI Codex、DeepSeek Harness、Kimi Code、Qwen Code、Grok Build、CodeBuddy Code、Gemini CLI、MiniMax Code,以及通过 Claude Code 运行的 GLM。
 
 ## API Key
 

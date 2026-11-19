@@ -46,7 +46,8 @@ SuperAgent 驱动主流的编码 Agent CLI,用公司的 Key 运行:
 | DeepSeek Harness | ✓ | |
 | Kimi Code | ✓ | |
 | Qwen Code | ✓ | |
-| CodeBuddy、MiniMax Code、Gemini CLI | 仅安装 | 目前能安装、升级、管理 Key,执行工作稍后支持 |
+| CodeBuddy | 已支持 | 腾讯终端编程 Agent；网络环境在「设置 → CodeBuddy」 |
+| Gemini CLI、MiniMax Code | 已支持 | 安装并配置 Key 后可选模型跑对话与任务 |
 
 ## 还没做的
 

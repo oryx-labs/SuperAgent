@@ -15,7 +15,13 @@ public enum AgentType {
     /** Zhipu has no agent CLI: Claude Code, pointed at GLM's Anthropic-compatible endpoint. */
     GLM("glm"),
     /** xAI's Grok Build. Speaks ACP rather than a CLI MCP flag, so its runner is a different shape. */
-    GROK("grok");
+    GROK("grok"),
+    /** Tencent CodeBuddy Code: Claude-shaped stream-json + {@code --mcp-config}. */
+    CODEBUDDY("codebuddy"),
+    /** Google Gemini CLI: stream-json; MCP via an isolated {@code GEMINI_CONFIG_DIR} settings file. */
+    GEMINI("gemini"),
+    /** MiniMax Code: {@code mcode exec --output-format stream-json}; MCP via isolated {@code MINIMAX_DATA_DIR}. */
+    MINIMAX("minimax");
 
     private final String cliName;
 

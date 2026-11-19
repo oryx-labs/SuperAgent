@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import com.superagent.core.chat.RunCredential;
+import com.superagent.core.settings.SystemSettingStore;
 
 /**
  * Checks whether a listed model can actually complete an inference — a model list only says
@@ -84,10 +85,16 @@ public class ProviderInferenceProbe {
      * one, else one tiny inference on {@code modelId}.
      */
     public void checkKey(String providerKey, String modelId, RunCredential credential) throws IOException, InterruptedException {
+        if ("codebuddy".equals(providerKey) || "gemini".equals(providerKey) || "minimax".equals(providerKey)) {
+            // No fixed OpenAI /models URL: CLI version (and optional short headless turn) is the key check.
+            check(providerKey, modelId, credential, SOURCE_KEY_CHECK);
+            return;
+        }
         var entry = com.superagent.core.provider.ProviderCatalog.find(providerKey).orElseThrow();
         java.util.Optional<ApiAccess> access = "claude".equals(providerKey) ? ApiAccess.anthropic(credential)
                 : ApiAccess.of(entry, credential);
-        if (access.isPresent() && !"claude".equals(providerKey) && !"glm".equals(providerKey)) {
+        if (access.isPresent() && !"claude".equals(providerKey) && !"glm".equals(providerKey)
+                && access.get().base() != null) {
             ApiAccess a = access.get();
             HttpResponse<String> resp = sendRaw(a.base(), a.authorizeBearer(HttpRequest.newBuilder(URI.create(a.modelsUrl(providerKey)))
                     .timeout(Duration.ofSeconds(30)).GET()));
@@ -105,7 +112,15 @@ public class ProviderInferenceProbe {
         check(providerKey, modelId, credential, SOURCE_KEY_CHECK);
     }
 
-    private static final java.util.Set<String> VENDORS = java.util.Set.of("deepseek", "glm", "kimi", "qwen", "grok");
+    private static final java.util.Set<String> VENDORS = java.util.Set.of("deepseek", "glm", "kimi", "qwen", "grok",
+            "codebuddy", "gemini", "minimax");
+
+    private SystemSettingStore settings; // null in tests: CodeBuddy region defaults to internal
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setSettings(SystemSettingStore settings) {
+        this.settings = settings;
+    }
 
     /** Runs one inference against {@code modelId}; returns normally on success, throws with a readable reason. */
     public void check(String providerKey, String modelId) throws IOException, InterruptedException {
@@ -122,10 +137,194 @@ public class ProviderInferenceProbe {
         com.superagent.core.usage.TokenUsage used = switch (providerKey) {
             case "claude" -> checkClaude(modelId, credential);
             case "codex" -> checkCodex(modelId, credential);
+            case "codebuddy" -> checkCodeBuddy(modelId, credential);
+            case "gemini" -> checkGemini(modelId, credential);
+            case "minimax" -> checkMinimax(modelId, credential);
             case "deepseek", "glm", "kimi", "qwen", "grok" -> checkVendor(providerKey, modelId, credential);
             default -> throw new IOException("Inference check is not available for " + providerKey + " yet");
         };
         book(providerKey, source, used);
+    }
+
+    /**
+     * CodeBuddy: (A) key present + {@code codebuddy --version}; (B) when {@code modelId} is set, one short
+     * {@code -p} turn. No OpenAI {@code /models} on a fixed base URL.
+     */
+    private com.superagent.core.usage.TokenUsage checkCodeBuddy(String modelId, RunCredential credential)
+            throws IOException, InterruptedException {
+        if (credential == null) {
+            throw new IOException("还没有配置 API Key");
+        }
+        Path bin = probe.findBinary("codebuddy").orElseThrow(() -> new IOException("codebuddy is not installed"));
+        String region = settings == null ? "internal"
+                : settings.all().getOrDefault("codebuddy.internet-environment", "internal");
+        if (region == null || region.isBlank()) {
+            region = "internal";
+        }
+        java.util.Map<String, String> env = new java.util.HashMap<>();
+        env.put("CODEBUDDY_API_KEY", credential.apiKey());
+        if (credential.baseUrl() != null && !credential.baseUrl().isBlank()) {
+            env.put("CODEBUDDY_BASE_URL", credential.baseUrl().strip());
+        }
+        if (!"public".equalsIgnoreCase(region.strip())) {
+            env.put("CODEBUDDY_INTERNET_ENVIRONMENT", region.strip().toLowerCase(java.util.Locale.ROOT));
+        }
+        run(List.of(bin.toString(), "--version"), null, env);
+        if (modelId == null) {
+            return null;
+        }
+        String out = run(List.of(bin.toString(), "-p", "-y", "--output-format", "json", "--max-turns", "1",
+                "--model", modelId, "--", PROMPT), null, env);
+        try {
+            JsonNode root = mapper.readTree(out);
+            // stream-json may print several lines; prefer the last object that looks like a result
+            if (!root.isObject()) {
+                JsonNode last = null;
+                for (String line : out.split("\\R")) {
+                    if (line.strip().startsWith("{")) {
+                        last = mapper.readTree(line);
+                    }
+                }
+                root = last == null ? root : last;
+            }
+            if (root.path("is_error").asBoolean(false)) {
+                throw new IOException(tail(root.path("result").asText("codebuddy reported an error")));
+            }
+            JsonNode u = root.path("usage");
+            if (u.isObject()) {
+                return new com.superagent.core.usage.TokenUsage(modelId, u.path("input_tokens").asLong(0),
+                        u.path("cache_read_input_tokens").asLong(0), u.path("cache_creation_input_tokens").asLong(0),
+                        0, u.path("output_tokens").asLong(0), 0, null);
+            }
+        } catch (IOException e) {
+            if (e.getMessage() != null && e.getMessage().contains("codebuddy reported")) {
+                throw e;
+            }
+            // non-JSON success still counts: the process exited 0
+        }
+        return new com.superagent.core.usage.TokenUsage(modelId, 0, 0, 0, 0, 0, 0, null);
+    }
+
+    /**
+     * Gemini CLI: key + {@code gemini --version}; when {@code modelId} is set, one short {@code -p} turn with an
+     * isolated {@code GEMINI_CONFIG_DIR} so the operator home is untouched.
+     */
+    private com.superagent.core.usage.TokenUsage checkGemini(String modelId, RunCredential credential)
+            throws IOException, InterruptedException {
+        if (credential == null) {
+            throw new IOException("还没有配置 API Key");
+        }
+        Path bin = probe.findBinary("gemini").orElseThrow(() -> new IOException("gemini is not installed"));
+        java.util.Map<String, String> env = new java.util.HashMap<>();
+        env.put("GEMINI_API_KEY", credential.apiKey());
+        if (credential.baseUrl() != null && !credential.baseUrl().isBlank()) {
+            env.put("GOOGLE_GEMINI_BASE_URL", credential.baseUrl().strip());
+        }
+        run(List.of(bin.toString(), "--version"), null, env);
+        if (modelId == null) {
+            return null;
+        }
+        Path config = Files.createTempDirectory("sa-gemini-probe-");
+        try {
+            env.put("GEMINI_CONFIG_DIR", config.toString());
+            env.put("HOME", config.toString());
+            Files.writeString(config.resolve("settings.json"), "{\"mcpServers\":{}}");
+            List<String> argv = new java.util.ArrayList<>(List.of(bin.toString(), "-p", PROMPT,
+                    "--output-format", "json", "--approval-mode", "plan", "--skip-trust", "--model", modelId));
+            String out = run(argv, null, env);
+            try {
+                JsonNode root = mapper.readTree(out.strip().isEmpty() ? "{}" : lastJsonObject(out));
+                if (root.path("error").isObject()) {
+                    throw new IOException(tail(root.path("error").path("message").asText("gemini reported an error")));
+                }
+                JsonNode stats = root.path("stats");
+                if (stats.isObject()) {
+                    long in = stats.path("inputTokens").asLong(stats.path("promptTokenCount").asLong(0));
+                    long output = stats.path("outputTokens").asLong(stats.path("candidatesTokenCount").asLong(0));
+                    return new com.superagent.core.usage.TokenUsage(modelId, in, 0, 0, 0, output, 0, null);
+                }
+            } catch (IOException e) {
+                if (e.getMessage() != null && e.getMessage().contains("gemini reported")) {
+                    throw e;
+                }
+            }
+            return new com.superagent.core.usage.TokenUsage(modelId, 0, 0, 0, 0, 0, 0, null);
+        } finally {
+            deleteTree(config);
+        }
+    }
+
+    /**
+     * MiniMax Code: key + {@code mcode --version}; when {@code modelId} is set, one short {@code mcode exec}
+     * under an isolated {@code MINIMAX_DATA_DIR} with the key written into config.yaml.
+     */
+    private com.superagent.core.usage.TokenUsage checkMinimax(String modelId, RunCredential credential)
+            throws IOException, InterruptedException {
+        if (credential == null) {
+            throw new IOException("还没有配置 API Key");
+        }
+        Path bin = probe.findBinary("mcode").orElseThrow(() -> new IOException("mcode is not installed"));
+        run(List.of(bin.toString(), "--version"), null, java.util.Map.of());
+        if (modelId == null) {
+            return null;
+        }
+        Path data = Files.createTempDirectory("sa-mcode-probe-");
+        try {
+            String model = modelId.contains("/") ? modelId : "minimax/" + modelId;
+            Files.writeString(data.resolve("config.yaml"),
+                    "logLevel: info\ndefaultModel: \"" + model + "\"\nminimax_api:\n  apiKey: \""
+                            + credential.apiKey().replace("\"", "\\\"") + "\"\nminimaxModelSource: minimax_api_key\n");
+            Files.writeString(data.resolve("mcp.json"), "{\"mcpServers\":{}}");
+            java.util.Map<String, String> env = new java.util.HashMap<>();
+            env.put("MINIMAX_DATA_DIR", data.toString());
+            env.put("MCODE_PROVIDER_API_KEY", credential.apiKey());
+            if (credential.baseUrl() != null && !credential.baseUrl().isBlank()) {
+                env.put("MCODE_API_BASE_URL", credential.baseUrl().strip());
+            }
+            String out = run(List.of(bin.toString(), "exec", "--output-format", "stream-json",
+                    "--permission", "off", "--max-steps", "1", "--model", model, PROMPT), null, env);
+            long in = 0, cached = 0, outTokens = 0;
+            for (String line : out.split("\\R")) {
+                if (!line.strip().startsWith("{")) {
+                    continue;
+                }
+                JsonNode e = mapper.readTree(line);
+                if ("exec.completed".equals(e.path("type").asText())) {
+                    JsonNode u = e.path("result").path("usage");
+                    in += u.path("input_tokens").asLong(u.path("inputTokens").asLong(0));
+                    cached += u.path("cached_input_tokens").asLong(0);
+                    outTokens += u.path("output_tokens").asLong(u.path("outputTokens").asLong(0));
+                    if ("failed".equals(e.path("result").path("status").asText())) {
+                        throw new IOException(tail(e.path("result").path("error").path("message")
+                                .asText("mcode reported an error")));
+                    }
+                } else if ("turn.failed".equals(e.path("type").asText())) {
+                    throw new IOException(tail(e.path("error").path("message").asText("mcode turn failed")));
+                }
+            }
+            return new com.superagent.core.usage.TokenUsage(modelId, Math.max(0, in - cached), cached, 0, 0, outTokens,
+                    0, null);
+        } finally {
+            deleteTree(data);
+        }
+    }
+
+    /** Last JSON object in a multi-line CLI dump (Gemini {@code -o json} may print banners first). */
+    private static String lastJsonObject(String out) {
+        String last = "{}";
+        for (String line : out.split("\\R")) {
+            String t = line.strip();
+            if (t.startsWith("{") && t.endsWith("}")) {
+                last = t;
+            }
+        }
+        if ("{}".equals(last)) {
+            int i = out.lastIndexOf('{');
+            if (i >= 0) {
+                last = out.substring(i).strip();
+            }
+        }
+        return last;
     }
 
     // --- claude ---

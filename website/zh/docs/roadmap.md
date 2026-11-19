@@ -34,5 +34,5 @@ SuperAgent 迭代很快。这里列出还没做的,所以其他文档只写今�
 
 ## 模型与连接
 
-- **更多 CLI 能执行工作**:CodeBuddy、MiniMax Code、Gemini CLI,目前已经可以安装。
+- **更多 CLI 能执行工作**:CodeBuddy Code、Gemini CLI、MiniMax Code 已支持跑对话与任务。
 - **更多系统**:「连接配置」里接入更多公司应用,方式和 GitHub、Gitee、飞书一样。

@@ -232,15 +232,15 @@ class ProviderServiceTest {
     }
 
     @Test
-    void installOnlyClisTrackInstallAndVersionButNeedARecentEnoughNode() throws InterruptedException {
+    void minimaxInstallRequiresRecentEnoughNodeEvenWhenSupported() throws InterruptedException {
         InMemoryStore store = new InMemoryStore();
         FakeProbe probe = new FakeProbe(true, false);
         ProviderService service = new ProviderService(store, probe, new FakeFetcher(), new FakeInference(),
                 new FakeNode(probe, "v20.11.0"), null);
         ProviderDto minimax = service.add("minimax");
         assertThat(minimax.installable()).isTrue();
-        assertThat(minimax.supported()).isFalse();
-        assertThat(minimax.status()).isEqualTo("installed"); // no auth to check: nothing runs on it
+        assertThat(minimax.supported()).isTrue();
+        assertThat(minimax.status()).isEqualTo("no_auth"); // supported, installed in fake probe, but no key yet
         assertThat(minimax.models()).isEmpty();
 
         // MiniMax Code needs Node ≥ 22.19: its install first installs Node; when that fails the row says why

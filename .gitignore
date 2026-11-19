@@ -43,6 +43,10 @@ target/
 .DS_Store
 docs/td/*
 
+# Local working notes (not for upstream)
+FEATURE-BACKLOG.md
+FEATURE-BACKLOG.*.md
+
 # SuperAgent runtime data (sessions, agent workspaces)
 /data/
 superagent-server/data/*

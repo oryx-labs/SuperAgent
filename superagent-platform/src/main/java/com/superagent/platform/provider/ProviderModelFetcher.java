@@ -72,8 +72,124 @@ public class ProviderModelFetcher {
             case "codex" -> fetchCodex(credential);
             case "claude" -> fetchClaude(credential);
             case "deepseek", "glm", "kimi", "qwen", "grok" -> fetchVendor(providerKey, credential);
+            case "codebuddy" -> fetchCodeBuddy(credential);
+            case "gemini" -> fetchGemini(credential);
+            case "minimax" -> fetchMinimax(credential);
             default -> throw new IOException("Model listing is not available for " + providerKey + " yet");
         };
+    }
+
+    /**
+     * CodeBuddy has no fixed public OpenAI {@code /models} URL. When the credential carries a custom base URL,
+     * try that; otherwise seed the built-in catalogue (canInfer comes from the CLI probe).
+     */
+    private Result fetchCodeBuddy(com.superagent.core.chat.RunCredential credential)
+            throws IOException, InterruptedException {
+        if (credential != null && credential.baseUrl() != null && !credential.baseUrl().isBlank()) {
+            try {
+                return fetchVendor("codebuddy", credential);
+            } catch (IOException ignored) {
+                // fall through to the built-in list
+            }
+        }
+        if (credential == null) {
+            throw new IOException("请先在 API Key 页配置 Key");
+        }
+        // Seed from CodeBuddy's documented built-ins (intl + China plans). Goes stale; probe marks which answer.
+        List<ProviderModelDto> out = new ArrayList<>();
+        for (String id : List.of("auto", "glm-5.2", "kimi-k2.6", "kimi-k2.7-code", "kimi-k2.7-code-highspeed",
+                "minimax-m3", "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-202605",
+                "deepseek-v4-pro-202606")) {
+            out.add(new ProviderModelDto(id, null, List.of(), null, "none", null, true));
+        }
+        return new Result(out, "CodeBuddy built-in catalogue");
+    }
+
+    /**
+     * Gemini CLI: {@code gemini --list-models -o json} under an isolated HOME / GEMINI_CONFIG_DIR so listing
+     * never writes into the operator's real {@code ~/.gemini}.
+     */
+    private Result fetchGemini(com.superagent.core.chat.RunCredential credential)
+            throws IOException, InterruptedException {
+        if (credential == null) {
+            throw new IOException("请先在 API Key 页配置 Key");
+        }
+        Path bin = probe.findBinary("gemini").orElseThrow(() -> new IOException("gemini is not installed"));
+        Path home = java.nio.file.Files.createTempDirectory("sa-gemini-models-");
+        try {
+            java.nio.file.Files.createDirectories(home.resolve(".gemini"));
+            java.nio.file.Files.writeString(home.resolve(".gemini").resolve("settings.json"), "{\"mcpServers\":{}}");
+            ProcessBuilder pb = new ProcessBuilder(bin.toString(), "--list-models", "-o", "json")
+                    .redirectError(ProcessBuilder.Redirect.DISCARD);
+            pb.environment().put("PATH", String.join(File.pathSeparator, probe.searchPath()));
+            pb.environment().put("HOME", home.toString());
+            pb.environment().put("GEMINI_CONFIG_DIR", home.resolve(".gemini").toString());
+            pb.environment().put("GEMINI_API_KEY", credential.apiKey());
+            if (credential.baseUrl() != null && !credential.baseUrl().isBlank()) {
+                pb.environment().put("GOOGLE_GEMINI_BASE_URL", credential.baseUrl().strip());
+            }
+            Process p = pb.start();
+            CompletableFuture<byte[]> stdout = CompletableFuture.supplyAsync(() -> readAll(p.getInputStream()));
+            if (!p.waitFor(60, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                throw new IOException("gemini --list-models timed out after 60s");
+            }
+            if (p.exitValue() != 0) {
+                throw new IOException("gemini --list-models exited with " + p.exitValue());
+            }
+            String out = new String(stdout.join(), StandardCharsets.UTF_8).strip();
+            JsonNode root = mapper.readTree(out.isEmpty() ? "[]" : out);
+            if (!root.isArray() && root.has("models")) {
+                root = root.path("models");
+            }
+            List<ProviderModelDto> models = new ArrayList<>();
+            if (root.isArray()) {
+                for (JsonNode m : root) {
+                    String id = m.path("id").asText(m.path("modelId").asText(m.path("name").asText("")));
+                    if (id.isBlank() || NON_CHAT.matcher(id).find()) {
+                        continue;
+                    }
+                    Integer ctx = m.path("contextLimits").path("inputTokens").isNumber()
+                            ? m.path("contextLimits").path("inputTokens").asInt()
+                            : (m.hasNonNull("context_window") ? m.get("context_window").asInt() : null);
+                    models.add(new ProviderModelDto(id, textOrNull(m, "displayName"), List.of(), null, "none", ctx, true));
+                }
+            }
+            if (models.isEmpty()) {
+                throw new IOException("gemini --list-models returned no models");
+            }
+            models.sort(Comparator.comparing(ProviderModelDto::id));
+            return new Result(models, "gemini --list-models");
+        } finally {
+            try (var paths = java.nio.file.Files.walk(home)) {
+                paths.sorted(Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+            } catch (IOException ignored) {
+                // temp cleaner
+            }
+        }
+    }
+
+    /**
+     * MiniMax Code has no public OpenAI {@code /models} on a fixed base. Seed the built-ins from the CLI's
+     * default catalogue (canInfer comes from the exec probe).
+     */
+    private Result fetchMinimax(com.superagent.core.chat.RunCredential credential)
+            throws IOException, InterruptedException {
+        if (credential == null) {
+            throw new IOException("请先在 API Key 页配置 Key");
+        }
+        if (credential.baseUrl() != null && !credential.baseUrl().isBlank()) {
+            try {
+                return fetchVendor("minimax", credential);
+            } catch (IOException ignored) {
+                // fall through to built-ins
+            }
+        }
+        List<ProviderModelDto> out = new ArrayList<>();
+        for (String id : List.of("MiniMax-M3.1-Flash", "MiniMax-M2.1", "MiniMax-M2", "MiniMax-Text-01")) {
+            out.add(new ProviderModelDto(id, null, List.of(), null, "none", null, true));
+        }
+        return new Result(out, "MiniMax Code built-in catalogue");
     }
 
     // --- the vendors reached by key: their OpenAI-style model list ---

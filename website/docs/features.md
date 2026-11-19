@@ -46,7 +46,8 @@ SuperAgent drives coding-agent CLIs and runs them on the company's keys:
 | DeepSeek Harness | ✓ | |
 | Kimi Code | ✓ | |
 | Qwen Code | ✓ | |
-| CodeBuddy, MiniMax Code, Gemini CLI | Install only | Install, upgrade and manage keys today; running work on them comes later |
+| CodeBuddy | Supported | Tencent's terminal coding agent; region under Settings → CodeBuddy |
+| Gemini CLI, MiniMax Code | Supported | Install, set a key, pick a model — chat and tasks run on them |
 
 ## What isn't built yet
 

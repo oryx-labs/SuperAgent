@@ -34,5 +34,5 @@ SuperAgent iterates fast. This is what isn't built yet, so the rest of the docs 
 
 ## Models and connections
 
-- **More CLIs running work** — CodeBuddy, MiniMax Code and Gemini CLI, which can already be installed.
+- **More CLIs running work** — CodeBuddy Code, Gemini CLI, and MiniMax Code are supported for chat and tasks.
 - **More systems** — more company apps under Integrations, in the same way as GitHub, Gitee and Feishu.

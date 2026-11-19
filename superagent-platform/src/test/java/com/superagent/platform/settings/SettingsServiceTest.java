@@ -114,4 +114,15 @@ class SettingsServiceTest {
     private static SystemSettingsDto limits(String company, int rounds, double spend) {
         return new SystemSettingsDto(null, company, null, null, null, null, null, null, null, null, rounds, spend);
     }
+
+    @Test
+    void codeBuddyInternetEnvironmentDefaultsToInternalAndRejectsUnknown() {
+        assertThat(service.get().codebuddyInternetEnvironment()).isEqualTo("internal");
+        assertThat(service.update(new SystemSettingsDto(null, null, null, null, null, null, null, null, null, null, null, null, " PUBLIC "))
+                .codebuddyInternetEnvironment()).isEqualTo("public");
+        assertThat(service.update(new SystemSettingsDto(null, "OKG", null)).codebuddyInternetEnvironment())
+                .isEqualTo("public"); // null on save keeps it
+        assertThatThrownBy(() -> service.update(new SystemSettingsDto(null, null, null, null, null, null, null, null, null, null, null, null, "mars")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

@@ -70,6 +70,127 @@ class VendorCliRunnersTest {
                 .contains("\"httpUrl\":\"http://127.0.0.1:18080/mcp\"").contains("\"Authorization\":\"Bearer turn-token\"");
     }
 
+    @Test
+    void codeBuddyKeepsClaudeShapedMcpAndInjectsRegionEnv() throws Exception {
+        AgentRunRequest req = request("auto");
+        assertThat(CodeBuddyCliAgentRunner.mcpConfig(req)).isEqualTo(MCP);
+
+        List<java.nio.file.Path> cleanup = new java.util.ArrayList<>();
+        List<String> cmd = new CodeBuddyCliAgentRunner("codebuddy", 60).buildCommand(req, null, cleanup);
+        assertThat(cmd).contains("-p", "--output-format", "stream-json", "--include-partial-messages",
+                "--model", "auto", "-y", "--strict-mcp-config", "--mcp-config");
+        assertThat(cmd).doesNotContain("--resume");
+        String mcpFile = cmd.get(cmd.indexOf("--mcp-config") + 1);
+        assertThat(java.nio.file.Files.readString(java.nio.file.Path.of(mcpFile)))
+                .contains("\"type\":\"http\"").contains("Bearer turn-token");
+        for (java.nio.file.Path f : cleanup) {
+            java.nio.file.Files.deleteIfExists(f);
+        }
+
+        assertThat(CodeBuddyCliAgentRunner.environment(req.credential(), "internal"))
+                .containsEntry("CODEBUDDY_API_KEY", "sk-test")
+                .containsEntry("CODEBUDDY_INTERNET_ENVIRONMENT", "internal")
+                .containsEntry("CODEBUDDY_BASE_URL", "http://127.0.0.1:1");
+        assertThat(CodeBuddyCliAgentRunner.environment(req.credential(), "public"))
+                .doesNotContainKey("CODEBUDDY_INTERNET_ENVIRONMENT");
+        assertThat(CodeBuddyCliAgentRunner.normalizeInternetEnvironment(null)).isEqualTo("internal");
+        assertThat(CodeBuddyCliAgentRunner.normalizeInternetEnvironment("IOA")).isEqualTo("ioa");
+    }
+
+    @Test
+    void codeBuddyResumeAndAllowedTools() throws Exception {
+        AgentRunRequest req = new AgentRunRequest("s1", "cli-sess", "/tmp", "hi", "auto",
+                List.of("Read", "Edit"), false, null, "be brief", List.of(), null,
+                new RunCredential("c1", null, "sk-test", false));
+        List<String> cmd = new CodeBuddyCliAgentRunner("codebuddy", 60).buildCommand(req, "cli-sess", List.of());
+        assertThat(cmd).containsSequence("--resume", "cli-sess");
+        assertThat(cmd).containsSequence("--allowedTools", "Read Edit");
+        assertThat(cmd).doesNotContain("-y", "--append-system-prompt", "--mcp-config");
+    }
+
+    @Test
+    void geminiStreamMcpAndApproval() throws Exception {
+        GeminiStreamParser parser = new GeminiStreamParser();
+        List<JsonLineCliRunner.Line> lines = new ArrayList<>();
+        for (String l : List.of(
+                "{\"type\":\"init\",\"session_id\":\"g-sess-1\",\"model\":\"gemini-2.5-pro\"}",
+                "{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"Hel\"}",
+                "{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"Hello\"}",
+                "{\"type\":\"tool_use\",\"tool_name\":\"read_file\",\"tool_id\":\"t1\"}",
+                "{\"type\":\"tool_result\",\"tool_id\":\"t1\",\"output\":\"ok\"}",
+                "{\"type\":\"result\",\"status\":\"success\",\"stats\":{\"inputTokens\":10,\"outputTokens\":2}}")) {
+            lines.addAll(parser.parse(l));
+        }
+        assertThat(lines).extracting(JsonLineCliRunner.Line::type).containsExactly(
+                AgentEventType.SYSTEM, AgentEventType.TEXT, AgentEventType.TEXT,
+                AgentEventType.TOOL_USE, AgentEventType.TOOL_RESULT, AgentEventType.RESULT);
+        assertThat(lines.get(0).payload()).isEqualTo("g-sess-1");
+        assertThat(lines.get(1).payload()).isEqualTo("Hel");
+        assertThat(lines.get(2).payload()).isEqualTo("lo");
+        assertThat(parser.tokens("gemini-2.5-pro")).singleElement()
+                .satisfies(u -> {
+                    assertThat(u.input()).isEqualTo(10);
+                    assertThat(u.output()).isEqualTo(2);
+                });
+
+        AgentRunRequest req = request("gemini-2.5-pro");
+        assertThat(GeminiCliAgentRunner.settingsJson(CodexCliAgentRunner.mcpServers(req)))
+                .contains("\"httpUrl\":\"http://127.0.0.1:18080/mcp\"").contains("Bearer turn-token");
+        assertThat(GeminiCliAgentRunner.approvalMode(req)).isEqualTo("plan");
+        assertThat(GeminiCliAgentRunner.approvalMode(new AgentRunRequest("s1", null, "/tmp", "hi", "m",
+                List.of("Edit"), false, null, null, List.of(), null,
+                new RunCredential("c1", null, "sk", false)))).isEqualTo("auto_edit");
+        assertThat(GeminiCliAgentRunner.environment(req.credential(), java.nio.file.Path.of("/tmp/g")))
+                .containsEntry("GEMINI_API_KEY", "sk-test")
+                .containsEntry("GEMINI_CONFIG_DIR", "/tmp/g")
+                .containsEntry("HOME", "/tmp/g");
+
+        List<String> cmd = new GeminiCliAgentRunner("gemini", 60).buildCommand(req, null, List.of());
+        assertThat(cmd).contains("-p", "--output-format", "stream-json", "--skip-trust",
+                "--approval-mode", "plan", "--model", "gemini-2.5-pro");
+        assertThat(java.nio.file.Files.readString(
+                java.nio.file.Path.of("/tmp/.superagent/gemini-home/s1/settings.json")))
+                .contains("httpUrl");
+    }
+
+    @Test
+    void minimaxStreamMcpAndPermission() throws Exception {
+        McodeStreamParser parser = new McodeStreamParser();
+        List<JsonLineCliRunner.Line> lines = new ArrayList<>();
+        for (String l : List.of(
+                "{\"type\":\"session.started\",\"sessionId\":\"mvs_abc\"}",
+                "{\"type\":\"item.started\",\"item\":{\"id\":\"t1\",\"type\":\"tool_call\",\"toolCall\":{\"name\":\"Bash\"}}}",
+                "{\"type\":\"item.completed\",\"item\":{\"id\":\"t1\",\"type\":\"tool_call\",\"toolCall\":{\"name\":\"Bash\",\"result\":\"done\"}}}",
+                "{\"type\":\"item.completed\",\"item\":{\"id\":\"m1\",\"type\":\"agent_message\",\"text\":\"你好\"}}",
+                "{\"type\":\"exec.completed\",\"result\":{\"status\":\"succeeded\",\"output\":\"你好\",\"usage\":{\"input_tokens\":5,\"output_tokens\":2}}}")) {
+            lines.addAll(parser.parse(l));
+        }
+        assertThat(lines).extracting(JsonLineCliRunner.Line::type).containsExactly(
+                AgentEventType.SYSTEM, AgentEventType.TOOL_USE, AgentEventType.TOOL_RESULT,
+                AgentEventType.TEXT, AgentEventType.RESULT);
+        assertThat(lines.get(0).payload()).isEqualTo("mvs_abc");
+        assertThat(parser.tokens("MiniMax-M2.1")).singleElement()
+                .satisfies(u -> assertThat(u.input() + u.output()).isEqualTo(7));
+
+        AgentRunRequest req = request("MiniMax-M2.1");
+        assertThat(MinimaxCliAgentRunner.mcpJson(CodexCliAgentRunner.mcpServers(req)))
+                .contains("\"type\":\"http\"").contains("Bearer turn-token");
+        assertThat(MinimaxCliAgentRunner.modelArg("MiniMax-M2.1")).isEqualTo("minimax/MiniMax-M2.1");
+        assertThat(MinimaxCliAgentRunner.modelArg("minimax/MiniMax-M2.1")).isEqualTo("minimax/MiniMax-M2.1");
+        assertThat(MinimaxCliAgentRunner.permission(req)).isEqualTo("off");
+        assertThat(MinimaxCliAgentRunner.configYaml("sk-test", "minimax/MiniMax-M2.1"))
+                .contains("apiKey: \"sk-test\"").contains("defaultModel: \"minimax/MiniMax-M2.1\"");
+
+        List<String> cmd = new MinimaxCliAgentRunner("mcode", 60).buildCommand(req, null, List.of());
+        assertThat(cmd).containsSequence("exec", "--output-format", "stream-json")
+                .containsSequence("--permission", "off")
+                .containsSequence("--model", "minimax/MiniMax-M2.1")
+                .contains("hi");
+        assertThat(java.nio.file.Files.readString(
+                java.nio.file.Path.of("/tmp/.superagent/mcode-home/s1/mcp.json")))
+                .contains("http://127.0.0.1:18080/mcp");
+    }
+
     private static AgentRunRequest request(String model) {
         return new AgentRunRequest("s1", null, "/tmp", "hi", model, List.of(), false, MCP, null, List.of(), null,
                 new RunCredential("c1", "http://127.0.0.1:1", "sk-test", false));

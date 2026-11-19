@@ -85,8 +85,8 @@ public class CliConfigWriter {
                 case "codex" -> writeCodex(machine.codexHome(), choice.credential());
                 case "qwen" -> writeEnvFile(machine.home(".qwen").resolve(".env"), "OPENAI_API_KEY", "OPENAI_BASE_URL", choice.credential());
                 case "gemini" -> writeEnvFile(machine.home(".gemini").resolve(".env"), "GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL", choice.credential());
-                // GLM shares Claude Code's config (Claude's pool owns it), Kimi's runs have a home of their own;
-                // DeepSeek, CodeBuddy and MiniMax have no key file we can write safely: their keys reach runs only.
+                // GLM shares Claude Code's config (Claude's pool owns it), Kimi/MiniMax runs use an isolated home;
+                // DeepSeek and CodeBuddy have no key file we can write safely: their keys reach runs only.
                 default -> { /* nothing machine-wide */ }
             }
         } catch (IOException | RuntimeException e) {
