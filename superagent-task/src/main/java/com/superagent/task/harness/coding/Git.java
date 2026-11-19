@@ -40,12 +40,12 @@ final class Git {
         cmd.add("-c");
         cmd.add("core.quotepath=false");
         cmd.addAll(List.of(args));
-        return run(cmd, dir, timeoutSeconds, extraEnv);
+        return run(cmd, dir, timeoutSeconds, extraEnv, false);
     }
 
     /** A check, through the shell, as a person would type it. */
     Result shell(Path dir, String command, int timeoutSeconds) {
-        return run(List.of("/bin/sh", "-c", command), dir, timeoutSeconds, Map.of());
+        return run(List.of("/bin/sh", "-c", command), dir, timeoutSeconds, Map.of(), true);
     }
 
     String text(Path dir, String... args) {
@@ -56,7 +56,8 @@ final class Git {
         return r.out.strip();
     }
 
-    private Result run(List<String> cmd, Path dir, int timeoutSeconds, Map<String, String> extraEnv) {
+    /** {@code killedOnShutdown}: a check (a build, a test run) is ended with the server; git itself is let finish. */
+    private Result run(List<String> cmd, Path dir, int timeoutSeconds, Map<String, String> extraEnv, boolean killedOnShutdown) {
         long start = System.currentTimeMillis();
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile());
         pb.environment().putAll(env);
@@ -64,6 +65,9 @@ final class Git {
         pb.environment().put("GIT_TERMINAL_PROMPT", "0"); // never hang on a password prompt
         try {
             Process p = pb.start();
+            if (killedOnShutdown) {
+                com.superagent.runtime.cli.CliProcesses.track(p);
+            }
             p.getOutputStream().close();
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             ByteArrayOutputStream err = new ByteArrayOutputStream();

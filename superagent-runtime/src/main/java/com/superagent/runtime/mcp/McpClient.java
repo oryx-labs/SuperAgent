@@ -131,7 +131,7 @@ public class McpClient {
         if (spec.env() != null) {
             pb.environment().putAll(spec.env());
         }
-        Process p = pb.start();
+        Process p = com.superagent.runtime.cli.CliProcesses.track(pb.start());
         BlockingQueue<JsonNode> incoming = new ArrayBlockingQueue<>(256);
         Thread reader = new Thread(() -> readLines(p.getInputStream(), incoming), "mcp-list-tools");
         reader.setDaemon(true);

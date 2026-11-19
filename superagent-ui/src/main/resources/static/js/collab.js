@@ -146,6 +146,7 @@ document.getElementById("agentLeaveBtn").addEventListener("click", async () => {
   if (!agent || !window.confirm(L("co.leaveConfirm", { name: agent.name }))) return;
   try {
     await api.removeMember(agent.id, currentUserId);
+    stopLiveWatch();
     activeAgentId = null;
     activeAgent = null;
     renderAgentPanel(null);
@@ -184,6 +185,7 @@ async function watchLiveTurn(agent, live) {
   handles.text.closest(".bubble").prepend(head);
   el.input.disabled = true;
   el.input.placeholder = mine ? L("chat.resumingPh") : L("co.waitFor", { name: live.byName });
+  setSendButtonStop(true);
   scrollToBottom();
   try {
     const resp = await fetch("/api/v1/sessions/" + activeSessionId + "/live/stream", { signal: abort.signal });
@@ -191,9 +193,11 @@ async function watchLiveTurn(agent, live) {
   } catch (e) { /* switched away or the connection dropped: the poll picks the turn up again */ }
   handles.text.classList.remove("is-streaming");
   liveWatch = null;
-  if (abort.signal.aborted || activeAgent !== agent) return;
+  if (abort.signal.aborted) return; // stopLiveWatch already restored the composer
   el.input.disabled = false;
   el.input.placeholder = L("chat.composer");
+  setSendButtonStop(false);
+  if (!activeAgent || activeAgent.id !== agent.id || handles.interrupted) return;
   await selectSession(activeSessionId);
   loadAgents();
   renderAgentWork(agent); // the turn may have set off a task
@@ -206,6 +210,7 @@ function stopLiveWatch() {
   liveWatch = null;
   el.input.disabled = false;
   el.input.placeholder = L("chat.composer");
+  setSendButtonStop(false);
 }
 setInterval(pollLive, 2500);
 

@@ -69,6 +69,9 @@ class ChatTaskResultsTest {
         results.onTaskNote(new NoticeEvents.TaskNote("t3", "ada", "加登录", "验证第 1 轮没通过，正在自动修复"));
         results.onTaskStatus(new NoticeEvents.TaskStatusChanged("t3", "ada", "加登录", "web_chat", "needs_confirmation",
                 null, null, "规格写好了，请确认。\n\n👉 下一步：回复「确认规格」开始开发"));
+        // Stopping again on the same question is not news: the chat isn't told twice.
+        results.onTaskStatus(new NoticeEvents.TaskStatusChanged("t3", "ada", "加登录", "web_chat", "needs_confirmation",
+                null, null, null, true));
 
         ArgumentCaptor<ChatMessage> posted = ArgumentCaptor.forClass(ChatMessage.class);
         verify(chats, org.mockito.Mockito.times(2)).appendMessage(posted.capture());

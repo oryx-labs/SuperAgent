@@ -15,7 +15,7 @@ mvn clean install                             # build + test all modules
 mvn clean install -DskipTests                 # build, skip tests
 mvn -pl superagent-task -am test              # one module (+ its deps)
 mvn -pl superagent-core test -Dtest=FooTest   # single test class
-mvn -pl superagent-server spring-boot:run     # run everything on :18080 (after mvn install)
+scripts/run-local.sh                          # run everything on :18080 from its own jar copy (mvn package, not install)
 ```
 
 ## Module architecture

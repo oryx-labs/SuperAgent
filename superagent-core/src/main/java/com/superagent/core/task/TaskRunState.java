@@ -8,14 +8,20 @@ import java.time.Instant;
  * run: {@code agentSessionId} is the agent conversation to {@code --resume};
  * {@code failureCount} counts consecutive failures on the current session (reset
  * when the session is rotated); {@code attemptCount} is the total number of runs
- * (the overall retry budget).
+ * (the overall retry budget). {@code interruptedByRestart} marks a run a server
+ * shutdown cut short: it resumes right after startup without spending the budget.
  */
 public record TaskRunState(
         String taskId,
         String agentSessionId,
         int failureCount,
         int attemptCount,
-        Instant updatedAt) {
+        Instant updatedAt,
+        boolean interruptedByRestart) {
+
+    public TaskRunState(String taskId, String agentSessionId, int failureCount, int attemptCount, Instant updatedAt) {
+        this(taskId, agentSessionId, failureCount, attemptCount, updatedAt, false);
+    }
 
     public static TaskRunState initial(String taskId, String agentSessionId) {
         return new TaskRunState(taskId, agentSessionId, 0, 1, Instant.now());
@@ -34,5 +40,16 @@ public record TaskRunState(
     /** A plain retry/resume on the same session without counting it as a failure. */
     public TaskRunState resumed() {
         return new TaskRunState(taskId, agentSessionId, failureCount, attemptCount + 1, Instant.now());
+    }
+
+    /** The run was cut short by a server shutdown, on {@code sessionId} (the conversation to pick up). */
+    public TaskRunState interruptedByRestart(String sessionId) {
+        return new TaskRunState(taskId, sessionId != null ? sessionId : agentSessionId, failureCount, attemptCount,
+                Instant.now(), true);
+    }
+
+    /** Picked up after the restart: same session, nothing counted, the mark cleared. */
+    public TaskRunState resumedAfterRestart() {
+        return new TaskRunState(taskId, agentSessionId, failureCount, attemptCount, Instant.now(), false);
     }
 }

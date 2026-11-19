@@ -53,6 +53,7 @@ async function sendMessage(text, images, imageUrls, fileIds, fileNames) {
     if (sending === me) sending = null;
     handles.text.classList.remove("is-streaming");
     setStreaming(false);
+    if (handles.interrupted) return; // keep the notice: the server going down has nothing newer to show
     await selectSession(activeSessionId); // refresh with ids so messages become editable
     loadAgents();
     if (activeAgent) renderAgentWork(activeAgent); // a turn may have set off a task
@@ -125,6 +126,16 @@ function handleFrame(frame, handles) {
       handles.text.after(stoppedNote(!handles.text.textContent.trim()));
       break;
     }
+    case "interrupted": {
+      // The server is restarting: the reply stops here and the page shouldn't reload from it.
+      handles.interrupted = true;
+      handles.text.classList.remove("is-streaming");
+      const note = document.createElement("div");
+      note.className = "is-error";
+      note.textContent = L("chat.interrupted");
+      handles.text.after(note);
+      break;
+    }
     case "error":
       handles.text.classList.add("is-error");
       handles.text.textContent = L("chat.errored", { msg: ev.payload || L("chat.errGeneric") });
@@ -167,9 +178,15 @@ function setStreaming(on) {
   streaming = on;
   el.input.disabled = on;
   chatImages.setDisabled(on);
+  setSendButtonStop(on);
+}
+
+/** The send button doubles as Stop while a reply is coming in: one we sent, or a running turn we re-attached to. */
+function setSendButtonStop(on) {
   el.sendBtn.classList.toggle("is-stop", on);
   el.sendBtn.textContent = on ? "■" : "↑";
   el.sendBtn.title = on ? L("msg.stop") : L("msg.send");
+  el.sendBtn.disabled = on ? false : noChatModel;
 }
 
 function relativeTime(iso) {

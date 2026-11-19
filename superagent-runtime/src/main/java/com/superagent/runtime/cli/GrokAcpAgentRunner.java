@@ -91,7 +91,7 @@ public class GrokAcpAgentRunner implements AgentRunner {
             client = new AcpClient(process, Duration.ofSeconds(timeoutSeconds));
             AcpClient toClose = client;
             cancellation.onCancel(() -> {
-                process.destroyForcibly();
+                CliProcesses.kill(process);
                 toClose.close();
             });
             turn(request, sink, seq, client);
@@ -139,7 +139,7 @@ public class GrokAcpAgentRunner implements AgentRunner {
         env.put("GROK_HOME", home.resolve(".grok").toString());
         applyCredential(env, request);
         log.info("session {} running: grok agent stdio (cwd={})", request.sessionId(), request.workspaceDir());
-        return pb.start();
+        return CliProcesses.track(pb.start());
     }
 
     /**

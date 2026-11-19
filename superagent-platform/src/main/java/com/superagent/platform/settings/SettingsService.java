@@ -21,6 +21,10 @@ public class SettingsService {
     static final String TASK_FIXED_ON = "task.fixed-models.on";
     static final String TASK_FIXED_MODELS = "task.fixed-models";
     static final String CODE_ROOTS = "task.coding.local-roots";
+    static final String REVIEW_MAX_ROUNDS = "task.coding.review-max-rounds";
+    static final String REVIEW_MAX_SPEND = "task.coding.review-max-spend";
+    public static final int DEFAULT_REVIEW_MAX_ROUNDS = 8;
+    public static final double DEFAULT_REVIEW_MAX_SPEND = 30;
     public static final int DEFAULT_MAX_SUBTASKS = 10;
     public static final int DEFAULT_MAX_PARALLEL = 5;
 
@@ -54,7 +58,8 @@ public class SettingsService {
         return new SystemSettingsDto(trimToNull(all.get(AGENT_DEFAULT_MODEL)), companyName(all),
                 trimToNull(all.get(COMPANY_SHORT_NAME)), trimToNull(all.get(PUBLIC_URL)), list(all, BACKUP_MODELS),
                 number(all, COMPLEX_MAX_SUBTASKS, DEFAULT_MAX_SUBTASKS), number(all, COMPLEX_MAX_PARALLEL, DEFAULT_MAX_PARALLEL),
-                "true".equals(all.get(TASK_FIXED_ON)), list(all, TASK_FIXED_MODELS), lines(all, CODE_ROOTS));
+                "true".equals(all.get(TASK_FIXED_ON)), list(all, TASK_FIXED_MODELS), lines(all, CODE_ROOTS),
+                number(all, REVIEW_MAX_ROUNDS, DEFAULT_REVIEW_MAX_ROUNDS), decimal(all, REVIEW_MAX_SPEND, DEFAULT_REVIEW_MAX_SPEND));
     }
 
     /**
@@ -75,25 +80,43 @@ public class SettingsService {
         if (fixedOn && fixed.isEmpty()) {
             throw new IllegalArgumentException("开启任务固定模型时，至少要选一个模型");
         }
+        java.util.List<String> backups = request.backupModels() == null ? null : models(request.backupModels(), backupModels());
+        String url = request.publicUrl() == null ? null : publicUrl(request.publicUrl());
+        String roots = request.codeRoots() == null ? null : codeRoots(request.codeRoots());
+        Integer subtasks = request.complexMaxSubtasks() == null ? null : bounded(request.complexMaxSubtasks(), 1, 50, "子任务上限");
+        Integer parallel = request.complexMaxParallel() == null ? null
+                : bounded(request.complexMaxParallel(), 1, 20, "同时运行的子任务数");
+        Integer rounds = request.codingReviewMaxRounds() == null ? null
+                : bounded(request.codingReviewMaxRounds(), 1, 20, "编码任务审查的最多轮数");
+        Double spend = request.codingReviewMaxSpend() == null ? null : spend(request.codingReviewMaxSpend());
+        String companyName = name(request.companyName(), 100);
+        String shortName = name(request.companyShortName(), 20);
+
         store.put(AGENT_DEFAULT_MODEL, model);
-        store.put(COMPANY_NAME, name(request.companyName(), 100));
-        store.put(COMPANY_SHORT_NAME, name(request.companyShortName(), 20));
-        if (request.backupModels() != null) {
-            store.put(BACKUP_MODELS, join(models(request.backupModels(), backupModels())));
+        store.put(COMPANY_NAME, companyName);
+        store.put(COMPANY_SHORT_NAME, shortName);
+        if (backups != null) {
+            store.put(BACKUP_MODELS, join(backups));
         }
         store.put(TASK_FIXED_MODELS, join(fixed));
         store.put(TASK_FIXED_ON, fixedOn ? "true" : null);
         if (request.publicUrl() != null) {
-            store.put(PUBLIC_URL, publicUrl(request.publicUrl()));
+            store.put(PUBLIC_URL, url);
         }
         if (request.codeRoots() != null) {
-            store.put(CODE_ROOTS, codeRoots(request.codeRoots()));
+            store.put(CODE_ROOTS, roots);
         }
-        if (request.complexMaxSubtasks() != null) {
-            store.put(COMPLEX_MAX_SUBTASKS, String.valueOf(bounded(request.complexMaxSubtasks(), 1, 50, "子任务上限")));
+        if (subtasks != null) {
+            store.put(COMPLEX_MAX_SUBTASKS, String.valueOf(subtasks));
         }
-        if (request.complexMaxParallel() != null) {
-            store.put(COMPLEX_MAX_PARALLEL, String.valueOf(bounded(request.complexMaxParallel(), 1, 20, "同时运行的子任务数")));
+        if (parallel != null) {
+            store.put(COMPLEX_MAX_PARALLEL, String.valueOf(parallel));
+        }
+        if (rounds != null) {
+            store.put(REVIEW_MAX_ROUNDS, String.valueOf(rounds));
+        }
+        if (spend != null) {
+            store.put(REVIEW_MAX_SPEND, String.valueOf(spend));
         }
         return get();
     }
@@ -129,6 +152,32 @@ public class SettingsService {
     /** How many of a complex task's subtasks run at once. */
     public int complexMaxParallel() {
         return number(store.all(), COMPLEX_MAX_PARALLEL, DEFAULT_MAX_PARALLEL);
+    }
+
+    /** A coding task's review loop stops for the user after this many rounds. */
+    public int codingReviewMaxRounds() {
+        return number(store.all(), REVIEW_MAX_ROUNDS, DEFAULT_REVIEW_MAX_ROUNDS);
+    }
+
+    /** …or once the task has spent this much (USD). */
+    public double codingReviewMaxSpend() {
+        return decimal(store.all(), REVIEW_MAX_SPEND, DEFAULT_REVIEW_MAX_SPEND);
+    }
+
+    private static double decimal(Map<String, String> all, String key, double fallback) {
+        try {
+            String v = trimToNull(all.get(key));
+            return v == null ? fallback : Double.parseDouble(v);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static double spend(double value) {
+        if (!(value >= 1 && value <= 1000)) {
+            throw new IllegalArgumentException("编码任务的费用上限要在 1 到 1000 美元之间");
+        }
+        return value;
     }
 
     private static int number(Map<String, String> all, String key, int fallback) {

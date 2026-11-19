@@ -45,6 +45,16 @@ public final class HarnessRun {
         return host.turn(task, prompt, conversation, first, label, cancellation);
     }
 
+    /** A turn on {@code model} (null: the task's own) in the new conversation {@code conversation}. */
+    public HarnessHost.Turn reviewTurn(HarnessHost.Model model, String prompt, String conversation, String label) {
+        return host.reviewTurn(task, model, prompt, conversation, label, cancellation);
+    }
+
+    /** A turn on {@code model} (null: the task's own) in a new conversation. */
+    public HarnessHost.Turn turnOn(HarnessHost.Model model, String prompt, String conversation, String label) {
+        return host.turnOn(task, model, prompt, conversation, label, cancellation);
+    }
+
     public void workIn(String dir) {
         task = host.workIn(task, dir);
     }
@@ -58,11 +68,16 @@ public final class HarnessRun {
     }
 
     public void begin(HarnessState.Step step) {
+        begin(step, step.name);
+    }
+
+    /** {@code label}: how the run log heads the step (with its round, say). */
+    public void begin(HarnessState.Step step, String label) {
         if (step.status != HarnessState.Status.RUNNING) {
             step.status = HarnessState.Status.RUNNING;
             step.startedAt = step.startedAt == null ? Instant.now() : step.startedAt;
             step.note = null;
-            note("── " + step.name + " ──");
+            note("── " + label + " ──");
         }
         state.waitingOn = null;
         save();
@@ -70,6 +85,7 @@ public final class HarnessRun {
     }
 
     public void done(HarnessState.Step step, String note) {
+        state.askedKey = null; // past it: a later stop is news again
         step.status = HarnessState.Status.DONE;
         step.finishedAt = Instant.now();
         step.note = note;
@@ -85,15 +101,23 @@ public final class HarnessRun {
         host.save(task, state);
     }
 
-    /** Stops at {@code step} until the user answers; {@code ask} is shown to them (with a continue button). */
+    /**
+     * Stops at {@code step} until the user answers; {@code ask} is shown to them (with a continue button). Stopping again
+     * on the same question (the user said "continue" but nothing changed) doesn't ask or notify them again.
+     */
     public void waitFor(HarnessState.Step step, String ask) {
+        String key = step.key + "\n" + ask;
+        boolean repeated = key.equals(state.askedKey);
         step.status = HarnessState.Status.WAITING;
         step.note = ask;
         state.waitingOn = step.key;
+        state.askedKey = key;
         save();
         settled = true;
-        host.ask(task, ask);
-        host.settle(task, TaskStatus.NEEDS_CONFIRMATION, progressAt(step, false), null, null);
+        if (!repeated) {
+            host.ask(task, ask);
+        }
+        host.settle(task, TaskStatus.NEEDS_CONFIRMATION, progressAt(step, false), null, null, repeated);
     }
 
     public void fail(HarnessState.Step step, String why) {

@@ -177,7 +177,7 @@ const chatImages = imageAttacher({
 
 el.composer.addEventListener("submit", async e => {
   e.preventDefault();
-  if (streaming) { stopGeneration(); return; }
+  if (streaming || liveWatch) { stopGeneration(); return; }
   if (noChatModel) { showToast(L(isAdmin ? "chat.noModelAdmin" : "chat.noModelUser"), true); return; }
   const text = el.input.value.trim();
   if (!text && chatImages.count() === 0) return;
@@ -202,7 +202,7 @@ el.input.addEventListener("input", autoGrow);
 el.input.addEventListener("keydown", e => {
   if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || e.isComposing) return;
   e.preventDefault();
-  if (!streaming) el.composer.requestSubmit(); // while a reply streams the button means Stop: don't stop by accident
+  if (!streaming && !liveWatch) el.composer.requestSubmit(); // while a reply streams the button means Stop: don't stop by accident
 });
 // Off a Mac the key is Ctrl: say so.
 if (!/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) {

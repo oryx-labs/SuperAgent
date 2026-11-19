@@ -17,12 +17,22 @@ public class MysqlTaskRunStateStore extends AbstractJdbcTaskRunStateStore {
               failure_count    INT         NOT NULL DEFAULT 0,
               attempt_count    INT         NOT NULL DEFAULT 0,
               updated_at       DATETIME(3) NOT NULL,
+              interrupted      BOOLEAN     NOT NULL DEFAULT FALSE,
               PRIMARY KEY (company_id, task_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
 
     public MysqlTaskRunStateStore(JdbcTemplate jdbc) {
         super(jdbc, SCHEMA);
+        ensureInterrupted();
+    }
+
+    private void ensureInterrupted() {
+        Integer present = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                + "AND LOWER(table_name) = 'task_run_state' AND LOWER(column_name) = 'interrupted'", Integer.class);
+        if (present == null || present == 0) {
+            jdbc.execute("ALTER TABLE task_run_state ADD COLUMN interrupted BOOLEAN NOT NULL DEFAULT FALSE");
+        }
     }
 
     @Override
@@ -32,12 +42,13 @@ public class MysqlTaskRunStateStore extends AbstractJdbcTaskRunStateStore {
 
     @Override
     public TaskRunState save(TaskRunState s) {
-        jdbc.update("INSERT INTO task_run_state (company_id, task_id, agent_session_id, failure_count, attempt_count, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?) "
+        jdbc.update("INSERT INTO task_run_state (company_id, task_id, agent_session_id, failure_count, attempt_count, updated_at, interrupted) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?) "
                         + "ON DUPLICATE KEY UPDATE agent_session_id=VALUES(agent_session_id), "
                         + "failure_count=VALUES(failure_count), attempt_count=VALUES(attempt_count), "
-                        + "updated_at=VALUES(updated_at)",
-                TenantSchema.company(), s.taskId(), nn(s.agentSessionId()), s.failureCount(), s.attemptCount(), utc(s.updatedAt()));
+                        + "updated_at=VALUES(updated_at), interrupted=VALUES(interrupted)",
+                TenantSchema.company(), s.taskId(), nn(s.agentSessionId()), s.failureCount(), s.attemptCount(), utc(s.updatedAt()),
+                s.interruptedByRestart());
         return s;
     }
 

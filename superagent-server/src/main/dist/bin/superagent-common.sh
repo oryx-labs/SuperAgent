@@ -19,7 +19,7 @@ if [ -f "$APP_HOME/config/superagent.env" ]; then
 fi
 
 SERVER_PORT="${SERVER_PORT:-18080}"
-STOP_TIMEOUT="${STOP_TIMEOUT:-35}"   # server.shutdown=graceful waits up to 30s for in-flight requests
+STOP_TIMEOUT="${STOP_TIMEOUT:-180}"  # running task turns get up to 2 min (superagent.task.shutdown.timeout), requests 30s
 
 # PID of the running server, or empty. Trusts the pid file only if that pid is still our jar
 # (a stale file can point at an unrelated process after a reboot); falls back to a jar-path match.

@@ -24,14 +24,21 @@ mvn -pl superagent-core test -Dtest=SomeClassTest#method # single test method
 Run the application (superagent-server is the one executable Spring Boot jar):
 
 ```bash
-mvn install -DskipTests && mvn -pl superagent-server spring-boot:run   # everything on :18080
-mvn clean package -PreleaseTgz                                         # release tarball (see README)
+scripts/run-local.sh                    # mvn package, copy the jar to run/, run it on :18080 (Ctrl-C stops gracefully)
+scripts/run-local.sh --server.port=18099 --superagent.agent.workspace-dir=/tmp/sa-18099/workspaces  # a second instance
+mvn clean package -PreleaseTgz          # release tarball (see README)
 ```
+
+The server runs from its own copy of the jar, so `mvn install` while it runs can't change classes under it (with
+`spring-boot:run` the classpath points into `~/.m2`, which `mvn install` overwrites). On shutdown the server waits up
+to `superagent.task.shutdown.timeout` (2 min) for running task turns and local merges, then marks what's left as
+interrupted by the restart and ends every CLI process; those tasks resume right after the next start.
 
 Smoke-check web wiring: `curl localhost:18080/api/v1/meta`.
 
-Under `spring-boot:run` the UI is served straight from `superagent-ui/src/main/resources/static` (configured in
-superagent-server's pom), so front-end edits show on a browser refresh. Java changes still need `mvn install` + restart.
+The UI is served straight from `superagent-ui/src/main/resources/static` (the script passes it; `spring-boot:run` gets it
+from superagent-server's pom), so front-end edits show on a browser refresh. Java changes need `scripts/run-local.sh`
+again (it rebuilds and restarts from a fresh copy).
 
 ## Module architecture
 

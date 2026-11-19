@@ -62,10 +62,11 @@ class TaskServiceTest {
 
     private static final class InMemoryTaskStore implements TaskStore {
         private final Map<String, Task> rows = new LinkedHashMap<>();
-        @Override public List<Task> listTasks() { return new ArrayList<>(rows.values()); }
-        @Override public Optional<Task> findTask(String id) { return Optional.ofNullable(rows.get(id)); }
+        // Every method locks: the scheduler, the task runs and the test read and write it from different threads.
+        @Override public synchronized List<Task> listTasks() { return new ArrayList<>(rows.values()); }
+        @Override public synchronized Optional<Task> findTask(String id) { return Optional.ofNullable(rows.get(id)); }
         @Override public synchronized Task save(Task t) { rows.put(t.id(), t); return t; }
-        @Override public void delete(String id) { rows.remove(id); }
+        @Override public synchronized void delete(String id) { rows.remove(id); }
     }
 
     private static final class InMemoryTaskPhaseStore implements TaskPhaseStore {
@@ -130,9 +131,9 @@ class TaskServiceTest {
 
     private static final class InMemoryTaskRunStateStore implements TaskRunStateStore {
         private final Map<String, TaskRunState> rows = new LinkedHashMap<>();
-        @Override public Optional<TaskRunState> find(String id) { return Optional.ofNullable(rows.get(id)); }
+        @Override public synchronized Optional<TaskRunState> find(String id) { return Optional.ofNullable(rows.get(id)); }
         @Override public synchronized TaskRunState save(TaskRunState s) { rows.put(s.taskId(), s); return s; }
-        @Override public void delete(String id) { rows.remove(id); }
+        @Override public synchronized void delete(String id) { rows.remove(id); }
     }
 
     /** A non-coding task, so the generic single-pass flow runs regardless of title wording. */
@@ -178,7 +179,7 @@ class TaskServiceTest {
         awaitStatus(tasks, id, "NEEDS_CONFIRMATION");
         TaskDetailDto d = service.detail(id, "tester");
         assertThat(d.harness().steps()).extracting(com.superagent.api.task.HarnessDto.Step::status)
-                .containsExactly("done", "done", "waiting", "pending", "pending", "pending", "pending");
+                .containsExactly("done", "done", "waiting", "pending", "pending", "pending", "pending", "pending");
         assertThat(d.harness().verifyCommands()).containsExactly("test -f x.txt");
         assertThat(cwds).singleElement().isEqualTo(d.harness().workspace().dir()); // the agent ran in the task's own worktree
         assertThat(d.harness().workspace().dir()).isNotEqualTo(repo.toString());
@@ -897,6 +898,161 @@ class TaskServiceTest {
         } finally {
             loop.interrupt();
         }
+    }
+
+    /** A scripted agent for the general flow: the checklist, the work, and the independent checker's verdict. */
+    private static boolean generalTurn(AgentRunRequest req, AgentEventSink sink, List<String> checked) {
+        String p = req.prompt();
+        if (p.startsWith("你是独立检查员")) {
+            // It only judges: read-only tools, nothing that could change the work, no MCP or connectors.
+            assertThat(req.allowedTools()).isEqualTo(TaskService.READ_ONLY_TOOLS);
+            assertThat(req.skipPermissions()).isFalse();
+            assertThat(req.mcpConfig()).isNull();
+            checked.add(req.sessionId());
+            reply(req, sink, "1. ✅ 有结论\nVERDICT: PASS");
+        } else if (p.contains("可以逐条核对的清单")) {
+            reply(req, sink, "## 交付物\n- 结论 | 回复\n\n## 验收标准\n1. 给出结论\n");
+        } else if (p.contains("清单定好了")) {
+            reply(req, sink, "结果：查到了");
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    @Test
+    void aLinkThatFailedOnceAndWasReadLaterCountsAsRead() {
+        java.util.function.BiFunction<Integer, String, AgentEvent> result = (i, text) ->
+                new AgentEvent("t", null, i, AgentEventType.TOOL_RESULT, text, Instant.now());
+        List<AgentEvent> events = List.of(
+                result.apply(0, "读不到 https://a.example/doc/：读取超时。稍后再试"),
+                result.apply(1, "读不到 https://b.example/x：没有权限"),
+                result.apply(2, "《文档 A》\n来源：https://a.example/doc\n读取方式：公开内容，未登录\n以下是内容…"));
+        assertThat(TaskService.unreadableLinks(events)).containsExactly("https://b.example/x");
+        // Read first, failing after: its last read failed.
+        assertThat(TaskService.unreadableLinks(List.of(events.get(2), result.apply(3, "读不到 https://a.example/doc：超时"))))
+                .containsExactly("https://a.example/doc");
+    }
+
+    @Test
+    void aComplexTasksSubtasksAreEachCheckedAndSoIsItsConclusion() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        InMemoryTaskPhaseStore phases = new InMemoryTaskPhaseStore();
+        java.util.concurrent.atomic.AtomicReference<TaskService> svc = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> parentId = new java.util.concurrent.atomic.AtomicReference<>();
+        List<String> checked = Collections.synchronizedList(new ArrayList<>());
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                if (generalTurn(req, sink, checked)) {
+                    return;
+                }
+                if (req.prompt().contains("## 这一轮：拆分")) {
+                    svc.get().createSubtask(parentId.get(), "tester", "第 1 块", "调研第 1 块");
+                    svc.get().createSubtask(parentId.get(), "tester", "第 2 块", "调研第 2 块");
+                    reply(req, sink, "计划：分 2 块");
+                } else {
+                    reply(req, sink, "最终结论：2 块都齐了");
+                }
+            }
+        };
+        TaskService service = service(runner, tasks, phases, 50);
+        service.setLinks(new InMemoryLinks());
+        service.setHarnesses(List.of(new com.superagent.task.harness.general.GeneralHarness()));
+        svc.set(service);
+        Thread loop = schedulerLoop(service);
+        try {
+            String id = service.create(new CreateTaskRequest("两块调研", "分头调研两块，再汇总出结论", null, null, null,
+                    null, null, null, "complex")).id();
+            parentId.set(id);
+            await().atMost(Duration.ofSeconds(15)).until(() -> tasks.findTask(id).orElseThrow().status().name().equals("DONE"));
+
+            List<String> kids = service.relations(id, "tester").subtasks().stream().map(k -> k.id()).toList();
+            assertThat(kids).hasSize(2).allSatisfy(k -> {
+                var h = service.detail(k, "tester").harness();
+                assertThat(h.harness()).isEqualTo("general");
+                assertThat(h.general().checks()).singleElement().satisfies(c -> assertThat(c.passed()).isTrue());
+            });
+            var parent = service.detail(id, "tester").harness();
+            assertThat(parent.harness()).isEqualTo("complex");
+            assertThat(parent.general().checks()).singleElement().satisfies(c -> assertThat(c.verdict()).isEqualTo("PASS"));
+            assertThat(checked).hasSize(3).doesNotHaveDuplicates(); // each check in a conversation of its own
+            assertThat(service.lastAnswer(id)).isEqualTo("最终结论：2 块都齐了");
+        } finally {
+            loop.interrupt();
+        }
+    }
+
+    @Test
+    void aComplexTaskFromBeforeTheCheckIsSummedUpAsItWas() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        java.util.concurrent.atomic.AtomicReference<TaskService> svc = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> parentId = new java.util.concurrent.atomic.AtomicReference<>();
+        List<String> checked = Collections.synchronizedList(new ArrayList<>());
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                if (generalTurn(req, sink, checked)) {
+                    return;
+                }
+                if (req.prompt().contains("## 这一轮：拆分")) {
+                    svc.get().createSubtask(parentId.get(), "tester", "第 1 块", "调研第 1 块");
+                    reply(req, sink, "计划：1 块");
+                } else {
+                    reply(req, sink, "最终结论：齐了");
+                }
+            }
+        };
+        TaskService service = service(runner, tasks);
+        service.setLinks(new InMemoryLinks());
+        svc.set(service);
+        service.useScheduler(() -> { }); // recorded, not run yet
+        String id = service.create(new CreateTaskRequest("旧复杂任务", "调研再汇总", null, null, null,
+                null, null, null, "complex")).id();
+        parentId.set(id);
+        service.setHarnesses(List.of(new com.superagent.task.harness.general.GeneralHarness())); // the new version starts
+        Thread loop = schedulerLoop(service);
+        try {
+            await().atMost(Duration.ofSeconds(15)).until(() -> tasks.findTask(id).orElseThrow().status().name().equals("DONE"));
+            assertThat(service.detail(id, "tester").harness()).isNull();
+            assertThat(service.lastAnswer(id)).isEqualTo("最终结论：齐了");
+            assertThat(checked).hasSize(1); // its new subtask is checked; its conclusion isn't
+        } finally {
+            loop.interrupt();
+        }
+    }
+
+    @Test
+    void aNewGeneralTaskRunsTheFourStepsWhileOneFromBeforeKeepsItsSinglePassAndPage() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        InMemoryTaskPhaseStore phases = new InMemoryTaskPhaseStore();
+        List<String> checked = Collections.synchronizedList(new ArrayList<>());
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                if (!generalTurn(req, sink, checked)) {
+                    reply(req, sink, "交付完成：单轮执行。");
+                }
+            }
+        };
+        TaskService service = service(runner, tasks, phases, 50); // no general harness yet
+        String old = service.create(brief("Old task")).id();
+        await().atMost(Duration.ofSeconds(5)).until(() -> tasks.findTask(old).orElseThrow().status().name().equals("DONE"));
+
+        service.setHarnesses(List.of(new com.superagent.task.harness.general.GeneralHarness()));
+        TaskDetailDto oldPage = service.detail(old, "tester");
+        assertThat(oldPage.harness()).isNull();
+        assertThat(oldPage.phases()).isEmpty();
+        assertThat(oldPage.events()).isNotEmpty();
+
+        String id = service.create(brief("New task")).id();
+        await().atMost(Duration.ofSeconds(5)).until(() -> tasks.findTask(id).orElseThrow().status().name().equals("DONE"));
+        var h = service.detail(id, "tester").harness();
+        assertThat(h.steps()).extracting(com.superagent.api.task.HarnessDto.Step::status).containsOnly("done");
+        assertThat(h.criteria()).singleElement().satisfies(c -> assertThat(c.met()).isTrue());
+        assertThat(h.general().reply()).isEqualTo("结果：查到了"); // the agent's own summary, not the checker's verdict
+        assertThat(checked).hasSize(1);
+        assertThat(service.lastAnswer(id)).contains("结果：查到了", "独立检查 PASS");
     }
 
     @Test

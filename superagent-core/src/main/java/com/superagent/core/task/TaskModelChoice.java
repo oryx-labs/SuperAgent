@@ -9,7 +9,7 @@ import java.time.Instant;
  * @param by         who decided: {@link #BY_JUDGE}, {@link #BY_USER}, {@link #BY_FALLBACK}, {@link #BY_ESCALATION}, or
  *                   {@link #BY_DEFAULT} (tiers off: the creator's model or the configured default, nothing judged), or
  *                   {@link #BY_FIXED} (the admin holds tasks to a set of models: no judging, cheapest first, the next
- *                   dearer one after a failure)
+ *                   dearer one after a failure), or {@link #BY_REVIEWER} (who reviews the work, not who runs it)
  * @param model      what it runs on; null only for {@link #BY_FIXED} when none of the fixed models is left to try, and
  *                   the task fails for the reason given
  * @param difficulty easy | medium | hard, as judged (null when nobody judged it)
@@ -26,6 +26,8 @@ public record TaskModelChoice(String taskId, int seq, String by, String difficul
     public static final String BY_ESCALATION = "escalation";
     public static final String BY_DEFAULT = "default";
     public static final String BY_FIXED = "fixed";
+    /** The model that reviews or checks a task's work: another one than the one that did it, where there is another. */
+    public static final String BY_REVIEWER = "reviewer";
 
     /** Nothing left to run it on: the task is to fail, not to fall back to some other model. */
     public boolean refused() {

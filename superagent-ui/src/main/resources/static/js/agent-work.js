@@ -137,7 +137,24 @@ function agentWorkRow(t) {
   btn.append(dot, body);
   btn.addEventListener("click", () => { setView("tasks"); openTask(t.id); });
   li.appendChild(btn);
+  if (isActiveStatus(t.status)) li.appendChild(agentWorkStop(t));
   return li;
+}
+
+// Beside the row, not inside it: clicking Stop must not open the task.
+function agentWorkStop(t) {
+  const stop = document.createElement("button");
+  stop.type = "button";
+  stop.className = "sw-stop";
+  stop.textContent = L("aw.stop");
+  stop.addEventListener("click", async e => {
+    e.stopPropagation();
+    if (!window.confirm(L("aw.stopConfirm", { title: t.title }))) return;
+    stop.disabled = true;
+    try { await api.stopTask(t.id).then(kbJson); } catch (err) { showToast(err.message, true); }
+    if (activeAgent) renderAgentWork(activeAgent);
+  });
+  return stop;
 }
 
 function closeAgentDetail() { awel.drawer.hidden = true; }

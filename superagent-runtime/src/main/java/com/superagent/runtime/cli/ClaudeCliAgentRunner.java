@@ -207,7 +207,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
 
         Process process;
         try {
-            process = pb.start();
+            process = CliProcesses.track(pb.start());
             if (stdinMessage != null) {
                 try (OutputStream stdin = process.getOutputStream()) {
                     stdin.write(stdinMessage.getBytes(StandardCharsets.UTF_8));
@@ -221,7 +221,7 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         }
 
         // Let the orchestrator stop this turn by killing the subprocess.
-        cancellation.onCancel(process::destroyForcibly);
+        cancellation.onCancel(() -> CliProcesses.kill(process)); // with its children: a tool it started must not live on
 
         Thread stderr = new Thread(() -> drainStderr(process.getErrorStream(), request.sessionId(), stderrTail),
                 "claude-stderr-" + request.sessionId());

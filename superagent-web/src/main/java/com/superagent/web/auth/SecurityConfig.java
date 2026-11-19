@@ -58,7 +58,7 @@ public class SecurityConfig {
                 .headers(h -> h.frameOptions(f -> f.sameOrigin()))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/login", "/login.html", "/login.css", "/login.js", "/app.css", "/js/**",
-                                "/i18n.js", "/superagent-logo.png", "/favicon.ico").permitAll()
+                                "/superagent-logo.png", "/favicon.ico").permitAll()
                         .requestMatchers("/api/v1/meta", "/actuator/health", "/api/v1/branding/logo").permitAll()
                         .requestMatchers("/api/v1/auth/login", "/api/v1/auth/phone/**").permitAll()
                         // Anyone may register an organization, where the server allows it.

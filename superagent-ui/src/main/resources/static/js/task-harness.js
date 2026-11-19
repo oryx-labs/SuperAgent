@@ -1,4 +1,5 @@
-// SuperAgent UI — A harness-run task's detail (coding): where it works, its steps, spec, changes, checks and review.
+// SuperAgent UI — A harness-run task's detail. Coding: where it works, its steps, spec, changes, checks, review and
+// acceptance. General (and a complex task's conclusion): a summary card, four steps, the checklist, the checks and what it produced.
 // Classic script sharing one global scope with the others; index.html loads it after tasks.js.
 "use strict";
 
@@ -15,9 +16,19 @@ const hnEl = {
   diff: document.getElementById("hnDiff"),
   verify: document.getElementById("hnVerify"),
   review: document.getElementById("hnReview"),
+  accept: document.getElementById("hnAccept"),
+  resolve: document.getElementById("hnResolve"),
+  stop: document.getElementById("hnStop"),
   tabs: { hspec: document.getElementById("hnTabSpec"), hdiff: document.getElementById("hnTabDiff"),
-    hverify: document.getElementById("hnTabVerify"), hreview: document.getElementById("hnTabReview") },
+    hverify: document.getElementById("hnTabVerify"), hreview: document.getElementById("hnTabReview"),
+    haccept: document.getElementById("hnTabAccept"), hresolve: document.getElementById("hnTabResolve") },
+  criteria: document.getElementById("hnCriteria"),
+  check: document.getElementById("hnCheck"),
+  gtabs: { gcrit: document.getElementById("hnTabCriteria"), gcheck: document.getElementById("hnTabCheck") },
 };
+// The tabs in the order the page declares them; a general task puts what it produced and how it was checked first.
+const hnTabOrder = [...tel.tabs.children];
+const HN_GENERAL_FIRST = ["output", "gcrit", "run", "gcheck"];
 let hnOpenFiles = new Set(); // diffs kept open across refreshes
 let hnShown = null; // the harness last drawn, for the Output tab
 
@@ -37,10 +48,24 @@ const hnDuration = (a, b) => {
 /** Shows (or hides, for any other task) the coding view; {@code h} is the detail's harness, {@code t} the task. */
 function renderHarness(h, t) {
   const on = !!h;
+  const general = !!(h && h.general);
   hnShown = h || null;
   hnEl.box.hidden = !on;
-  Object.values(hnEl.tabs).forEach(b => { b.hidden = !on; });
+  hnEl.box.classList.toggle("hn--general", general);
+  Object.values(hnEl.tabs).forEach(b => { b.hidden = !on || general; });
+  Object.values(hnEl.gtabs).forEach(b => { b.hidden = !general; });
+  hnArrangeTabs(general);
+  tel.tabs.querySelector('[data-tab="output"]').textContent = L(general ? "hn.g.tabOutput" : "tasks.tabOutput");
   if (!on) return;
+  if (general) { hnEl.stop.hidden = true; renderGeneral(h, t); return; }
+  const reviews = h.reviews || [];
+  // Tasks from before acceptance had no such step.
+  hnEl.tabs.haccept.hidden = !h.steps.some(s => s.key === "accept");
+  // Only a delivery that met conflicts has this step.
+  const conflicts = h.conflicts || [];
+  hnEl.tabs.hresolve.hidden = !h.steps.some(s => s.key === "resolve") && !conflicts.length;
+  hnEl.stop.hidden = !h.stopReason;
+  hnEl.stop.textContent = h.stopReason ? L("hn.stopped", { reason: h.stopReason }) : "";
   renderHarnessEnv(h);
   renderHarnessPipe(h);
   hnEl.tabs.hspec.textContent = L("hn.tabSpec") + (h.specApproved ? " ✓" : "");
@@ -50,11 +75,18 @@ function renderHarness(h, t) {
   hnEl.tabs.hverify.append(L("hn.tabVerify"), hnCount(h.rounds.length || ""));
   hnEl.tabs.hverify.title = h.rounds.length ? L("hn.rounds", { n: h.rounds.length }) : "";
   hnEl.tabs.hreview.innerHTML = "";
-  hnEl.tabs.hreview.append(L("hn.tabReview"), hnCount(h.findings.length || ""));
+  const looks = kind => reviews.filter(r => r.kind === kind);
+  hnEl.tabs.hreview.append(L("hn.tabReview"), hnCount(reviews.length ? looks("review").length : (h.findings.length || "")));
+  hnEl.tabs.haccept.innerHTML = "";
+  hnEl.tabs.haccept.append(L("hn.tabAccept"), hnCount(looks("accept").length || ""));
+  hnEl.tabs.hresolve.innerHTML = "";
+  hnEl.tabs.hresolve.append(L("hn.tabResolve"), hnCount(conflicts.length || ""));
   renderHarnessSpec(h);
   renderHarnessDiff(h, t);
   renderHarnessVerify(h);
   renderHarnessReview(h);
+  renderHarnessAccept(h);
+  renderHarnessResolve(h);
   // The run log is where the agent's work shows: name it so for a harness-run task.
   tel.tabs.querySelector('[data-tab="run"]').textContent = L("hn.tabRun");
 }
@@ -101,8 +133,7 @@ function renderHarnessPipe(h) {
     const li = hnEl2("li", "hn-step is-" + s.status);
     const top = hnEl2("div", "hn-step__top");
     const dot = hnEl2("span", "hn-dot", s.status === "done" ? "✓" : s.status === "failed" ? "✕" : String(i + 1));
-    const name = L("hn.step." + s.key);
-    top.append(dot, hnEl2("span", "hn-step__name", name === "hn.step." + s.key ? s.name : name));
+    top.append(dot, hnEl2("span", "hn-step__name", hnStepName(h, s)));
     const meta = hnEl2("span", "hn-step__meta");
     meta.textContent = s.status === "waiting" ? L("hn.waiting")
       : s.status === "running" ? L("hn.running") + " · " + hnDuration(s.startedAt)
@@ -113,6 +144,24 @@ function renderHarnessPipe(h) {
     li.append(top, meta);
     return li;
   }));
+}
+
+/** A step's name; in a general flow that went back, the round it is on ("执行 · 第 2 轮"). */
+function hnStepName(h, s) {
+  const key = h.general ? (h.harness === "complex" && s.key === "execute" ? "g.sum" : "g." + s.key) : s.key;
+  const name = L("hn.step." + key) === "hn.step." + key ? s.name : L("hn.step." + key);
+  const round = h.general && h.general.round > 1 && (s.key === "execute" || s.key === "check")
+    && s.status !== "pending" ? h.general.round : 0;
+  return round ? name + " · " + L("hn.g.round", { n: round }) : name;
+}
+
+/** A general task leads with what it produced and how it was checked; any other task keeps the page's order. */
+function hnArrangeTabs(general) {
+  const order = general
+    ? [...HN_GENERAL_FIRST.map(k => hnTabOrder.find(b => b.dataset.tab === k)),
+      ...hnTabOrder.filter(b => !HN_GENERAL_FIRST.includes(b.dataset.tab))]
+    : hnTabOrder;
+  order.forEach(b => tel.tabs.appendChild(b));
 }
 
 function renderHarnessSpec(h) {
@@ -231,23 +280,17 @@ function renderHarnessVerify(h) {
 
 function renderHarnessReview(h) {
   hnEl.review.replaceChildren();
+  const reviews = h.reviews || [];
   const head = hnEl2("div", "hn-section__head");
-  head.append(hnEl2("h3", null, L("hn.tabReview")), hnEl2("span", "hn-section__sum", L("hn.reviewHint")));
+  head.append(hnEl2("h3", null, L("hn.tabReview")), hnEl2("span", "hn-section__sum", L(reviews.length ? "hn.reviewHintLoop" : "hn.reviewHint")));
   hnEl.review.appendChild(head);
-  if (!h.findings.length) {
+  if (reviews.length) {
+    hnEl.review.appendChild(hnRounds(reviews, "review"));
+  } else if (!h.findings.length) {
     const reviewed = h.steps.some(s => s.key === "review" && s.status === "done");
     hnEl.review.append(hnEl2("p", "kb-empty", L(reviewed ? "hn.reviewClean" : "hn.noReview")));
   } else {
-    const ul = hnEl2("ul", "hn-list");
-    h.findings.forEach(f => {
-      const li = hnEl2("li", "hn-finding");
-      li.append(hnEl2("span", "hn-sev is-" + f.severity, L("hn.sev." + f.severity)));
-      const body = hnEl2("div", "hn-finding__body", f.text);
-      if (f.where) body.append(hnEl2("span", "hn-finding__where", f.where));
-      li.append(body, hnEl2("span", "hn-state is-" + f.state, L("hn.state." + f.state)));
-      ul.appendChild(li);
-    });
-    hnEl.review.appendChild(ul);
+    hnEl.review.appendChild(hnFindings(h.findings)); // a task from before the review loop
   }
   if (h.delivery) {
     const d = hnEl2("div", "hn-deliver");
@@ -263,12 +306,132 @@ function renderHarnessReview(h) {
   }
 }
 
+function renderHarnessAccept(h) {
+  hnEl.accept.replaceChildren();
+  const head = hnEl2("div", "hn-section__head");
+  head.append(hnEl2("h3", null, L("hn.tabAccept")), hnEl2("span", "hn-section__sum", L("hn.acceptHint")));
+  hnEl.accept.appendChild(head);
+  const reviews = h.reviews || [];
+  if (!reviews.some(r => r.kind === "accept")) {
+    hnEl.accept.append(hnEl2("p", "kb-empty", L("hn.noAccept")));
+    return;
+  }
+  hnEl.accept.appendChild(hnRounds(reviews, "accept"));
+}
+
+const HN_RESOLVE_CHECKS = { "冲突标记": "markers", "继续变基": "continue", "验证命令": "verify", "审查": "review" };
+
+/**
+ * The goes at resolving the conflicts of the rebase before delivery, newest first: which commit, which files, what the
+ * developer said it did, and the platform's checks of it (markers, the rebase going on, the verify commands, the review).
+ */
+function renderHarnessResolve(h) {
+  hnEl.resolve.replaceChildren();
+  const head = hnEl2("div", "hn-section__head");
+  head.append(hnEl2("h3", null, L("hn.tabResolve")), hnEl2("span", "hn-section__sum", L("hn.resolveHint")));
+  hnEl.resolve.appendChild(head);
+  const rounds = h.conflicts || [];
+  if (!rounds.length) {
+    hnEl.resolve.append(hnEl2("p", "kb-empty", L("hn.noResolve")));
+    return;
+  }
+  const box = hnEl2("div", "hn-box");
+  [...rounds].reverse().forEach(r => {
+    const round = hnEl2("div", "hn-round hn-look");
+    const top = hnEl2("div", "hn-round__head hn-look__head " + (r.passed ? "is-ok" : "is-bad"));
+    top.append(hnEl2("span", null, L("hn.roundN", { n: r.round }) + " · " + formatDateTime(r.at).slice(11, 16) + " · "
+      + L(r.passed ? "hn.lookPassed" : "hn.resolveFailed")));
+    if (r.model) top.append(hnEl2("span", "hn-model", r.model));
+    if (r.verdict) top.append(hnEl2("span", "hn-verdict is-" + (r.verdict === "PASS" ? "ok" : "bad"), "VERDICT: " + r.verdict));
+    round.appendChild(top);
+    const meta = hnEl2("div", "hn-check");
+    meta.append(hnEl2("b", null, L(r.commit ? "hn.resolveCommit" : "hn.resolveAfter")),
+      hnEl2("span", "hn-check__time", (r.commit ? r.commit + " · " : "") + L("hn.resolveFiles", { files: (r.files || []).join("、") })));
+    round.appendChild(meta);
+    if (r.summary) round.appendChild(hnEl2("div", "hn-fix", L("hn.resolveSummary", { what: r.summary })));
+    (r.checks || []).forEach(c => {
+      const row = hnEl2("div", "hn-check");
+      const key = HN_RESOLVE_CHECKS[c.name];
+      row.append(hnEl2("span", "hn-exit " + (c.passed ? "is-ok" : "is-bad"), c.passed ? "✅" : "❌"),
+        hnEl2("b", null, key ? L("hn.resolveCheck." + key) : c.name), hnEl2("span", "hn-check__time", c.detail || ""));
+      round.appendChild(row);
+    });
+    if (!r.passed && r.reason) round.appendChild(hnEl2("pre", "hn-log", r.reason));
+    box.appendChild(round);
+  });
+  hnEl.resolve.appendChild(box);
+}
+
+function hnFindings(list) {
+  const ul = hnEl2("ul", "hn-list");
+  list.forEach(f => {
+    const li = hnEl2("li", "hn-finding");
+    li.append(hnEl2("span", "hn-sev is-" + f.severity, L("hn.sev." + f.severity)));
+    const body = hnEl2("div", "hn-finding__body");
+    const text = hnEl2("span", null, f.text);
+    if (f.id && !/^AC/.test(f.id)) text.prepend(hnEl2("span", "hn-finding__id", "#" + f.id));
+    body.appendChild(text);
+    if (f.where) body.append(hnEl2("span", "hn-finding__where", f.where));
+    li.append(body, hnEl2("span", "hn-state is-" + f.state, L("hn.state." + f.state)));
+    ul.appendChild(li);
+  });
+  return ul;
+}
+
+/**
+ * The rounds of one kind (review | accept), newest first: who looked, what it found and how the count moved since the
+ * look before (of either kind), the developer's objections and the rulings on them; for acceptance, each criterion.
+ */
+function hnRounds(all, kind) {
+  const box = hnEl2("div", "hn-box");
+  const rows = [];
+  all.forEach((r, i) => { if (r.kind === kind) rows.push({ r, before: i > 0 ? all[i - 1] : null }); });
+  rows.reverse().forEach(({ r, before }) => {
+    const round = hnEl2("div", "hn-round hn-look");
+    const top = hnEl2("div", "hn-round__head hn-look__head " + (r.passed ? "is-ok" : "is-bad"));
+    top.append(hnEl2("span", null, L("hn.roundN", { n: r.round }) + " · " + L(r.passed ? "hn.lookPassed" : "hn.lookIssues", { n: r.blocking })));
+    if (r.model) top.append(hnEl2("span", "hn-model", r.model));
+    if (before) top.append(hnEl2("span", "hn-trend", L("hn.delta", { from: before.blocking, to: r.blocking })));
+    top.append(hnEl2("span", "hn-verdict is-" + (r.verdict === "PASS" ? "ok" : "bad"), "VERDICT: " + (r.verdict || "—")));
+    round.appendChild(top);
+    if (r.reverted) round.appendChild(hnEl2("div", "hn-fix", L("hn.reverted")));
+    (r.rebuttals || []).forEach(b => {
+      const d = hnEl2("div", "hn-rebuttal");
+      d.append(hnEl2("span", "hn-rebuttal__who", L("hn.rebuttal", { id: b.id.replace(/^AC/, L("hn.criterionShort")) })),
+        hnEl2("span", null, b.reason));
+      const rule = hnEl2("span", "hn-ruling is-" + (b.ruling || "none"),
+        L("hn.ruling." + (b.ruling || "none")) + (b.rulingReason ? "：" + b.rulingReason : ""));
+      d.appendChild(rule);
+      round.appendChild(d);
+    });
+    if (kind === "accept" && r.criteria && r.criteria.length) {
+      const ul = hnEl2("ul", "hn-list");
+      r.criteria.forEach((c, i) => {
+        const li = hnEl2("li", "hn-ac");
+        li.append(hnEl2("span", "hn-ac__mark " + (c.met ? "is-ok" : "is-bad"), c.met ? "✓" : "✕"));
+        const t = hnEl2("div", "hn-ac__text", (i + 1) + ". " + c.text);
+        if (c.evidence) t.append(hnEl2("span", "hn-ac__evidence", c.evidence));
+        li.appendChild(t);
+        ul.appendChild(li);
+      });
+      round.appendChild(ul);
+    } else if (r.findings.length) {
+      round.appendChild(hnFindings(r.findings));
+    } else {
+      round.appendChild(hnEl2("p", "hn-look__none", L("hn.noIssues")));
+    }
+    box.appendChild(round);
+  });
+  return box;
+}
+
 /**
  * The Output tab of a coding task: what was delivered (the merge commit or the PR), then what changed, what it was
  * held to and how the platform checked it. Without a delivery yet, false (the caller shows its usual text).
  */
-function renderHarnessOutput(box) {
+function renderHarnessOutput(box, said, t) {
   const h = hnShown;
+  if (h && h.general) return renderGeneralOutput(box, h, said, t);
   if (!h || !h.delivery) return false;
   box.replaceChildren();
   const out = hnEl2("div", "hn-out");
@@ -357,6 +520,174 @@ function renderHarnessOutput(box) {
     sec.append(sh, box2);
     out.appendChild(sec);
   }
+  box.appendChild(out);
+  return true;
+}
+
+// --- a general task (and a complex task's conclusion) ---
+
+function renderGeneral(h, t) {
+  renderGeneralCard(h, t);
+  renderHarnessPipe(h);
+  const g = h.general;
+  const met = h.criteria.filter(c => c.met).length;
+  hnEl.gtabs.gcrit.replaceChildren(L("hn.g.tabCriteria"), hnCount(h.criteria.length ? met + "/" + h.criteria.length : ""));
+  hnEl.gtabs.gcheck.replaceChildren(L("hn.g.tabCheck"), hnCount(g.checks.length || ""));
+  tel.tabs.querySelector('[data-tab="run"]').textContent = L("hn.g.tabRun");
+  renderGeneralCriteria(h);
+  renderGeneralChecks(h);
+}
+
+/** Status, model (and the one that checked), time, spend and the step it is on. */
+function renderGeneralCard(h, t) {
+  hnEl.env.replaceChildren();
+  const kv = (label, value, tip) => {
+    const d = hnEl2("div", "hn-kv");
+    d.append(hnEl2("span", null, label), hnEl2("b", null, value || "—"));
+    if (tip) d.dataset.tip = tip;
+    hnEl.env.appendChild(d);
+  };
+  const checks = h.general.checks;
+  const checker = [...checks].reverse().map(c => c.checker).find(Boolean);
+  const current = h.steps.find(s => s.status !== "done");
+  kv(L("hn.g.status"), TASK_STATUS_LABEL[t.status] || t.status);
+  kv(L("tasks.model"), taskModelLabel(t) + (checker ? " · " + L("hn.g.checkedOn", { m: checker }) : ""),
+    checker ? L("hn.g.checkerTip") : null);
+  kv(L("tasks.elapsed"), formatElapsed(t));
+  kv(L("tasks.spend"), "$" + Number(t.spend || 0).toFixed(2));
+  kv(L("hn.g.current"), current ? hnStepName(h, current) + (current.status === "waiting" ? " · " + L("hn.waiting") : "")
+    : L("hn.g.delivered"));
+}
+
+function hnCriterionRow(c, i) {
+  const li = hnEl2("li", "hn-ac");
+  const judged = !!c.evidence;
+  li.append(hnEl2("span", "hn-ac__mark " + (c.met ? "is-ok" : judged ? "is-bad" : "is-wait"), c.met ? "✅" : judged ? "❌" : "…"));
+  const txt = hnEl2("div", "hn-ac__text", (i + 1) + ". " + c.text);
+  if (c.agentAdded) txt.append(hnEl2("span", "hn-added", L("hn.g.agentAdded")));
+  if (c.evidence) txt.append(hnEl2("span", "hn-ac__evidence", c.evidence));
+  li.appendChild(txt);
+  return li;
+}
+
+function renderGeneralCriteria(h) {
+  const box = hnEl.criteria;
+  box.replaceChildren();
+  const g = h.general;
+  if (!h.criteria.length) {
+    box.append(hnEl2("p", "kb-empty", L("hn.g.noCriteria")));
+    return;
+  }
+  if (g.deliverables.length) {
+    const sec = hnEl2("section", "hn-section");
+    const head = hnEl2("div", "hn-section__head");
+    head.append(hnEl2("h3", null, L("hn.g.deliverables")));
+    const ul = hnEl2("ul", "hn-list");
+    g.deliverables.forEach(d => {
+      const li = hnEl2("li", "hn-ac");
+      li.append(hnEl2("span", "hn-ac__mark", "·"),
+        hnEl2("div", "hn-ac__text", d.name + " · " + (d.type === "reply" ? L("hn.g.typeReply") : d.type)));
+      ul.appendChild(li);
+    });
+    sec.append(head, ul);
+    box.appendChild(sec);
+  }
+  const sec = hnEl2("section", "hn-section");
+  const head = hnEl2("div", "hn-section__head");
+  const met = h.criteria.filter(c => c.met).length;
+  const added = h.criteria.filter(c => c.agentAdded).length;
+  head.append(hnEl2("h3", null, L("hn.criteria")), hnEl2("span", "hn-section__sum",
+    L("hn.criteriaMet", { met, n: h.criteria.length }) + (added ? " · " + L("hn.g.addedN", { n: added }) : "")));
+  const ul = hnEl2("ul", "hn-list");
+  h.criteria.forEach((c, i) => ul.appendChild(hnCriterionRow(c, i)));
+  sec.append(head, ul);
+  box.appendChild(sec);
+}
+
+function renderGeneralChecks(h) {
+  const box = hnEl.check;
+  box.replaceChildren();
+  const head = hnEl2("div", "hn-section__head");
+  head.append(hnEl2("h3", null, L("hn.g.tabCheck")), hnEl2("span", "hn-section__sum", L("hn.g.checkHint")));
+  box.appendChild(head);
+  const checks = h.general.checks;
+  if (!checks.length) {
+    box.append(hnEl2("p", "kb-empty", L("hn.noRounds")));
+    return;
+  }
+  const list = hnEl2("div", "hn-box");
+  [...checks].reverse().forEach(c => {
+    const round = hnEl2("div", "hn-round");
+    const verdict = c.verdict ? " · " + L("hn.g.verdict", { v: c.verdict }) + (c.checker ? "（" + c.checker + "）" : "")
+      : " · " + L("hn.g.noModel");
+    round.append(hnEl2("div", "hn-round__head " + (c.passed ? "is-ok" : "is-bad"),
+      L(c.passed ? "hn.g.roundPassed" : "hn.g.roundFailed", { n: c.round, time: formatDateTime(c.at).slice(11, 16) }) + verdict));
+    c.platform.forEach(p => {
+      const row = hnEl2("div", "hn-check");
+      row.append(hnEl2("span", "hn-exit " + (p.passed ? "is-ok" : "is-bad"), p.passed ? "✅" : "❌"),
+        hnEl2("b", null, p.name), hnEl2("span", "hn-check__time", p.detail));
+      round.appendChild(row);
+    });
+    if (!c.passed && c.issues.length) {
+      const ul = hnEl2("ul", "hn-issues");
+      c.issues.forEach(i => ul.appendChild(hnEl2("li", null, i)));
+      round.appendChild(ul);
+    }
+    list.appendChild(round);
+  });
+  box.appendChild(list);
+}
+
+/** What it produced: file cards (preview, download), then its closing note; a stop for the user says why first. */
+function renderGeneralOutput(box, h, text, t) {
+  box.replaceChildren();
+  const out = hnEl2("div", "hn-out");
+  const waiting = h.steps.find(s => s.status === "waiting");
+  if (waiting && waiting.note) {
+    const note = hnEl2("div", "hn-gnote is-wait markdown");
+    note.innerHTML = renderMarkdown(waiting.note);
+    out.appendChild(note);
+  }
+  const files = task.filesList || [];
+  if (files.length) {
+    const sec = hnEl2("section");
+    const sh = hnEl2("div", "hn-section__head");
+    sh.append(hnEl2("h3", null, L("hn.g.files", { n: files.length })));
+    const grid = hnEl2("div", "hn-cards");
+    files.forEach(f => {
+      const card = hnEl2("div", "hn-card");
+      const name = hnEl2("div", "hn-card__name");
+      name.append(hnEl2("span", "hn-card__icon", fileIcon(f)), hnEl2("span", null, f.name));
+      const meta = hnEl2("div", "hn-card__meta", f.kind === "link" ? L("hn.g.link") : formatBytes(f.size));
+      const acts = hnEl2("div", "hn-card__acts");
+      const view = hnEl2("button", "link-btn", L("hn.g.preview"));
+      view.type = "button";
+      view.addEventListener("click", () => openFile(f));
+      acts.appendChild(view);
+      if (f.kind !== "link") {
+        const dl = hnEl2("a", "link-btn", L("hn.g.download"));
+        dl.href = fileContentUrl(f.id, true);
+        acts.appendChild(dl);
+      }
+      card.append(name, meta, acts);
+      grid.appendChild(card);
+    });
+    sec.append(sh, grid);
+    out.appendChild(sec);
+  }
+  const sec = hnEl2("section");
+  const sh = hnEl2("div", "hn-section__head");
+  sh.append(hnEl2("h3", null, L("hn.g.note")));
+  sec.appendChild(sh);
+  if (text) {
+    const body = hnEl2("div", "hn-gnote markdown");
+    body.innerHTML = renderMarkdown(text);
+    sec.appendChild(body);
+  } else {
+    sec.appendChild(hnEl2("p", "task-output__empty",
+      L(t && (t.status === "error" || t.status === "stopped") ? "tasks.outputNone" : "tasks.outputWaiting")));
+  }
+  out.appendChild(sec);
   box.appendChild(out);
   return true;
 }

@@ -24,7 +24,14 @@ public record CreateTaskRequest(
          * A coding task's delivery: {@code merge} (squash-merge back into the local branch it started from) or {@code pr}
          * (push a new branch and open a pull / merge request). Null: merge for a local path, pr for a remote URL.
          */
-        String delivery) {
+        String delivery,
+        /** Tasks that must be done before this one starts (ids the creator can see); null or empty = none. */
+        java.util.List<String> after) {
+
+    public CreateTaskRequest(String title, String brief, String source, String repo, String branch, String flow,
+                             String model, String agentType, String kind, String tier, String continuesFrom, String delivery) {
+        this(title, brief, source, repo, branch, flow, model, agentType, kind, tier, continuesFrom, delivery, null);
+    }
 
     public CreateTaskRequest(String title, String brief, String source, String repo, String branch, String flow,
                              String model, String agentType, String kind, String tier, String continuesFrom) {

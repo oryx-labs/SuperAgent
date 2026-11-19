@@ -134,6 +134,50 @@ public class TaskModelRouter implements TaskModelSelector {
                 Instant.now()));
     }
 
+    @Override
+    public Optional<TaskModelChoice> reviewer(Task task, ReviewPurpose purpose, java.util.Set<String> runnableClis) {
+        List<String> fixed = settings.taskFixedModels();
+        List<Candidate> pool = (fixed.isEmpty() ? prices.candidates().stream().filter(Candidate::forTasks).toList() : usable(fixed))
+                .stream().filter(c -> runnableClis == null || runnableClis.contains(c.cli())).toList();
+        String within = fixed.isEmpty() ? "用于任务的模型" : "固定模型";
+        String own = task.model();
+        String doer = purpose == ReviewPurpose.REVIEW ? "开发" : "执行";
+        List<Candidate> others = pool.stream().filter(c -> !c.id().equals(own)).toList();
+        if (others.isEmpty()) {
+            Candidate self = pool.stream().filter(c -> c.id().equals(own)).findFirst().orElse(null);
+            if (self == null && own == null) {
+                return Optional.empty();
+            }
+            String cli = self != null ? self.cli() : task.agentType() == null ? null : task.agentType().cliName();
+            return Optional.of(new TaskModelChoice(task.id(), 0, TaskModelChoice.BY_REVIEWER, null, null, own, cli, null,
+                    describe(pool), (purpose == ReviewPurpose.REVIEW ? "审查和验收" : "独立检查") + "：" + within
+                    + "里只有这一个模型 " + own + "，只能用它，开新会话" + (purpose == ReviewPurpose.REVIEW ? "审查" : "检查")
+                    + "（不带" + doer + "过程）。", Instant.now()));
+        }
+        Candidate pick;
+        String why;
+        if (purpose == ReviewPurpose.CHECK) {
+            pick = others.get(0); // cheapest first
+            why = "独立检查：核对产出比做事容易，在" + within + "里排除执行模型 " + own + " 后选最便宜的 " + pick.id() + "。";
+        } else {
+            String vendor = ModelVendors.of(own, task.agentType() == null ? null : task.agentType().cliName());
+            List<Candidate> elsewhere = others.stream().filter(c -> !ModelVendors.of(c.id(), c.cli()).equals(vendor)).toList();
+            pick = strongest(elsewhere.isEmpty() ? others : elsewhere);
+            why = "审查和验收：要换一个模型看代码，在" + within + "里排除开发模型 " + own + "，"
+                    + (elsewhere.isEmpty() ? "没有其他厂商的模型，在同厂商（" + vendor + "）的其余模型里"
+                    : "优先其他厂商（开发模型是 " + vendor + " 的），在 " + ModelVendors.of(pick.id(), pick.cli()) + " 等其他厂商的模型里")
+                    + "选能力最强（按价格最贵）的 " + pick.id() + "。";
+        }
+        return Optional.of(new TaskModelChoice(task.id(), 0, TaskModelChoice.BY_REVIEWER, null, null, pick.id(), pick.cli(),
+                null, describe(pool), why, Instant.now()));
+    }
+
+    /** The dearest priced one (price as the stand-in for ability); unpriced ones only when none is priced. */
+    private static Candidate strongest(List<Candidate> pool) {
+        return pool.stream().filter(Candidate::priced).max(Comparator.comparingDouble(Candidate::blended))
+                .orElse(pool.get(pool.size() - 1));
+    }
+
     // --- fixed models ---
 
     /** The fixed models that can run now and that tasks may use, cheapest first (unpriced last). */

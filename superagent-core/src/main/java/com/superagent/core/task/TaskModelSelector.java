@@ -27,4 +27,26 @@ public interface TaskModelSelector {
     default Optional<TaskModelChoice> strongest(Task task) {
         return Optional.empty();
     }
+
+    /** What a second model looks at a task's work for. */
+    enum ReviewPurpose {
+        /** Reviewing code and accepting it against its spec: the strongest model, from another vendor where possible. */
+        REVIEW,
+        /** Checking a plain task's output: easier, so the cheapest other model. */
+        CHECK
+    }
+
+    /**
+     * The model that looks at the work {@code task} did on its own model ({@link Task#model()}): never that one while
+     * any other can run (on one of {@code runnableClis}); within the fixed models when the admin holds tasks to those.
+     * The task's own model only when it is the only one, and the reason says so. Empty when nothing can be said.
+     */
+    default java.util.Optional<TaskModelChoice> reviewer(Task task, ReviewPurpose purpose, java.util.Set<String> runnableClis) {
+        return java.util.Optional.empty();
+    }
+
+    /** The model that checks a plain task's output: the cheapest other model (see {@link #reviewer}, CHECK). */
+    default Optional<TaskModelChoice> checker(Task task, java.util.Set<String> runnableClis) {
+        return reviewer(task, ReviewPurpose.CHECK, runnableClis);
+    }
 }

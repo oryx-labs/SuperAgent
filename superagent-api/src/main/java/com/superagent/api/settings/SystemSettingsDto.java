@@ -32,7 +32,21 @@ public record SystemSettingsDto(String agentDefaultModel, String companyName, St
                                  * Directories on this server a coding task may work in as a local project (a repository
                                  * anywhere under one); none means only remote repositories. Null on a save keeps them.
                                  */
-                                java.util.List<String> codeRoots) {
+                                java.util.List<String> codeRoots,
+                                /**
+                                 * A coding task's review loop (review → acceptance → fix → verify again): how many
+                                 * rounds before it stops for the user (null on a save keeps it).
+                                 */
+                                Integer codingReviewMaxRounds,
+                                /** …and how much (USD) the task may have spent before it stops (null on a save keeps it). */
+                                Double codingReviewMaxSpend) {
+
+    public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl,
+                             java.util.List<String> backupModels, Integer complexMaxSubtasks, Integer complexMaxParallel,
+                             Boolean taskFixedModelsOn, java.util.List<String> taskFixedModels, java.util.List<String> codeRoots) {
+        this(agentDefaultModel, companyName, companyShortName, publicUrl, backupModels, complexMaxSubtasks,
+                complexMaxParallel, taskFixedModelsOn, taskFixedModels, codeRoots, null, null);
+    }
 
     public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl,
                              java.util.List<String> backupModels, Integer complexMaxSubtasks, Integer complexMaxParallel,

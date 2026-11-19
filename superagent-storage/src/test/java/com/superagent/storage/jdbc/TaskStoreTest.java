@@ -102,6 +102,12 @@ class TaskStoreTest {
         });
 
         assertThat(store.find("t1")).map(TaskRunState::agentSessionId).contains("s1");
+
+        store.save(store.find("t1").orElseThrow().interruptedByRestart("s9"));
+        assertThat(store.find("t1")).get().satisfies(s -> {
+            assertThat(s.interruptedByRestart()).isTrue();
+            assertThat(s.agentSessionId()).isEqualTo("s9");
+        });
     }
 
     @Test

@@ -134,7 +134,7 @@ abstract class JsonLineCliRunner implements AgentRunner {
                 cliPaths.apply(pb);
             }
             pb.environment().putAll(environment(request));
-            process = pb.start();
+            process = CliProcesses.track(pb.start());
             try (OutputStream in = process.getOutputStream()) {
                 String stdin = stdin(request, resumeId);
                 if (stdin != null) {
@@ -146,7 +146,7 @@ abstract class JsonLineCliRunner implements AgentRunner {
             emit(sink, request, seq, AgentEventType.ERROR, "Failed to start " + command + ": " + e.getMessage());
             return;
         }
-        cancellation.onCancel(process::destroyForcibly);
+        cancellation.onCancel(() -> CliProcesses.kill(process)); // with its children: a tool it started must not live on
         StringBuilder stderr = new StringBuilder();
         Thread drain = new Thread(() -> drain(process.getErrorStream(), stderr), command + "-stderr-" + request.sessionId());
         drain.setDaemon(true);

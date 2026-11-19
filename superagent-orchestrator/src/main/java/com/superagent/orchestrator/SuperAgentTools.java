@@ -35,7 +35,7 @@ public class SuperAgentTools implements McpToolProvider {
 
     /** Every tool name, in the order they're listed; the round's CLI allowlist is built from this. */
     static final List<String> NAMES = List.of("list_team", "list_skills", "list_projects", "propose_plan", "hire_member",
-            "update_member", "place_member", "assign_task", "list_assigned_tasks", "get_task", "reply_task", "get_current_time",
+            "update_member", "place_member", "assign_task", "list_assigned_tasks", "list_tasks", "get_task", "reply_task", "get_current_time",
             SuperAgentTools.TELL_USER);
 
     /** Background rounds only: posts into the chat. */
@@ -118,10 +118,12 @@ public class SuperAgentTools implements McpToolProvider {
         tools.add(tool("assign_task", "（计划确认后）把一个任务派给某个成员，立即开始执行。完成、失败或需要确认时你会收到系统消息。",
                 props(field("member_id", "string", "成员 id"), field("title", "string", "任务标题"),
                         field("brief", "string", "任务说明：目标、范围、交付物与验收标准"),
-                        field("kind", "string", com.superagent.task.TaskKinds.DESCRIPTION)),
+                        field("kind", "string", com.superagent.task.TaskKinds.DESCRIPTION),
+                        field("after", "string", com.superagent.task.TaskWaits.DESCRIPTION)),
                 "member_id", "title", "brief", "kind"));
         tools.add(tool("list_assigned_tasks", "列出你派出的、仍在跟进的任务及其状态。", props()));
-        tools.add(tool("get_task", "查看一个任务的状态与进度。", props(field("id", "string", "任务 id")), "id"));
+        tools.add(tool("list_tasks", "列出用户的全部任务（不只是你派出的）：状态、进度、代码仓库，以及在等哪些任务完成。建任务前用它查有没有改同一处的任务。", props()));
+        tools.add(tool("get_task", "查看一个任务的状态与进度，以及它在等哪些任务。", props(field("id", "string", "任务 id")), "id"));
         tools.add(tool("reply_task", "回复一个正在等待确认的任务（你能自己判断的小问题）。",
                 props(field("task_id", "string", "任务 id"), field("content", "string", "回复内容")),
                 "task_id", "content"));
@@ -210,7 +212,8 @@ public class SuperAgentTools implements McpToolProvider {
                 }
                 case "assign_task" -> {
                     String taskId = service.assign(owner, required(args, "member_id"), text(args, "title"),
-                            text(args, "brief"), grant.messageId(), com.superagent.task.TaskKinds.require(args));
+                            text(args, "brief"), grant.messageId(), com.superagent.task.TaskKinds.require(args),
+                            com.superagent.task.TaskWaits.parse(args));
                     yield "已派出任务 " + taskId + "，正在执行。结束后你会收到系统消息。";
                 }
                 case "list_assigned_tasks" -> {
@@ -230,7 +233,23 @@ public class SuperAgentTools implements McpToolProvider {
                     Task t = service.task(owner, required(args, "id"))
                             .orElseThrow(() -> new IllegalArgumentException("No such task"));
                     yield t.title() + " — 状态 " + t.status() + "，进度 " + t.progress() + "%"
-                            + (t.error() != null ? "，错误：" + t.error() : "");
+                            + (t.repo() != null ? "，仓库 " + t.repo() : "")
+                            + (t.error() != null ? "，错误：" + t.error() : "")
+                            + com.superagent.task.TaskWaits.detail(service.taskView(owner, t.id()));
+                }
+                case "list_tasks" -> {
+                    List<com.superagent.api.task.TaskDto> list = service.userTasks(owner);
+                    if (list.isEmpty()) {
+                        yield "用户当前没有任务。";
+                    }
+                    StringBuilder sb = new StringBuilder("共 " + list.size() + " 个任务：\n");
+                    for (com.superagent.api.task.TaskDto t : list) {
+                        sb.append("- ").append(t.id()).append(" | ").append(t.title()).append(" | ").append(t.status())
+                                .append(" | ").append(t.progress()).append("%")
+                                .append(t.repo() == null ? "" : " | 仓库 " + t.repo())
+                                .append(com.superagent.task.TaskWaits.line(t)).append('\n');
+                    }
+                    yield sb.toString();
                 }
                 case "reply_task" -> {
                     service.replyToTask(owner, required(args, "task_id"), required(args, "content"));

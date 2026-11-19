@@ -55,4 +55,25 @@ class LiveTurnTest {
         assertThat(carol.sent).containsExactly("thinking:想一想", "tool_use:Read", "text:你好", "done:你好");
         assertThat(carol.completed).isTrue();
     }
+
+    @Test
+    void aShutdownEndsTheReplyForTheSenderAndEveryViewerWithOneInterruptedEvent() {
+        ChatService.LiveTurn turn = new ChatService.LiveTurn("alice", "Alice", Instant.now());
+        Recorder alice = new Recorder();
+        turn.sender(alice);
+        Recorder bob = new Recorder();
+        turn.watch(bob);
+        turn.publish(new StreamEventDto("text", 1, "写到"));
+
+        turn.interrupt();
+        turn.publish(new StreamEventDto("stopped", -1, "写到")); // what the cancelled turn still says is dropped
+        turn.publish(new StreamEventDto("done", -1, "写到"));
+
+        assertThat(alice.sent).containsExactly("interrupted:server_restart");
+        assertThat(alice.completed).isTrue();
+        assertThat(bob.sent).containsExactly("text:写到", "interrupted:server_restart");
+        assertThat(bob.sent).noneMatch(e -> e.startsWith("error"));
+        assertThat(bob.completed).isTrue();
+        assertThat(turn.interrupted()).isTrue();
+    }
 }

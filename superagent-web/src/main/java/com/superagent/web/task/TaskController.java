@@ -158,6 +158,12 @@ public class TaskController {
         return ApiResponse.empty();
     }
 
+    /** "Don't wait, run it": a task waiting for others starts on the scheduler's next pass. */
+    @PostMapping(ApiPaths.TASKS + "/{id}/run-now")
+    public ApiResponse<TaskDto> runNow(@PathVariable String id, Authentication auth) {
+        return ApiResponse.ok(taskService.runNow(id, auth.getName()));
+    }
+
     @DeleteMapping(ApiPaths.TASKS + "/{id}")
     public ApiResponse<Void> delete(@PathVariable String id, Authentication auth) {
         taskService.delete(id, auth.getName());

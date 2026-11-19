@@ -3,6 +3,7 @@ package com.superagent.cost.routing;
 import com.superagent.core.chat.AgentType;
 import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskModelChoice;
+import com.superagent.core.task.TaskModelSelector.ReviewPurpose;
 import com.superagent.core.task.TaskSource;
 import com.superagent.core.task.TaskStatus;
 import com.superagent.cost.ModelPriceService;
@@ -103,8 +104,58 @@ class TaskModelRouterTest {
         assertThat(router.escalate(task("x", "opus"), "boom")).isEmpty(); // past the default model: no further
     }
 
+    @Test
+    void theReviewerIsAnotherModelFromAnotherVendorAndTheStrongestThere() {
+        var any = java.util.Set.of("claude", "codex");
+        List<Candidate> mixed = List.of(model("claude-haiku", 0.8, 4.0, true), model("glm-5", 1.0, 4.0, true),
+                on("gpt-5", "codex", 2.0, 10.0), model("claude-sonnet", 3.0, 15.0, true), model("claude-opus", 5.0, 25.0, true));
+        when(prices.candidates()).thenReturn(mixed);
+
+        // Another vendor beats a dearer model of the developer's own; among them, the dearest.
+        TaskModelChoice r = router.reviewer(task("x", "claude-sonnet"), ReviewPurpose.REVIEW, any).orElseThrow();
+        assertThat(r).extracting(TaskModelChoice::by, TaskModelChoice::model, TaskModelChoice::cli)
+                .containsExactly(TaskModelChoice.BY_REVIEWER, "gpt-5", "codex");
+        assertThat(r.reasoning()).contains("claude-sonnet", "其他厂商");
+        assertThat(r.candidates()).contains("claude-opus");
+        // A model on a CLI that can't run here is no candidate.
+        assertThat(router.reviewer(task("x", "claude-sonnet"), ReviewPurpose.REVIEW, java.util.Set.of("claude"))
+                .orElseThrow().model()).isEqualTo("glm-5");
+
+        // No other vendor: the strongest other model of the same one.
+        when(prices.candidates()).thenReturn(models.subList(0, 4).stream().filter(c -> !c.id().equals("glm")).toList());
+        assertThat(router.reviewer(task("x", "sonnet"), ReviewPurpose.REVIEW, any).orElseThrow().model()).isEqualTo("opus");
+
+        // Only one model: that one, in a new conversation.
+        when(prices.candidates()).thenReturn(List.of(model("sonnet", 3.0, 15.0, true)));
+        TaskModelChoice self = router.reviewer(task("x", "sonnet"), ReviewPurpose.REVIEW, any).orElseThrow();
+        assertThat(self.model()).isEqualTo("sonnet");
+        assertThat(self.reasoning()).contains("只有这一个模型", "开新会话");
+
+        // Fixed models: only among them, though a stronger model of another vendor could run.
+        when(prices.candidates()).thenReturn(mixed);
+        when(settings.taskFixedModels()).thenReturn(List.of("claude-haiku", "claude-sonnet"));
+        assertThat(router.reviewer(task("x", "claude-sonnet"), ReviewPurpose.REVIEW, any).orElseThrow().model())
+                .isEqualTo("claude-haiku");
+    }
+
+    @Test
+    void aPlainTaskIsCheckedOnTheCheapestOtherModel() {
+        var any = java.util.Set.of("claude");
+        TaskModelChoice c = router.reviewer(task("x", "haiku"), ReviewPurpose.CHECK, any).orElseThrow();
+        assertThat(c.model()).isEqualTo("glm");
+        assertThat(c.reasoning()).contains("最便宜", "haiku");
+        assertThat(router.reviewer(task("x", "sonnet"), ReviewPurpose.CHECK, any).orElseThrow().model()).isEqualTo("haiku");
+
+        when(settings.taskFixedModels()).thenReturn(List.of("sonnet", "opus"));
+        assertThat(router.reviewer(task("x", "sonnet"), ReviewPurpose.CHECK, any).orElseThrow().model()).isEqualTo("opus");
+    }
+
     private static Candidate model(String id, double in, double out, boolean forTasks) {
         return new Candidate(id, "claude", in, out, null, null, "2026-05-01", "anthropic", false, forTasks);
+    }
+
+    private static Candidate on(String id, String cli, double in, double out) {
+        return new Candidate(id, cli, in, out, null, null, "2026-05-01", "openai", false, true);
     }
 
     private static Task task(String title, String model) {

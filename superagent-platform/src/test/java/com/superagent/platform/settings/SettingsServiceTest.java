@@ -95,4 +95,23 @@ class SettingsServiceTest {
         assertThat(off.taskFixedModelsOn()).isFalse();
         assertThat(off.taskFixedModels()).containsExactly("gpt-5.5", "claude-opus-5-5");
     }
+
+    @Test
+    void theCodingReviewLimitsHaveDefaultsAndARefusedSaveWritesNothing() {
+        assertThat(service.get()).extracting(SystemSettingsDto::codingReviewMaxRounds, SystemSettingsDto::codingReviewMaxSpend)
+                .containsExactly(8, 30.0);
+
+        service.update(limits("OKG", 3, 12.5));
+        assertThat(service.codingReviewMaxRounds()).isEqualTo(3);
+        assertThat(service.codingReviewMaxSpend()).isEqualTo(12.5);
+
+        assertThatThrownBy(() -> service.update(limits("Other", 21, 12.5))).hasMessageContaining("最多轮数");
+        assertThatThrownBy(() -> service.update(limits("Other", 3, 0.5))).hasMessageContaining("费用上限");
+        assertThat(service.get().companyName()).isEqualTo("OKG"); // nothing of the refused saves was written
+        assertThat(service.codingReviewMaxRounds()).isEqualTo(3);
+    }
+
+    private static SystemSettingsDto limits(String company, int rounds, double spend) {
+        return new SystemSettingsDto(null, company, null, null, null, null, null, null, null, null, rounds, spend);
+    }
 }

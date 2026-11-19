@@ -1,6 +1,9 @@
 spring:
   application:
     name: superagent-server
+  lifecycle:
+    # Each shutdown phase may take this long: task turns get superagent.task.shutdown.timeout (2 min) to finish.
+    timeout-per-shutdown-phase: 3m
   autoconfigure:
     exclude: org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
   servlet:
@@ -75,5 +78,9 @@ superagent:
     allowed-tools: ${SUPERAGENT_TASK_ALLOWED_TOOLS:Read,Glob,Grep,LS,Edit,Write,Bash}
     skip-permissions: ${SUPERAGENT_TASK_SKIP_PERMISSIONS:false}
     max-parallel: ${SUPERAGENT_TASK_MAX_PARALLEL:50}
+    # On shutdown: how long running task turns (and local merges) get to finish before they're cut short and resumed
+    # after the next start. The stop script's STOP_TIMEOUT must stay above it.
+    shutdown:
+      timeout: ${SUPERAGENT_TASK_SHUTDOWN_TIMEOUT:120s}
   app:
     base-url: ${SUPERAGENT_BASE_URL:}

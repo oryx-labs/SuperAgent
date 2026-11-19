@@ -388,9 +388,10 @@
             <button class="btn" id="taskDeleteBtn" type="button" data-i18n="tasks.delete">Delete</button>
           </div>
         </div>
-        <!-- A coding task run by the harness: where it works, and its seven steps. -->
+        <!-- A task run by a harness: a coding task's workspace and seven steps, or a general task's card and four steps. -->
         <section class="hn" id="taskHarness" hidden>
           <div class="hn-env" id="hnEnv"></div>
+          <div class="hn-stop" id="hnStop" hidden></div>
           <ol class="hn-pipe" id="hnPipe"></ol>
         </section>
         <div class="task-detail__body">
@@ -403,6 +404,10 @@
               <button type="button" class="model-tab hn-tab" data-tab="hdiff" id="hnTabDiff" hidden>Changes</button>
               <button type="button" class="model-tab hn-tab" data-tab="hverify" id="hnTabVerify" hidden>Checks</button>
               <button type="button" class="model-tab hn-tab" data-tab="hreview" id="hnTabReview" hidden>Review</button>
+              <button type="button" class="model-tab hn-tab" data-tab="haccept" id="hnTabAccept" hidden>Acceptance</button>
+              <button type="button" class="model-tab hn-tab" data-tab="hresolve" id="hnTabResolve" hidden>Conflicts</button>
+              <button type="button" class="model-tab hn-tab" data-tab="gcrit" id="hnTabCriteria" hidden>Criteria</button>
+              <button type="button" class="model-tab hn-tab" data-tab="gcheck" id="hnTabCheck" hidden>Check</button>
               <button type="button" class="model-tab" data-tab="output" data-i18n="tasks.tabOutput">Output</button>
               <button type="button" class="model-tab" data-tab="subtasks" id="taskSubtasksTab" hidden>Subtasks</button>
               <button type="button" class="model-tab" data-tab="usage" data-i18n="tasks.tabUsage">Cost</button>
@@ -419,6 +424,10 @@
             <div class="task-pane" data-pane-tab="hdiff" hidden><div id="hnDiff"></div></div>
             <div class="task-pane" data-pane-tab="hverify" hidden><div id="hnVerify"></div></div>
             <div class="task-pane" data-pane-tab="hreview" hidden><div id="hnReview"></div></div>
+            <div class="task-pane" data-pane-tab="haccept" hidden><div id="hnAccept"></div></div>
+            <div class="task-pane" data-pane-tab="hresolve" hidden><div id="hnResolve"></div></div>
+            <div class="task-pane" data-pane-tab="gcrit" hidden><div id="hnCriteria"></div></div>
+            <div class="task-pane" data-pane-tab="gcheck" hidden><div id="hnCheck"></div></div>
             <div class="task-pane" data-pane-tab="run" id="taskRunPane">
               <section class="task-phases" id="taskPhasesPanel" hidden>
                 <h3 class="task-section__title" data-i18n="tasks.phases">Flow</h3>
@@ -868,6 +877,13 @@
           <label class="field"><span data-i18n="settings.codeRoots">Local code directories</span>
             <textarea id="sfCodeRoots" rows="3" spellcheck="false" placeholder="/data/projects"></textarea></label>
           <p class="field-hint" data-i18n="settings.codeRootsHint">One full path per line. A coding task may work on a git repository on this server only if it sits under one of these. Leave empty to allow remote repositories only.</p>
+          <div class="field-row">
+            <label class="field"><span data-i18n="settings.reviewMaxRounds">Review rounds at most</span>
+              <input type="number" id="sfReviewMaxRounds" min="1" max="20" step="1" /></label>
+            <label class="field"><span data-i18n="settings.reviewMaxSpend">Spend limit (USD)</span>
+              <input type="number" id="sfReviewMaxSpend" min="1" max="1000" step="1" /></label>
+          </div>
+          <p class="field-hint" data-i18n="settings.reviewHint">Another model reviews a coding task and checks it against its spec; bugs go back to the developer until it passes. It stops and asks you after this many rounds or once the task has spent this much.</p>
           <div class="settings-form__actions">
             <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
             <span class="settings-form__status" id="sfStatus" role="status"></span>
@@ -1615,7 +1631,7 @@
     </form>
   </div>
 
-  <script src="/i18n.js"></script>
+  <script src="/js/i18n.js"></script>
   <script src="/vendor/marked.min.js"></script>
   <script src="/vendor/purify.min.js"></script>
   <script src="/vendor/highlight.min.js"></script>

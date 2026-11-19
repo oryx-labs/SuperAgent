@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>普通任务详情页 · 样式稿</title>
+<style>
+  :root { --ink:#111; --muted:#6b6b6b; --line:#e5e5e5; --bg:#fafafa; --brand:#2f6bff; --ok:#1f7a3a; --bad:#b42318; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.6 -apple-system,"PingFang SC",sans-serif; color:var(--ink); background:var(--bg); }
+  .page { max-width:1040px; margin:24px auto; padding:0 20px; }
+  .switch { margin-bottom:12px; color:var(--muted); font-size:12px; }
+  .switch button { border:1px solid var(--line); background:#fff; border-radius:6px; padding:3px 10px; cursor:pointer; }
+  .switch button.on { border-color:var(--ink); }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:12px; margin-bottom:16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+  .card div span { display:block; color:var(--muted); font-size:12px; }
+  .card div b { font-weight:600; }
+  .badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; border:1px solid var(--line); }
+  .badge.done { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .badge.wait { border-color:var(--brand); color:var(--brand); }
+  .pipe { display:flex; gap:0; margin:18px 0; list-style:none; padding:0; }
+  .pipe li { flex:1; position:relative; padding:10px 12px; background:#fff; border:1px solid var(--line); margin-right:-1px; }
+  .pipe li:first-child { border-radius:10px 0 0 10px; } .pipe li:last-child { border-radius:0 10px 10px 0; }
+  .dot { display:inline-flex; width:20px; height:20px; border-radius:50%; align-items:center; justify-content:center; font-size:12px; border:1px solid var(--line); margin-right:6px; }
+  .is-done .dot { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .is-running .dot { background:var(--brand); color:#fff; border-color:var(--brand); }
+  .is-running { box-shadow:inset 0 -2px 0 var(--brand); }
+  .is-waiting .dot { border-color:var(--brand); color:var(--brand); }
+  .meta { display:block; color:var(--muted); font-size:12px; margin-top:2px; }
+  .round { font-size:11px; color:var(--brand); margin-left:4px; }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-top:8px; flex-wrap:wrap; }
+  .tabs button { border:0; background:none; padding:8px 12px; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; font-size:14px; }
+  .tabs button.on { color:var(--ink); border-bottom-color:var(--brand); font-weight:600; }
+  .tabs .sep { flex:1; }
+  .pane { background:#fff; border:1px solid var(--line); border-top:0; border-radius:0 0 10px 10px; padding:16px; min-height:260px; }
+  .files { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin-bottom:16px; }
+  .file { border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .file .n { font-weight:600; } .file .s { color:var(--muted); font-size:12px; }
+  .file .a { margin-top:6px; font-size:12px; } .file .a a { color:var(--brand); margin-right:10px; text-decoration:none; }
+  .note { border-left:3px solid var(--brand); padding:4px 12px; background:#f5f8ff; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12px; color:var(--muted); font-weight:500; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  .tag { font-size:11px; border:1px dashed var(--brand); color:var(--brand); border-radius:8px; padding:0 6px; margin-left:6px; }
+  .src { font-size:11px; color:var(--muted); margin-left:6px; }
+  h3 { font-size:14px; margin:16px 0 8px; } h3:first-child { margin-top:0; }
+  .verdict { display:inline-block; font-weight:600; padding:2px 10px; border-radius:6px; }
+  .verdict.pass { background:#eaf5ee; color:var(--ok); } .verdict.fail { background:#fdeceb; color:var(--bad); }
+  .seg { border:1px solid var(--line); border-radius:8px; margin-bottom:10px; }
+  .seg > summary { padding:8px 12px; cursor:pointer; font-weight:600; }
+  .seg .body { padding:0 12px 10px; }
+  .tool { font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:6px; padding:4px 8px; margin:6px 0; }
+  .tool summary { cursor:pointer; }
+  .sys { font-size:12px; color:var(--muted); }
+  .old { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <!-- source: SuperAgent 任务 2e76aea4 规格步骤, summary: 普通任务详情页静态样式稿，切换标签和状态仅用于演示 -->
+  <div class="switch">样式稿演示：
+    <button class="on" onclick="scene('done')">已完成（退回过 1 轮）</button>
+    <button onclick="scene('wait')">超过 2 轮停下等确认</button>
+    <button onclick="scene('old')">旧任务（无 harness）</button>
+  </div>
+
+  <h1 id="title">整理 11 月客户访谈纪要并生成字幕文件</h1>
+  <div class="sub">普通 · 来自对话「市场部 Agent」 · 任务 #a1b2c3</div>
+
+  <div class="card" id="card">
+    <div><span>状态</span><b id="st"><span class="badge done">已完成</span></b></div>
+    <div><span>模型</span><b>glm-4.6<span class="src">检查：deepseek-chat</span></b></div>
+    <div><span>耗时</span><b>6 分 42 秒</b></div>
+    <div><span>花费</span><b>$0.083</b></div>
+    <div><span>当前步骤</span><b id="cur">交付 ✓</b></div>
+  </div>
+
+  <ol class="pipe" id="pipe"></ol>
+
+  <div class="tabs" id="tabs"></div>
+  <div class="pane" id="pane"></div>
+</div>
+
+<script>
+/** source: SuperAgent 任务 2e76aea4 规格步骤, summary: 样式稿的演示脚本，只切换静态内容，不请求任何接口 **/
+const steps = {
+  done: [["明确标准","done","4 条 · 1 条由 Agent 补全",""],["执行","done","2 分 10 秒","第 2 轮"],["检查","done","通过","第 2 轮"],["交付","done","已发回对话",""]],
+  wait: [["明确标准","done","5 条",""],["执行","done","3 分 02 秒","第 3 轮"],["检查","waiting","等你确认","第 3 轮"],["交付","pending","",""]]
+};
+const panes = {
+  output: `
+    <h3>产出文件</h3>
+    <div class="files">
+      <div class="file"><div class="n">📄 访谈纪要汇总.md</div><div class="s">Markdown · 12.4 KB</div><div class="a"><a href="#">预览</a><a href="#">下载</a></div></div>
+      <div class="file"><div class="n">🎬 访谈-客户A.srt</div><div class="s">SRT 字幕 · 8.1 KB · 214 条</div><div class="a"><a href="#">预览</a><a href="#">下载</a></div></div>
+    </div>
+    <h3>说明</h3>
+    <div class="note">汇总了 3 场访谈的要点，按「痛点 / 需求 / 报价反馈」分节；客户 A 的录音生成了中文字幕。第 1 轮检查发现字幕文件为空，已重新生成并通过检查。</div>`,
+  criteria: `
+    <table>
+      <tr><th>#</th><th>标准</th><th>结果</th><th>依据</th></tr>
+      <tr><td>1</td><td>交付「访谈纪要汇总」一份 Markdown</td><td class="ok">✅</td><td>访谈纪要汇总.md 存在，12.4 KB，可解析</td></tr>
+      <tr><td>2</td><td>客户 A 录音生成 srt 字幕</td><td class="ok">✅</td><td>访谈-客户A.srt，214 条，时间轴递增</td></tr>
+      <tr><td>3</td><td>覆盖 3 场访谈，每场都有痛点和需求</td><td class="ok">✅</td><td>独立检查：三个二级标题下均有「痛点」「需求」</td></tr>
+      <tr><td>4</td><td>不编造访谈里没有的数据<span class="tag">由 Agent 补全</span></td><td class="ok">✅</td><td>独立检查：报价数字都能在逐字稿里找到</td></tr>
+    </table>`,
+  check: `
+    <h3>第 2 轮 <span class="verdict pass">VERDICT: PASS</span> <span class="src">独立检查模型 deepseek-chat（任务可用模型中最便宜）</span></h3>
+    <table>
+      <tr><th>平台核对</th><th>结果</th><th>说明</th></tr>
+      <tr><td>声称交付的文件存在且非空</td><td class="ok">✅</td><td>2 / 2</td></tr>
+      <tr><td>文件类型与交付物一致</td><td class="ok">✅</td><td>md ← 文档；srt ← 字幕</td></tr>
+      <tr><td>资料都读到了</td><td class="ok">✅</td><td>3 个链接均成功 read_link；1 个附件在 uploads/</td></tr>
+      <tr><td>固定格式可解析</td><td class="ok">✅</td><td>srt 214 条序号连续、时间轴合法</td></tr>
+    </table>
+    <h3>第 1 轮 <span class="verdict fail">未通过</span></h3>
+    <table>
+      <tr><td>平台核对 · 文件非空</td><td class="bad">❌</td><td>访谈-客户A.srt 为 0 字节 → 退回执行</td></tr>
+      <tr><td>独立检查</td><td class="sys">—</td><td class="sys">平台核对没通过，本轮不调用模型</td></tr>
+    </table>`,
+  process: `
+    <details class="seg"><summary>明确标准</summary><div class="body"><p>从确认表拆出 3 条标准，补全 1 条（标准 4）。</p></div></details>
+    <details class="seg"><summary>执行 · 第 1 轮</summary><div class="body">
+      <p>读取资料并整理纪要……</p>
+      <details class="tool"><summary>🔧 read_link · 3 次</summary>https://…/interview-a ✓<br>https://…/interview-b ✓<br>https://…/interview-c ✓</details>
+      <details class="tool"><summary>🔧 file_write · 访谈纪要汇总.md</summary>12.4 KB</details>
+      <details class="tool"><summary>🔧 file_save · 访谈-客户A.srt</summary>0 B</details></div></details>
+    <details class="seg"><summary>检查 · 第 1 轮 · 未通过</summary><div class="body sys">访谈-客户A.srt 为空文件</div></details>
+    <details class="seg" open><summary>执行 · 第 2 轮</summary><div class="body">
+      <p>按检查意见重新生成字幕。</p>
+      <details class="tool"><summary>🔧 audio_transcribe</summary>214 条</details>
+      <details class="tool"><summary>🔧 file_save · 访谈-客户A.srt</summary>8.1 KB</details></div></details>
+    <details class="seg"><summary>检查 · 第 2 轮 · 通过</summary><div class="body sys">平台核对 4/4，独立检查 PASS</div></details>
+    <details class="seg"><summary>交付</summary><div class="body sys">已发回对话「市场部 Agent」</div></details>`,
+  waitOut: `<div class="note">检查连续 3 轮未通过，停下等你确认。剩下的问题：<br>
+      ❌ 标准 3「每场访谈都有报价反馈」：客户 C 部分缺失（独立检查）<br>
+      👉 回复补充说明再改一轮，或回复「确认交付」照现在交付。</div>`,
+  other: `<p class="sys">（Prompt / 模型选择 / 成本 / 耗时 / 会话：沿用现有内容，不变）</p>`
+};
+const tabs = [["output","产出"],["criteria","标准"],["process","过程"],["check","检查"],["sep"],["prompt","Prompt"],["model","模型选择"],["cost","成本"],["timing","耗时"],["session","会话"]];
+function renderPipe(list){
+  document.getElementById("pipe").innerHTML = list.map((s,i)=>
+    `<li class="is-${s[1]}"><span class="dot">${s[1]==="done"?"✓":i+1}</span>${s[0]}${s[3]?`<span class="round">· ${s[3]}</span>`:""}<span class="meta">${s[2]}</span></li>`).join("");
+}
+let mode = "done";
+function tab(k){
+  document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.k===k));
+  let html = panes[k] || panes.other;
+  if (mode==="wait" && k==="output") html = panes.waitOut + panes.output.replace(/第 1 轮检查.*?通过检查。/, "");
+  document.getElementById("pane").innerHTML = html;
+}
+function scene(m){
+  mode = m;
+  document.querySelectorAll(".switch button").forEach((b,i)=>b.classList.toggle("on",["done","wait","old"][i]===m));
+  if (m==="old"){
+    document.getElementById("pipe").innerHTML = "";
+    document.getElementById("cur").textContent = "—";
+    document.getElementById("st").innerHTML = '<span class="badge done">已完成</span>';
+    document.getElementById("tabs").innerHTML = ["Prompt","模型选择","对话","产出","成本","耗时","会话"].map((t,i)=>`<button class="${i===3?"on":""}">${t}</button>`).join("");
+    document.getElementById("pane").innerHTML = '<p class="old">旧任务没有 harness 数据：保持现在的标签和运行日志平铺，不显示步骤条；完成的任务照旧默认打开「产出」。</p>';
+    return;
+  }
+  renderPipe(steps[m]);
+  document.getElementById("st").innerHTML = m==="done" ? '<span class="badge done">已完成</span>' : '<span class="badge wait">需要确认</span>';
+  document.getElementById("cur").textContent = m==="done" ? "交付 ✓" : "检查 · 第 3 轮";
+  document.getElementById("tabs").innerHTML = tabs.map(t=>t[0]==="sep"?'<span class="sep"></span>':`<button data-k="${t[0]}" onclick="tab('${t[0]}')">${t[1]}</button>`).join("");
+  tab("output");
+}
+scene("done");
+</script>
+</body>
+</html>

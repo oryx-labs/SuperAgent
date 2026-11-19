@@ -688,27 +688,40 @@ public class SuperAgentService {
 
     /** Starts a task run by {@code memberId} under a confirmed plan. */
     String assign(String owner, String memberId, String title, String brief) {
-        return assign(owner, memberId, title, brief, null, null);
+        return assign(owner, memberId, title, brief, null, null, List.of());
     }
 
     /** {@code messageId}: the chat reply that hands it out, for its card there (null from a background round). */
-    String assign(String owner, String memberId, String title, String brief, String messageId, String kind) {
+    /** {@code after}: the tasks it waits for before it starts (ids the user can see). */
+    String assign(String owner, String memberId, String title, String brief, String messageId, String kind,
+                  List<String> after) {
         requireApproved(owner);
-        return dispatch(owner, member(owner, memberId), title, brief, messageId, kind);
+        return dispatch(owner, member(owner, memberId), title, brief, messageId, kind, after);
     }
 
     /** Starts what the user just agreed to in the chat: by a member if one was named, else on its own. */
     String startTask(String owner, String memberId, String title, String brief) {
-        return startTask(owner, memberId, title, brief, null, null);
+        return startTask(owner, memberId, title, brief, null, null, List.of());
     }
 
     /** {@code kind}: coding or general (null = general unless it names a repository, see TaskService). */
-    String startTask(String owner, String memberId, String title, String brief, String messageId, String kind) {
+    String startTask(String owner, String memberId, String title, String brief, String messageId, String kind,
+                     List<String> after) {
         return dispatch(owner, memberId == null || memberId.isBlank() ? null : member(owner, memberId), title, brief,
-                messageId, kind);
+                messageId, kind, after);
     }
 
-    private String dispatch(String owner, Agent m, String title, String brief, String messageId, String kind) {
+    /** The user's tasks as the task list shows them, with what each waits for. */
+    List<com.superagent.api.task.TaskDto> userTasks(String owner) {
+        return taskService.list(owner);
+    }
+
+    com.superagent.api.task.TaskDto taskView(String owner, String taskId) {
+        return taskService.status(taskId, owner);
+    }
+
+    private String dispatch(String owner, Agent m, String title, String brief, String messageId, String kind,
+                            List<String> after) {
         if (title == null || title.isBlank() || brief == null || brief.isBlank()) {
             throw new IllegalArgumentException("A task needs a title and a brief");
         }
@@ -722,7 +735,7 @@ public class SuperAgentService {
         String memberSession = m == null ? null : chatService.currentSessionId(m.id());
         String noteId = memberSession == null ? null : UUID.randomUUID().toString();
         String taskId = taskService.create(new CreateTaskRequest(title.strip(), fullBrief, "web_chat", null, null, null,
-                model, providers.cliFor(model).orElse(null), kind, null), owner, m == null ? null : m.id(),
+                model, providers.cliFor(model).orElse(null), kind, null, null, null, after), owner, m == null ? null : m.id(),
                 memberSession, noteId).id();
         if (noteId != null) {
             chats.appendMessage(new ChatMessage(noteId, memberSession, MessageRole.ASSISTANT,

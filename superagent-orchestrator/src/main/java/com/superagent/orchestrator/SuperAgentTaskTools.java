@@ -47,7 +47,8 @@ class SuperAgentTaskTools implements McpToolProvider {
                 props(req("title", "string", "任务标题"),
                         req("brief", "string", "任务说明，要写全：目标、资料（路径或 Files 文件 id，执行者用 file_get 取）、交付标准"),
                         req("kind", "string", com.superagent.task.TaskKinds.DESCRIPTION),
-                        opt("member_id", "string", "交给哪位现有成员（用 list_team 查），他的人设和技能会带上；没有合适的就不填，直接作为独立任务执行")),
+                        opt("member_id", "string", "交给哪位现有成员（用 list_team 查），他的人设和技能会带上；没有合适的就不填，直接作为独立任务执行"),
+                        opt("after", "string", com.superagent.task.TaskWaits.DESCRIPTION)),
                 "title", "brief", "kind"));
     }
 
@@ -62,7 +63,8 @@ class SuperAgentTaskTools implements McpToolProvider {
         }
         try {
             return McpToolResult.ok("任务已开始（id " + superAgent.startTask(user, strOrNull(args, "member_id"),
-                    require(args, "title"), require(args, "brief"), grant.messageId(), com.superagent.task.TaskKinds.require(args))
+                    require(args, "title"), require(args, "brief"), grant.messageId(), com.superagent.task.TaskKinds.require(args),
+                    com.superagent.task.TaskWaits.parse(args))
                     + "）。聊天里会自动出现任务卡片（任务名和执行成员，可点击跳转）；用一两句话告诉用户开始了，提到任务名和交给了谁，然后结束这一轮，不要等它做完。");
         } catch (IllegalArgumentException | NotFoundException e) {
             throw new McpToolException(e.getMessage());

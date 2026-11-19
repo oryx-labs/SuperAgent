@@ -48,3 +48,6 @@ docs/td/*
 superagent-server/data/*
 # Docker deployment secrets
 docker/.env
+
+# Local run copies (scripts/run-local.sh)
+/run/

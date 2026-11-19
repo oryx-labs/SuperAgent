@@ -57,6 +57,9 @@ public class ChatTaskResults {
 
     @EventListener
     public void onTaskStatus(NoticeEvents.TaskStatusChanged e) {
+        if (e.repeated()) {
+            return; // the chat already has this question
+        }
         post(e.taskId(), e.status(), report(e));
     }
 

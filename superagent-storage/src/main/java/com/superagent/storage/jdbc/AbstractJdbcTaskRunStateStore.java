@@ -37,7 +37,8 @@ abstract class AbstractJdbcTaskRunStateStore implements TaskRunStateStore {
             emptyToNull(rs.getString("agent_session_id")),
             rs.getInt("failure_count"),
             rs.getInt("attempt_count"),
-            instant(rs, "updated_at"));
+            instant(rs, "updated_at"),
+            rs.getBoolean("interrupted"));
 
     @Override
     public Optional<TaskRunState> find(String taskId) {
@@ -47,9 +48,10 @@ abstract class AbstractJdbcTaskRunStateStore implements TaskRunStateStore {
     }
 
     protected void insert(TaskRunState s) {
-        jdbc.update("INSERT INTO task_run_state (company_id, task_id, agent_session_id, failure_count, attempt_count, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?)",
-                TenantSchema.company(), s.taskId(), nn(s.agentSessionId()), s.failureCount(), s.attemptCount(), utc(s.updatedAt()));
+        jdbc.update("INSERT INTO task_run_state (company_id, task_id, agent_session_id, failure_count, attempt_count, updated_at, interrupted) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                TenantSchema.company(), s.taskId(), nn(s.agentSessionId()), s.failureCount(), s.attemptCount(), utc(s.updatedAt()),
+                s.interruptedByRestart());
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

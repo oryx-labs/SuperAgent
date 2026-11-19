@@ -162,7 +162,7 @@ final class ClaudeWarmSessions {
         List<String> cmd = runner.buildCommand(request, mcp, settings, true);
         Process process;
         try {
-            process = runner.processFor(cmd, request).start();
+            process = CliProcesses.track(runner.processFor(cmd, request).start());
         } catch (IOException e) {
             runner.deleteQuietly(settings);
             runner.deleteQuietly(mcp);
@@ -365,11 +365,13 @@ final class ClaudeWarmSessions {
             } catch (IOException ignored) {
                 // already gone
             }
+            List<ProcessHandle> children = process.descendants().toList();
             process.destroy();
             try {
                 if (!process.waitFor(2, TimeUnit.SECONDS)) {
                     process.destroyForcibly();
                 }
+                children.forEach(ProcessHandle::destroyForcibly);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 process.destroyForcibly();

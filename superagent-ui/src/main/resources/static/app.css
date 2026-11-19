@@ -1391,6 +1391,15 @@ button.stat-card:hover { border-color: var(--line-strong); }
 .sw-toggle::before { content: "▸"; font-size: 10px; transition: transform .15s; }
 .sw-toggle[aria-expanded="true"]::before { transform: rotate(90deg); }
 .sw-toggle:hover { color: var(--ink); border-color: var(--line-strong); }
+.sw-stop {
+  display: inline-flex; align-items: center; gap: 4px; margin: -2px 0 2px 24px; padding: 2px 8px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--paper); cursor: pointer;
+  font: inherit; font-size: 11px; color: var(--muted);
+}
+.sw-stop::before { content: "■"; font-size: 8px; }
+.sw-stop:hover { color: var(--ink); border-color: var(--line-strong); }
+.sw-stop:disabled { opacity: .5; cursor: default; }
+.sw-stop + .sw-toggle { margin-left: 4px; }
 .sw-sub { list-style: none; margin: 2px 0 4px 15px; padding: 0 0 0 6px; border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 1px; }
 .sw-sub .sw-row { padding: 6px 8px; }
 @media (prefers-reduced-motion: reduce) { .sw-toggle::before { transition: none; } }
@@ -2484,6 +2493,19 @@ button.t-chip { font: inherit; font-size: 11.5px; cursor: pointer; }
 .t-chip--tag:hover { color: var(--accent); border-color: var(--accent); }
 .task-detail__rel { font-size: 12.5px; color: var(--muted); margin-top: 3px; display: flex; flex-wrap: wrap; gap: 12px; }
 .task-detail__rel .link-btn { font-size: 12.5px; }
+.t-chip--wait { color: var(--muted); border-style: dashed; }
+.t-chip--run { color: var(--accent); border-color: var(--accent); }
+.t-chip--run:hover { color: var(--paper); background: var(--accent); }
+.t-chip--wait.is-blocked { color: var(--ink); border-style: solid; border-color: var(--accent); }
+.task-detail__wait {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 6px; padding: 6px 10px;
+  font-size: 12.5px; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: 6px; background: var(--panel);
+}
+.task-detail__wait[hidden] { display: none; }
+.task-detail__wait .link-btn { font-size: 12.5px; }
+.task-detail__wait.is-blocked { color: var(--ink); border-style: solid; border-color: var(--accent); }
+.task-detail__wait-why { color: var(--ink); }
+.task-detail__wait .btn { margin-left: auto; }
 .subtasks__sum { margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
 .subtasks { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .subtasks:empty { display: none; }
@@ -2675,6 +2697,7 @@ button.t-chip { font: inherit; font-size: 11.5px; cursor: pointer; }
 .hn-ac { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; padding: 9px 12px; }
 .hn-ac__mark { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 11px; font-weight: 700; margin-top: 2px; }
 .hn-ac__mark.is-ok { background: #dcfce7; color: #15803d; }
+.hn-ac__mark.is-bad { background: #fee2e2; color: #b91c1c; }
 .hn-ac__mark.is-wait { background: var(--panel); color: var(--muted-2); border: 1px solid var(--line-strong); }
 .hn-ac__text { display: flex; flex-direction: column; gap: 3px; font-size: 13px; min-width: 0; }
 .hn-ac__evidence { font-size: 12px; color: var(--muted); }
@@ -2722,6 +2745,25 @@ button.t-chip { font: inherit; font-size: 11.5px; cursor: pointer; }
 .hn-state { font-size: 12px; white-space: nowrap; color: var(--muted); }
 .hn-state.is-fixed { color: #15803d; }
 .hn-state.is-open { color: var(--accent); }
+.hn-state.is-waived { color: var(--muted); text-decoration: line-through; }
+.hn-finding__id { margin-right: 6px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The review loop: why it stopped, and each look by the reviewing model. */
+.hn-stop { margin: 10px 0 0; padding: 8px 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: 8px; background: var(--panel); font-size: 12.5px; white-space: pre-wrap; }
+.hn-look + .hn-look { border-top: 1px solid var(--line); }
+.hn-look__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hn-model { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 5px; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.hn-trend { font-size: 11.5px; font-weight: 500; color: var(--muted); }
+.hn-verdict { margin-left: auto; font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hn-verdict.is-ok { color: #15803d; }
+.hn-verdict.is-bad { color: #b91c1c; }
+.hn-look__none { margin: 0; padding: 10px 12px; font-size: 12.5px; color: var(--muted); }
+.hn-rebuttal { display: flex; flex-wrap: wrap; gap: 6px 10px; padding: 8px 12px; font-size: 12.5px; border-bottom: 1px dashed var(--line); }
+.hn-rebuttal__who { font-weight: 600; }
+.hn-ruling { margin-left: auto; color: var(--muted); }
+.hn-ruling.is-accepted { color: #15803d; }
+.hn-ruling.is-rejected { color: #b91c1c; }
 .hn-deliver { margin-top: 16px; border: 1px dashed var(--line-strong); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
 /* Output of a delivered coding task: what was delivered, then what changed and how it was checked. */
 .hn-out { display: flex; flex-direction: column; gap: 18px; max-width: 920px; padding: 2px 0 8px; line-height: 1.55; }
@@ -2770,3 +2812,23 @@ button.t-chip { font: inherit; font-size: 11.5px; cursor: pointer; }
 #projFieldsBody { display: grid; gap: 12px; }
 #projFieldsBody textarea { padding: 8px 10px; font: inherit; font-size: 13px; color: var(--ink); background: var(--paper);
   border: 1px solid var(--line); border-radius: 8px; resize: vertical; }
+
+/* A general task's view: checklist marks, check rows, file cards and the closing note. */
+.hn-ac__mark.is-bad { background: #fee2e2; color: #b91c1c; }
+.hn-added { display: inline-block; margin-left: 8px; padding: 0 6px; border: 1px dashed var(--accent); border-radius: 8px; color: var(--accent); font-size: 11px; line-height: 17px; vertical-align: 1px; }
+.hn-ac__text .hn-ac__evidence { display: block; }
+.hn--general .hn-check { grid-template-columns: 22px minmax(0, 14em) minmax(0, 1fr); }
+.hn--general .hn-check .hn-check__time { white-space: normal; overflow-wrap: anywhere; }
+.hn-issues { margin: 0; padding: 6px 12px 10px 30px; border-top: 1px solid var(--line); font-size: 12.5px; color: #b91c1c; }
+.hn-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.hn-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--paper); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hn-card__name { display: flex; gap: 6px; font-weight: 600; font-size: 13px; min-width: 0; }
+.hn-card__name span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hn-card__meta { font-size: 12px; color: var(--muted); }
+.hn-card__acts { display: flex; gap: 12px; font-size: 12.5px; }
+.hn-gnote { border-left: 3px solid var(--accent); padding: 4px 14px; }
+.hn-gnote.is-wait { background: rgba(37, 99, 235, .05); border-radius: 0 8px 8px 0; padding: 8px 14px; }
+.ev--step { cursor: pointer; user-select: none; }
+.ev--step .ev__body { border-left: 0; padding-left: 0; color: var(--ink, inherit); font-weight: 600; font-size: 13px; }
+.ev--step .ev__body::before { content: "▾ "; color: var(--muted); }
+.ev--step.is-folded .ev__body::before { content: "▸ "; }

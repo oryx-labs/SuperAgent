@@ -192,6 +192,51 @@ final class Workspace {
         }
     }
 
+    /** The worktree as it stands: HEAD and what {@code git status} lists (the CLIs' own session files aside). */
+    record Snapshot(String head, java.util.Set<String> status) {
+    }
+
+    Snapshot snapshot(HarnessState s) {
+        Path dir = Path.of(s.dir);
+        return new Snapshot(git.text(dir, "rev-parse", "HEAD"), status(dir));
+    }
+
+    private java.util.Set<String> status(Path dir) {
+        java.util.Set<String> out = new java.util.TreeSet<>();
+        for (String line : git.git(dir, "status", "--porcelain", "--untracked-files=all").out().lines().toList()) {
+            if (line.length() > 3 && !line.substring(3).startsWith(".superagent/")) {
+                out.add(line);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Puts the worktree back as {@code before} had it (a reviewer only reads): its commits dropped, its edits undone,
+     * the files it added deleted. False when it had changed nothing.
+     */
+    boolean restore(HarnessState s, Snapshot before) {
+        Path dir = Path.of(s.dir);
+        java.util.Set<String> now = status(dir);
+        if (git.text(dir, "rev-parse", "HEAD").equals(before.head()) && now.equals(before.status())) {
+            return false;
+        }
+        git.text(dir, "reset", "-q", "--hard", before.head());
+        for (String line : status(dir)) {
+            if (line.startsWith("?? ") && !before.status().contains(line)) {
+                Path added = dir.resolve(line.substring(3)).normalize();
+                if (added.startsWith(dir)) {
+                    try {
+                        Files.deleteIfExists(added);
+                    } catch (IOException e) {
+                        throw new IllegalStateException("could not undo the reviewer's file " + added + ": " + e.getMessage(), e);
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     /** The whole change, for the reviewer (capped). */
     String diff(HarnessState s, int maxChars) {
         String d = git.git(Path.of(s.dir), "diff", s.baseSha + "..HEAD").out();
@@ -208,8 +253,14 @@ final class Workspace {
 
     // --- delivery ---
 
-    /** How a local delivery went: merged as {@code commit}, or stopped for the user with {@code problem}. */
-    record Merge(String commit, String problem, boolean rebased) {
+    /**
+     * How a local delivery went: merged as {@code commit}, or stopped for the user with {@code problem}; {@code conflicts}
+     * (neither): the rebase ran into these files, for the flow to resolve.
+     */
+    record Merge(String commit, String problem, boolean rebased, List<String> conflicts) {
+        Merge(String commit, String problem, boolean rebased) {
+            this(commit, problem, rebased, List.of());
+        }
     }
 
     /**
@@ -218,19 +269,50 @@ final class Workspace {
      * to another branch. {@code recheck} runs the checks again after a rebase; false stops the merge.
      */
     Merge mergeLocal(HarnessState s, String message, java.util.function.BooleanSupplier recheck) {
+        return mergeLocal(s, message, recheck, sha -> { });
+    }
+
+    /**
+     * As above; {@code committed} gets the merge commit right after it is made, before the worktree is cleaned up,
+     * so the task records it while shutdown still waits on this merge. A merge already recorded is not made again.
+     */
+    Merge mergeLocal(HarnessState s, String message, java.util.function.BooleanSupplier recheck,
+                     java.util.function.Consumer<String> committed) {
+        MergeGuard.enter();
+        try {
+            return merge(s, message, recheck, committed);
+        } finally {
+            MergeGuard.exit();
+        }
+    }
+
+    /** The lock local merges into {@code repoRoot} take, one at a time. */
+    static Object repoLock(String repoRoot) {
+        return REPO_LOCKS.computeIfAbsent(repoRoot, k -> new Object());
+    }
+
+    private Merge merge(HarnessState s, String message, java.util.function.BooleanSupplier recheck,
+                        java.util.function.Consumer<String> committed) {
         Path root = Path.of(s.repoRoot);
         Path dir = Path.of(s.dir);
-        synchronized (REPO_LOCKS.computeIfAbsent(s.repoRoot, k -> new Object())) {
+        synchronized (repoLock(s.repoRoot)) {
+            if (s.deliveryResult != null) { // merged before a restart; only the clean-up may be left
+                git.git(root, "worktree", "remove", "--force", s.dir);
+                git.git(root, "branch", "-D", s.branch);
+                return new Merge(s.deliveryResult, null, false);
+            }
             String tip = git.text(root, "rev-parse", s.baseBranch);
             boolean rebased = false;
             if (!tip.equals(s.baseSha)) {
                 Git.Result rebase = git.git(dir, 600, Map.of(), "-c", "user.name=" + AGENT_NAME, "-c",
                         "user.email=" + AGENT_EMAIL, "rebase", s.baseBranch);
                 if (!rebase.ok()) {
-                    List<String> conflicts = git.git(dir, "diff", "--name-only", "--diff-filter=U").out().lines().toList();
+                    List<String> conflicts = unmerged(dir);
                     git.git(dir, "rebase", "--abort");
-                    return new Merge(null, "合并到 " + s.baseBranch + " 时有冲突：" + String.join("、", conflicts)
-                            + "。这个分支在任务期间被别的改动更新过，和这次的改动碰到了同一处。", false);
+                    if (!conflicts.isEmpty()) {
+                        return new Merge(null, null, false, conflicts);
+                    }
+                    return new Merge(null, "变基到 " + s.baseBranch + " 失败：" + Git.tail(rebase.output(), 500), false);
                 }
                 s.baseSha = tip;
                 rebased = true;
@@ -259,10 +341,229 @@ final class Workspace {
                 }
             }
             String sha = git.text(root, "rev-parse", "HEAD");
+            committed.accept(sha);
             git.git(root, "worktree", "remove", "--force", s.dir);
             git.git(root, "branch", "-D", s.branch);
             return new Merge(sha, null, rebased);
         }
+    }
+
+    // --- resolving a conflicted rebase, in the task's own worktree (the user's checkout is never touched) ---
+
+    /**
+     * A commit of the task's that didn't apply cleanly: which one, the files in conflict with their conflicted parts,
+     * and what each side did ({@code baseLog}: what landed on the base branch meanwhile; {@code taskLog}: the task's).
+     */
+    record Conflict(String commit, List<String> files, Map<String, String> hunks, String baseLog, String taskLog) {
+    }
+
+    /** The outcome of {@code rebase --continue}: done, the next commit in conflict, or git's complaint. */
+    record Continued(boolean done, Conflict next, String error) {
+    }
+
+    boolean rebasing(HarnessState s) {
+        Path dir = Path.of(s.dir);
+        for (String what : List.of("rebase-merge", "rebase-apply")) {
+            Path p = Path.of(git.text(dir, "rev-parse", "--git-path", what));
+            if (Files.isDirectory(p.isAbsolute() ? p : dir.resolve(p))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Starts rebasing the task's branch onto where the base branch is now and leaves it stopped at the conflict (null:
+     * nothing to rebase, or it went cleanly). A rebase already under way is picked up where it stopped. The branch is
+     * squashed into one commit first: it is squash-merged anyway, and so a conflict is resolved once, not once for every
+     * commit of the task that touched the same place.
+     */
+    Conflict startRebase(HarnessState s) {
+        if (rebasing(s)) {
+            return conflict(s);
+        }
+        String tip = git.text(Path.of(s.repoRoot), "rev-parse", s.baseBranch);
+        if (tip.equals(s.baseSha)) {
+            return null;
+        }
+        s.rebaseOnto = tip;
+        if (s.preRebaseHead == null) {
+            s.preRebaseHead = git.text(Path.of(s.dir), "rev-parse", "HEAD");
+            s.preRebaseBase = s.baseSha;
+        }
+        squash(s);
+        Git.Result rebase = git.git(Path.of(s.dir), 600, Map.of(), "-c", "user.name=" + AGENT_NAME, "-c",
+                "user.email=" + AGENT_EMAIL, "rebase", tip);
+        if (rebase.ok()) {
+            finishRebase(s);
+            return null;
+        }
+        if (unmerged(Path.of(s.dir)).isEmpty()) {
+            abortRebase(s);
+            throw new Git.GitException("rebase", rebase.output());
+        }
+        return conflict(s);
+    }
+
+    private void squash(HarnessState s) {
+        Path dir = Path.of(s.dir);
+        String subjects = git.text(dir, "log", "--reverse", "--format=- %s", s.baseSha + "..HEAD");
+        if (subjects.lines().count() < 2) {
+            return;
+        }
+        git.text(dir, "reset", "-q", "--soft", s.baseSha);
+        git.text(dir, "-c", "user.name=" + AGENT_NAME, "-c", "user.email=" + AGENT_EMAIL, "commit", "-q", "-m",
+                "本任务的改动（合并前压成一个提交）\n\n" + subjects);
+    }
+
+    private Conflict conflict(HarnessState s) {
+        Path dir = Path.of(s.dir);
+        List<String> files = unmerged(dir);
+        Map<String, String> hunks = new java.util.LinkedHashMap<>();
+        int budget = 30_000;
+        for (String f : files) {
+            String h = hunks(dir.resolve(f), 6_000);
+            if (budget > 0 && !h.isEmpty()) {
+                hunks.put(f, h);
+                budget -= h.length();
+            }
+        }
+        String onto = s.rebaseOnto == null ? s.baseBranch : s.rebaseOnto;
+        String commit = git.git(dir, "log", "-1", "--format=%h %s", "REBASE_HEAD").out().strip();
+        String baseLog = git.git(dir, "log", "--format=%h %s%n%b", s.baseSha + ".." + onto, "-n", "30").out().strip();
+        String taskLog = git.git(dir, "log", "--format=%h %s%n%b", onto + ".." + s.branch, "-n", "30").out().strip();
+        return new Conflict(commit, files, hunks, baseLog, taskLog);
+    }
+
+    /** The conflicted parts of a file, each with a few lines around it (capped). */
+    private static String hunks(Path file, int maxChars) {
+        List<String> lines;
+        try {
+            lines = Files.readAllLines(file);
+        } catch (IOException | java.io.UncheckedIOException e) {
+            return ""; // deleted on one side, or not text
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < lines.size(); i++) {
+            if (!lines.get(i).startsWith("<<<<<<<")) {
+                continue;
+            }
+            int end = i;
+            while (end < lines.size() && !lines.get(end).startsWith(">>>>>>>")) {
+                end++;
+            }
+            int from = Math.max(0, i - 3), to = Math.min(lines.size() - 1, end + 3);
+            sb.append("@@ 第 ").append(from + 1).append(" 行起\n");
+            for (int k = from; k <= to; k++) {
+                sb.append(lines.get(k)).append("\n");
+            }
+            i = end;
+        }
+        return sb.length() <= maxChars ? sb.toString() : sb.substring(0, maxChars) + "\n…（太长，后面没有贴出）";
+    }
+
+    /**
+     * The files still holding conflict markers. A bare {@code =======} line counts only when there are more of them
+     * than either side had (a Markdown heading underline is not a marker).
+     */
+    List<String> markers(HarnessState s, List<String> files) {
+        Path dir = Path.of(s.dir);
+        List<String> left = new ArrayList<>();
+        for (String f : files) {
+            List<String> lines;
+            try {
+                lines = Files.readAllLines(dir.resolve(f));
+            } catch (IOException | java.io.UncheckedIOException e) {
+                continue;
+            }
+            boolean marked = lines.stream().anyMatch(l -> l.matches("^(<{7}|>{7})( .*)?$"));
+            long rules = lines.stream().filter(l -> l.equals("=======")).count();
+            if (marked || rules > 0 && rules > Math.max(rules(dir, s.rebaseOnto, f), rules(dir, "REBASE_HEAD", f))) {
+                left.add(f);
+            }
+        }
+        return left;
+    }
+
+    private long rules(Path dir, String rev, String file) {
+        if (rev == null) {
+            return 0;
+        }
+        Git.Result r = git.git(dir, "show", rev + ":" + file);
+        return r.ok() ? r.out().lines().filter(l -> l.equals("=======")).count() : 0;
+    }
+
+    /** Stages the resolution and goes on with the rebase (a commit the resolution left empty is skipped). */
+    Continued continueRebase(HarnessState s) {
+        Path dir = Path.of(s.dir);
+        if (!rebasing(s)) {
+            return finished(s); // the agent ran it itself
+        }
+        git.text(dir, "add", "-A");
+        boolean empty = git.git(dir, "diff", "--cached", "--quiet").ok();
+        Git.Result r = git.git(dir, 600, Map.of("GIT_EDITOR", "true"), "-c", "user.name=" + AGENT_NAME, "-c",
+                "user.email=" + AGENT_EMAIL, "rebase", empty ? "--skip" : "--continue");
+        if (!rebasing(s)) {
+            return finished(s);
+        }
+        if (!unmerged(dir).isEmpty()) {
+            return new Continued(false, conflict(s), null);
+        }
+        return new Continued(false, null, Git.tail(r.output(), 800));
+    }
+
+    private Continued finished(HarnessState s) {
+        Path dir = Path.of(s.dir);
+        if (s.rebaseOnto == null || !git.git(dir, "merge-base", "--is-ancestor", s.rebaseOnto, "HEAD").ok()) {
+            s.rebaseOnto = null;
+            return new Continued(false, null, "变基被中止了，分支没有接到 " + s.baseBranch + " 的最新提交上");
+        }
+        finishRebase(s);
+        return new Continued(true, null, null);
+    }
+
+    private void finishRebase(HarnessState s) {
+        s.baseSha = s.rebaseOnto;
+        s.rebaseOnto = null;
+    }
+
+    /**
+     * Puts the task's branch back as it was before the resolve step rebased it: a rebase under way is aborted, and one
+     * that went through (with any fixes after it) is reset away.
+     */
+    void rollbackRebase(HarnessState s) {
+        abortRebase(s);
+        if (s.preRebaseHead != null) {
+            git.text(Path.of(s.dir), "reset", "-q", "--hard", s.preRebaseHead);
+            s.baseSha = s.preRebaseBase;
+        }
+        keepRebase(s);
+    }
+
+    /** The resolved rebase stands: nothing to go back to any more. */
+    void keepRebase(HarnessState s) {
+        s.preRebaseHead = null;
+        s.preRebaseBase = null;
+    }
+
+    /** Aborts a rebase under way (the branch back to where that rebase started). */
+    void abortRebase(HarnessState s) {
+        if (rebasing(s)) {
+            git.git(Path.of(s.dir), "rebase", "--abort");
+        }
+        s.rebaseOnto = null;
+    }
+
+    /** How the task's change now reads in {@code files}, on top of the base it was rebased onto (capped). */
+    String diff(HarnessState s, List<String> files, int maxChars) {
+        List<String> args = new ArrayList<>(List.of("diff", s.baseSha + "..HEAD", "--"));
+        args.addAll(files);
+        String d = git.git(Path.of(s.dir), args.toArray(String[]::new)).out();
+        return d.length() <= maxChars ? d : d.substring(0, maxChars) + "\n…（太长，后面没有贴出）";
+    }
+
+    private List<String> unmerged(Path dir) {
+        return git.git(dir, "diff", "--name-only", "--diff-filter=U").out().lines().filter(l -> !l.isBlank()).toList();
     }
 
     /** Pushes the task's branch; the problem when it couldn't (null when it went). */
