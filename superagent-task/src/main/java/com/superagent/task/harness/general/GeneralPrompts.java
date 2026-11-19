@@ -14,7 +14,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** What the general flow tells the agent and the checker at each step, and how it reads their answers. */
-final class GeneralPrompts {
+public final class GeneralPrompts {
 
     /** The line an agent starts with when it has to ask the user (the same marker the single-pass run used). */
     static final String CONFIRM = "NEEDS_CONFIRMATION";
@@ -198,7 +198,7 @@ final class GeneralPrompts {
     }
 
     /** A short yes (「确认交付」「可以」); anything with a no in it (「先别交付」「不确认」) is the user's words for another round. */
-    static boolean approves(String reply) {
+    public static boolean approves(String reply) {
         if (reply == null) {
             return false;
         }

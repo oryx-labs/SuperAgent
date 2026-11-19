@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -28,11 +29,14 @@ public class Transcriber {
 
     static final String PROVIDER = "codex";
     static final String MODEL = "whisper-1";
-    /** OpenAI's list price for whisper-1. */
-    static final double USD_PER_MINUTE = 0.006;
+    /** OpenAI's transcription models and their list prices per minute; only whisper-1 gives timings. */
+    static final Map<String, Double> USD_PER_MINUTE = Map.of(MODEL, 0.006, "gpt-4o-transcribe", 0.006,
+            "gpt-4o-mini-transcribe", 0.003);
     /** The API takes 25 MB a file; a little room for the form around it. */
     static final long MAX_BYTES = 24L * 1024 * 1024;
     static final int PIECE_SECONDS = 1200;
+    /** A model without timings writes at most ~2000 tokens an answer: shorter pieces, so none is cut off. */
+    static final int UNTIMED_PIECE_SECONDS = 240;
     static final Set<String> ACCEPTED = Set.of("flac", "m4a", "mp3", "mp4", "mpeg", "mpga", "oga", "ogg", "wav", "webm");
     private static final int FAILOVERS = 3;
 
@@ -43,9 +47,16 @@ public class Transcriber {
     record Piece(double seconds, List<Segment> segments) {
     }
 
+    record Request(String model, String prompt, String language) {
+    }
+
     /** The call itself, a seam for tests. */
     interface Api {
-        Piece transcribe(RunCredential credential, Path file, String language) throws ApiException;
+        Piece transcribe(RunCredential credential, Path file, Request request) throws ApiException;
+    }
+
+    static boolean timed(String model) {
+        return MODEL.equals(model);
     }
 
     /** The API refused or couldn't be reached; the message is what decides whether another key could help. */
@@ -108,12 +119,24 @@ public class Transcriber {
      * the user can fix (no key, a file it can't take) is an {@link IllegalArgumentException}.
      */
     public Result transcribe(Path file, String language, UsageContext paying) throws IOException {
+        return transcribe(MODEL, file, null, language, paying);
+    }
+
+    /** {@code prompt}: terms to spell right (null: none). */
+    public Result transcribe(String model, Path file, String prompt, String language, UsageContext paying) throws IOException {
+        if (!USD_PER_MINUTE.containsKey(model)) {
+            throw new IllegalArgumentException("不支持的转写模型：" + model);
+        }
         String ext = extension(file);
         long size = Files.size(file);
+        boolean timed = timed(model);
         Path scratch = null;
         try {
             List<Path> pieces;
-            if (size <= MAX_BYTES && ACCEPTED.contains(ext)) {
+            if (!timed && ffmpeg != null) {
+                scratch = Files.createTempDirectory("sa-transcribe-");
+                pieces = ffmpeg.split(file, scratch, UNTIMED_PIECE_SECONDS);
+            } else if (size <= MAX_BYTES && ACCEPTED.contains(ext)) {
                 pieces = List.of(file);
             } else if (ffmpeg == null) {
                 throw new IllegalArgumentException((size > MAX_BYTES
@@ -124,19 +147,21 @@ public class Transcriber {
                 scratch = Files.createTempDirectory("sa-transcribe-");
                 pieces = ffmpeg.split(file, scratch, PIECE_SECONDS);
             }
+            int pieceSeconds = timed ? PIECE_SECONDS : UNTIMED_PIECE_SECONDS;
             List<Segment> all = new ArrayList<>();
             double offset = 0;
             double usd = 0;
             for (Path piece : pieces) {
-                Piece p = call(piece, language);
+                Piece p = call(piece, new Request(model, prompt, language));
+                double seconds = p.seconds() > 0 ? p.seconds() : pieces.size() > 1 ? pieceSeconds : 0;
                 for (Segment s : p.segments()) {
-                    all.add(new Segment(s.start() + offset, s.end() + offset, s.text()));
+                    all.add(new Segment(s.start() + offset, (timed ? s.end() : seconds) + offset, s.text()));
                 }
-                offset += p.seconds();
-                double cost = p.seconds() / 60 * USD_PER_MINUTE;
+                offset += seconds;
+                double cost = seconds / 60 * USD_PER_MINUTE.get(model);
                 usd += cost;
                 if (usage != null && paying != null) {
-                    usage.recordCost(paying, MODEL, cost); // per piece: a later failure doesn't hide what was spent
+                    usage.recordCost(paying, model, cost); // per piece: a later failure doesn't hide what was spent
                 }
             }
             return new Result(all, offset, usd);
@@ -149,7 +174,27 @@ public class Transcriber {
         }
     }
 
-    private Piece call(Path piece, String language) {
+    /** Whether each OpenAI transcription model answers on the company's key; empty-handed results without one. */
+    List<com.superagent.core.media.SpeechEngine.Probe> probe(java.util.function.BiConsumer<RunCredential, String> send) {
+        CredentialService.Choice choice;
+        try {
+            choice = credentials.current(PROVIDER);
+        } catch (CredentialService.NoCompanyKeyException e) {
+            return USD_PER_MINUTE.keySet().stream().sorted().map(m -> new com.superagent.core.media.SpeechEngine.Probe(m,
+                    timed(m), false, "没有 OpenAI Key")).toList();
+        }
+        RunCredential credential = choice.credential();
+        return USD_PER_MINUTE.keySet().stream().sorted().map(m -> {
+            try {
+                send.accept(credential, m);
+                return new com.superagent.core.media.SpeechEngine.Probe(m, timed(m), true, null);
+            } catch (RuntimeException e) {
+                return new com.superagent.core.media.SpeechEngine.Probe(m, timed(m), false, e.getMessage());
+            }
+        }).toList();
+    }
+
+    private Piece call(Path piece, Request request) {
         CredentialService.Choice choice;
         try {
             choice = credentials.current(PROVIDER);
@@ -158,7 +203,7 @@ public class Transcriber {
         }
         for (int attempt = 0; ; attempt++) {
             try {
-                return api.transcribe(choice.credential(), piece, language);
+                return api.transcribe(choice.credential(), piece, request);
             } catch (ApiException e) {
                 Optional<CredentialService.Choice> next = attempt < FAILOVERS
                         ? credentials.failover(PROVIDER, choice, e.getMessage()) : Optional.empty();

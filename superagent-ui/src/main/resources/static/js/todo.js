@@ -202,7 +202,8 @@ function todoActions(n) {
         // Saying yes needs no page: the task carries on. Looking first is a click away.
         : [[L("todo.confirmGo"), async () => {
             await confirmTaskFromTodo(n.linkId);
-            await api.noticeAction(n.id, "done");
+            // The task resuming usually closes the item already (it then 404s): only a slower start needs this.
+            await api.noticeAction(n.id, "done").catch(() => {});
           }, true], [L("todo.handle"), () => openTaskFromTodo(n.linkId)], ignore];
     case "action":
       // To-dos come from received messages: the stream is where to read them in full.

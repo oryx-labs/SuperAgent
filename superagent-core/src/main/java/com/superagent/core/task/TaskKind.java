@@ -13,7 +13,9 @@ package com.superagent.core.task;
 public enum TaskKind {
     CODING, GENERAL,
     /** Splits itself into subtasks that run side by side, then sums up what they found. */
-    COMPLEX;
+    COMPLEX,
+    /** Subtitles from audio: every speech model transcribes, the platform votes, text models settle the disputes. */
+    SUBTITLE;
 
     public String storageName() {
         return name().toLowerCase();

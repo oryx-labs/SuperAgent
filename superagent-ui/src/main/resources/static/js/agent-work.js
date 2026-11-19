@@ -220,7 +220,31 @@ function markTaskReport(msgEl, taskId) {
   tag.title = L("super.dispatchOpenTask");
   tag.addEventListener("click", () => { setView("tasks"); openTask(taskId); });
   msgEl.prepend(tag);
+  foldLongLists(msgEl.querySelector(".bubble"));
   attachTaskReplies(msgEl, taskId);
+}
+
+/** A long list in a notice (the files a task changed, say) shows its first few items; the rest open on a click. */
+function foldLongLists(bubble, keep = 4) {
+  if (!bubble) return;
+  bubble.querySelectorAll("ul, ol").forEach(list => {
+    const items = [...list.children].filter(li => li.tagName === "LI");
+    if (items.length <= keep + 2) return;
+    const rest = items.slice(keep);
+    rest.forEach(li => { li.hidden = true; });
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "list-fold";
+    const label = () => rest[0].hidden ? L("chat.listMore", { n: rest.length }) : L("chat.listLess");
+    btn.textContent = label();
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const show = rest[0].hidden;
+      rest.forEach(li => { li.hidden = !show; });
+      btn.textContent = label();
+    });
+    list.after(btn);
+  });
 }
 
 /**

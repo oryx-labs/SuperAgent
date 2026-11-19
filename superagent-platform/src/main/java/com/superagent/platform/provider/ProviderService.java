@@ -556,6 +556,9 @@ public class ProviderService {
         if (credentials != null && !credentials.hasOwnKey(entry.key())) {
             return true; // no key of the company's own: nothing to test its models with (never the machine's login)
         }
+        if (speechProbes != null) {
+            speechProbes.check(entry.key(), freshEnough); // the speech models on this key: subtitle tasks use what answers
+        }
         Map<String, ProviderModelDto> results = new java.util.concurrent.ConcurrentHashMap<>();
         com.superagent.core.chat.RunCredential credential = currentCredential(entry.key());
         java.util.concurrent.atomic.AtomicInteger unreachableCount = new java.util.concurrent.atomic.AtomicInteger();
@@ -604,6 +607,13 @@ public class ProviderService {
     /** The models' last results with this round's on top (a partial round keeps the others' results). */
     private static List<ProviderModelDto> mergeChecked(List<ProviderModelDto> current, Map<String, ProviderModelDto> fresh) {
         return current.stream().map(m -> fresh.getOrDefault(m.id(), m)).toList();
+    }
+
+    private SpeechProbes speechProbes; // null in tests
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setSpeechProbes(SpeechProbes speechProbes) {
+        this.speechProbes = speechProbes;
     }
 
     private com.superagent.core.usage.UsageStore usageStore; // null in tests: no figure shown

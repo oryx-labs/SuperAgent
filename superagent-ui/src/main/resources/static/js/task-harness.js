@@ -29,6 +29,7 @@ const hnEl = {
 // The tabs in the order the page declares them; a general task puts what it produced and how it was checked first.
 const hnTabOrder = [...tel.tabs.children];
 const HN_GENERAL_FIRST = ["output", "gcrit", "run", "gcheck"];
+const SB_FIRST = ["ssub", "scmp", "sdoubt", "sterm", "run"];
 let hnOpenFiles = new Set(); // diffs kept open across refreshes
 let hnShown = null; // the harness last drawn, for the Output tab
 
@@ -49,15 +50,18 @@ const hnDuration = (a, b) => {
 function renderHarness(h, t) {
   const on = !!h;
   const general = !!(h && h.general);
+  const subtitle = !!(h && h.harness === "subtitle");
   hnShown = h || null;
   hnEl.box.hidden = !on;
-  hnEl.box.classList.toggle("hn--general", general);
-  Object.values(hnEl.tabs).forEach(b => { b.hidden = !on || general; });
+  hnEl.box.classList.toggle("hn--general", general || subtitle);
+  Object.values(hnEl.tabs).forEach(b => { b.hidden = !on || general || subtitle; });
   Object.values(hnEl.gtabs).forEach(b => { b.hidden = !general; });
-  hnArrangeTabs(general);
+  sbShowTabs(subtitle);
+  hnArrangeTabs(general, subtitle);
   tel.tabs.querySelector('[data-tab="output"]').textContent = L(general ? "hn.g.tabOutput" : "tasks.tabOutput");
   if (!on) return;
   if (general) { hnEl.stop.hidden = true; renderGeneral(h, t); return; }
+  if (subtitle) { hnEl.stop.hidden = true; renderSubtitle(h, t); return; }
   const reviews = h.reviews || [];
   // Tasks from before acceptance had no such step.
   hnEl.tabs.haccept.hidden = !h.steps.some(s => s.key === "accept");
@@ -148,18 +152,23 @@ function renderHarnessPipe(h) {
 
 /** A step's name; in a general flow that went back, the round it is on ("执行 · 第 2 轮"). */
 function hnStepName(h, s) {
-  const key = h.general ? (h.harness === "complex" && s.key === "execute" ? "g.sum" : "g." + s.key) : s.key;
+  const key = h.general ? (h.harness === "complex" && s.key === "execute" ? "g.sum" : "g." + s.key)
+    : h.harness === "subtitle" ? "s." + s.key : s.key;
   const name = L("hn.step." + key) === "hn.step." + key ? s.name : L("hn.step." + key);
   const round = h.general && h.general.round > 1 && (s.key === "execute" || s.key === "check")
     && s.status !== "pending" ? h.general.round : 0;
   return round ? name + " · " + L("hn.g.round", { n: round }) : name;
 }
 
-/** A general task leads with what it produced and how it was checked; any other task keeps the page's order. */
-function hnArrangeTabs(general) {
-  const order = general
-    ? [...HN_GENERAL_FIRST.map(k => hnTabOrder.find(b => b.dataset.tab === k)),
-      ...hnTabOrder.filter(b => !HN_GENERAL_FIRST.includes(b.dataset.tab))]
+/**
+ * A general task leads with what it produced and how it was checked, a subtitle task with its subtitles and their
+ * disputes; any other task keeps the page's order.
+ */
+function hnArrangeTabs(general, subtitle) {
+  const first = general ? HN_GENERAL_FIRST : subtitle ? SB_FIRST : null;
+  const order = first
+    ? [...first.map(k => hnTabOrder.find(b => b.dataset.tab === k)),
+      ...hnTabOrder.filter(b => !first.includes(b.dataset.tab))]
     : hnTabOrder;
   order.forEach(b => tel.tabs.appendChild(b));
 }

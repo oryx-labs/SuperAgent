@@ -24,7 +24,7 @@ const sel = {
   codeRoots: document.getElementById("sfCodeRoots"),
   reviewMaxRounds: document.getElementById("sfReviewMaxRounds"),
   reviewMaxSpend: document.getElementById("sfReviewMaxSpend"),
-  codebuddyInternet: document.getElementById("sfCodebuddyInternet"),
+  subtitleMaxCalibrators: document.getElementById("sfSubtitleMaxCalibrators"),
   missing: document.getElementById("sfAgentModelMissing"),
   filtered: document.getElementById("sfAgentModelFiltered"),
   status: document.getElementById("sfStatus"),
@@ -48,7 +48,7 @@ async function loadSettingsForm() {
   sel.codeRoots.value = (systemSettings.codeRoots || []).join("\n");
   sel.reviewMaxRounds.value = systemSettings.codingReviewMaxRounds || 8;
   sel.reviewMaxSpend.value = systemSettings.codingReviewMaxSpend || 30;
-  sel.codebuddyInternet.value = systemSettings.codebuddyInternetEnvironment || "internal";
+  sel.subtitleMaxCalibrators.value = systemSettings.subtitleMaxCalibrators || 3;
 
   sel.agentModel.innerHTML = "";
   const def = document.createElement("option");
@@ -262,13 +262,14 @@ sel.form.addEventListener("submit", async e => {
       codeRoots: sel.codeRoots.value.split("\n").map(s => s.trim()).filter(Boolean),
       codingReviewMaxRounds: Number(sel.reviewMaxRounds.value) || null,
       codingReviewMaxSpend: Number(sel.reviewMaxSpend.value) || null,
-      codebuddyInternetEnvironment: sel.codebuddyInternet.value || "internal",
+      subtitleMaxCalibrators: Number(sel.subtitleMaxCalibrators.value) || null,
     });
     if (!res || !res.data) throw new Error((res && res.message) || "no data");
     systemSettings = res.data;
     sel.codeRoots.value = (systemSettings.codeRoots || []).join("\n");
     sel.reviewMaxRounds.value = systemSettings.codingReviewMaxRounds || 8;
     sel.reviewMaxSpend.value = systemSettings.codingReviewMaxSpend || 30;
+    sel.subtitleMaxCalibrators.value = systemSettings.subtitleMaxCalibrators || 3;
     backupModels = (systemSettings.backupModels || []).slice();
     renderBackupModels();
     fixedModels = (systemSettings.taskFixedModels || []).slice();

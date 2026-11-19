@@ -120,7 +120,10 @@ function setView(view) {
   if (isAutomation) { showAutoList(); loadAutomations(); }
   if (isTasks) { showTaskList(); loadTasks(); } else { stopTaskPolling(); }
   // Set after showTaskList (which forgets where the list was entered from): a task opened next can go back there.
+  // Only for a task opened right away (setView("tasks"); openTask(id)): entering the list from the nav and then
+  // picking a task must go back to the list, not to the page before it.
   enteredTasksFrom = isTasks && from && from !== "tasks" ? from : null;
+  if (enteredTasksFrom) setTimeout(() => { enteredTasksFrom = null; }, 0);
   if (isModels) { showModelList(); startModelPolling(); } else { stopModelPolling(); }
   if (isModelPrices) mpLoad();
 }

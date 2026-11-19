@@ -81,7 +81,7 @@ public class NoticeService {
     // --- the page ---
 
     public List<NoticeDto> list(String owner) {
-        return store.list(owner, LIST_LIMIT).stream().map(NoticeService::toDto).toList();
+        return current(owner).stream().map(NoticeService::toDto).toList();
     }
 
     /**
@@ -89,7 +89,7 @@ public class NoticeService {
      * before the to-do page existed counts too. Periods are in the configured zone; weeks start on Monday.
      */
     public NoticeStatsDto stats(String owner) {
-        List<Notice> items = store.list(owner, LIST_LIMIT);
+        List<Notice> items = current(owner);
         int confirm = (int) items.stream().filter(n -> n.kind() == Notice.Kind.CONFIRM && n.state() == Notice.State.OPEN).count();
         int todo = (int) items.stream().filter(n -> n.kind() == Notice.Kind.ACTION && n.state() == Notice.State.OPEN).count();
         int unread = (int) items.stream().filter(n -> n.kind() == Notice.Kind.NOTICE && n.state() == Notice.State.OPEN).count();
@@ -257,6 +257,31 @@ public class NoticeService {
     }
 
     // --- helpers ---
+
+    /**
+     * The owner's items, with task decisions checked against the task itself: a task answered elsewhere (its
+     * chat, the task page) or whose status event was missed no longer waits on the user, so it leaves the list.
+     */
+    private List<Notice> current(String owner) {
+        return store.list(owner, LIST_LIMIT).stream().map(this::settleIfAnswered)
+                .filter(n -> n.kind() != Notice.Kind.TRACK).toList();
+    }
+
+    private Notice settleIfAnswered(Notice n) {
+        if (n.kind() != Notice.Kind.CONFIRM || n.state() != Notice.State.OPEN || !"task".equals(n.linkType())) {
+            return n;
+        }
+        TaskStatus status = tasks.findTask(n.linkId()).map(Task::status).orElse(null);
+        if (status == null) {
+            return n; // can't tell: leave it to the user rather than drop it
+        }
+        return switch (status) {
+            case NEEDS_CONFIRMATION, ERROR -> n;
+            case PENDING, RUNNING, WAITING -> save(n.with(Notice.Kind.TRACK, Notice.State.OPEN, n.title(), null, n.actor()));
+            case DONE -> save(n.with(Notice.Kind.DONE, Notice.State.DONE, n.title(), "已完成", n.actor()));
+            case STOPPED, DELETED -> save(n.withState(Notice.State.IGNORED));
+        };
+    }
 
     /** Who started a task: the agent that created it, the scheduled task, or the secretary. */
     private String origin(NoticeEvents.TaskStatusChanged e) {

@@ -28,6 +28,8 @@ public final class ApiPaths {
     /** Work files: what agents produced (documents, images, videos). */
     public static final String FILES = V1 + "/files";
     public static final String PROJECTS = V1 + "/projects";
+    /** How the company's and each project's names and terms are written (subtitles spell by it). */
+    public static final String GLOSSARY = V1 + "/glossary";
     public static final String FILE_FOLDERS = FILES + "/folders";
     public static final String PROJECT_FOLDERS = FILES + "/project-folders";
 

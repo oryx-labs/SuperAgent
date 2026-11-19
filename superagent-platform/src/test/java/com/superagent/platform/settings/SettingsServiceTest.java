@@ -109,20 +109,15 @@ class SettingsServiceTest {
         assertThatThrownBy(() -> service.update(limits("Other", 3, 0.5))).hasMessageContaining("费用上限");
         assertThat(service.get().companyName()).isEqualTo("OKG"); // nothing of the refused saves was written
         assertThat(service.codingReviewMaxRounds()).isEqualTo(3);
+
+        assertThat(service.subtitleMaxCalibrators()).isEqualTo(3);
+        service.update(new SystemSettingsDto(null, "OKG", null, null, null, null, null, null, null, null, null, null, 5));
+        assertThat(service.get().subtitleMaxCalibrators()).isEqualTo(5);
+        assertThatThrownBy(() -> service.update(new SystemSettingsDto(null, "OKG", null, null, null, null, null, null, null,
+                null, null, null, 11))).hasMessageContaining("字幕校准模型数上限");
     }
 
     private static SystemSettingsDto limits(String company, int rounds, double spend) {
         return new SystemSettingsDto(null, company, null, null, null, null, null, null, null, null, rounds, spend);
-    }
-
-    @Test
-    void codeBuddyInternetEnvironmentDefaultsToInternalAndRejectsUnknown() {
-        assertThat(service.get().codebuddyInternetEnvironment()).isEqualTo("internal");
-        assertThat(service.update(new SystemSettingsDto(null, null, null, null, null, null, null, null, null, null, null, null, " PUBLIC "))
-                .codebuddyInternetEnvironment()).isEqualTo("public");
-        assertThat(service.update(new SystemSettingsDto(null, "OKG", null)).codebuddyInternetEnvironment())
-                .isEqualTo("public"); // null on save keeps it
-        assertThatThrownBy(() -> service.update(new SystemSettingsDto(null, null, null, null, null, null, null, null, null, null, null, null, "mars")))
-                .isInstanceOf(IllegalArgumentException.class);
     }
 }

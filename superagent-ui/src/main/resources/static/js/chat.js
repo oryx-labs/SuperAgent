@@ -165,9 +165,19 @@ async function loadAgents(autoOpen) {
   agents = res.data || [];
   renderThreads(agents);
   if (autoOpen && !activeAgentId) {
-    const first = agents.find(a => a.sessionId);
-    if (first) selectAgent(first);
+    const lastId = rememberedAgentId();
+    const open = agents.find(a => a.id === lastId && a.sessionId) || agents.find(a => a.sessionId);
+    if (open) selectAgent(open);
   }
+}
+
+// The agent last opened, so a refresh comes back to it. Keyed by user: several people may share a browser.
+const lastAgentKey = () => "superagent.lastAgent." + (currentUserId || "");
+function rememberedAgentId() {
+  try { return localStorage.getItem(lastAgentKey()); } catch (e) { return null; }
+}
+function rememberAgent(id) {
+  try { localStorage.setItem(lastAgentKey(), id); } catch (e) { /* not remembered */ }
 }
 
 // An agent with collaborators (whoever owns it) is a shared one: listed apart, marked with its head count.
@@ -424,6 +434,7 @@ async function selectAgent(agent) {
   stopLiveWatch(); // was watching a turn on the previous agent
   activeAgentId = agent.id;
   activeAgent = agent;
+  rememberAgent(agent.id);
   renderAgentPanel(agent);
   markActiveThread();
   setSuperMode(agent.kind === "super");

@@ -11,6 +11,8 @@ import com.superagent.core.notice.Notice;
 import com.superagent.core.notice.NoticeEvents;
 import com.superagent.core.notice.NoticeStore;
 import com.superagent.core.settings.SystemSettingStore;
+import com.superagent.core.task.Task;
+import com.superagent.core.task.TaskStatus;
 import com.superagent.core.task.TaskStore;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -41,6 +43,7 @@ class NoticeServiceTest {
 
     private final Store store = new Store();
     private final List<Object> published = new ArrayList<>();
+    private final TaskStore tasks = Mockito.mock(TaskStore.class);
     private final NoticeService service;
 
     NoticeServiceTest() {
@@ -48,7 +51,7 @@ class NoticeServiceTest {
         Instant t = Instant.now();
         Mockito.when(agents.find("ag1")).thenReturn(Optional.of(new Agent("ag1", "写手", null, null, null, null,
                 AgentStatus.ACTIVE, "ada", AgentKind.STANDARD, null, t, t)));
-        service = new NoticeService(store, agents, Mockito.mock(AutomationStore.class), Mockito.mock(TaskStore.class),
+        service = new NoticeService(store, agents, Mockito.mock(AutomationStore.class), tasks,
                 Mockito.mock(InboxTodoStore.class), Mockito.mock(EventSourceStore.class),
                 Mockito.mock(SystemSettingStore.class), published::add, "Asia/Shanghai");
     }
@@ -92,5 +95,25 @@ class NoticeServiceTest {
         String id = service.list("ada").stream().filter(n -> n.kind().equals("action")).findFirst().orElseThrow().id();
         service.ignore("ada", id);
         assertThat(published).singleElement().isEqualTo(new NoticeEvents.NoticeIgnored("ada", "todo", "td1"));
+    }
+
+    @Test
+    void aDecisionAnsweredElsewhereLeavesTheList() {
+        task("needs_confirmation", null);
+        Task t1 = Mockito.mock(Task.class);
+        Mockito.when(tasks.findTask("t1")).thenReturn(Optional.of(t1));
+        Mockito.when(t1.status()).thenReturn(TaskStatus.NEEDS_CONFIRMATION);
+        assertThat(service.list("ada")).singleElement().satisfies(n -> assertThat(n.kind()).isEqualTo("confirm"));
+
+        Mockito.when(t1.status()).thenReturn(TaskStatus.RUNNING); // confirmed in its chat; the event never came
+        assertThat(service.list("ada")).isEmpty();
+        assertThat(service.stats("ada").toConfirm()).isZero();
+
+        task("needs_confirmation", null);
+        Mockito.when(t1.status()).thenReturn(TaskStatus.DONE);
+        assertThat(service.list("ada")).singleElement().satisfies(n -> {
+            assertThat(n.kind()).isEqualTo("done");
+            assertThat(n.state()).isEqualTo("done");
+        });
     }
 }

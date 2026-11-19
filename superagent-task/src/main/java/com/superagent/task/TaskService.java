@@ -606,6 +606,43 @@ public class TaskService implements TaskRecovery {
                 state == null ? null : com.superagent.task.harness.HarnessViews.dto(state));
     }
 
+    /** A subtitle task's result: the subtitles, every disputed span, the glossary. */
+    public com.superagent.api.task.SubtitleDto subtitle(String id, String user) {
+        Task task = requireVisible(id, user);
+        var harness = subtitleHarness();
+        com.superagent.task.harness.HarnessState state = harnessState(id)
+                .filter(st -> com.superagent.task.harness.subtitle.SubtitleHarness.KIND.equals(st.harness))
+                .orElseThrow(() -> new TaskNotFoundException(id));
+        var view = harness.view(state, task, harnessHost);
+        return view == null ? null : com.superagent.task.harness.subtitle.SubtitleViews.dto(view,
+                harnessHost.projectOf(task).orElse(null));
+    }
+
+    /** The owner fixes one disputed span of a subtitle task: the files are rewritten, the glossary learns it. */
+    public com.superagent.api.task.SubtitleDto fixSubtitle(String id, String owner, String spanId, String text) {
+        Task task = require(id, owner);
+        com.superagent.task.harness.HarnessState state = harnessState(id)
+                .filter(st -> com.superagent.task.harness.subtitle.SubtitleHarness.KIND.equals(st.harness))
+                .orElseThrow(() -> new TaskNotFoundException(id));
+        subtitleHarness().fix(task, state, harnessHost, spanId, text, owner)
+                .ifPresent(term -> harnessHost.note(task, "疑点修改已记进术语表：" + term));
+        return subtitle(id, owner);
+    }
+
+    /** The models a subtitle task would use now, for the agent's confirm table. */
+    public String subtitleModels() {
+        var h = harnesses.get(com.superagent.task.harness.subtitle.SubtitleHarness.KIND);
+        return h == null ? "这里没有接入字幕流程。" : ((com.superagent.task.harness.subtitle.SubtitleHarness) h).models();
+    }
+
+    private com.superagent.task.harness.subtitle.SubtitleHarness subtitleHarness() {
+        var h = harnesses.get(com.superagent.task.harness.subtitle.SubtitleHarness.KIND);
+        if (h == null) {
+            throw new IllegalStateException("subtitle flow not wired");
+        }
+        return (com.superagent.task.harness.subtitle.SubtitleHarness) h;
+    }
+
     /** One changed file's diff in a harness-run task (empty when it has none). */
     public String harnessDiff(String id, String owner, String path) {
         requireVisible(id, owner);
@@ -2189,6 +2226,32 @@ public class TaskService implements TaskRecovery {
         @Override
         public Path workRoot() {
             return com.superagent.core.tenant.TenantPaths.of(workspaceRoot);
+        }
+
+        @Override
+        public Path fetch(Task task, String fileId, Path dir) {
+            if (files == null) {
+                throw new IllegalStateException("no file service");
+            }
+            return dir.resolve(files.copyToWorkspace(fileId, task.createdBy(), dir));
+        }
+
+        @Override
+        public String deliver(Task task, Path file, String name, String replaceId, List<String> tags) {
+            if (files == null) {
+                throw new IllegalStateException("no file service");
+            }
+            return files.saveFrom(files.forTask(task.createdBy(), task.id()), file, name, replaceId, tags).id();
+        }
+
+        @Override
+        public java.util.Optional<String> projectOf(Task task) {
+            return projects == null ? java.util.Optional.empty() : projects.projectOfTask(task.id());
+        }
+
+        @Override
+        public void spent(Task task, BigDecimal usd) {
+            addSpend(task.id(), usd);
         }
 
         @Override

@@ -36,12 +36,13 @@ class TranscriberTest {
         when(credentials.current("codex")).thenReturn(first);
         when(credentials.failover(eq("codex"), eq(first), any())).thenReturn(Optional.of(second));
         List<String> keysTried = new ArrayList<>();
-        Transcriber.Api api = (credential, file, language) -> {
+        Transcriber.Api api = (credential, file, request) -> {
             keysTried.add(credential.id());
             if (credential.id().equals("k1")) {
                 throw new Transcriber.ApiException("HTTP 401: invalid api key");
             }
-            assertThat(language).isEqualTo("zh");
+            assertThat(request.language()).isEqualTo("zh");
+            assertThat(request.model()).isEqualTo("whisper-1");
             return OpenAiTranscriptions.parse("""
                     {"duration": 90.5, "segments": [
                       {"start": 0.0, "end": 3.2, "text": " 大家好"},
@@ -65,7 +66,7 @@ class TranscriberTest {
 
     @Test
     void withoutFfmpegAFileTheApiCantTakeIsRefusedWithAWayOut() throws Exception {
-        Transcriber t = new Transcriber(credentials, (c, f, l) -> { throw new AssertionError("not called"); }, null);
+        Transcriber t = new Transcriber(credentials, (c, f, r) -> { throw new AssertionError("not called"); }, null);
         Path big = tmp.resolve("long.mp3");
         try (var out = Files.newOutputStream(big)) {
             out.write(new byte[(int) Transcriber.MAX_BYTES + 1]);

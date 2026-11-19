@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Never send anything out to a remote, and never run `scripts/package.sh`.** No `git push`, no `scp` / `rsync` / `ssh`
+> uploads, no deploying to or running commands on the deploy host. Pulling in is fine (`git pull`, `git fetch`,
+> `git clone`), as is local git (`status`, `diff`, `log`, `add`, `commit`). Shipping out is done by the user.
+
 ## What this is
 
 SuperAgent is an AI collaborative work system for companies, not a personal assistant: everyone works with AI in one system, and the work becomes company assets (see [README.md](README.md) for the positioning, in priority order). Design features from the company's and its employees' side, not one person's. The core is running and iterating fast; you will often be scaffolding new functionality as well as modifying existing behavior.
@@ -85,7 +89,12 @@ keep packages under `com.superagent.*`.
 
 ## Deployment
 
-`scripts/package.sh` is the deploy path, not a local build helper. It computes the set of changed/untracked/deleted files versus `origin/<branch>`, tars **only those files**, `scp`s them to a remote host, then on the remote runs pull → extract → commit → push, and finally commits the same files locally. It also opens/updates a GitHub PR for non-`main` branches. Note it commits with the message `dev` on both ends — this explains the flat `dev` commit history. All values crossing the SSH boundary are base64-encoded to avoid shell injection. Treat running this script as an outward-facing, hard-to-reverse action.
+`scripts/diff_build.sh <commit-id> [-m <msg>] [-o <dir>]` packages what changed since that commit, for someone to
+apply by hand; nothing leaves the machine. It first commits every uncommitted change **locally** (never push, fetch or
+any other remote operation), then writes one file, `superagent-<from>-<to>.tar.gz`: a directory with `changes.tar.gz`
+(files added or changed between the two commits) and `apply.sh`, which is run from the target's root: it lists the
+changes, asks, extracts `changes.tar.gz` over the current directory and deletes the files deleted here. It prints
+`<to>`, the commit to pass next time; nothing is remembered between runs. Updating a host with it is done by the user.
 
 ## Conventions
 

@@ -116,6 +116,19 @@ public class TaskController {
         return ApiResponse.ok(taskService.harnessDiff(id, auth.getName(), path));
     }
 
+    @GetMapping(ApiPaths.TASKS + "/{id}/subtitle")
+    public ApiResponse<com.superagent.api.task.SubtitleDto> subtitle(@PathVariable String id, Authentication auth) {
+        return ApiResponse.ok(taskService.subtitle(id, auth.getName()));
+    }
+
+    /** The owner fixes one disputed span of a subtitle task: {@code {"text": "…"}}. */
+    @PutMapping(ApiPaths.TASKS + "/{id}/subtitle/disputes/{spanId}")
+    public ApiResponse<com.superagent.api.task.SubtitleDto> fixSubtitle(@PathVariable String id, @PathVariable String spanId,
+                                                                    @RequestBody java.util.Map<String, String> body,
+                                                                    Authentication auth) {
+        return ApiResponse.ok(taskService.fixSubtitle(id, auth.getName(), spanId, body.get("text")));
+    }
+
     @GetMapping(ApiPaths.TASKS + "/{id}/events")
     public ApiResponse<List<TaskEventDto>> events(@PathVariable String id,
                                                   @RequestParam(defaultValue = "0") int offset, Authentication auth) {

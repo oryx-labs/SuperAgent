@@ -5,6 +5,7 @@ import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskStatus;
 
 import java.math.BigDecimal;
+import java.nio.file.Path;
 
 /** What a harness asks of the task service: run an agent turn, record what it did, and settle the task. */
 public interface HarnessHost {
@@ -113,6 +114,27 @@ public interface HarnessHost {
     /** Whether the task got at its materials: the ones it was given that it never fetched, the links it couldn't read. */
     default Materials materials(Task task) {
         return new Materials(java.util.List.of(), java.util.List.of(), java.util.List.of());
+    }
+
+    // --- what flows that work on files need ---
+
+    /** Copies a file of the task's owner from Files into {@code dir} (under uploads/); returns where it landed. */
+    default Path fetch(Task task, String fileId, Path dir) {
+        throw new UnsupportedOperationException("no files here");
+    }
+
+    /** Hands a file over to the owner's Files ({@code replaceId}: the earlier one it replaces); returns its id. */
+    default String deliver(Task task, Path file, String name, String replaceId, java.util.List<String> tags) {
+        throw new UnsupportedOperationException("no files here");
+    }
+
+    /** The project the task was made in. */
+    default java.util.Optional<String> projectOf(Task task) {
+        return java.util.Optional.empty();
+    }
+
+    /** What the platform spent on the task outside an agent turn (a transcription), added to its cost. */
+    default void spent(Task task, BigDecimal usd) {
     }
 
     record Model(String model, String cli) {

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>字幕任务详情页 · 样式稿</title>
+<style>
+  :root { --ink:#111; --muted:#6b6b6b; --line:#e5e5e5; --bg:#fafafa; --brand:#2f6bff; --ok:#1f7a3a; --bad:#b42318; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.6 -apple-system,"PingFang SC",sans-serif; color:var(--ink); background:var(--bg); }
+  .page { max-width:1080px; margin:24px auto; padding:0 20px; }
+  h1 { font-size:20px; margin:0 0 4px; } .sub { color:var(--muted); font-size:12px; margin-bottom:16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+  .card div span { display:block; color:var(--muted); font-size:12px; } .card div b { font-weight:600; }
+  .badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; border:1px solid var(--line); }
+  .badge.done { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .pipe { display:flex; margin:18px 0; list-style:none; padding:0; }
+  .pipe li { flex:1; padding:10px 8px; background:#fff; border:1px solid var(--line); margin-right:-1px; font-size:13px; }
+  .pipe li:first-child { border-radius:10px 0 0 10px; } .pipe li:last-child { border-radius:0 10px 10px 0; }
+  .dot { display:inline-flex; width:18px; height:18px; border-radius:50%; align-items:center; justify-content:center; font-size:11px; border:1px solid var(--line); margin-right:4px; }
+  .is-done .dot { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .is-running .dot { background:var(--brand); color:#fff; border-color:var(--brand); } .is-running { box-shadow:inset 0 -2px 0 var(--brand); }
+  .meta { display:block; color:var(--muted); font-size:11px; margin-top:2px; }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-top:8px; }
+  .tabs button { border:0; background:none; padding:8px 12px; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; font-size:14px; }
+  .tabs button.on { color:var(--ink); border-bottom-color:var(--brand); font-weight:600; }
+  .tabs .sep { flex:1; } .cnt { font-size:11px; color:var(--muted); margin-left:4px; }
+  .pane { background:#fff; border:1px solid var(--line); border-top:0; border-radius:0 0 10px 10px; padding:16px; min-height:300px; }
+  .pane > section { display:none; } .pane > section.on { display:block; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12px; color:var(--muted); font-weight:500; }
+  .tc { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted); white-space:nowrap; }
+  .diff { background:#fff4d6; border-bottom:2px solid #e0a800; padding:0 2px; }
+  .fixed { background:#eaf0ff; border-bottom:2px solid var(--brand); padding:0 2px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  .tool { display:flex; gap:10px; align-items:center; margin-bottom:12px; font-size:12px; color:var(--muted); }
+  .btn { border:1px solid var(--line); background:#fff; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:12px; }
+  .btn.primary { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .q { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:10px; }
+  .q .h { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); }
+  .q input { width:100%; border:1px solid var(--line); border-radius:6px; padding:5px 8px; font-size:14px; margin-top:6px; }
+  .q .why { font-size:12px; color:var(--muted); margin-top:4px; }
+  .pill { font-size:11px; border:1px solid var(--line); border-radius:8px; padding:0 6px; margin-left:4px; }
+  .pill.b { border-color:var(--brand); color:var(--brand); }
+  .note { border-left:3px solid var(--brand); padding:4px 12px; background:#f5f8ff; margin-bottom:12px; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>第 02 课 · 生成字幕</h1>
+  <div class="sub">字幕任务 · 原话转写（中英混说原样保留，不翻译）</div>
+
+  <div class="card">
+    <div><span>状态</span><b><span class="badge done">已完成</span></b></div>
+    <div><span>音频</span><b>第02课.mp3 · 18 分 42 秒</b></div>
+    <div><span>参考资料</span><b>第02课.pptx（32 页）</b></div>
+    <div><span>听写模型</span><b>3 个</b> <span class="meta">whisper-1（骨架）· gpt-4o-transcribe · gpt-4o-mini-transcribe</span></div>
+    <div><span>校准模型</span><b>3 个（上限 3）</b> <span class="meta">claude-opus · deepseek-v3 · glm-4.6</span></div>
+  </div>
+
+  <ol class="pipe">
+    <li class="is-done"><span class="dot">✓</span>素材<span class="meta">音频 + 1 份资料</span></li>
+    <li class="is-done"><span class="dot">✓</span>术语<span class="meta">新增 41 · 共 128</span></li>
+    <li class="is-done"><span class="dot">✓</span>听写<span class="meta">3 份 · $0.27</span></li>
+    <li class="is-done"><span class="dot">✓</span>对齐投票<span class="meta">一致 86% · 分歧 37 处</span></li>
+    <li class="is-done"><span class="dot">✓</span>校准<span class="meta">采用 31 · 疑点 6</span></li>
+    <li class="is-done"><span class="dot">✓</span>检查<span class="meta">第 2 轮通过</span></li>
+    <li class="is-done"><span class="dot">✓</span>交付<span class="meta">srt + 疑点清单</span></li>
+  </ol>
+
+  <div class="tabs" id="tabs">
+    <button class="on" data-t="sub">字幕<span class="cnt">412</span></button>
+    <button data-t="cmp">对比<span class="cnt">37</span></button>
+    <button data-t="doubt">疑点<span class="cnt">6</span></button>
+    <button data-t="term">术语<span class="cnt">128</span></button>
+    <span class="sep"></span>
+    <button data-t="run">运行</button>
+  </div>
+  <div class="pane">
+    <section id="sub" class="on">
+      <div class="tool"><button class="btn primary">下载 srt</button><span>第02课.srt 已存进「文件」</span>
+        <label><input type="checkbox" checked> 标出校准改过的地方</label></div>
+      <table>
+        <tr><th>#</th><th>时间</th><th>字幕</th></tr>
+        <tr><td>1</td><td class="tc">00:00:01,200 → 00:00:05,800</td><td>今天我们讲 <span class="fixed">Transformer</span> 里的 attention 机制</td></tr>
+        <tr><td>2</td><td class="tc">00:00:05,900 → 00:00:11,300</td><td>先回顾一下上节课的 <span class="fixed">RAG</span> pipeline</td></tr>
+        <tr><td>3</td><td class="tc">00:00:11,400 → 00:00:16,900</td><td>它的问题是 context window 不够用</td></tr>
+      </table>
+    </section>
+
+    <section id="cmp">
+      <div class="tool"><label><input type="checkbox" checked> 只看有分歧的段落</label><span>黄色＝各份不一致；蓝色＝最后采用</span></div>
+      <table>
+        <tr><th>时间</th><th>whisper-1</th><th>gpt-4o-transcribe</th><th>gpt-4o-mini-transcribe</th><th>采用</th></tr>
+        <tr><td class="tc">00:00:01,200</td>
+          <td>今天我们讲 <span class="diff">transformer</span> 里的 attention 机制</td>
+          <td>今天我们讲 <span class="diff">Transformer</span> 里的 attention 机制</td>
+          <td>今天我们讲 <span class="diff">穿死佛么</span> 里的 attention 机制</td>
+          <td><span class="fixed">Transformer</span><span class="pill">3/3 校准一致</span></td></tr>
+        <tr><td class="tc">00:00:05,900</td>
+          <td>上节课的 <span class="diff">rag</span> pipeline</td>
+          <td>上节课的 <span class="diff">RAG</span> pipeline</td>
+          <td>上节课的 <span class="diff">rag</span> 派普兰</td>
+          <td><span class="fixed">RAG</span><span class="pill">术语表</span></td></tr>
+      </table>
+    </section>
+
+    <section id="doubt">
+      <div class="note">这 6 处校准模型没达成多数，字幕里暂用骨架（whisper-1）的写法。改完点「保存」：字幕更新，写法自动记进本项目的术语表，下次识别更准。</div>
+      <div class="q">
+        <div class="h"><span class="tc">00:07:42,100 → 00:07:46,500</span><span>校准：claude-opus「LoRA」· deepseek-v3「Laura」· glm-4.6「LORA」</span></div>
+        <div>听写：whisper-1「我们用 Laura 微调」· gpt-4o-transcribe「我们用 LoRA 微调」· gpt-4o-mini「我们用 罗拉 微调」</div>
+        <input value="我们用 LoRA 微调">
+        <div class="why">暂用：whisper-1 原文。理由：3 个校准模型给出 3 种写法，没有多数；PPT 第 14 页写作「LoRA」。</div>
+        <div style="margin-top:6px"><button class="btn primary">保存</button> <label style="font-size:12px;color:var(--muted)"><input type="checkbox" checked> 写回术语表（项目级）</label></div>
+      </div>
+    </section>
+
+    <section id="term">
+      <div class="tool"><button class="btn">本项目</button><button class="btn">公司</button><button class="btn">+ 添加</button></div>
+      <table>
+        <tr><th>写法</th><th>常被误识别为</th><th>类别</th><th>范围</th><th>来源</th><th></th></tr>
+        <tr><td>Transformer</td><td>transformer、穿死佛么</td><td>英文术语</td><td>公司</td><td>手动</td><td><a class="btn">编辑</a></td></tr>
+        <tr><td>LoRA</td><td>Laura、罗拉</td><td>缩写</td><td>本项目</td><td>疑点修改 <span class="pill b">本次</span></td><td><a class="btn">编辑</a></td></tr>
+        <tr><td>RAG</td><td>rag</td><td>缩写</td><td>本项目</td><td>PPT 第02课.pptx 第 3 页</td><td><a class="btn">编辑</a></td></tr>
+      </table>
+    </section>
+
+    <section id="run"><div class="meta">沿用现有「运行」标签：按步骤列出平台日志、每个模型的调用和费用，检查轮次逐条展开。</div></section>
+  </div>
+</div>
+<script>
+/** source: 字幕任务规格样式稿, summary: 切换详情页标签 **/
+document.getElementById("tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-t]"); if (!b) return;
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".pane > section").forEach(s => s.classList.toggle("on", s.id === b.dataset.t));
+});
+</script>
+</body>
+</html>

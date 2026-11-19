@@ -2,6 +2,10 @@
 
 Guidance for AI coding agents working in this repository. The canonical, detailed version lives in [CLAUDE.md](CLAUDE.md); this file mirrors the essentials for tools that read `AGENTS.md`.
 
+> **Never send anything out to a remote, and never run `scripts/package.sh`.** No `git push`, no `scp` / `rsync` / `ssh`
+> uploads, no deploying to or running commands on the deploy host. Pulling in is fine (`git pull`, `git fetch`,
+> `git clone`), as is local git (`status`, `diff`, `log`, `add`, `commit`). Shipping out is done by the user.
+
 ## What this is
 
 SuperAgent is an AI collaborative work system for companies, not a personal assistant: everyone works with AI in one system, and the work becomes company assets (see [README.md](README.md)). Design from the company's and its employees' side. It iterates fast; you will often be adding new functionality as well as changing existing behavior.
@@ -45,4 +49,4 @@ platform-wide).
 
 ## Deployment
 
-`scripts/package.sh` packages only changed files, syncs them to a remote host over SSH, commits/pushes on both ends (commit message `dev`), and opens/updates a GitHub PR for non-`main` branches. It is an outward-facing, hard-to-reverse action — don't run it incidentally.
+`scripts/package.sh` ships the files changed since the last shipped commit (`scripts/.package-last-commit`, untracked; it stops if missing) to the deploy host: local commit of uncommitted changes → `git diff` → one tarball of added/changed files plus the deleted list → one `scp` + one `ssh` (extract into `/root/SuperAgent`, delete, remove the tarball) → record HEAD. No build, restart, push or git on the host. Only the user runs it.

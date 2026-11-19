@@ -548,7 +548,8 @@ function renderDetail(d) {
   // A complex task still at work opens on its subtasks: that is where its progress is. A general task always opens
   // on what it produced.
   const answered = last || (d.harness && d.harness.delivery);
-  setTaskTab(task.general && !(t.flow === "complex" && t.subtasks && isActiveStatus(t.status)) ? "output"
+  setTaskTab(d.harness && d.harness.harness === "subtitle" ? "ssub"
+    : task.general && !(t.flow === "complex" && t.subtasks && isActiveStatus(t.status)) ? "output"
     : answered && t.status === "done" ? "output" : t.flow === "complex" && t.subtasks ? "subtasks" : "run");
   loadTaskFiles(t.id);
   task.choiceKey = t.status + "|" + t.model;

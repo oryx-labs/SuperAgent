@@ -408,6 +408,10 @@
               <button type="button" class="model-tab hn-tab" data-tab="hresolve" id="hnTabResolve" hidden>Conflicts</button>
               <button type="button" class="model-tab hn-tab" data-tab="gcrit" id="hnTabCriteria" hidden>Criteria</button>
               <button type="button" class="model-tab hn-tab" data-tab="gcheck" id="hnTabCheck" hidden>Check</button>
+              <button type="button" class="model-tab hn-tab" data-tab="ssub" id="hnTabSubs" hidden>Subtitles</button>
+              <button type="button" class="model-tab hn-tab" data-tab="scmp" id="hnTabCompare" hidden>Compare</button>
+              <button type="button" class="model-tab hn-tab" data-tab="sdoubt" id="hnTabDoubts" hidden>Doubts</button>
+              <button type="button" class="model-tab hn-tab" data-tab="sterm" id="hnTabTerms" hidden>Terms</button>
               <button type="button" class="model-tab" data-tab="output" data-i18n="tasks.tabOutput">Output</button>
               <button type="button" class="model-tab" data-tab="subtasks" id="taskSubtasksTab" hidden>Subtasks</button>
               <button type="button" class="model-tab" data-tab="usage" data-i18n="tasks.tabUsage">Cost</button>
@@ -428,6 +432,10 @@
             <div class="task-pane" data-pane-tab="hresolve" hidden><div id="hnResolve"></div></div>
             <div class="task-pane" data-pane-tab="gcrit" hidden><div id="hnCriteria"></div></div>
             <div class="task-pane" data-pane-tab="gcheck" hidden><div id="hnCheck"></div></div>
+            <div class="task-pane" data-pane-tab="ssub" hidden><div id="sbSubs"></div></div>
+            <div class="task-pane" data-pane-tab="scmp" hidden><div id="sbCompare"></div></div>
+            <div class="task-pane" data-pane-tab="sdoubt" hidden><div id="sbDoubts"></div></div>
+            <div class="task-pane" data-pane-tab="sterm" hidden><div id="sbTerms"></div></div>
             <div class="task-pane" data-pane-tab="run" id="taskRunPane">
               <section class="task-phases" id="taskPhasesPanel" hidden>
                 <h3 class="task-section__title" data-i18n="tasks.phases">Flow</h3>
@@ -884,17 +892,10 @@
               <input type="number" id="sfReviewMaxSpend" min="1" max="1000" step="1" /></label>
           </div>
           <p class="field-hint" data-i18n="settings.reviewHint">Another model reviews a coding task and checks it against its spec; bugs go back to the developer until it passes. It stops and asks you after this many rounds or once the task has spent this much.</p>
-          <h3 class="settings-form__section" data-i18n="settings.sectionCodeBuddy">CodeBuddy</h3>
-          <label class="field"><span data-i18n="settings.codebuddyInternet">Internet environment</span>
-            <select id="sfCodebuddyInternet">
-              <option value="internal" data-i18n="settings.codebuddyInternet.internal">China (internal)</option>
-              <option value="public" data-i18n="settings.codebuddyInternet.public">International (public)</option>
-              <option value="ioa" data-i18n="settings.codebuddyInternet.ioa">iOA</option>
-              <option value="cloudhosted" data-i18n="settings.codebuddyInternet.cloudhosted">Dedicated (cloudhosted)</option>
-              <option value="selfhosted" data-i18n="settings.codebuddyInternet.selfhosted">Self-hosted</option>
-            </select>
-          </label>
-          <p class="field-hint" data-i18n="settings.codebuddyInternetHint">Sets CODEBUDDY_INTERNET_ENVIRONMENT for every CodeBuddy run. Default is China (internal).</p>
+          <h3 class="settings-form__section" data-i18n="settings.sectionSubtitle">Subtitle tasks</h3>
+          <label class="field"><span data-i18n="settings.subtitleMaxCalibrators">Calibrating models at most</span>
+            <input type="number" id="sfSubtitleMaxCalibrators" min="1" max="10" step="1" /></label>
+          <p class="field-hint" data-i18n="settings.subtitleHint">Every speech model transcribes and the platform votes; where they disagree, text models (the strongest of each vendor, up to this many) propose a fix, and only a majority's stands.</p>
           <div class="settings-form__actions">
             <button type="submit" class="btn btn--primary" data-i18n="common.save">Save</button>
             <span class="settings-form__status" id="sfStatus" role="status"></span>
@@ -1668,6 +1669,7 @@
   <script src="/js/projects.js"></script>
   <script src="/js/tasks.js"></script>
   <script src="/js/task-harness.js"></script>
+  <script src="/js/task-subtitle.js"></script>
   <script src="/js/timing.js"></script>
   <script src="/js/auth.js"></script>
   <script src="/js/models.js"></script>

@@ -53,6 +53,9 @@ public class TaskMcpTools implements McpToolProvider {
                         "title", "brief", "kind"),
                 tool("coding_targets", "编码任务能在哪里做：你所在项目配置的仓库（优先用）、允许的本地代码目录和其中的 git 仓库、用户最近用过的代码位置、是否授权了 GitHub/GitLab。"
                         + "列编码任务的参数表之前先调用，用它填「代码位置」并给出可选项。", props(), (String[]) null),
+                tool("subtitle_models", "字幕任务这次会用哪些模型：听写模型（几个、哪些、哪个带时间轴）和校准模型（几个、哪些）。"
+                        + "列字幕任务的参数表之前先调用，把结果填进「听写模型」「校准模型」两行；没有可用的听写模型时如实告诉用户要管理员先配置。",
+                        props(), (String[]) null),
                 tool("list_tasks", "列出当前用户的任务：状态、进度、代码仓库，以及在等哪些任务完成。", props(), (String[]) null),
                 tool("get_task", "查看某个任务的状态与进度，以及它在等哪些任务。", props(req("id", "string", "任务 id")), "id"),
                 tool("run_task_now", "不等了，直接跑：它等的任务失败或被停止、因此被阻塞的任务，马上开始（只是还在等的任务会自动开始，不能直接跑）。只在用户要求时调用。",
@@ -94,6 +97,7 @@ public class TaskMcpTools implements McpToolProvider {
                         + "结果出来后会自动发到这个对话里。现在用一两句话告诉用户任务名和要做什么，然后结束这一轮，不要在对话里接着做。";
             }
             case "coding_targets" -> tasks.codingTargets(grant.owner(), grant.agentId());
+            case "subtitle_models" -> tasks.subtitleModels();
             case "list_tasks" -> {
                 List<TaskDto> list = tasks.list(grant.owner());
                 if (list.isEmpty()) {
