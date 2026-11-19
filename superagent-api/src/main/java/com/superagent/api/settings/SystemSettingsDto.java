@@ -43,7 +43,17 @@ public record SystemSettingsDto(String agentDefaultModel, String companyName, St
                                 /** …and how much (USD) the task may have spent before it stops (null on a save keeps it). */
                                 Double codingReviewMaxSpend,
                                 /** A subtitle task: the most text models that correct its disputed spans (null on a save keeps it). */
-                                Integer subtitleMaxCalibrators) {
+                                Integer subtitleMaxCalibrators,
+                                String codebuddyInternetEnvironment) {
+
+    public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl,
+                             java.util.List<String> backupModels, Integer complexMaxSubtasks, Integer complexMaxParallel,
+                             Boolean taskFixedModelsOn, java.util.List<String> taskFixedModels, java.util.List<String> codeRoots,
+                             Integer codingReviewMaxRounds, Double codingReviewMaxSpend, Integer subtitleMaxCalibrators) {
+        this(agentDefaultModel, companyName, companyShortName, publicUrl, backupModels, complexMaxSubtasks,
+                complexMaxParallel, taskFixedModelsOn, taskFixedModels, codeRoots, codingReviewMaxRounds,
+                codingReviewMaxSpend, subtitleMaxCalibrators, null);
+    }
 
     public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl,
                              java.util.List<String> backupModels, Integer complexMaxSubtasks, Integer complexMaxParallel,

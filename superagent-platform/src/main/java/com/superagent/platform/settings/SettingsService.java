@@ -24,6 +24,10 @@ public class SettingsService {
     static final String REVIEW_MAX_ROUNDS = "task.coding.review-max-rounds";
     static final String REVIEW_MAX_SPEND = "task.coding.review-max-spend";
     static final String SUBTITLE_CALIBRATORS = "task.subtitle.max-calibrators";
+    /** The same key the CodeBuddy runner and probe read. */
+    static final String CODEBUDDY_INTERNET_ENV = "codebuddy.internet-environment";
+    private static final java.util.Set<String> CODEBUDDY_INTERNET_ENVS =
+            java.util.Set.of("internal", "public", "ioa", "cloudhosted", "selfhosted");
     public static final int DEFAULT_REVIEW_MAX_ROUNDS = 8;
     public static final double DEFAULT_REVIEW_MAX_SPEND = 30;
     public static final int DEFAULT_MAX_SUBTASKS = 10;
@@ -62,7 +66,18 @@ public class SettingsService {
                 number(all, COMPLEX_MAX_SUBTASKS, DEFAULT_MAX_SUBTASKS), number(all, COMPLEX_MAX_PARALLEL, DEFAULT_MAX_PARALLEL),
                 "true".equals(all.get(TASK_FIXED_ON)), list(all, TASK_FIXED_MODELS), lines(all, CODE_ROOTS),
                 number(all, REVIEW_MAX_ROUNDS, DEFAULT_REVIEW_MAX_ROUNDS), decimal(all, REVIEW_MAX_SPEND, DEFAULT_REVIEW_MAX_SPEND),
-                number(all, SUBTITLE_CALIBRATORS, DEFAULT_SUBTITLE_CALIBRATORS));
+                number(all, SUBTITLE_CALIBRATORS, DEFAULT_SUBTITLE_CALIBRATORS),
+                trimToNull(all.get(CODEBUDDY_INTERNET_ENV)) == null ? "internal" : all.get(CODEBUDDY_INTERNET_ENV).strip());
+    }
+
+    /** One of CodeBuddy's regions, lower-cased; anything else is refused. */
+    private static String requireCodebuddyInternetEnvironment(String value) {
+        String v = value.strip().toLowerCase(java.util.Locale.ROOT);
+        if (!CODEBUDDY_INTERNET_ENVS.contains(v)) {
+            throw new IllegalArgumentException("CodeBuddy 区域只能是 " + String.join(" / ",
+                    new java.util.TreeSet<>(CODEBUDDY_INTERNET_ENVS)) + "，收到：" + value);
+        }
+        return v;
     }
 
     /**
