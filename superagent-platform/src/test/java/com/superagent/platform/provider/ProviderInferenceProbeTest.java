@@ -30,4 +30,35 @@ class ProviderInferenceProbeTest {
         assertThat(ProviderInferenceProbe.cliFailure(1, "Starting\nError: Invalid API key · Please run /login\n"))
                 .isEqualTo("退出码 1：Starting\nError: Invalid API key · Please run /login");
     }
+
+    /** A 403 that denies only the probed model must not read as a bad key, and DashScope's top-level message must show. */
+    @Test
+    void modelDenied403ReadsAsModelEligibilityNotABadKey() {
+        String dashScope = "{\"request_id\":\"r1\",\"code\":\"AccessDenied\","
+                + "\"message\":\"Access to model denied. Please make sure you are eligible for using the model.\"}";
+        assertThat(ProviderInferenceProbe.cause(403, dashScope)).contains("Key 已通过验证").contains("无权使用测试的模型");
+        assertThat(ProviderInferenceProbe.errorDetail(dashScope))
+                .isEqualTo(": Access to model denied. Please make sure you are eligible for using the model.");
+
+        // A key-level 403 keeps the key wording; wrapped (Anthropic/OpenAI) errors still parse; other statuses unchanged.
+        assertThat(ProviderInferenceProbe.cause(403, "{\"error\":{\"message\":\"account restricted\"}}"))
+                .isEqualTo("API Key 没有权限，或账号被限制");
+        assertThat(ProviderInferenceProbe.errorDetail("{\"error\":{\"message\":\"invalid x-api-key\"}}"))
+                .isEqualTo(": invalid x-api-key");
+        assertThat(ProviderInferenceProbe.cause(401, dashScope)).isEqualTo("API Key 无效或已失效");
+    }
+
+    /** A model the endpoint retired says so; a key problem does not — the check tells them apart. */
+    @Test
+    void aRetiredModelIsNotMistakenForABadKey() {
+        assertThat(ProviderInferenceProbe.modelGone(400,
+                "{\"request_id\":\"r\",\"code\":\"InvalidParameter\",\"message\":\"Model not exist.\"}")).isTrue();
+        assertThat(ProviderInferenceProbe.modelGone(404,
+                "{\"error\":{\"message\":\"The model \\\"MiniMax-M2\\\" is no longer available. (2069)\"}}")).isTrue();
+        assertThat(ProviderInferenceProbe.modelGone(404, "{\"error\":{\"message\":\"model_not_found\"}}")).isTrue();
+        assertThat(ProviderInferenceProbe.modelGone(401,
+                "{\"error\":{\"message\":\"invalid x-api-key\"}}")).isFalse();
+        assertThat(ProviderInferenceProbe.modelGone(429,
+                "{\"error\":{\"message\":\"rate limit exceeded\"}}")).isFalse();
+    }
 }
