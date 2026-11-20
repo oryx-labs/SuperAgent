@@ -50,9 +50,10 @@ public class CredentialService {
 
     // Vendors with a fixed /models URL can validate the key alone. CodeBuddy / Gemini / MiniMax need a
     // real headless turn (version alone is not auth) — without a model they stay UNKNOWN, not OK.
-    private static final Set<String> VENDOR_CHECKED = Set.of("deepseek", "glm", "kimi", "qwen", "grok");
+    // Qoder proves the token with its own model list, so it needs no model either.
+    private static final Set<String> VENDOR_CHECKED = Set.of("deepseek", "glm", "kimi", "qwen", "grok", "qoder");
     private static final Set<String> CHECKED = Set.of("claude", "codex", "deepseek", "glm", "kimi", "qwen", "grok",
-            "codebuddy", "gemini", "minimax");
+            "codebuddy", "gemini", "minimax", "qoder");
 
     private static final Logger log = LoggerFactory.getLogger(CredentialService.class);
     private static final TypeReference<List<ProviderModelDto>> MODEL_LIST = new TypeReference<>() {

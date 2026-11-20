@@ -113,7 +113,7 @@ public class ProviderInferenceProbe {
     }
 
     private static final java.util.Set<String> VENDORS = java.util.Set.of("deepseek", "glm", "kimi", "qwen", "grok",
-            "codebuddy", "gemini", "minimax");
+            "codebuddy", "gemini", "minimax", "qoder");
 
     private SystemSettingStore settings; // null in tests: CodeBuddy region defaults to internal
 
@@ -140,6 +140,7 @@ public class ProviderInferenceProbe {
             case "codebuddy" -> checkCodeBuddy(modelId, credential);
             case "gemini" -> checkGemini(modelId, credential);
             case "minimax" -> checkMinimax(modelId, credential);
+            case "qoder" -> checkQoder(modelId, credential);
             case "deepseek", "glm", "kimi", "qwen", "grok" -> checkVendor(providerKey, modelId, credential);
             default -> throw new IOException("Inference check is not available for " + providerKey + " yet");
         };
@@ -387,8 +388,52 @@ public class ProviderInferenceProbe {
         return last;
     }
 
-    // --- claude ---
+    /**
+     * Qoder CN: the personal access token is the key. {@code --list-models} proves it — the CLI exits non-zero when
+     * it is not authenticated — and costs no quota; a model check is one short {@code -p} turn.
+     */
+    private com.superagent.core.usage.TokenUsage checkQoder(String modelId, RunCredential credential)
+            throws IOException, InterruptedException {
+        if (credential == null) {
+            throw new IOException("还没有配置 API Key");
+        }
+        Path bin = probe.findBinary("qoderclicn").orElseThrow(() -> new IOException("qoderclicn is not installed"));
+        java.util.Map<String, String> env = ProviderModelFetcher.qoderEnv(credential);
+        run(List.of(bin.toString(), "--list-models"), null, env);   // the token: a non-zero exit means it is not accepted
+        if (modelId == null) {
+            return null;
+        }
+        String out = run(List.of(bin.toString(), "-p", "--output-format", "json", "--model", modelId, PROMPT), null, env);
+        try {
+            JsonNode root = mapper.readTree(out);
+            if (!root.isObject()) {
+                JsonNode last = null;
+                for (String line : out.split("\\R")) {
+                    if (line.strip().startsWith("{")) {
+                        last = mapper.readTree(line);
+                    }
+                }
+                root = last == null ? root : last;
+            }
+            if (root.path("is_error").asBoolean(false)) {
+                throw new IOException(tail(root.path("result").asText("qoder reported an error")));
+            }
+            JsonNode u = root.path("usage");
+            if (u.isObject()) {
+                return new com.superagent.core.usage.TokenUsage(modelId, u.path("input_tokens").asLong(0),
+                        u.path("cache_read_input_tokens").asLong(0), u.path("cache_creation_input_tokens").asLong(0),
+                        0, u.path("output_tokens").asLong(0), 0, null);
+            }
+        } catch (IOException e) {
+            if (e.getMessage() != null && e.getMessage().contains("qoder reported")) {
+                throw e;
+            }
+            // non-JSON success still counts: the process exited 0
+        }
+        return new com.superagent.core.usage.TokenUsage(modelId, 0, 0, 0, 0, 0, 0, null);
+    }
 
+    // --- claude ---
     private com.superagent.core.usage.TokenUsage checkClaude(String modelId, RunCredential credential) throws IOException, InterruptedException {
         java.util.Optional<ApiAccess> access = ApiAccess.anthropic(credential);
         if (access.isEmpty()) {
