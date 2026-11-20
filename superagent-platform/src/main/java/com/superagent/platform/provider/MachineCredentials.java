@@ -78,6 +78,23 @@ public class MachineCredentials {
         };
     }
 
+    /**
+     * Where a key for this provider would be found — the places {@link #find} looks, whether or not anything is
+     * there. Shown when nothing was found, so it says what to look at instead of only that there is nothing.
+     */
+    public List<String> sources(String providerKey) {
+        return switch (providerKey) {
+            case "claude" -> List.of("服务器环境变量 ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN",
+                    "~/.claude/settings.json");
+            case "codex" -> List.of("服务器环境变量 CODEX_API_KEY / OPENAI_API_KEY", "~/.codex/auth.json");
+            default -> {
+                var access = com.superagent.core.provider.ProviderCatalog.find(providerKey).map(e -> e.access()).orElse(null);
+                yield access == null || access.keyEnv() == null ? List.of()
+                        : List.of("服务器环境变量 " + access.keyEnv());
+            }
+        };
+    }
+
     /** The others: the catalogue's variables in the server's environment. */
     private List<Found> vendor(String providerKey) {
         var access = com.superagent.core.provider.ProviderCatalog.find(providerKey).map(e -> e.access()).orElse(null);

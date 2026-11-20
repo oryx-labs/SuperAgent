@@ -140,18 +140,26 @@ class CredentialServiceTest {
         CredentialService svc = new CredentialService(pool, providers,
                 new SecretCipher("", tmp.resolve("secret.key").toString()), new FakeProbe(tmp), machine);
 
-        assertThat(svc.importMachine("claude")).isEqualTo(1);
+        CredentialService.MachineImport first = svc.importMachine("claude");
+        assertThat(first.found()).isEqualTo(1);
+        assertThat(first.added()).isEqualTo(1);
+        assertThat(first.sources()).contains("~/.claude/settings.json");   // says where a key would come from
         CredentialDto imported = svc.list("claude").get(0);
         assertThat(imported.source()).isEqualTo(ProviderCredential.MACHINE);
         assertThat(imported.baseUrl()).isEqualTo("https://gw.example");
         assertThat(imported.current()).isTrue();             // runs keep using what they used before
-        assertThat(svc.importMachine("claude")).isZero();    // found again on the next startup: no duplicate
+        CredentialService.MachineImport again = svc.importMachine("claude");
+        assertThat(again.found()).isEqualTo(1);               // the key is still on the machine
+        assertThat(again.added()).isZero();                   // but the pool already has it: nothing new
 
         // Adding the same key by hand is refused; deleting the imported one keeps it out for good.
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> svc.add("claude",
                 new CredentialRequests.Save("dup", "", "sk-ant-from-env-000001", false, null)))
                 .isInstanceOf(IllegalArgumentException.class);
         svc.delete("claude", imported.id());
-        assertThat(svc.importMachine("claude")).isZero();
+        CredentialService.MachineImport afterDelete = svc.importMachine("claude");
+        assertThat(afterDelete.found()).isEqualTo(1);          // found on the machine
+        assertThat(afterDelete.added()).isZero();              // but a deleted key stays deleted
+        assertThat(afterDelete.deleted()).isEqualTo(1);        // and the admin is told it was a deleted one
     }
 }

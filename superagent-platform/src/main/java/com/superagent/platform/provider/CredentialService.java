@@ -88,16 +88,35 @@ public class CredentialService {
     }
 
     /**
+     * What an import saw on the machine: {@code found} keys, of which {@code added} were new to the pool,
+     * {@code kept} were already in it and {@code deleted} an admin deleted earlier (those keep their hash, so
+     * they are not added again). {@code sources} says where a key would have been found.
+     */
+    public record MachineImport(int found, int added, int kept, int deleted, java.util.List<String> sources) {
+    }
+
+    /**
      * Adds the machine's keys not in the pool yet — never one an admin deleted (deleted entries keep their hash).
      * Into an empty pool they go first, so runs keep using what they used before; otherwise last.
      */
-    public int importMachine(String providerKey) {
+    public MachineImport importMachine(String providerKey) {
         backfillHashes(providerKey);
         java.util.Set<String> known = store.knownKeyHashes(providerKey);
+        java.util.Set<String> inPool = store.list(providerKey).stream().map(ProviderCredential::keyHash)
+                .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        int found = 0;
         int added = 0;
+        int kept = 0;
+        int deleted = 0;
         for (MachineCredentials.Found f : machine == null ? List.<MachineCredentials.Found>of() : machine.find(providerKey)) {
+            found++;
             String hash = ProviderCredential.hash(f.apiKey());
             if (!known.add(hash)) {
+                if (inPool.contains(hash)) {
+                    kept++;
+                } else {
+                    deleted++;   // found on the machine, but an admin deleted it: not added again
+                }
                 continue;
             }
             int next = store.list(providerKey).stream().mapToInt(ProviderCredential::priority).max().orElse(0) + 1;
@@ -112,7 +131,8 @@ public class CredentialService {
             store.list(providerKey).stream().filter(c -> ProviderCredential.MACHINE.equals(c.source()))
                     .forEach(c -> checkSoon(c.id()));
         }
-        return added;
+        log.info("{}: machine import found {} key(s), added {}, kept {}, deleted before", providerKey, found, added, kept, deleted);
+        return new MachineImport(found, added, kept, deleted, machine == null ? List.of() : machine.sources(providerKey));
     }
 
     /** Entries saved before hashes existed get one, so their key is recognised when found again on the machine. */
