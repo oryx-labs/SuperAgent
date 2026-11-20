@@ -257,36 +257,69 @@ public class CredentialService {
      * model the CLI is known to run.
      */
     ProviderCredential check(ProviderCredential c) {
-        String model = testModel(c.providerKey());
+        List<String> candidates = testModels(c.providerKey());
         ProviderCredential checked;
         // Vendors and Codex list models with the key alone; Claude needs a model to ask.
         boolean keyAlone = VENDOR_CHECKED.contains(c.providerKey()) || "codex".equals(c.providerKey());
-        if (!CHECKED.contains(c.providerKey()) || (model == null && !keyAlone)) {
+        if (!CHECKED.contains(c.providerKey()) || (candidates.isEmpty() && !keyAlone)) {
             checked = c.withHealth(ProviderCredential.UNKNOWN, CHECKED.contains(c.providerKey())
-                    ? "还没有可用来测试的模型（等模型列表刷新后再检查）" : "这个 CLI 暂不支持检查 Key");
+                    ? "还没有可用来测试的模型（端点没有模型列表，请点「刷新」，或让 CLI 配置一个模型）"
+                    : "这个 CLI 暂不支持检查 Key");
         } else {
-            try {
-                probe.checkKey(c.providerKey(), model, toRun(c));
-                checked = c.withHealth(ProviderCredential.OK, null);
-            } catch (IOException e) {
-                checked = c.withHealth(ProviderCredential.ERROR, tail(e.getMessage() == null ? e.toString() : e.getMessage()));
-            } catch (InterruptedException e) {
+            IOException failure = null;
+            boolean interrupted = false;
+            // A vendor needs no model: its key proves itself against the endpoint's model list.
+            List<String> tries = candidates.isEmpty() ? java.util.List.of((String) null) : candidates;
+            for (String model : tries) {
+                try {
+                    probe.checkKey(c.providerKey(), model, toRun(c));
+                    failure = null;
+                    break;
+                } catch (ProviderInferenceProbe.ModelGoneException gone) {
+                    failure = gone;      // this model is gone there; the next one may still work
+                } catch (IOException e) {
+                    failure = e;         // another kind of problem: report it as it is
+                    break;
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                    break;
+                } catch (IllegalStateException e) { // key can't be decrypted (secret key changed)
+                    failure = new IOException("密钥无法解密，请重新填写 API Key");
+                    break;
+                }
+            }
+            if (interrupted) {
                 Thread.currentThread().interrupt();
                 return c;
-            } catch (IllegalStateException e) { // key can't be decrypted (secret key changed)
-                checked = c.withHealth(ProviderCredential.ERROR, "密钥无法解密，请重新填写 API Key");
             }
+            checked = failure == null ? c.withHealth(ProviderCredential.OK, null)
+                    : c.withHealth(ProviderCredential.ERROR, tail(failure.getMessage() == null ? failure.toString() : failure.getMessage()));
         }
         store.save(checked);
         return checked;
     }
 
-    /** The model a health check asks: one the last model sweep saw answer, else the first listed. */
-    private String testModel(String providerKey) {
+    /** How many models a health check may try before giving up. */
+    private static final int MAX_TEST_MODELS = 5;
+
+    /**
+     * The models a health check asks, best first: one the last sweep saw answer, then the others. A model the
+     * endpoint has retired is skipped (the check moves on to the next one), and with no list at all the model
+     * Claude Code is configured to run is used — that one works by definition.
+     */
+    private List<String> testModels(String providerKey) {
         List<ProviderModelDto> models = providers.findByKey(providerKey).map(ModelProvider::modelsJson)
                 .map(this::parse).orElse(List.of());
-        return models.stream().filter(ProviderModelDto::canInfer).map(ProviderModelDto::id).findFirst()
-                .orElse(models.isEmpty() ? null : models.get(0).id());
+        List<String> ordered = new java.util.ArrayList<>();
+        models.stream().filter(ProviderModelDto::canInfer).map(ProviderModelDto::id).forEach(ordered::add);
+        models.stream().map(ProviderModelDto::id).filter(id -> !ordered.contains(id)).forEach(ordered::add);
+        if (ordered.isEmpty() && "claude".equals(providerKey) && machine != null) {
+            String cliModel = machine.claudeModel();
+            if (cliModel != null) {
+                ordered.add(cliModel);
+            }
+        }
+        return ordered.size() > MAX_TEST_MODELS ? ordered.subList(0, MAX_TEST_MODELS) : ordered;
     }
 
     private void checkSoon(String id) {

@@ -67,7 +67,9 @@ class ProviderServiceTest {
         List<ProviderModelDto> models = List.of(
                 new ProviderModelDto("gpt-6-sol", "GPT-6 Sol", List.of("low", "medium", "high"), "medium", "model", 400000, true));
         String error;
-        FakeFetcher() { super(new FakeProbe(true, true)); }
+        FakeFetcher() { super(new FakeProbe(true, true), new MachineCredentials(Map.<String, String>of()::get,
+                Path.of(System.getProperty("java.io.tmpdir"), "sa-test-claude"),
+                Path.of(System.getProperty("java.io.tmpdir"), "sa-test-codex"))); }
         @Override public Result fetch(String key, RunCredential credential) throws IOException {
             if (error != null) {
                 throw new IOException(error);

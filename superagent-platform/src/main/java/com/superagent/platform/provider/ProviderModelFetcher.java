@@ -53,11 +53,13 @@ public class ProviderModelFetcher {
     }
 
     private final ProviderProbe probe;
+    private final MachineCredentials machine;
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
-    public ProviderModelFetcher(ProviderProbe probe) {
+    public ProviderModelFetcher(ProviderProbe probe, MachineCredentials machine) {
         this.probe = probe;
+        this.machine = machine;
     }
 
     /** Fetches the model list for a catalogue key; throws with a readable message on failure. */
@@ -280,6 +282,13 @@ public class ProviderModelFetcher {
             access.get().authorize(req);
             HttpResponse<String> resp = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
+                // Many relays don't serve a model list at all. The model Claude Code itself is configured to
+                // run works by definition, so offer that one instead of leaving the provider with no models.
+                Result fallback = cliModelFallback(cliEfforts,
+                        "端点没有模型列表（GET /v1/models 返回 HTTP " + resp.statusCode() + "）");
+                if (fallback != null) {
+                    return fallback;
+                }
                 throw new IOException("GET /v1/models returned HTTP " + resp.statusCode());
             }
             JsonNode root = mapper.readTree(resp.body());
@@ -311,7 +320,27 @@ public class ProviderModelFetcher {
             afterId = root.get("last_id").asText();
         }
         out.sort(Comparator.comparing((ProviderModelDto m) -> !m.nativeModel()).thenComparing(ProviderModelDto::id));
+        if (out.isEmpty()) {
+            Result fallback = cliModelFallback(cliEfforts, "端点的模型列表是空的");
+            if (fallback != null) {
+                return fallback;
+            }
+        }
         return new Result(out, viaGateway ? "GET /v1/models (ANTHROPIC_BASE_URL gateway)" : "GET /v1/models");
+    }
+
+    /**
+     * The model Claude Code is configured to run, as the one model the endpoint is known to serve. Null when
+     * nothing names a model — then the provider really has no models to offer.
+     */
+    private Result cliModelFallback(List<String> cliEfforts, String why) {
+        String model = machine.claudeModel();
+        if (model == null) {
+            return null;
+        }
+        ProviderModelDto dto = new ProviderModelDto(model, model, cliEfforts, null,
+                cliEfforts.isEmpty() ? "none" : "cli", null, false);
+        return new Result(List.of(dto), "CLI 配置的模型 " + model + "（" + why + "）");
     }
 
     private static List<String> effortsFromCapabilities(JsonNode effort) {

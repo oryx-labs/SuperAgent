@@ -61,7 +61,7 @@ class CredentialServiceTest {
     }
 
     /** Keys listed in {@code down} fail their check (e.g. quota exhausted); the rest answer. */
-    private static final class FakeProbe extends ProviderInferenceProbe {
+    private static class FakeProbe extends ProviderInferenceProbe {
         final Set<String> down = new HashSet<>();
         FakeProbe(Path tmp) { super(new ProviderProbe(new CliPaths(tmp.resolve("node").toString()))); }
         @Override public void check(String key, String model, RunCredential c) throws IOException {
@@ -161,5 +161,29 @@ class CredentialServiceTest {
         assertThat(afterDelete.found()).isEqualTo(1);          // found on the machine
         assertThat(afterDelete.added()).isZero();              // but a deleted key stays deleted
         assertThat(afterDelete.deleted()).isEqualTo(1);        // and the admin is told it was a deleted one
+    }
+
+    /** A model the endpoint retired must not fail the key: the check moves on to the next model. */
+    @Test
+    void aRetiredModelDoesNotFailTheKeyWhenTheNextModelAnswers() {
+        InMemoryPool pool = new InMemoryPool();
+        ModelProviderStore providers = mock(ModelProviderStore.class);
+        String models = "[{\"id\":\"retired-model\",\"inferStatus\":\"error\"},{\"id\":\"live-model\",\"inferStatus\":\"error\"}]";
+        when(providers.findByKey("claude")).thenReturn(Optional.of(new ModelProvider("p1", "claude", true, true,
+                null, null, "ok", Instant.now(), models, null, Instant.now(), Instant.now(), Instant.now())));
+        MachineCredentials machine = new MachineCredentials(Map.<String, String>of()::get, tmp.resolve("claude"), tmp.resolve("codex"));
+        CredentialService svc = new CredentialService(pool, providers,
+                new SecretCipher("", tmp.resolve("secret.key").toString()),
+                new FakeProbe(tmp) {
+                    @Override public void checkKey(String key, String model, RunCredential c) throws IOException {
+                        if ("retired-model".equals(model)) {
+                            throw new ProviderInferenceProbe.ModelGoneException("HTTP 404: 该模型已下线");
+                        }
+                    }
+                }, machine);
+
+        CredentialDto added = svc.add("claude", new CredentialRequests.Save("k", "", "sk-test-000001", false, null));
+        ProviderCredential checked = svc.check(pool.find(added.id()).orElseThrow());
+        assertThat(checked.status()).isEqualTo(ProviderCredential.OK);
     }
 }
