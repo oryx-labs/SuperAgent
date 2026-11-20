@@ -309,6 +309,17 @@ class TaskServiceTest {
     }
 
     @Test
+    void aWritingTasksGenreSurvivesTheLinkCheckOfItsMaterials() {
+        TaskService service = service(new FakeRunner(() -> "done."), new InMemoryTaskStore());
+        service.setHarnesses(List.of(new com.superagent.task.harness.article.ArticleHarness()));
+        service.useScheduler(() -> { });
+        service.useLinkReader((url, user) -> new com.superagent.core.link.LinkContent(url, "课程介绍", "正文", com.superagent.core.link.LinkContent.PUBLIC, true));
+        TaskDto t = service.create(new CreateTaskRequest("缓存方案", "读 https://x.feishu.cn/docx/public，写一份技术方案", null, null, null, null, null, null,
+                "article", null, null, null, null, "技术方案"), "alice");
+        assertThat(service.detail(t.id(), "alice").harness().article().genre()).isEqualTo("技术方案");
+    }
+
+    @Test
     void missingTaskYields404() {
         TaskService service = service(new FakeRunner(() -> "x"), new InMemoryTaskStore());
         assertThatThrownBy(() -> service.detail("nope", "tester")).isInstanceOf(TaskNotFoundException.class);
@@ -741,6 +752,91 @@ class TaskServiceTest {
         assertThat(service.modelChoices(id, "tester").get(1).reasoning()).contains("not up to it");
     }
 
+    /**
+     * A harness that stops on something only the user can fix waits on them: no stronger model, no watchdog retry, and
+     * saying "continue" with nothing changed neither logs nor notifies again. A failure that isn't the model's doesn't
+     * move it up either.
+     */
+    @Test
+    void aStopOnWhatOnlyTheUserCanFixIsNeitherEscalatedNorRetriedNorRepeated() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        InMemoryRunStore runStore = new InMemoryRunStore();
+        List<String> ran = Collections.synchronizedList(new ArrayList<>());
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) { ran.add(req.prompt()); }
+        };
+        List<com.superagent.core.notice.NoticeEvents.TaskStatusChanged> notices = Collections.synchronizedList(new ArrayList<>());
+        TaskService service = new TaskService(tasks, new InMemoryTaskPhaseStore(), new InMemoryTaskRunStateStore(), runStore,
+                List.of(runner), IMAGES, System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID(), "", "", false, 50,
+                "tester", null, null, null, e -> {
+                    if (e instanceof com.superagent.core.notice.NoticeEvents.TaskStatusChanged c) {
+                        notices.add(c);
+                    }
+                }, null);
+        List<com.superagent.core.task.TaskModelChoice> kept = Collections.synchronizedList(new ArrayList<>());
+        AtomicInteger escalations = new AtomicInteger();
+        service.setModelSelection(new com.superagent.core.task.TaskModelSelector() {
+            @Override public boolean enabled() { return true; }
+            @Override public Optional<com.superagent.core.task.TaskModelChoice> choose(Task t) {
+                return Optional.of(new com.superagent.core.task.TaskModelChoice(t.id(), 0, "judge", "easy", "fast", "cheap",
+                        "claude", "judge-model", "- cheap", "easy one", Instant.now()));
+            }
+            @Override public Optional<com.superagent.core.task.TaskModelChoice> escalate(Task t, String failure) {
+                escalations.incrementAndGet();
+                return Optional.of(new com.superagent.core.task.TaskModelChoice(t.id(), 0, "escalation", null, "strong",
+                        "strong", "claude", null, null, failure, Instant.now()));
+            }
+        }, new com.superagent.core.task.TaskModelChoiceStore() {
+            @Override public void save(com.superagent.core.task.TaskModelChoice c) { kept.add(c); }
+            @Override public List<com.superagent.core.task.TaskModelChoice> list(String id) {
+                return kept.stream().filter(c -> c.taskId().equals(id)).toList();
+            }
+        });
+        service.setHarnesses(List.of(new com.superagent.task.harness.TaskHarness() {
+            @Override public String kind() { return "general"; }
+            @Override public com.superagent.task.harness.HarnessState start(Task task, String delivery) {
+                var s = new com.superagent.task.harness.HarnessState();
+                s.harness = "general";
+                s.steps = new ArrayList<>(List.of(new com.superagent.task.harness.HarnessState.Step("listen", "听写")));
+                return s;
+            }
+            @Override public void drive(com.superagent.task.harness.HarnessRun run) {
+                var step = run.state().current();
+                if ("坏了".equals(run.reply())) {
+                    run.fail(step, "听写服务出错", false);
+                    return;
+                }
+                run.quietIfAskedAgain(step);
+                run.begin(step);
+                run.note("同时听写：whisper-1");
+                run.waitFor(step, "音频超过 24 MB，服务器没有 ffmpeg");
+            }
+        }));
+
+        String id = service.create(brief("字幕")).id();
+        awaitStatus(tasks, id, "NEEDS_CONFIRMATION");
+        service.recover(id); // what the watchdog would do: nothing, it isn't failed
+        assertThat(tasks.findTask(id).orElseThrow().status().name()).isEqualTo("NEEDS_CONFIRMATION");
+
+        service.sendMessage(id, "tester", "继续");
+        await().atMost(Duration.ofSeconds(5)).until(() -> notices.stream().filter(n -> n.status().equals("needs_confirmation")).count() == 2);
+        awaitStatus(tasks, id, "NEEDS_CONFIRMATION");
+
+        assertThat(notices).filteredOn(n -> n.status().equals("needs_confirmation"))
+                .extracting(com.superagent.core.notice.NoticeEvents.TaskStatusChanged::repeated).containsExactly(false, true);
+        List<String> log = runStore.listEvents(id).stream().map(AgentEvent::payload).toList();
+        assertThat(log).filteredOn(l -> l.contains("ffmpeg")).hasSize(1); // asked once
+        assertThat(log).filteredOn(l -> l.contains("同时听写")).hasSize(1);
+        assertThat(log).filteredOn(l -> l.contains("── 听写")).hasSize(1);
+
+        service.sendMessage(id, "tester", "坏了");
+        awaitStatus(tasks, id, "ERROR");
+        assertThat(escalations).hasValue(0);
+        assertThat(kept).noneMatch(c -> c.by().equals("escalation"));
+        assertThat(ran).isEmpty(); // the harness never needed the task's model
+    }
+
     @Test
     void withTiersOffATaskSaysWhyItRunsOnItsModel() {
         InMemoryTaskStore tasks = new InMemoryTaskStore();
@@ -984,6 +1080,35 @@ class TaskServiceTest {
     }
 
     @Test
+    void anArticleTaskIsCreatedWithTheEightWritingSteps() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        AgentRunner runner = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                reply(req, sink, "不会跑到这里");
+            }
+        };
+        TaskService service = service(runner, tasks);
+        service.setHarnesses(List.of(new com.superagent.task.harness.article.ArticleHarness()));
+        service.useScheduler(() -> { }); // recorded, not run
+        String id = service.create(new CreateTaskRequest("写提纲的方法", "写一篇公众号文章，读者是产品经理，1500 字", null, null, null,
+                null, null, null, "article")).id();
+
+        assertThat(tasks.findTask(id).orElseThrow().flow()).isEqualTo("article");
+        var h = service.detail(id, "tester").harness();
+        assertThat(h.harness()).isEqualTo("article");
+        assertThat(h.steps()).extracting(com.superagent.api.task.HarnessDto.Step::key)
+                .containsExactly("brief", "research", "outline", "draft", "check", "review", "revise", "deliver");
+        assertThat(h.article()).isNotNull();
+        assertThat(h.general()).isNull();
+        assertThat(h.article().genre()).isNull();
+
+        String withGenre = service.create(new CreateTaskRequest("缓存方案", "写一份技术方案", null, null, null, null, null, null, "article",
+                null, null, null, null, "技术方案")).id();
+        assertThat(service.detail(withGenre, "tester").harness().article().genre()).isEqualTo("技术方案");
+    }
+
+    @Test
     void aComplexTaskFromBeforeTheCheckIsSummedUpAsItWas() {
         InMemoryTaskStore tasks = new InMemoryTaskStore();
         java.util.concurrent.atomic.AtomicReference<TaskService> svc = new java.util.concurrent.atomic.AtomicReference<>();
@@ -1178,6 +1303,8 @@ class TaskServiceTest {
 
         assertThat(prompts.stream().filter(p -> p.contains("项目里的活"))).isNotEmpty().allMatch(p -> p.contains("金额两位小数"));
         assertThat(prompts.stream().filter(p -> p.contains("项目外的活"))).isNotEmpty().noneMatch(p -> p.contains("项目共同上下文"));
+        assertThat(TaskService.withToolRules("做事", true)).contains("【交付规则】", "【沉淀规则】", "agent_memory_write");
+        assertThat(TaskService.withToolRules("做事", false)).isEqualTo("做事");
 
         String targets = service.codingTargets("tester", "a1");
         assertThat(targets).startsWith("本项目的仓库").contains("api：/code/api", "交付方式 pr", "后端服务", "每个仓库建一个子任务");

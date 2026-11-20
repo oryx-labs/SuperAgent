@@ -80,9 +80,15 @@ class ProjectStoreTest {
         Instant now = Instant.now();
 
         context.saveRepo(new ProjectRepo("r2", "p1", "web", "git@x:web.git", "main", "pr", null, 1, now, now));
-        context.saveRepo(new ProjectRepo("r1", "p1", "api", "/code/api", "main", "merge", "后端", 0, now, now));
+        context.saveRepo(new ProjectRepo("r1", "p1", "api", "/code/api", "main", "merge", "后端", 0, now, now,
+                "ada", "a1", "s1", null));
         assertThat(context.repos("p1")).extracting(ProjectRepo::name).containsExactly("api", "web");
-        context.saveBrief(new ProjectBrief("p1", "上线看板", null, null, null, "ada", now));
+        assertThat(context.repos("p1").get(0)).satisfies(r -> {
+            assertThat(r.agentId()).isEqualTo("a1");
+            assertThat(r.updatedBy()).isEqualTo("ada");
+        });
+        context.saveBrief(new ProjectBrief("p1", "上线看板", null, null, null, "ada", now, "a1", null, "t1"));
+        assertThat(context.brief("p1")).get().satisfies(b -> assertThat(b.taskId()).isEqualTo("t1"));
         ProjectMemory m = new ProjectMemory("m1", "p1", "用 UTC", "时间一律存 UTC", "a1", "s1", null, "ada", "ada", false, now, now);
         context.saveMemory(m);
         assertThat(context.memory("m1")).get().satisfies(x -> assertThat(x.agentId()).isEqualTo("a1"));

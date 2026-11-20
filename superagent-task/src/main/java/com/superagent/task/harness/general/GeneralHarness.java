@@ -102,6 +102,8 @@ public class GeneralHarness implements TaskHarness {
                     }
                     default -> throw new IllegalStateException("Unknown step " + step.key);
                 }
+            } catch (com.superagent.core.error.NeedsUserException e) {
+                run.waitFor(step, step.name + "这一步停下了：" + e.getMessage()); // no retry or stronger model fixes it
             } catch (RuntimeException e) {
                 log.warn("task {}: general step {} failed", run.task().id(), step.key, e);
                 run.fail(step, step.name + "这一步出错：" + e.getMessage());

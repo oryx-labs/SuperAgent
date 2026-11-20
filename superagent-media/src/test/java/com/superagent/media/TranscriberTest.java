@@ -1,6 +1,7 @@
 package com.superagent.media;
 
 import com.superagent.core.chat.RunCredential;
+import com.superagent.core.error.NeedsUserException;
 import com.superagent.core.usage.UsageContext;
 import com.superagent.core.usage.UsageRecorder;
 import com.superagent.platform.provider.CredentialService;
@@ -65,15 +66,37 @@ class TranscriberTest {
     }
 
     @Test
-    void withoutFfmpegAFileTheApiCantTakeIsRefusedWithAWayOut() throws Exception {
-        Transcriber t = new Transcriber(credentials, (c, f, r) -> { throw new AssertionError("not called"); }, null);
+    void withoutFfmpegAFileTheApiCantTakeIsForTheUserToFixAndWithItItIsCutIntoPieces() throws Exception {
         Path big = tmp.resolve("long.mp3");
-        try (var out = Files.newOutputStream(big)) {
-            out.write(new byte[(int) Transcriber.MAX_BYTES + 1]);
+        try (var f = new java.io.RandomAccessFile(big.toFile(), "rw")) {
+            f.setLength(26L * 1024 * 1024); // sparse: nothing is written
         }
-        assertThatThrownBy(() -> t.transcribe(big, null, null)).isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("超过转写单次上限").hasMessageContaining("ffmpeg");
+        Transcriber without = new Transcriber(credentials, (c, f, r) -> { throw new AssertionError("not called"); }, null);
+        assertThat(without.converts()).isFalse();
+        assertThatThrownBy(() -> without.transcribe(big, null, null)).isInstanceOf(NeedsUserException.class)
+                .hasMessageContaining("超过转写单次上限 24 MB").hasMessageContaining("安装 ffmpeg").hasMessageContaining("单声道 mp3");
         Path mov = Files.write(tmp.resolve("clip.mov"), new byte[]{1});
-        assertThatThrownBy(() -> t.transcribe(mov, null, null)).hasMessageContaining("不直接支持 .mov");
+        assertThatThrownBy(() -> without.transcribe(mov, null, null)).isInstanceOf(NeedsUserException.class)
+                .hasMessageContaining("不直接支持 .mov");
+
+        when(credentials.current("codex")).thenReturn(first);
+        List<Path> sent = new ArrayList<>();
+        Ffmpeg fake = new Ffmpeg(Path.of("/nowhere/ffmpeg")) {
+            @Override List<Path> split(Path input, Path dir, int seconds) throws java.io.IOException {
+                assertThat(seconds).isEqualTo(Transcriber.PIECE_SECONDS);
+                return List.of(Files.write(dir.resolve("part000.mp3"), new byte[]{1}), Files.write(dir.resolve("part001.mp3"), new byte[]{2}));
+            }
+        };
+        Transcriber with = new Transcriber(credentials, (c, f, r) -> {
+            sent.add(f.getFileName());
+            return OpenAiTranscriptions.parse("{\"duration\": 1200, \"segments\": [{\"start\": 1.0, \"end\": 2.0, \"text\": \"段\"}]}");
+        }, fake);
+        assertThat(with.converts()).isTrue();
+
+        Transcriber.Result r = with.transcribe(big, null, null);
+
+        assertThat(sent).extracting(Path::toString).containsExactly("part000.mp3", "part001.mp3");
+        assertThat(r.segments()).extracting(Transcriber.Segment::start).containsExactly(1.0, 1201.0);
+        assertThat(r.seconds()).isEqualTo(2400.0);
     }
 }

@@ -57,6 +57,8 @@ class CodingHarnessTest {
         final java.util.ArrayDeque<java.util.function.Function<Path, String>> resolves = new java.util.ArrayDeque<>();
         final List<Boolean> repeats = new ArrayList<>();
         int idleDevelops; // develop turns that change nothing
+        boolean commitNotes; // a later develop turn commits its change itself
+        int quietNotes;   // later develop turns that change nothing
         final String file;
         final String spec;
         TaskStatus status;
@@ -113,8 +115,9 @@ class CodingHarnessTest {
                         return new Turn(spec, BigDecimal.ZERO, false);
                     }
                     case CodingHarness.DEVELOP -> {
-                        if (idleDevelops > 0) {
-                            idleDevelops--;
+                        if (idleDevelops > 0 || (quietNotes > 0 && developTurns >= 1)) {
+                            quietNotes = Math.max(0, quietNotes - 1);
+                            idleDevelops = Math.max(0, idleDevelops - 1);
                             return new Turn("看了一下，没什么要改的", BigDecimal.ZERO, false);
                         }
                         developTurns++;
@@ -123,6 +126,10 @@ class CodingHarnessTest {
                             return new Turn("新建了 " + file + "，自己跑过了，都通过。", BigDecimal.ZERO, false);
                         }
                         Files.writeString(dir.resolve("fix-" + developTurns + ".txt"), "fixed\n");
+                        if (commitNotes) {
+                            new Git(Map.of("PATH", System.getenv("PATH"))).text(dir, "add", "-A");
+                            new Git(Map.of("PATH", System.getenv("PATH"))).text(dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "self");
+                        }
                         String reply = fixReplies.isEmpty() ? "问题都修了" : fixReplies.poll();
                         return new Turn(reply, BigDecimal.ZERO, false);
                     }
@@ -693,6 +700,97 @@ class CodingHarnessTest {
         git(repo, "add", "-A");
         git(repo, "commit", "-q", "-m", "add shared");
         return repo;
+    }
+
+    private static final String NOTE_FAIL = "1. ✅ | 文件在\n2. ❌ | 说明缺失 | 交付说明没写实测结论\n\nVERDICT: FAIL";
+
+    @Test
+    void anAcceptanceThatOnlyMissesTheNoteGetsOneNoteRewriteAndIsAcceptedAgainWithoutFixVerifyOrReview() throws Exception {
+        Task task = task("t-0103-aaaa", repo(), "加 n.txt");
+        Host host = new Host("n.txt");
+        host.accepts.add(NOTE_FAIL);
+        host.quietNotes = 1; // the rewrite touches no file
+        HarnessState s = approved(new CodingHarness(60), task, host);
+
+        assertThat(host.status).isEqualTo(TaskStatus.DONE);
+        assertThat(host.calls(CodingHarness.DEVELOP)).hasSize(2);
+        assertThat(host.calls(CodingHarness.DEVELOP).get(1).prompt()).contains("只补写交付说明", "没写实测结论").doesNotContain("修好");
+        assertThat(host.calls(CodingHarness.VERIFY)).hasSize(1);   // the one fix of the first failing check, none after
+        assertThat(s.rounds).hasSize(2);                           // verify did not run again
+        assertThat(host.calls(CodingHarness.REVIEW)).hasSize(1);
+        assertThat(host.calls(CodingHarness.ACCEPT)).hasSize(2);
+        assertThat(host.calls(CodingHarness.ACCEPT).get(1).prompt()).contains("看了一下，没什么要改的");
+    }
+
+    @Test
+    void aNoteRewriteThatChangesCodeGoesBackThroughTheWholeFlow() throws Exception {
+        Task task = task("t-0104-aaaa", repo(), "加 c.txt");
+        Host host = new Host("c.txt");
+        host.accepts.add(NOTE_FAIL);   // the rewrite turn also writes a file (no idle develop)
+        HarnessState s = approved(new CodingHarness(60), task, host);
+
+        assertThat(host.status).isEqualTo(TaskStatus.DONE);
+        assertThat(s.rounds).hasSize(3);                           // verified again
+        assertThat(host.calls(CodingHarness.REVIEW)).hasSize(2);   // reviewed again
+        assertThat(host.calls(CodingHarness.ACCEPT)).hasSize(2);
+    }
+
+    @Test
+    void aNoteRewriteThatCommitsCodeItselfAlsoGoesBackThroughTheWholeFlow() throws Exception {
+        Task task = task("t-0107-aaaa", repo(), "加 k.txt");
+        Host host = new Host("k.txt");
+        host.accepts.add(NOTE_FAIL);
+        host.commitNotes = true;
+        HarnessState s = approved(new CodingHarness(60), task, host);
+
+        assertThat(host.status).isEqualTo(TaskStatus.DONE);
+        assertThat(s.rounds).hasSize(3);
+        assertThat(host.calls(CodingHarness.REVIEW)).hasSize(2);
+    }
+
+    @Test
+    void anyImplementationIssueOrUnreadableKindTakesTheFullFixFlow() throws Exception {
+        Task task = task("t-0105-aaaa", repo(), "加 m.txt");
+        Host host = new Host("m.txt");
+        host.accepts.add("1. ❌ | 说明缺失 | 没写结论\n2. ❌ | 实现问题 | 内容不对\n\nVERDICT: FAIL");
+        HarnessState s = approved(new CodingHarness(60), task, host);
+
+        assertThat(host.status).isEqualTo(TaskStatus.DONE);
+        assertThat(host.calls(CodingHarness.DEVELOP).get(1).prompt()).contains("修好").doesNotContain("只补写交付说明");
+        assertThat(host.calls(CodingHarness.REVIEW)).hasSize(2);
+
+        var parsed = CodingPrompts.parseAccept("1. ❌ | 类别乱写 | 没写\n2. ❌ | 说明缺失 | 没写结论\n3. ❌ 没有类别",
+                List.of(new HarnessState.Criterion("a", false, null), new HarnessState.Criterion("b", false, null),
+                        new HarnessState.Criterion("c", false, null)));
+        assertThat(parsed.criteria()).extracting(HarnessState.Criterion::noteOnly).containsExactly(false, true, false);
+        assertThat(parsed.criteria().get(1).evidence()).isEqualTo("没写结论");
+    }
+
+    @Test
+    void aNoteRewriteCountsAsARoundForTheStopRules() throws Exception {
+        Task task = task("t-0106-aaaa", repo(), "加 l.txt");
+        Host host = new Host("l.txt");
+        host.limits = new HarnessHost.ReviewLimits(2, 30);
+        host.quietNotes = 5;
+        host.accepts.add(NOTE_FAIL);
+        host.accepts.add(NOTE_FAIL);
+        HarnessState s = approved(new CodingHarness(60), task, host);
+
+        assertThat(host.status).isEqualTo(TaskStatus.NEEDS_CONFIRMATION);
+        assertThat(host.calls(CodingHarness.DEVELOP)).hasSize(2); // one rewrite, then the round limit stops it
+        assertThat(s.stopReason).contains("上限");
+    }
+
+    @Test
+    void theDevelopPromptAsksForASelfCheckAndKeepsToolOutputShort() {
+        HarnessState s = new HarnessState();
+        s.baseBranch = "main";
+        s.verifyCommands = List.of("mvn -q test");
+        assertThat(CodingPrompts.develop(s)).contains("逐条自查", "交付说明", "mvn -q", "tail -n 80", "不要重复读");
+        HarnessState.Round r = new HarnessState.Round(1, Instant.now(), false,
+                List.of(new HarnessState.Check("mvn test", 1, 5, "x".repeat(9000) + "BOOM")), null);
+        assertThat(CodingPrompts.fixReview(List.of(), "验收", null)).contains("tail -n 80", "不要重复读");
+        assertThat(CodingPrompts.fix(s, r)).contains("grep -E", "BOOM").hasSizeLessThan(CodingPrompts.LOG_CHARS + 1500);
     }
 
     private Path repo() throws Exception {

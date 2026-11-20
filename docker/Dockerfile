@@ -24,9 +24,10 @@ ENV PATH=/opt/cli/bin:${JAVA_HOME}/bin:${PATH}
 
 COPY --from=jre /opt/java/openjdk /opt/java/openjdk
 
-# git and ripgrep: what the agent CLIs expect to find; tini: a proper PID 1 for the CLI subprocesses.
+# git and ripgrep: what the agent CLIs expect to find; tini: a proper PID 1 for the CLI subprocesses;
+# ffmpeg: transcription converts and cuts audio with it (any size, any format).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git ripgrep tini procps less \
+ && apt-get install -y --no-install-recommends ca-certificates curl git ripgrep tini procps less ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 # Claude Code refuses to skip permissions as root, so everything runs as this user.

@@ -37,6 +37,15 @@ public interface HarnessHost {
         settle(task, status, progress, output, error);
     }
 
+    /**
+     * {@code escalate}: a failure may move the task up to a stronger model; false when the model is not what failed
+     * (the platform's own work, such as transcription).
+     */
+    default void settle(Task task, TaskStatus status, int progress, String output, String error, boolean repeated,
+                        boolean escalate) {
+        settle(task, status, progress, output, error, repeated);
+    }
+
     /** The owner's token for a connector they authorized (GitHub, GitLab), if any. */
     java.util.Optional<String> connectorToken(String connectorId, String owner);
 

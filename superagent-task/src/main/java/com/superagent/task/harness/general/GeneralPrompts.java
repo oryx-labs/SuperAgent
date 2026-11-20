@@ -179,12 +179,12 @@ public final class GeneralPrompts {
     }
 
     /** Whether the agent stopped to ask the user (a line starting with the marker). */
-    static boolean asks(String text) {
+    public static boolean asks(String text) {
         return text != null && text.lines().anyMatch(l -> l.stripLeading().startsWith(CONFIRM));
     }
 
     /** The question, from the marker on, without the marker itself. */
-    static String question(String text) {
+    public static String question(String text) {
         List<String> lines = text.lines().toList();
         for (int i = 0; i < lines.size(); i++) {
             String l = lines.get(i).stripLeading();

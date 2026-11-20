@@ -559,7 +559,7 @@ public class ChatService implements org.springframework.context.SmartLifecycle {
             String skillIndex = skills.install(session.workspaceDir(),
                     agent == null ? List.of() : skills.forAgent(agent.id(), agent.owner()), mcpGrants != null);
             systemPrompt = joinPrompt(joinPrompt(joinPrompt(characterAndProject(agent, projects), skillIndex),
-                            mcpGrants == null ? null : McpGrants.FILES_HINT),
+                            toolRules(mcpGrants != null)),
                     worksInTasks(agent) ? ChatTaskResults.GUIDE : null);
         }
 
@@ -614,6 +614,11 @@ public class ChatService implements org.springframework.context.SmartLifecycle {
             }
         }));
         return emitter;
+    }
+
+    /** How to use the platform tools, for a chat that has them: hand results over as files, settle what's learnt. */
+    static String toolRules(boolean withTools) {
+        return withTools ? McpGrants.FILES_HINT + "\n\n" + McpGrants.SETTLE_HINT : null;
     }
 
     /** Who the agent is, then the shared context of its project (none outside a project). */

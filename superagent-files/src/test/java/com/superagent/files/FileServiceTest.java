@@ -394,7 +394,7 @@ class FileServiceTest {
         InMemoryFiles store = new InMemoryFiles();
         FileService svc = service(store);
         FileFolderService folders = new FileFolderService(folderStore, svc);
-        FileFolderMcpTools tidy = new FileFolderMcpTools(svc, folders);
+        FileFolderMcpTools tidy = new FileFolderMcpTools(svc, folders, new ProjectFolderService(new ProjectFolderServiceTest.InMemoryProjectFolders(), svc));
         FileManageMcpTools manage = new FileManageMcpTools(svc);
         var json = new com.fasterxml.jackson.databind.ObjectMapper();
         var chat = new com.superagent.runtime.mcp.McpGrants.Grant("t", com.superagent.runtime.mcp.McpGrants.Kind.CHAT, "bob", null, "dev", "s", "m", null);

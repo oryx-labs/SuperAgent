@@ -5,6 +5,8 @@ import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskStatus;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 /** One run of a harness on one task: the state it advances and the ways it can end. */
 public final class HarnessRun {
@@ -15,6 +17,7 @@ public final class HarnessRun {
     private final String reply;
     private Task task;
     private boolean settled;
+    private List<String> held; // non-null: run-log lines kept back until it's known whether this is a repeated stop
 
     public HarnessRun(HarnessHost host, Task task, HarnessState state, String reply, Cancellation cancellation) {
         this.host = host;
@@ -64,7 +67,29 @@ public final class HarnessRun {
     }
 
     public void note(String text) {
-        host.note(task, text);
+        if (held != null) {
+            held.add(text);
+        } else {
+            host.note(task, text);
+        }
+    }
+
+    /**
+     * Before beginning {@code step} again after it stopped on a question: keeps the run log back until the step ends,
+     * so stopping again on the same question (the user said "continue" but nothing changed) logs nothing new.
+     */
+    public void quietIfAskedAgain(HarnessState.Step step) {
+        if (step.status == HarnessState.Status.WAITING && state.askedKey != null && state.askedKey.startsWith(step.key + "\n")) {
+            held = new ArrayList<>();
+        }
+    }
+
+    private void release(boolean write) {
+        List<String> lines = held;
+        held = null;
+        if (write && lines != null) {
+            lines.forEach(l -> host.note(task, l));
+        }
     }
 
     public void begin(HarnessState.Step step) {
@@ -85,6 +110,7 @@ public final class HarnessRun {
     }
 
     public void done(HarnessState.Step step, String note) {
+        release(true);
         state.askedKey = null; // past it: a later stop is news again
         step.status = HarnessState.Status.DONE;
         step.finishedAt = Instant.now();
@@ -108,6 +134,7 @@ public final class HarnessRun {
     public void waitFor(HarnessState.Step step, String ask) {
         String key = step.key + "\n" + ask;
         boolean repeated = key.equals(state.askedKey);
+        release(!repeated);
         step.status = HarnessState.Status.WAITING;
         step.note = ask;
         state.waitingOn = step.key;
@@ -121,14 +148,21 @@ public final class HarnessRun {
     }
 
     public void fail(HarnessState.Step step, String why) {
+        fail(step, why, true);
+    }
+
+    /** {@code escalate}: false when a stronger model wouldn't help (the failure isn't the model's). */
+    public void fail(HarnessState.Step step, String why, boolean escalate) {
+        release(true);
         step.status = HarnessState.Status.FAILED;
         step.note = why;
         save();
         settled = true;
-        host.settle(task, TaskStatus.ERROR, progressAt(step, false), null, why);
+        host.settle(task, TaskStatus.ERROR, progressAt(step, false), null, why, false, escalate);
     }
 
     public void stopped(HarnessState.Step step) {
+        release(true);
         step.status = HarnessState.Status.PENDING;
         save();
         settled = true;
@@ -136,6 +170,7 @@ public final class HarnessRun {
     }
 
     public void finish(String output) {
+        release(true);
         save();
         settled = true;
         host.settle(task, TaskStatus.DONE, 100, output, null);

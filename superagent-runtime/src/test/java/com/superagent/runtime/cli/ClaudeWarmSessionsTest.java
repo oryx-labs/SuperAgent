@@ -49,11 +49,13 @@ class ClaudeWarmSessionsTest {
                 "esac",
                 "echo '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\"}'",
                 "case \"$*\" in",
-                "  *'--input-format stream-json'*) n=0; while read line; do",
-                "    n=$((n+1))",
-                // Like the real CLI in this mode: each result carries the process's running totals.
-                "    echo '{\"type\":\"result\",\"is_error\":false,\"result\":\"pid '$$'\",\"total_cost_usd\":'$n',"
-                        + "\"modelUsage\":{\"sonnet\":{\"inputTokens\":'$((n*100))',\"outputTokens\":'$((n*10))'}}}'",
+                "  *'--input-format stream-json'*) base=0; case \"$*\" in *--resume*) base=5 ;; esac; n=0; while read line; do",
+                "    n=$((n+1)); t=$((n+base))",
+                // Like the real CLI: each turn is one call of 100 in / 10 out costing 1, and each result carries the
+                // conversation's running totals, a resumed one's earlier turns (here 5) included.
+                "    echo '{\"type\":\"assistant\",\"message\":{\"id\":\"msg_'$$'_'$n'\",\"usage\":{\"input_tokens\":100,\"output_tokens\":10}}}'",
+                "    echo '{\"type\":\"result\",\"is_error\":false,\"result\":\"pid '$$'\",\"session_id\":\"s1\",\"total_cost_usd\":'$t',"
+                        + "\"modelUsage\":{\"sonnet\":{\"inputTokens\":'$((t*100))',\"outputTokens\":'$((t*10))'}}}'",
                 "  done ;;",
                 "  *)",
                 answer,
@@ -116,6 +118,27 @@ class ClaudeWarmSessionsTest {
         assertThat(replies.get(2)).isNotEqualTo(replies.get(0));
         assertThat(Files.readAllLines(dir.resolve("starts.log"))).hasSize(2)
                 .allMatch(l -> l.contains("--input-format stream-json"));
+    }
+
+    /** A kept CLI started on a resumed conversation: its totals include turns before it, which aren't billed again. */
+    @Test
+    void aKeptCliOnAResumedConversationBillsEachTurnOnlyItsOwnUsage() throws Exception {
+        runner = new ClaudeCliAgentRunner(fakeClaude().toString(), 30);
+        runner.enableWarm(null, Duration.ofMinutes(10), 5);
+        List<String> billed = new ArrayList<>();
+        List<String> costs = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            runner.runChat(turn("s1", "persona", null), e -> {
+                if (e.type() == AgentEventType.USAGE) {
+                    costs.add(e.payload());
+                } else if (e.type() == AgentEventType.TOKENS) {
+                    Tokens.parse(e.payload()).forEach(t -> billed.add(t.input() + "/" + t.output()));
+                }
+            }, new Cancellation());
+        }
+        assertThat(Files.readAllLines(dir.resolve("starts.log"))).hasSize(1);
+        assertThat(billed).containsExactly("100/10", "100/10", "100/10"); // not 600/60, 100/10, 100/10
+        assertThat(costs).containsExactly("1.0", "1.0"); // the first turn's share of the cost can't be told
     }
 
     @Test

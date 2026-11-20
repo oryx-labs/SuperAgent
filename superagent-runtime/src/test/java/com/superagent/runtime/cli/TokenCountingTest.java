@@ -12,32 +12,10 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Each CLI's tokens come out in one shape, nothing counted twice. Claude Code's and Codex's lines are copied from real
+ * Each CLI's tokens come out in one shape, nothing counted twice (Claude Code's: see ClaudeUsageLedgerTest). Codex's lines are copied from real
  * runs; Qwen Code's, DeepSeek Harness's and Kimi Code's follow their sources.
  */
 class TokenCountingTest {
-
-    @Test
-    void claudeCountsTheWholeRunPerModelAndStillCountsARunStoppedBeforeItsResult() {
-        ClaudeStreamParser parser = new ClaudeStreamParser();
-        String result = "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\",\"total_cost_usd\":0.0458055,"
-                + "\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":35266,\"cache_read_input_tokens\":0,\"output_tokens\":155,"
-                + "\"output_tokens_details\":{\"thinking_tokens\":149},\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":35266}},"
-                + "\"modelUsage\":{\"claude-haiku-4-5\":{\"inputTokens\":908,\"outputTokens\":163,\"cacheReadInputTokens\":0,"
-                + "\"cacheCreationInputTokens\":35266,\"costUSD\":0.0458055,\"thinkingTokens\":149,\"cacheCreationEphemeral1hInputTokens\":0}}}";
-        List<TokenUsage> used = parser.parse(result).orElseThrow().tokens();
-        // modelUsage, not usage: usage covers the main loop only (input 10), modelUsage the whole run (908).
-        assertThat(used).containsExactly(new TokenUsage("claude-haiku-4-5", 908, 0, 35266, 0, 163, 149, 0.0458055));
-        assertThat(parser.unreportedTokens()).isEmpty(); // the result counted it all
-
-        ClaudeStreamParser stopped = new ClaudeStreamParser();
-        String call = "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-opus-4-5\",\"usage\":{\"input_tokens\":12,"
-                + "\"cache_read_input_tokens\":3000,\"cache_creation_input_tokens\":500,\"cache_creation\":{\"ephemeral_1h_input_tokens\":100},\"output_tokens\":%d}}}";
-        stopped.parse(call.formatted(3));
-        stopped.parse(call.formatted(40)); // the same call again, further on: the last one stands
-        stopped.parse(call.replace("msg_1", "msg_2").formatted(7));
-        assertThat(stopped.unreportedTokens()).containsExactly(new TokenUsage("claude-opus-4-5", 24, 6000, 1000, 200, 47, 0, null));
-    }
 
     @Test
     void codexReportsInputWithTheCachedPartInsideSoItIsSplit() {
@@ -46,6 +24,24 @@ class TokenCountingTest {
                 + "\"cache_write_input_tokens\":0,\"output_tokens\":69,\"reasoning_output_tokens\":62}}");
         assertThat(parser.tokens("gpt-5.5")).containsExactly(new TokenUsage("gpt-5.5", 364, 20224, 0, 0, 69, 62, null));
         assertThat(parser.tokens("gpt-5.5").get(0).total()).isEqualTo(20588 + 69);
+    }
+
+    /** {@code exec resume} reports the thread's running total; the rollout's last total before the run is taken off. */
+    @Test
+    void aResumedCodexTurnIsBilledOnlyWhatItAdded(@TempDir Path home) throws Exception {
+        Path day = Files.createDirectories(home.resolve("sessions/2026/11/19"));
+        String thread = "01a1f45e-5b40-7250-a4f1-0376d248f39c";
+        Files.writeString(day.resolve("rollout-2026-11-19T23-13-08-" + thread + ".jsonl"), String.join("\n",
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"" + thread + "\"}}",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":20886,"
+                        + "\"cached_input_tokens\":0,\"output_tokens\":5,\"reasoning_output_tokens\":0}}}}", ""));
+        var before = CodexRollouts.lastTotal(home, thread).orElseThrow();
+
+        CodexStreamParser parser = new CodexStreamParser(); // the real second turn's report
+        parser.parse("{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":41825,\"cached_input_tokens\":20224,"
+                + "\"cache_write_input_tokens\":0,\"output_tokens\":10,\"reasoning_output_tokens\":0}}");
+        assertThat(parser.tokens("gpt-5.5", before)).containsExactly(new TokenUsage("gpt-5.5", 715, 20224, 0, 0, 5, 0, null));
+        assertThat(CodexRollouts.lastTotal(home, "00000000-0000-0000-0000-000000000000")).isEmpty();
     }
 
     @Test

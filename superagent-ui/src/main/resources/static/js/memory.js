@@ -53,8 +53,12 @@ async function loadMemory() {
 
 function renderMemory() {
   const s = memState;
+  const w = s.agentWrite;
   memEl.meta.textContent = s.distilling ? L("mem.distilling")
-    : s.updatedAt ? L("mem.updated", { time: formatDateTime(s.updatedAt) }) : "";
+    : [s.updatedAt ? L("mem.updated", { time: formatDateTime(s.updatedAt) }) : "",
+      w && w.at ? L("mem.agentWrote", { time: formatDateTime(w.at), name: w.byName || w.by || "" }) : "",
+      s.agentSections && s.agentSections.length ? L("mem.agentSections", { list: s.agentSections.join(L("mem.listSep")) }) : "",
+    ].filter(Boolean).join(" · ");
   memEl.edit.hidden = memEl.distill.hidden = !s.canEdit || !memEl.form.hidden;
   memEl.distill.disabled = s.distilling;
   if (s.memory) {

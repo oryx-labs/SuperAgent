@@ -71,7 +71,7 @@ class SuperAgentDelegatesTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> com.superagent.task.TaskKinds.require(json.readTree("{}")))
                 .isInstanceOf(com.superagent.runtime.mcp.McpToolException.class);
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> com.superagent.task.TaskKinds.require(json.readTree("{\"kind\":\"writing\"}")))
-                .hasMessageContaining("coding、general、complex 或 subtitle");
+                .hasMessageContaining("coding、general、complex、subtitle 或 article");
     }
 
     @Test

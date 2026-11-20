@@ -59,7 +59,7 @@ function todoTabItems(filter) {
 }
 
 function renderTodos() {
-  tdel.tabs.querySelectorAll(".model-tab").forEach(t => {
+  tdel.tabs.querySelectorAll(".ws-tab").forEach(t => {
     const f = t.dataset.filter;
     t.classList.toggle("is-active", f === todoFilter);
     if (f === "messages") return; // counted from the message stream (setTodoMessagesCount)
@@ -248,7 +248,7 @@ async function openAgentFromTodo(agentId) {
 }
 
 tdel.tabs.addEventListener("click", e => {
-  const t = e.target.closest(".model-tab");
+  const t = e.target.closest(".ws-tab");
   if (!t) return;
   todoFilter = t.dataset.filter;
   renderTodos();

@@ -137,6 +137,31 @@ class SkillServiceTest {
     }
 
     @Test
+    void genrePacksAndStandardsAreSeededOnceEvenForACompanyThatAlreadyHadTheExamples() {
+        InMemorySkills store = new InMemorySkills();
+        InMemorySettings settings = new InMemorySettings();
+        SkillService svc = service(store, settings, tmp.resolve("skills")); // the examples were seeded earlier
+        assertThat(svc.list("ada")).hasSize(SkillSeeds.ALL.size());
+
+        svc.seedGenresOnce();
+        List<String> names = svc.list("ada").stream().map(SkillDto::name).toList();
+        assertThat(names).contains("技术调研", "技术方案", "公众号文章", "通用长文", "技术画图规范", "去 AI 味写作规范", "证据与引用规范");
+        assertThat(svc.list("ada")).hasSize(SkillSeeds.ALL.size() + GenreSeeds.ALL.size())
+                .allSatisfy(s -> assertThat(s.space()).isEqualTo("company"));
+        assertThat(svc.companySkills()).extracting(Skill::name).contains("技术方案");
+        GenreSeeds.ALL.forEach(seed -> assertThat(seed.content()).contains("##").matches("(?s).*[\\u4e00-\\u9fa5].*"));
+
+        // Editable by an administrator; deleting one doesn't bring it back, and a second start adds nothing.
+        String design = svc.list("root").stream().filter(s -> s.name().equals("技术方案")).findFirst().orElseThrow().id();
+        svc.update(design, new SkillRequest(null, null, null, "改过的内容", null, null), "root");
+        assertThat(svc.get(design, "ada").content()).isEqualTo("改过的内容");
+        svc.delete(design, "root");
+        svc.seedGenresOnce();
+        assertThat(svc.list("ada")).extracting(SkillDto::name).doesNotContain("技术方案");
+        assertThat(svc.list("ada")).hasSize(SkillSeeds.ALL.size() + GenreSeeds.ALL.size() - 1);
+    }
+
+    @Test
     void personalSkillsAreTheOwnersAndTeamSkillsAreGone() {
         InMemorySkills store = new InMemorySkills();
         InMemorySettings settings = new InMemorySettings();

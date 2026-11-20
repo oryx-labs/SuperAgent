@@ -357,8 +357,17 @@ function projectRepoRow(r) {
     [L("common.edit"), () => editProjectRepo(r)],
     [L("common.delete"), () => deleteProjectRepo(r), "link-btn--danger"],
   ] : [];
-  const meta = [r.defaultBranch || L("proj.repoDefaultBranch"), L(r.delivery === "pr" ? "proj.deliveryPr" : "proj.deliveryMerge")].join(" · ");
+  const meta = [r.defaultBranch || L("proj.repoDefaultBranch"), L(r.delivery === "pr" ? "proj.deliveryPr" : "proj.deliveryMerge"),
+    projUpdatedBy(r)].filter(Boolean).join(" · ");
   return projRow(r.name, [r.location, r.purpose].filter(Boolean).join(" — "), meta, actions);
+}
+
+// Who last changed a brief or repository: an agent acting for someone, or the person themselves.
+function projUpdatedBy(x) {
+  if (!x || !x.updatedAt) return "";
+  const when = formatDateTime(x.updatedAt);
+  if (x.agentId) return L("proj.updatedByAgent", { agent: x.agentName || x.agentId, name: x.updatedByName || "", when });
+  return x.updatedBy ? L("proj.updatedByPerson", { name: x.updatedByName || x.updatedBy, when }) : "";
 }
 
 function editProjectRepo(r) {
@@ -421,7 +430,7 @@ function renderProjectBrief(p, brief) {
   if (brief.updatedAt) {
     const meta = document.createElement("p");
     meta.className = "proj-meta";
-    meta.textContent = L("proj.briefUpdated", { name: brief.updatedByName || "", when: formatDateTime(brief.updatedAt) });
+    meta.textContent = projUpdatedBy(brief);
     pjel.brief.appendChild(meta);
   }
   pjel.brief.hidden = false;

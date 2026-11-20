@@ -23,7 +23,65 @@ public record HarnessDto(
         List<ReviewRound> reviews,
         String stopReason,
         General general,
-        List<ConflictRound> conflicts) {
+        List<ConflictRound> conflicts,
+        Article article) {
+
+    /**
+     * A writing task's record: the brief, sources and claims, the outline and when it was confirmed, the first draft
+     * as it was, every platform check and review, the revisions, and the counters that bound the returns.
+     */
+    public record Article(Brief brief, List<Source> sources, List<Claim> claims, String judgement, String outline,
+                          List<String> titles, String thesis, List<Section> sections, boolean outlineApproved,
+                          List<Instant> approvals, String approvedBy, String draftFileId, String draftName,
+                          String draftSnapshot, List<ArticleCheck> checks, List<ArticleReview> reviews,
+                          List<Revision> revisions, int fixRounds, int reviewReturns, int outlineReturns,
+                          int researchReturns, int returns, boolean checkWaived, boolean acceptedAsIs,
+                          String genre, List<Evidence> evidence) {
+    }
+
+    /** One entry of an investigation's evidence log: {@code type} 代码 | 命令 | 数字 | 文档. */
+    public record Evidence(String id, String type, String key, String body) {
+    }
+
+    public record Brief(String genre, String audience, String knows, String purpose, String thesis, int words,
+                        String style, String mustUse, String exclude, String acceptance) {
+    }
+
+    public record Source(String id, String title, String ref, String status, String summary) {
+    }
+
+    public record Claim(String text, List<String> sources, String status) {
+    }
+
+    public record Section(String title, String point, List<String> sources, int words) {
+    }
+
+    /** {@code level}: pass | warn | fail. */
+    public record Issue(String check, String level, String where, String note) {
+    }
+
+    public record ArticleCheck(int round, Instant at, boolean passed, List<Issue> items) {
+    }
+
+    public record Score(int dimension, String name, int score, String quote, String advice) {
+    }
+
+    public record Fact(String statement, String sources, String verdict, String evidence, boolean adjusted) {
+    }
+
+    public record Item(String id, String severity, String type, String text, String where, String from, boolean outline) {
+    }
+
+    public record Response(String id, String action, String note) {
+    }
+
+    public record ArticleReview(int round, Instant at, String editorModel, String checkerModel, List<Score> scores,
+                                int total, List<Item> editor, List<String> titles, List<Fact> facts, List<String> reader,
+                                String retelling, Boolean consistent, List<Item> merged, String route, boolean passed) {
+    }
+
+    public record Revision(int round, Instant at, String from, List<Item> items, List<Response> responses, boolean changed) {
+    }
 
     /**
      * One go at resolving the conflicts of a rebase before delivery: {@code commit} the task's commit it was on (null: a

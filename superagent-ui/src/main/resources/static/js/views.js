@@ -30,7 +30,7 @@ let modelDetailId = null;
 const KNOWN_VIEWS = new Set(["todo", "chat", "files", "tasks", "messages", "projects", "skills", "automation", "connectors", "models",
   "users", "settings", "integrations", "file-storage", "analytics", "usage", "company-usage", "model-prices"]);
 // The "Workspace" dropdown's pages, and the admin pages (shown with the admin sidebar).
-const WORKSPACE_VIEWS = new Set(["projects", "skills", "connectors", "usage"]);
+const WORKSPACE_VIEWS = new Set(["files", "skills", "projects", "connectors", "usage"]);
 const ADMIN_VIEWS = new Set(["settings", "integrations", "file-storage", "analytics", "company-usage", "models", "model-prices", "users"]);
 const DEFAULT_VIEW = "todo"; // the to-do list is home: the first thing to look at each day
 let isAdmin = false;

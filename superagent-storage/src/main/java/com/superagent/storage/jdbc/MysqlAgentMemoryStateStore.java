@@ -19,6 +19,11 @@ public class MysqlAgentMemoryStateStore extends AbstractJdbcAgentMemoryStateStor
               session_failures INT          NOT NULL DEFAULT 0,
               memory           MEDIUMTEXT,
               updated_at       DATETIME(3)  NOT NULL,
+              agent_sections   TEXT,
+              written_by       VARCHAR(255),
+              written_session  VARCHAR(64),
+              written_task     VARCHAR(64),
+              written_at       DATETIME(3),
               PRIMARY KEY (company_id, agent_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """);
@@ -36,6 +41,19 @@ public class MysqlAgentMemoryStateStore extends AbstractJdbcAgentMemoryStateStor
         if (hasMemory == null || hasMemory == 0) { // memory used to live in the knowledge base
             jdbc.execute("ALTER TABLE agent_memory ADD COLUMN memory MEDIUMTEXT");
         }
+        addColumn(jdbc, "agent_sections", "TEXT");
+        addColumn(jdbc, "written_by", "VARCHAR(255)");
+        addColumn(jdbc, "written_session", "VARCHAR(64)");
+        addColumn(jdbc, "written_task", "VARCHAR(64)");
+        addColumn(jdbc, "written_at", "DATETIME(3)");
+    }
+
+    private static void addColumn(JdbcTemplate jdbc, String column, String type) {
+        Integer present = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                + "AND LOWER(table_name) = 'agent_memory' AND LOWER(column_name) = ?", Integer.class, column);
+        if (present == null || present == 0) {
+            jdbc.execute("ALTER TABLE agent_memory ADD COLUMN " + column + " " + type);
+        }
     }
 
     @Override
@@ -48,7 +66,8 @@ public class MysqlAgentMemoryStateStore extends AbstractJdbcAgentMemoryStateStor
         jdbc.update("INSERT INTO agent_memory " + COLUMNS + VALUES
                         + " ON DUPLICATE KEY UPDATE owner=VALUES(owner), summarized_until=VALUES(summarized_until), "
                         + "last_model=VALUES(last_model), session_failures=VALUES(session_failures), memory=VALUES(memory), "
-                        + "updated_at=VALUES(updated_at)",
+                        + "updated_at=VALUES(updated_at), agent_sections=VALUES(agent_sections), written_by=VALUES(written_by), "
+                        + "written_session=VALUES(written_session), written_task=VALUES(written_task), written_at=VALUES(written_at)",
                 params(s));
         return s;
     }

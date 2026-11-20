@@ -47,13 +47,24 @@ public final class HarnessState {
     }
 
     /** {@code agentAdded}: the brief was too vague, so the agent spelled this one out itself. */
-    public record Criterion(String text, boolean met, String evidence, boolean agentAdded) {
+    public record Criterion(String text, boolean met, String evidence, boolean agentAdded, String kind) {
+        /** Why an unmet criterion failed: the hand-over note lacks it, rather than the code. */
+        public static final String NOTE = "note";
+
         public Criterion(String text, boolean met, String evidence) {
-            this(text, met, evidence, false);
+            this(text, met, evidence, false, null);
+        }
+
+        public Criterion(String text, boolean met, String evidence, boolean agentAdded) {
+            this(text, met, evidence, agentAdded, null);
         }
 
         public Criterion judged(boolean met, String evidence) {
-            return new Criterion(text, met, evidence, agentAdded);
+            return new Criterion(text, met, evidence, agentAdded, kind);
+        }
+
+        public boolean noteOnly() {
+            return NOTE.equals(kind);
         }
     }
 
@@ -171,6 +182,8 @@ public final class HarnessState {
     public List<Rebuttal> pendingRebuttals = new ArrayList<>();
     /** Why the loop stopped for the user (null while it runs, or once it passed). */
     public String stopReason;
+    /** The developer's hand-over note (what it did per criterion, and the proof), as the acceptor reads it. */
+    public String handoff;
     public String deliveryResult;
     public String deliveryNote;
     /** Resolving a conflicted rebase before delivery: the commit it is rebasing onto while under way, each go at it. */
@@ -195,6 +208,130 @@ public final class HarnessState {
     public String reply;
     /** What the user said for the next execute round (a reply to a stop, or a follow-up after delivery). */
     public String hint;
+
+    // --- the writing flow's record (null for every other flow) ---
+    public Article article;
+
+    /**
+     * A writing task's record: the brief, its sources and claims, the outline and who confirmed it, the first draft as
+     * it was (Files keeps only the latest), every platform check and review, and the counters that bound the returns.
+     */
+    @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static final class Article {
+
+        public record Brief(String genre, String audience, String knows, String purpose, String thesis, int words,
+                            String style, String mustUse, String exclude, String acceptance) {
+        }
+
+        /** {@code status}: 已读 | 读不到 | 不用. */
+        public record Source(String id, String title, String ref, String status, String summary) {
+        }
+
+        /** {@code status}: 已证实 | 推断 | 未知. */
+        public record Claim(String text, List<String> sources, String status) {
+        }
+
+        public record Section(String title, String point, List<String> sources, int words) {
+        }
+
+        /** One platform check: {@code level} pass | warn | fail. */
+        public record Issue(String check, String level, String where, String note) {
+            public boolean failed() {
+                return "fail".equals(level);
+            }
+        }
+
+        public record CheckRound(int round, Instant at, boolean passed, List<Issue> items) {
+        }
+
+        public record Score(int dimension, String name, int score, String quote, String advice) {
+        }
+
+        /** {@code verdict}: 成立 | 不成立 | 无法核实; {@code adjusted}: the platform didn't find its evidence and changed it. */
+        public record Fact(String statement, String sources, String verdict, String evidence, boolean adjusted) {
+        }
+
+        /**
+         * One entry of the merged revision list: {@code severity} 严重 | 一般 | 建议 (only a suggestion never sends the
+         * draft back); {@code type} 结构 | 论证 | 表达 | 规范 | 事实 | 证据 | 核对 | 用户; {@code outline}: the editor
+         * said the outline itself has to change.
+         */
+        public record Item(String id, String severity, String type, String text, String where, String from, boolean outline) {
+            public boolean blocking() {
+                return !"建议".equals(severity);
+            }
+
+            public Item withId(String i) {
+                return new Item(i, severity, type, text, where, from, outline);
+            }
+        }
+
+        /**
+         * One entry of an investigation's evidence log: {@code type} 代码 | 命令 | 数字 | 文档; {@code key} what it is
+         * (a {@code path:line}, the command, the figure, the document's title, version and link); {@code body} the rest.
+         */
+        public record Evidence(String id, String type, String key, String body) {
+        }
+
+        /** {@code action}: 已改 | 不改 (with the author's reason). */
+        public record Response(String id, String action, String note) {
+        }
+
+        /** {@code route}: pass | revise | outline | research | stop. */
+        public record Review(int round, Instant at, String editorModel, String checkerModel, List<Score> scores,
+                             int total, List<Item> editor, List<String> titles, List<Fact> facts, List<String> reader,
+                             String retelling, Boolean consistent, List<Item> merged, String route, boolean passed) {
+        }
+
+        /** {@code from}: check | review | user. */
+        public record Revision(int round, Instant at, String from, List<Item> items, List<Response> responses,
+                               boolean changed) {
+        }
+
+        public Brief brief;
+        /** The genre asked for when the task was made (a pack's name or id); null: the original, pack-less flow. */
+        public String genre;
+        /** The genre pack the task runs by, with the text the author is given; null while the original flow runs. */
+        public com.superagent.task.harness.article.GenrePack pack;
+        public String guide;
+        public List<Evidence> evidence = new ArrayList<>();
+        public List<Source> sources = new ArrayList<>();
+        public List<Claim> claims = new ArrayList<>();
+        public String judgement;
+        public String outline;
+        public List<String> titles = new ArrayList<>();
+        public String thesis;
+        public List<Section> sections = new ArrayList<>();
+        public boolean outlineApproved;
+        /** When the user confirmed the outline, each time. */
+        public List<Instant> approvals = new ArrayList<>();
+        public String approvedBy;
+        public String draftFileId;
+        public String draftName;
+        public String draftSnapshot;
+        public String draftHash;
+        public List<CheckRound> checks = new ArrayList<>();
+        public List<Review> reviews = new ArrayList<>();
+        public List<Revision> revisions = new ArrayList<>();
+        /** What the next revision has to address, and where it came from (check | review | user). */
+        public List<Item> pending = new ArrayList<>();
+        public String revisionFrom;
+        /** Numbers in the draft the platform couldn't find in the sources, for the fact-checker. */
+        public List<String> untraced = new ArrayList<>();
+        /** The step to run next (the step bar shows where returns went; this is where the run is). */
+        public String next;
+        /** What a reply from the user answers while the task waits: ask | brief | sources | outline | check | review. */
+        public String waitKind;
+        public String hint;
+        public int fixRounds;
+        public int reviewReturns;
+        public int outlineReturns;
+        public int researchReturns;
+        /** The user said to go on with failing checks, or to deliver as it stands. */
+        public boolean checkWaived;
+        public boolean acceptedAsIs;
+    }
 
     /** Anything another flow wants to keep. */
     public Map<String, String> data = new LinkedHashMap<>();

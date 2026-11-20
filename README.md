@@ -77,7 +77,7 @@ The thinking behind SuperAgent, in `docs/prd/` (HTML; open them in a browser):
 
 Every release on the [Releases page](https://github.com/oryx-labs/SuperAgent/releases) has a tarball (`superagent-<version>.tar.gz`, with its `.sha256`) and a Docker image.
 
-**Docker** (the image has Java 21, Node.js 24 and the agent CLIs preinstalled: Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code and DeepSeek Harness):
+**Docker** (the image has Java 21, Node.js 24, ffmpeg and the agent CLIs preinstalled: Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code and DeepSeek Harness):
 
 ```bash
 cp docker/.env.example docker/.env      # set the admin and MySQL passwords
@@ -94,6 +94,7 @@ This starts SuperAgent with MySQL on `http://<host>:18080`. The image is `ghcr.i
 
 - Java 21+ and Maven (to build); Java 21+ on the server (to run)
 - MySQL 8 (the default storage; tables are created on first start)
+- [ffmpeg](https://ffmpeg.org/) on the server's `PATH`, for subtitles and transcription: it converts and cuts audio, so files of any size and format can be transcribed. Without it a file must be under 24 MB and in a format the transcription API takes. Install it with the system's package manager (`brew install ffmpeg`, `apt-get install ffmpeg`, …) or from the **Models** page.
 - The agent CLIs on the server's `PATH`: [Claude Code](https://www.npmjs.com/package/@anthropic-ai/claude-code) and/or [Codex](https://www.npmjs.com/package/@openai/codex). These can also be installed later from the **Models** page.
 
 ### Package

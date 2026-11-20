@@ -54,7 +54,7 @@ public class SkillService {
     private static final Logger log = LoggerFactory.getLogger(SkillService.class);
     private static final Pattern ID = Pattern.compile("[0-9a-fA-F-]{36}");
     private static final int MAX_CONTENT_CHARS = 200_000;
-    private static final String SEEDED = "skill.seeded";
+    private static final String SEEDED = "skill.seeded", GENRES_SEEDED = "skill.genres.seeded";
 
     private final SkillStore store;
     private final SystemSettingStore settings;
@@ -464,5 +464,21 @@ public class SkillService {
             }
         }
         settings.put(SEEDED, "true");
+    }
+
+    /** The writing genre packs and shared standards, once per company, also for one that already had the examples. */
+    @EventListener(CompanyStarted.class)
+    void seedGenresOnce() {
+        if (settings.all().containsKey(GENRES_SEEDED)) {
+            return;
+        }
+        Set<String> have = live().filter(s -> ownerOf(s) == null).map(Skill::name).collect(Collectors.toSet());
+        GenreSeeds.ALL.stream().filter(seed -> !have.contains(seed.name())).forEach(seed -> insert(seed, COMPANY, "system"));
+        settings.put(GENRES_SEEDED, "true");
+    }
+
+    /** The company's enabled skills (not anyone's personal ones): where the writing flow finds its genre packs. */
+    public List<Skill> companySkills() {
+        return live().filter(s -> s.enabled() && ownerOf(s) == null).toList();
     }
 }

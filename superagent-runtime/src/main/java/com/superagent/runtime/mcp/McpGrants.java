@@ -121,8 +121,12 @@ public class McpGrants {
     /** Audio and video (media.TranscribeMcpTools), for chats and tasks. */
     public static final List<String> MEDIA_TOOLS = List.of("mcp__superagent__audio_transcribe");
 
+    /** The project's shared context (project.ProjectMcpTools) and the agent's own memory (agent.AgentMemoryMcpTools). */
+    public static final List<String> SETTLE_TOOLS = List.of("mcp__superagent__project_context_read",
+            "mcp__superagent__project_memory_write", "mcp__superagent__project_update", "mcp__superagent__agent_memory_write");
+
     public static final List<String> WORK_TOOLS = java.util.stream.Stream.of(FILE_TOOLS, SKILL_TOOLS, DOC_TOOLS, HISTORY_TOOLS,
-                    MEDIA_TOOLS)
+                    MEDIA_TOOLS, SETTLE_TOOLS)
             .flatMap(List::stream).toList();
 
     /**
@@ -137,6 +141,15 @@ public class McpGrants {
             + "用户说了放哪个目录就带上 folder（file_list 会列出已有目录）；没说就不填，系统会自动归档。"
             + "任务说明里给了文件 id 时，用 file_get 把它取到工作区再处理。用户要整理文件时，用 file_find 查找他能看到的文件，用 file_move 和 file_folders、file_create_folder 等目录工具操作；只有他明确要求才新建或删除目录。"
             + "只是闲聊、回答问题、给简短建议时直接回复即可，不必建文件。";
+
+    /**
+     * Told to chat and task runs with the platform tools: agents settle what they learn themselves, no confirmation.
+     * The project half comes with the project's context, so an agent outside a project never sees it.
+     */
+    public static final String SETTLE_HINT = "【沉淀规则】读完资料、完成调研或定下约定后，主动把理解沉淀下来，不用先问用户："
+            + "以后对你有用的（项目理解、用户偏好、工作约定、踩过的坑）用 agent_memory_write 记进你自己的记忆；"
+            + "在对话里，用户对你的职责或做事方式有了明确的新要求，用 agent_update 更新你的人设。"
+            + "写完在回复里用一两句话说明改了什么。闲聊和一次性的问答不用沉淀。";
 
     /** Whether agents can reach {@link #selfUrl()}: unchecked until startup's self-check, then ok or error. */
     public record SelfStatus(String state, String error, Instant checkedAt) {

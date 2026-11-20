@@ -21,6 +21,12 @@ final class ProjectContextBuilder {
     record FileEntry(String id, String name, String note) {
     }
 
+    /** The project half of the settling rule (the agent half is McpGrants.SETTLE_HINT): only agents in a project get it. */
+    static final String SETTLE_PROJECT = "【沉淀到项目】读完资料、完成调研或定下约定后，主动沉淀到项目里，不用先问用户："
+            + "决策、约定、踩过的坑用 project_memory_write 记进项目记忆；项目目标、背景、规范、术语或仓库有变化，"
+            + "用 project_update 更新项目说明和项目仓库（只有项目负责人发起的对话或任务能改）；项目要用的资料文件，"
+            + "用 file_move 带 project_folder 放进项目目录。写完在回复里用一两句话说明改了什么。";
+
     private ProjectContextBuilder() {
     }
 
@@ -28,7 +34,8 @@ final class ProjectContextBuilder {
                         List<ProjectMemory> memories, int max) {
         String head = "## 项目共同上下文（项目「" + projectName + "」）\n"
                 + "你在这个项目里，项目里所有 Agent 共享下面这份上下文。用 project_context_read 读完整内容，"
-                + "有新的决策、约定或踩过的坑，用 project_memory_write 记进项目记忆。\n";
+                + "有新的决策、约定或踩过的坑，用 project_memory_write 记进项目记忆。\n"
+                + SETTLE_PROJECT + "\n";
         String full = head + briefSection(brief, Integer.MAX_VALUE) + section("资料索引", indexLines(files, repos, true))
                 + section("项目记忆", memoryLines(memories, true));
         if (full.length() <= max) {

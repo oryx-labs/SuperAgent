@@ -761,7 +761,7 @@ public class TaskService implements TaskRecovery {
         }
         return new CreateTaskRequest(request.title(), (request.brief() == null ? "" : request.brief()) + note, request.source(),
                 request.repo(), request.branch(), request.flow(), request.model(), request.agentType(), request.kind(),
-                request.tier(), request.continuesFrom(), request.delivery(), request.after());
+                request.tier(), request.continuesFrom(), request.delivery(), request.after(), request.genre());
     }
 
     private static String materialName(LinkContent c) {
@@ -851,7 +851,7 @@ public class TaskService implements TaskRecovery {
                 null, who, null, now, null, null, now, null);
         if (harness != null) {
             // Before the task row: the scheduler may pick it up at once, and then must find it a harness task.
-            phaseStore.save(id, harness.start(task, request.delivery()).toJson());
+            phaseStore.save(id, harness.start(task, request.delivery(), blankToNull(request.genre())).toJson());
         } else if (kind == TaskKind.COMPLEX && general() != null) {
             // Its conclusion is checked: only a complex task created with this record is (not one from before).
             phaseStore.save(id, general().startSummary().toJson());
@@ -2198,6 +2198,12 @@ public class TaskService implements TaskRecovery {
 
         @Override
         public void settle(Task task, TaskStatus status, int progress, String output, String error, boolean repeated) {
+            settle(task, status, progress, output, error, repeated, true);
+        }
+
+        @Override
+        public void settle(Task task, TaskStatus status, int progress, String output, String error, boolean repeated,
+                           boolean escalate) {
             Task stored = tasks.findTask(task.id()).orElse(task);
             if (output != null) {
                 writeOutput(stored, output);
@@ -2205,7 +2211,7 @@ public class TaskService implements TaskRecovery {
                 runStore.appendMessage(new ChatMessage(UUID.randomUUID().toString(), task.id(), MessageRole.ASSISTANT,
                         output, Instant.now()));
             }
-            TaskService.this.settle(stored, status, progress, error, BigDecimal.ZERO, repeated);
+            TaskService.this.settle(stored, status, progress, error, BigDecimal.ZERO, repeated, escalate);
         }
 
         @Override
@@ -2436,12 +2442,18 @@ public class TaskService implements TaskRecovery {
 
     /** {@code repeated}: a stop on the question the user was already told about (published as such, not told again). */
     private void settle(Task task, TaskStatus status, int progress, String error, BigDecimal turnCost, boolean repeated) {
+        settle(task, status, progress, error, turnCost, repeated, true);
+    }
+
+    /** {@code escalate}: a failure may move the task up a tier; false when a stronger model wouldn't help. */
+    private void settle(Task task, TaskStatus status, int progress, String error, BigDecimal turnCost, boolean repeated,
+                        boolean escalate) {
         if (interruptedByShutdown.contains(task.id())) {
             log.info("task {} cut short by shutdown: stays RUNNING for the restart to resume", task.id());
             return;
         }
         Task latest = tasks.findTask(task.id()).orElse(task);
-        if (status == TaskStatus.ERROR) {
+        if (status == TaskStatus.ERROR && escalate) {
             BigDecimal spent = (latest.spend() == null ? BigDecimal.ZERO : latest.spend())
                     .add(turnCost == null ? BigDecimal.ZERO : turnCost);
             if (escalate(latest.withSpend(spent), error)) {
@@ -2519,7 +2531,12 @@ public class TaskService implements TaskRecovery {
     private String taskSystemPrompt(Task task, boolean withTools) {
         String index = skills == null ? null : skills.install(task.workspaceDir(), skills.forTask(task.id(), task.createdBy()), withTools);
         String prompt = join(join(doerPrompt(task), projectPrompt(task)), index);
-        return withTools ? join(prompt, McpGrants.FILES_HINT) : prompt;
+        return withToolRules(prompt, withTools);
+    }
+
+    /** With the platform tools a run also learns how to hand results over and to settle what it learns. */
+    static String withToolRules(String prompt, boolean withTools) {
+        return withTools ? join(join(prompt, McpGrants.FILES_HINT), McpGrants.SETTLE_HINT) : prompt;
     }
 
     /**

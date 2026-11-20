@@ -26,7 +26,15 @@ public record CreateTaskRequest(
          */
         String delivery,
         /** Tasks that must be done before this one starts (ids the creator can see); null or empty = none. */
-        java.util.List<String> after) {
+        java.util.List<String> after,
+        /** A writing task's genre: the name of a genre pack (a company skill) or its id; null: the company's fallback, 通用长文. */
+        String genre) {
+
+    public CreateTaskRequest(String title, String brief, String source, String repo, String branch, String flow,
+                             String model, String agentType, String kind, String tier, String continuesFrom, String delivery,
+                             java.util.List<String> after) {
+        this(title, brief, source, repo, branch, flow, model, agentType, kind, tier, continuesFrom, delivery, after, null);
+    }
 
     public CreateTaskRequest(String title, String brief, String source, String repo, String branch, String flow,
                              String model, String agentType, String kind, String tier, String continuesFrom, String delivery) {

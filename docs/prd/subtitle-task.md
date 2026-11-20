@@ -4,9 +4,9 @@
 
 ## 流程（`SubtitleHarness`，7 步）
 
-1. **素材**：从任务说明里的文件 id 取音频（一个任务一段）和参考资料（pptx / pdf / txt / md，按页提取文字）。
+1. **素材**：从任务说明里的文件 id 取音频（一个任务一段）和参考资料（pptx / pdf / txt / md / srt / vtt，按页提取文字；字幕文件去掉序号、时间码和 WEBVTT 头后当纯文本）。
 2. **术语**：资料里的英文术语（缩写、大小写混写、带数字）+ 最便宜的文字模型提取的专名、人名；新词加进项目术语表（不在项目里就加进公司术语表），再合并公司和项目两级。
-3. **听写**：所有可用的听写模型并行，都带术语提示；由平台直接调用，不开大模型会话。
+3. **听写**：所有可用的听写模型并行，都带术语提示；由平台直接调用，不开大模型会话。网络抖动这类偶发错误在这一步内部最多重试 2 次；最终失败也不换文字模型（听写不用文字模型）。
 4. **对齐投票**：以带时间轴的那份作骨架，中文按字、英文按词对齐（不分大小写、不看标点）。各份一致的直接采用，不一致的地方切成分歧段。
 5. **校准**：每个校准模型拿到「各份原文、前后文、对应资料页、术语」，按 JSON 给出每个分歧段的写法。
    - 两个及以上模型：超过全部校准模型数的一半给出同一写法才采用（没回答的算不同意）。
@@ -30,6 +30,8 @@
 
 - **只有 1 个听写模型**：每一条都当作分歧段交给校准，规则同上。
 - **没有带时间轴的听写模型**：建任务时直接报错，提示管理员去配置。
+- **确定性错误**（重试多少次都不会好）：音频超过 24 MB 且服务器没有 ffmpeg、格式不支持、ffmpeg 读不了、没有听写模型或 Key。media 抛 core 的 `NeedsUserException`（`IllegalArgumentException` 的子类），harness 把任务停在「等你确认」，写清原因和办法（装 ffmpeg；或先转成单声道 mp3 压到 24 MB 以内；或去配 Key）。不升档、不进看门狗重试；同一原因再停下时不重复写运行日志、不重复通知（`TaskStatusChanged.repeated`）。用户回复「继续」后从停下的那一步接着做；回复里附上新的音频文件 id 就改用它。普通任务 harness 也认这个异常。
+- **ffmpeg**：平台依赖。「模型」页显示是否安装和版本，可一键安装（macOS 用 brew，Linux 用 apt-get / dnf / yum / apk，需要 root 或免密 sudo）；Docker 镜像已带。转写每次调用时现查，装好不用重启。`subtitle_models` 和字幕确认表会写明服务器有没有 ffmpeg，以及没有时的大小和格式限制。
 
 ## 模型能力（cost 的 `ModelCapabilityService`，接口在 core 的 `ModelCapabilities`）
 
@@ -42,7 +44,7 @@
 | 模块 | 内容 |
 |---|---|
 | core | `media/*` 接口（`SpeechEngine`、`SpeechToText`、`TranscriptAligner`、`ModelCapabilities`、`TextTokens`），`glossary/*` |
-| platform | `SpeechProbes`（随模型检查探测）、`task.subtitle.max-calibrators` 设置 |
+| platform | `SpeechProbes`（随模型检查探测）、`task.subtitle.max-calibrators` 设置、`FfmpegService`（ffmpeg 状态与安装） |
 | media | `OpenAiSpeechEngine`、`SpeechDispatcher`、`SubtitleAligner` |
 | cost | `ModelCapabilityService` |
 | files | `DocumentText`（pptx / pdf / 文本按页取文字） |

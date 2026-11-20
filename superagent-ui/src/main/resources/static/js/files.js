@@ -228,6 +228,7 @@ function markdownDocument(text) {
     scroll.appendChild(table);
   });
   doc.querySelectorAll("a[href]").forEach(a => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+  renderMermaidBlocks(doc);
   if (window.hljs) {
     doc.querySelectorAll('pre code[class*="language-"]').forEach(code => {
       const lang = code.className.match(/language-([\w+#.-]+)/);

@@ -78,6 +78,9 @@ class AgentUpdateMcpToolsTest {
         assertThat(AgentUpdateMcpTools.TOOLS).containsExactly("mcp__superagent__agent_update");
         assertThat(tools.kinds()).containsExactly(McpGrants.Kind.CHAT);
         assertThat(tools.tools()).hasSize(1);
-        assertThat(tools.tools().get(0).get("description").asText()).contains("确认修改吗？");
+        // Agents change settings directly now and say what changed; the SuperAgent rule is still spelled out.
+        String description = tools.tools().get(0).get("description").asText();
+        assertThat(description).doesNotContain("确认修改吗", "用户确认后").contains("不需要先问用户", "说明改了什么",
+                "SuperAgent 的名称和性格不能改");
     }
 }

@@ -38,7 +38,12 @@ abstract class AbstractJdbcAgentMemoryStateStore implements AgentMemoryStateStor
             emptyToNull(rs.getString("last_model")),
             rs.getInt("session_failures"),
             emptyToNull(rs.getString("memory")),
-            instant(rs, "updated_at"));
+            instant(rs, "updated_at"),
+            emptyToNull(rs.getString("agent_sections")),
+            emptyToNull(rs.getString("written_by")),
+            emptyToNull(rs.getString("written_session")),
+            emptyToNull(rs.getString("written_task")),
+            instant(rs, "written_at"));
 
     @Override
     public Optional<AgentMemoryState> find(String agentId) {
@@ -48,12 +53,14 @@ abstract class AbstractJdbcAgentMemoryStateStore implements AgentMemoryStateStor
     }
 
     protected static final String COLUMNS =
-            "(company_id, agent_id, owner, summarized_until, last_model, session_failures, memory, updated_at)";
-    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+            "(company_id, agent_id, owner, summarized_until, last_model, session_failures, memory, updated_at,"
+                    + " agent_sections, written_by, written_session, written_task, written_at)";
+    protected static final String VALUES = " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     protected Object[] params(AgentMemoryState s) {
         return new Object[]{TenantSchema.company(), s.agentId(), nn(s.owner()), utc(s.summarizedUntil()), nn(s.lastModel()),
-                s.sessionFailures(), nn(s.memory()), utc(s.updatedAt())};
+                s.sessionFailures(), nn(s.memory()), utc(s.updatedAt()), nn(s.agentSections()), nn(s.writtenBy()),
+                nn(s.writtenSession()), nn(s.writtenTask()), utc(s.writtenAt())};
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

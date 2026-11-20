@@ -1,6 +1,7 @@
 package com.superagent.task.harness.subtitle;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.superagent.core.error.NeedsUserException;
 import com.superagent.core.media.ModelCapabilities;
 import com.superagent.core.media.SpeechModel;
 import com.superagent.core.media.SpeechToText;
@@ -68,6 +69,9 @@ public class SubtitleHarness implements TaskHarness {
             "mov", "aac", "opus", "mkv");
     private static final Pattern FILE_ID = Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     private static final int PROMPT_TERMS_CHARS = 800, TERM_TEXT_CHARS = 12000;
+    /** Another try for a speech model that failed on something passing (the network); not for what the user must fix. */
+    static final int TRANSCRIBE_RETRIES = 2;
+    long retryPauseMillis = 3000;
 
     private final ModelCapabilities capabilities;
     private final SpeechToText speech;
@@ -123,6 +127,16 @@ public class SubtitleHarness implements TaskHarness {
         if (speechModels.size() == 1) {
             sb.append("只有一个听写模型：没有交叉比对，每一条都交给校准模型看，拿不准的列为疑点。\n");
         }
+        SpeechToText.Limits limits = speech.limits();
+        if (limits.converts()) {
+            sb.append("ffmpeg：服务器已安装，任意大小和格式的音视频都会自动转码切段。\n");
+        } else {
+            sb.append("⚠️ ffmpeg：服务器没有安装。音频须在 ").append(limits.maxBytes() / 1048576).append(" MB 以内");
+            if (!limits.formats().isEmpty()) {
+                sb.append("、格式限 ").append(String.join("、", limits.formats().stream().sorted().toList()));
+            }
+            sb.append("；超出的请先转成单声道 mp3 并压到限额以内，或请管理员在「模型」页安装 ffmpeg。\n");
+        }
         return sb.toString();
     }
 
@@ -149,32 +163,37 @@ public class SubtitleHarness implements TaskHarness {
             reply = null;
             try {
                 switch (step.key) {
-                    case MATERIAL -> material(run, step);
+                    case MATERIAL -> material(run, step, answer);
                     case TERMS -> terms(run, step);
-                    case TRANSCRIBE -> transcribe(run, step);
+                    case TRANSCRIBE -> transcribe(run, step, answer);
                     case ALIGN -> align(run, step);
                     case CALIBRATE -> calibrate(run, step);
                     case CHECK -> check(run, step, answer);
                     case DELIVER -> deliver(run, step);
                     default -> throw new IllegalStateException("Unknown step " + step.key);
                 }
+            } catch (NeedsUserException e) {
+                run.waitFor(step, step.name + "这一步停下了：" + e.getMessage()); // no retry or other model fixes it
             } catch (RuntimeException e) {
                 log.warn("task {}: subtitle step {} failed", run.task().id(), step.key, e);
-                run.fail(step, step.name + "这一步出错：" + e.getMessage());
+                // Its models are chosen per step from what can run, not the task's own: moving that up changes nothing.
+                run.fail(step, step.name + "这一步出错：" + e.getMessage(), false);
             }
         }
     }
 
     // --- steps ---
 
-    private void material(HarnessRun run, HarnessState.Step step) {
+    /** {@code answer}: the user's reply when it stopped here, which may name the audio's file id. */
+    private void material(HarnessRun run, HarnessState.Step step, String answer) {
+        run.quietIfAskedAgain(step);
         run.begin(step);
         Path dir = dir(run.state());
         SubtitleRecord r = SubtitleRecord.read(dir);
         Task task = run.task();
         List<String> problems = new ArrayList<>();
         Set<String> ids = new LinkedHashSet<>();
-        Matcher m = FILE_ID.matcher(task.brief() == null ? "" : task.brief());
+        Matcher m = FILE_ID.matcher((task.brief() == null ? "" : task.brief()) + "\n" + (answer == null ? "" : answer));
         while (m.find()) {
             ids.add(m.group());
         }
@@ -207,12 +226,13 @@ public class SubtitleHarness implements TaskHarness {
                     problems.add(got.getFileName() + " 读不出文字：" + e.getMessage());
                 }
             } else {
-                run.note("资料 " + got.getFileName() + " 读不了文字（支持 pptx、pdf、txt、md），没有用上");
+                run.note("资料 " + got.getFileName() + " 读不了文字（支持 pptx、pdf、txt、md、srt、vtt），没有用上");
             }
         }
         problems.forEach(p -> run.note("✕ " + p));
         if (r.audio == null) {
-            run.fail(step, "任务说明里没有找到音频文件（Files 里的文件 id）" + (problems.isEmpty() ? "" : "：" + String.join("；", problems)));
+            run.waitFor(step, "任务说明里没有找到能用的音频文件（Files 里的文件 id）" + (problems.isEmpty() ? "" : "：" + String.join("；", problems))
+                    + "。请把音频传到「文件」，回复里附上它的文件 id");
             return;
         }
         r.write(dir);
@@ -261,27 +281,62 @@ public class SubtitleHarness implements TaskHarness {
                 + r.termsAdded + " 个 · 共 " + r.terms.size() + " 个");
     }
 
-    private void transcribe(HarnessRun run, HarnessState.Step step) {
+    /** {@code answer}: the user's reply when it stopped here; an audio file id in it replaces the audio (re-encoded, say). */
+    private void transcribe(HarnessRun run, HarnessState.Step step, String answer) {
+        run.quietIfAskedAgain(step);
         run.begin(step);
         Path dir = dir(run.state());
         SubtitleRecord r = SubtitleRecord.read(dir);
         Task task = run.task();
+        Matcher ids = FILE_ID.matcher(answer == null ? "" : answer);
+        List<String> unusable = new ArrayList<>();
+        boolean replaced = false;
+        while (!replaced && ids.find()) {
+            Path got;
+            try {
+                got = run.host().fetch(task, ids.group(), dir);
+            } catch (RuntimeException e) {
+                unusable.add(ids.group() + "：" + e.getMessage());
+                continue;
+            }
+            if (AUDIO.contains(extension(got))) {
+                r.audio = dir.relativize(got).toString();
+                r.audioName = got.getFileName().toString();
+                r.write(dir);
+                run.note("改用你给的音频 " + r.audioName);
+                replaced = true;
+            } else {
+                unusable.add(got.getFileName() + " 不是音频或视频");
+            }
+        }
+        if (!replaced && !unusable.isEmpty()) {
+            // The user meant another file: running the old audio instead would go against what they asked.
+            run.waitFor(step, "你给的文件没法用作音频：" + String.join("；", unusable)
+                    + "。请确认文件 id（在「文件」里），回复里附上正确的 id；要继续用原来的音频，回复「继续」即可");
+            return;
+        }
         List<SpeechModel> models = capabilities.transcribers();
         if (models.stream().noneMatch(SpeechModel::timed)) {
-            run.fail(step, NO_TRANSCRIBER);
+            run.waitFor(step, NO_TRANSCRIBER.replace("模型检查通过后再建这个任务", "模型检查通过后回复「继续」"));
             return;
         }
         String prompt = speechPrompt(r.termList());
         Path audio = dir.resolve(r.audio);
+        String unfit = unfit(audio, speech.limits());
+        if (unfit != null) {
+            run.waitFor(step, unfit);
+            return;
+        }
         String company = TenantContext.require();
         UsageContext paying = new UsageContext(task.createdBy(), UsageContext.SOURCE_TRANSCRIBE, null, task.id(), null, "codex");
         run.note("同时听写：" + String.join("、", models.stream().map(SpeechModel::model).toList()));
         ExecutorService pool = Executors.newFixedThreadPool(Math.min(models.size(), 4));
         List<Transcript> got = new ArrayList<>();
         List<String> failed = new ArrayList<>();
+        Set<String> forTheUser = new LinkedHashSet<>();
         try {
             List<Future<Transcript>> jobs = models.stream().map(m -> pool.submit(() ->
-                    TenantContext.callChecked(company, () -> speech.transcribe(m, audio, prompt, null, paying)))).toList();
+                    TenantContext.callChecked(company, () -> transcribeRetrying(m, audio, prompt, paying)))).toList();
             for (int i = 0; i < models.size(); i++) {
                 try {
                     Transcript t = jobs.get(i).get();
@@ -290,6 +345,9 @@ public class SubtitleHarness implements TaskHarness {
                             + String.format(Locale.ROOT, " · $%.3f", t.usd()));
                 } catch (java.util.concurrent.ExecutionException e) {
                     String why = e.getCause() == null ? e.getMessage() : e.getCause().getMessage();
+                    if (e.getCause() instanceof NeedsUserException) {
+                        forTheUser.add(why);
+                    }
                     failed.add(models.get(i).model() + "：" + why);
                     run.note("✕ " + models.get(i).model() + " 听写失败：" + why);
                 }
@@ -315,7 +373,12 @@ public class SubtitleHarness implements TaskHarness {
             }
         }
         if (skeleton < 0) {
-            run.fail(step, "带时间轴的听写没有成功：" + String.join("；", failed));
+            if (!forTheUser.isEmpty()) {
+                // The same reason from every engine is said once; another try or model can't help until it's dealt with.
+                run.waitFor(step, "听写没法进行：" + String.join("；", forTheUser));
+            } else {
+                run.fail(step, "带时间轴的听写没有成功：" + String.join("；", failed), false);
+            }
             return;
         }
         r.transcripts = got;
@@ -324,6 +387,45 @@ public class SubtitleHarness implements TaskHarness {
         r.write(dir);
         run.done(step, got.size() + " 份" + (failed.isEmpty() ? "" : "（" + failed.size() + " 个失败）")
                 + String.format(Locale.ROOT, " · $%.2f", usd));
+    }
+
+    /** A passing failure (the network, a 5xx) is tried again a couple of times; what the user must fix is not. */
+    private Transcript transcribeRetrying(SpeechModel m, Path audio, String prompt, UsageContext paying) throws Exception {
+        for (int attempt = 0; ; attempt++) {
+            try {
+                return speech.transcribe(m, audio, prompt, null, paying);
+            } catch (NeedsUserException e) {
+                throw e;
+            } catch (RuntimeException | IOException e) {
+                if (attempt >= TRANSCRIBE_RETRIES) {
+                    throw e;
+                }
+                log.info("transcribing with {} failed ({}), trying again", m.model(), e.getMessage());
+                Thread.sleep(retryPauseMillis * (attempt + 1));
+            }
+        }
+    }
+
+    /** Why this file can't go to the speech models as it is on this server, or null when it can. */
+    static String unfit(Path audio, SpeechToText.Limits limits) {
+        if (limits.converts()) {
+            return null;
+        }
+        long size;
+        try {
+            size = Files.size(audio);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        String ext = extension(audio);
+        String why = size > limits.maxBytes()
+                ? String.format(Locale.ROOT, "音频有 %.0f MB，超过转写单次上限 %d MB", size / 1048576.0, limits.maxBytes() / 1048576)
+                : !limits.formats().isEmpty() && !limits.formats().contains(ext)
+                ? "转写不直接支持 ." + ext + " 格式（支持 " + String.join("、", limits.formats().stream().sorted().toList()) + "）"
+                : null;
+        return why == null ? null : "听写没法进行：" + why + "，服务器上又没有 ffmpeg，没法自动转码切段。办法：请管理员在「模型」页安装 ffmpeg"
+                + "（装好不用重启）；或者先把它转成单声道 mp3 并压到 " + limits.maxBytes() / 1048576 + " MB 以内，重新传到「文件」，"
+                + "回复里附上新文件的 id。处理好后回复「继续」";
     }
 
     private void align(HarnessRun run, HarnessState.Step step) {

@@ -210,12 +210,6 @@ final class ClaudeWarmSessions {
         private final StringBuilder stderrTail = new StringBuilder();
         private String conversation;
         private volatile Instant lastUsed = Instant.now();
-        /**
-         * What the CLI has reported so far. Its results carry running totals for the whole process (cost and per-model
-         * tokens), so each turn is billed the difference from the last one, not the total again.
-         */
-        private final Map<String, com.superagent.core.usage.TokenUsage> reported = new java.util.HashMap<>();
-        private double reportedCost;
 
         Kept(Process process, String fingerprint, String token, Path settings, Path mcp, String sessionId) {
             this.process = process;
@@ -279,14 +273,8 @@ final class ClaudeWarmSessions {
                         sink.emit(event(request, seq, AgentEventType.TOOL_RESULT, "Permission denied: " + denial));
                     }
                     sink.emit(event(request, seq, e.type(), e.payload()));
-                    if (e.costUsd() != null) {
-                        double turnCost = Math.max(0, e.costUsd() - reportedCost);
-                        reportedCost = Math.max(reportedCost, e.costUsd());
-                        sink.emit(event(request, seq, AgentEventType.USAGE, String.valueOf(turnCost)));
-                    }
-                    if (!e.tokens().isEmpty()) {
-                        Tokens.emit(sink, request.sessionId(), seq.getAndIncrement(),
-                                ClaudeCliAgentRunner.withModel(sinceLastResult(e.tokens()), request.model()));
+                    if (e.usage() != null) {
+                        runner.emitUsage(request, sink, seq, e.usage());
                     }
                     if (e.type() == AgentEventType.RESULT || e.type() == AgentEventType.ERROR) {
                         return Outcome.DONE; // the turn is over; the CLI waits for the next message
@@ -321,30 +309,9 @@ final class ClaudeWarmSessions {
                     grants.release(standing);
                 }
                 if (said) {
-                    // Stopped or broken before its result: what the calls so far used is still billed.
-                    Tokens.emit(sink, request.sessionId(), seq.getAndIncrement(),
-                            ClaudeCliAgentRunner.withModel(parser.unreportedTokens(), request.model()));
+                    runner.emitUnreported(request, sink, seq, parser, conversation);
                 }
             }
-        }
-
-        /** This turn's share of the running totals a result reports. */
-        private List<com.superagent.core.usage.TokenUsage> sinceLastResult(List<com.superagent.core.usage.TokenUsage> totals) {
-            List<com.superagent.core.usage.TokenUsage> turn = new ArrayList<>();
-            for (var t : totals) {
-                var before = reported.get(String.valueOf(t.model()));
-                reported.put(String.valueOf(t.model()), t);
-                var d = before == null ? t : new com.superagent.core.usage.TokenUsage(t.model(),
-                        Math.max(0, t.input() - before.input()), Math.max(0, t.cacheRead() - before.cacheRead()),
-                        Math.max(0, t.cacheWrite() - before.cacheWrite()), Math.max(0, t.cacheWrite1h() - before.cacheWrite1h()),
-                        Math.max(0, t.output() - before.output()), Math.max(0, t.reasoning() - before.reasoning()),
-                        t.cliCostUsd() == null ? null
-                                : Math.max(0, t.cliCostUsd() - (before.cliCostUsd() == null ? 0 : before.cliCostUsd())));
-                if (!d.nothingUsed()) {
-                    turn.add(d);
-                }
-            }
-            return turn;
         }
 
         private String message(AgentRunRequest request) throws IOException {

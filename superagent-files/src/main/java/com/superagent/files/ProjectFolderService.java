@@ -141,6 +141,26 @@ public class ProjectFolderService {
         return f.isPresent();
     }
 
+    /**
+     * An agent puts a file {@code user} (who set the run off) can see into the project its run works in, at {@code path}
+     * (blank = the root): the same rules as {@link #mount}, they must be in the project and it must not be archived.
+     * Returns where it went, for the reply.
+     */
+    public String mountByAgent(String user, String agentId, String taskId, String fileId, String path) {
+        String projectId = projectOfRun(agentId, taskId)
+                .orElseThrow(() -> new IllegalArgumentException("你不在任何项目里，没有项目目录可放"));
+        files.get(fileId, user);
+        projects().requireWritable(projectId, user);
+        String folder = ROOT;
+        if (path != null && !path.isBlank() && !path.strip().equals("/")) {
+            folder = byPath(projectId, path).map(ProjectFolder::id).orElseThrow(() -> new IllegalArgumentException(
+                    "项目里没有目录「" + path.strip() + "」，现有目录：" + (paths(projectId).isEmpty() ? "（无，只能放在项目根目录）"
+                            : String.join("、", paths(projectId)))));
+        }
+        store.place(projectId, fileId, folder, "agent");
+        return folder.equals(ROOT) ? "项目根目录" : "项目目录「" + path.strip() + "」";
+    }
+
     public List<String> paths(String projectId) {
         Map<String, ProjectFolder> all = byId(projectId);
         return all.values().stream().map(f -> path(f, all)).sorted().toList();

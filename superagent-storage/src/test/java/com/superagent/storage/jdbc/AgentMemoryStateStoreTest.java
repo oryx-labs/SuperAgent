@@ -20,13 +20,19 @@ class AgentMemoryStateStoreTest {
         MysqlAgentMemoryStateStore store = new MysqlAgentMemoryStateStore(new JdbcTemplate(new DriverManagerDataSource(
                 "jdbc:h2:mem:memory-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant now = Instant.now();
-        store.save(new AgentMemoryState("a1", "ada", null, "sonnet", 0, "likes tea", now));
+        store.save(new AgentMemoryState("a1", "ada", null, "sonnet", 0, "likes tea", now)
+                .writtenByAgent("## 用户偏好\n- likes tea", "用户偏好", "ada", "s1", null));
+        assertThat(store.find("a1")).hasValueSatisfying(s -> {
+            assertThat(s.agentSections()).isEqualTo("用户偏好");
+            assertThat(s.writtenSession()).isEqualTo("s1");
+            assertThat(s.writtenAt()).isNotNull();
+        });
 
         TenantContext.run(InCompany.OTHER, () -> {
             assertThat(store.find("a1")).isEmpty();
             store.save(new AgentMemoryState("a1", "eve", null, "sonnet", 0, "likes coffee", now.plusSeconds(1)));
             store.delete("a1");
         });
-        assertThat(store.find("a1")).hasValueSatisfying(s -> assertThat(s.memory()).isEqualTo("likes tea"));
+        assertThat(store.find("a1")).hasValueSatisfying(s -> assertThat(s.memory()).contains("likes tea"));
     }
 }

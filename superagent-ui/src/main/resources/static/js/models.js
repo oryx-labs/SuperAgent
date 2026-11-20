@@ -28,6 +28,9 @@ Object.assign(api, {
   installNode: () => fetch("/api/v1/providers/node/install", { method: "POST" }).then(r => r.json()),
   installLog: id => fetch("/api/v1/providers/" + id + "/install-log").then(kbJson),
   nodeInstallLog: () => fetch("/api/v1/providers/node/install-log").then(kbJson),
+  ffmpeg: () => fetch("/api/v1/providers/ffmpeg").then(r => r.json()),
+  installFfmpeg: () => fetch("/api/v1/providers/ffmpeg/install", { method: "POST" }).then(r => r.json()),
+  ffmpegInstallLog: () => fetch("/api/v1/providers/ffmpeg/install-log").then(kbJson),
 });
 
 const mel = {
@@ -95,6 +98,7 @@ async function loadModels() {
   mel.empty.hidden = list.length > 0;
   list.forEach(p => mel.rows.appendChild(modelRow(p)));
   renderNodeRuntime(list);
+  renderFfmpeg();
 }
 
 // ---------- Node.js runtime (what the npm-based CLIs install and run on) ----------
@@ -142,6 +146,41 @@ async function renderNodeRuntime(providers) {
 }
 
 nel.logBtn.addEventListener("click", () => openInstallLog("Node.js", api.nodeInstallLog));
+
+// ---------- ffmpeg (subtitles and transcription convert and cut audio with it) ----------
+const fel = {
+  state: document.getElementById("ffmpegState"),
+  hint: document.getElementById("ffmpegHint"),
+  btn: document.getElementById("ffmpegInstallBtn"),
+  logBtn: document.getElementById("ffmpegLogBtn"),
+};
+
+async function renderFfmpeg() {
+  let f;
+  try { const res = await api.ffmpeg(); f = res && res.data; } catch (e) { return; }
+  if (!f) return;
+  fel.state.className = "status-badge node-card__state " + (f.installing ? "is-model-installing"
+    : f.installed ? "is-model-ok" : "is-model-no_auth");
+  fel.state.textContent = f.installing ? L("ffmpeg.installing")
+    : !f.installed ? L("ffmpeg.missing")
+    : (f.version || L("ffmpeg.installed"));
+  fel.hint.textContent = f.installing && f.step ? f.step
+    : f.error ? L("ffmpeg.failed", { msg: f.error })
+    : f.installed ? L("ffmpeg.okHint", { path: f.path || "" })
+    : L("ffmpeg.missingHint");
+  fel.hint.classList.toggle("is-error", !!f.error && !f.installed);
+  fel.btn.hidden = f.installed || f.installing;
+  fel.btn.disabled = f.installing;
+  fel.logBtn.hidden = !f.hasLog;
+}
+
+fel.logBtn.addEventListener("click", () => openInstallLog("ffmpeg", api.ffmpegInstallLog));
+fel.btn.addEventListener("click", async () => {
+  fel.btn.disabled = true;
+  try { await api.installFfmpeg(); } catch (e) { showToast(e.message, true); }
+  renderFfmpeg();
+  openInstallLog("ffmpeg", api.ffmpegInstallLog);
+});
 
 // ---------- install / upgrade log ----------
 const iel = {

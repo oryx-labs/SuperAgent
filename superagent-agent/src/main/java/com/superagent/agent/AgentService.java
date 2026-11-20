@@ -351,8 +351,17 @@ public class AgentService {
     /** Members may read the agent's memory; only its owner changes it. */
     public AgentMemoryDto memory(String id, String user) {
         Agent agent = requireViewer(id, user);
+        com.superagent.core.agent.AgentMemoryState w = memory.lastAgentWrite(agent);
+        AgentMemoryDto.AgentWrite write = w == null ? null : new AgentMemoryDto.AgentWrite(w.writtenBy(),
+                w.writtenBy() == null ? null : displayName(w.writtenBy()), w.writtenSession(), w.writtenTask(), w.writtenAt());
         return new AgentMemoryDto(memory.read(agent), memory.updatedAt(agent), Objects.equals(agent.owner(), user),
-                memory.distilling(agent.id()));
+                memory.distilling(agent.id()), memory.agentSections(agent), write);
+    }
+
+    /** The agent writes a category of its own memory in a run {@code user} set off (who must be able to see it). */
+    public String writeOwnMemory(Agent agent, String user, String category, String content, boolean replace,
+                                 String sessionId, String taskId) {
+        return memory.writeSection(agent, category, content, replace, user, sessionId, taskId);
     }
 
     public AgentMemoryDto editMemory(String id, String user, String text) {

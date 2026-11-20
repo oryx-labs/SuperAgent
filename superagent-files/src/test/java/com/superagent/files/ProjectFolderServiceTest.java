@@ -169,8 +169,35 @@ class ProjectFolderServiceTest {
         assertThat(folders.placeByAgent("p1", f.id(), "规格")).isTrue();
         assertThat(folders.trees("bob").get(0).placements()).containsEntry(f.id(), specs.id());
         assertThat(folders.placeByAgent("p1", f.id(), "没有")).isFalse();
+        // An agent puts an existing file into its project's folders with file_move, for a member, while it's open.
+        FileFolderMcpTools tools = new FileFolderMcpTools(svc, personal, folders);
+        com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+        WorkFile h = svc.writeText(chat("bob", "dev", "m3"), "纪要.md", "x", null);
+        var bobInDev = new com.superagent.runtime.mcp.McpGrants.Grant("t", com.superagent.runtime.mcp.McpGrants.Kind.CHAT, "bob",
+                null, "dev", "s1", "m3", null);
+        assertThat(tools.call(bobInDev, "file_move", json.readTree("{\"file_id\":\"" + h.id() + "\",\"project_folder\":\"规格\"}"))
+                .text()).contains("规格");
+        assertThat(shared.placements("p1")).containsEntry(h.id(), specs.id());
+        tools.call(bobInDev, "file_move", json.readTree("{\"file_id\":\"" + h.id() + "\",\"project_folder\":\"\"}"));
+        assertThat(shared.placements("p1")).containsEntry(h.id(), "");
+        assertThatThrownBy(() -> tools.call(bobInDev, "file_move",
+                json.readTree("{\"file_id\":\"" + h.id() + "\",\"project_folder\":\"没有\"}"))).hasMessageContaining("项目里没有目录");
+        when(projects.projectOfTask("t3")).thenReturn(Optional.of("p3")); // bob isn't in p3
+        var bobsTaskInP3 = new com.superagent.runtime.mcp.McpGrants.Grant("t", com.superagent.runtime.mcp.McpGrants.Kind.TASK, "bob",
+                "t3", null, null, null, null);
+        assertThatThrownBy(() -> tools.call(bobsTaskInP3, "file_move",
+                json.readTree("{\"file_id\":\"" + h.id() + "\",\"project_folder\":\"\"}")))
+                .isInstanceOf(com.superagent.runtime.mcp.McpToolException.class);
+        assertThat(shared.placements("p3")).doesNotContainKey(h.id());
+
         archived.add("p2");
         when(projects.projectArchived("p2")).thenReturn(true);
+        when(projects.projectOfTask("t2")).thenReturn(Optional.of("p2"));
+        var adasTaskInP2 = new com.superagent.runtime.mcp.McpGrants.Grant("t", com.superagent.runtime.mcp.McpGrants.Kind.TASK, "ada",
+                "t2", null, null, null, null);
+        assertThatThrownBy(() -> tools.call(adasTaskInP2, "file_move",
+                json.readTree("{\"file_id\":\"" + f.id() + "\",\"project_folder\":\"\"}")))
+                .isInstanceOf(com.superagent.runtime.mcp.McpToolException.class).hasMessageContaining("archived");
         assertThat(folders.placeByAgent("p2", f.id(), "设计")).isFalse(); // an archived project takes nothing, agents included
         assertThatThrownBy(() -> folders.unmount("ada", f.id(), "p2")).isInstanceOf(com.superagent.core.error.ConflictException.class);
         assertThatThrownBy(() -> folders.rename("ada", design.id(), "x")).isInstanceOf(com.superagent.core.error.ConflictException.class);

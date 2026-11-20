@@ -16,7 +16,22 @@ public final class TaskConfirmPrompt {
             用户没说清时，推荐最近用过的或最像的那个，并在「可选项」里列出其他候选；远程仓库要开 PR 而用户没授权对应平台时，标 ❓ 并说明先去「连接」页授权。
             你在项目里时，优先用项目配置的仓库；一个任务只改一个仓库，要改多个仓库就拆成每个仓库一个任务。
             列字幕任务的表格前先调用 subtitle_models，把这次会用的听写模型和校准模型原样填进表格；它说没有可用的听写模型时标 ❓，告诉用户要管理员先配置。
+            它的 ffmpeg 那一行也填进表格：服务器没有 ffmpeg 时标 ⚠️，写明音频的大小和格式限制，超出的先转成单声道 mp3 并压到限额以内，或请管理员在「模型」页安装 ffmpeg。
             """;
+
+    // The writing task's table. The genre row and the article_genres tool exist only for an agent's own chat (create_task).
+    private static String article(boolean genre) {
+        return """
+                写作任务（一篇长文）的表格换成这样：
+                | 任务标题 | … | … |
+                | 任务类型 | ✅ 已确定 | 写作 |
+                %s| 要做什么 | … | 目标读者、写作目的、目标字数 |
+                | 代码位置 | … | 技术调研、技术方案这类要读代码的文体填这台服务器上的仓库路径；其他文体写「无」 |
+                | 资料 | … | 文件 id 和链接；没有就写「无」 |
+                | 交付物 | ✅ 已确定 | Markdown 终稿（存进「文件」） |
+                | 依赖 | … | 要等哪个任务完成才开始；不用等就写「无」 |
+                """.formatted(genre ? "| 文体 | … | 你按内容选一个并写一句理由，用户可以改：技术调研 / 技术方案 / 公众号文章 / 通用长文 / 公司自建的文体（列表格前先调用 article_genres 看有哪些）；拿不准选「通用长文」。创建时填进 genre |\n" : "");
+    }
 
     private static final String DEPENDENCIES = "列表格之前先调用 list_tasks，看有没有正在跑或在排队（pending、running、needs_confirmation）、"
             + "而且要改同一个代码仓库或同一个模块的任务。有的话，新任务要等它做完再开始，免得两边同时改同一处到合并时冲突："
@@ -48,7 +63,7 @@ public final class TaskConfirmPrompt {
                 | 参数 | 状态 | 内容 |
                 | --- | --- | --- |
                 | 任务标题 | ✅ 已确定 或 ❓ 待确认 | … |
-                | 任务类型 | … | 普通（一次做完）/ 编码（PRD → 开发 → 验收）/ 复杂（拆成子任务并行，最后汇总）/ 字幕（音频做成字幕） |
+                | 任务类型 | … | 普通（一次做完）/ 编码（PRD → 开发 → 验收）/ 复杂（拆成子任务并行，最后汇总）/ 字幕（音频做成字幕）/ 写作（一篇长文：提纲要你确认，平台核对加独立评审） |
                 %2$s| 要做什么 | … | 目标、范围、要求 |
                 | 资料 | … | 用户给的文件路径和链接原样写上；Files 里的文件写名称和 id；没有就写「无」 |
                 | 交付物 | … | 产出什么、什么格式 |
@@ -72,9 +87,11 @@ public final class TaskConfirmPrompt {
                 | 参考资料 | … | PPT、讲义等，用来认专有名词和术语：名称和 id；没有就写「无」 |
                 | 听写模型 | … | 几个、哪些（全部同时听写，对齐投票） |
                 | 校准模型 | … | 几个、哪些（只改各份听写不一致的地方，多数一致才采用，其余列为疑点） |
+                | ffmpeg | … | 服务器有没有；没有时标 ⚠️，写明音频的大小和格式限制 |
                 | 交付物 | ✅ 已确定 | srt 字幕 + 疑点清单（存进「文件」） |
                 | 依赖 | … | 要等哪个任务完成才开始；不用等就写「无」 |
                 字幕任务的说明里要写上音频和参考资料的文件 id。
+                %5$s写作任务的「要做什么」里写清目标读者、写作目的和目标字数，资料写文件 id 和链接。技术调研、技术方案要读仓库，所以「代码位置」必填；文体不合适时平台会在需求这一步停下来问用户。
 %3$s                编码任务的「下一步」可以给多个可选回复，例如：👉 下一步：回复「确认」或「确认，交付方式改为开 PR」或「确认，代码位置用 /path/other」（每个都会变成按钮，最多 3 个）。
                 建任务时平台会先检查代码位置、分支和授权；检查不过不会创建，把原因告诉用户并更新表格。
 
@@ -101,7 +118,7 @@ public final class TaskConfirmPrompt {
                 再用一两句话概括这个任务会做什么。最后写：「当前已成功提交，**不代表已经完成**。结果出来后会发到这个对话里。」
                 如果创建失败，照实说明原因和用户可以怎么做，不要说已创建。
                 """.formatted(tool, extraRows == null || extraRows.isBlank() ? "" : extraRows.strip() + "\n",
-                        "create_task".equals(tool) ? CODING_TARGETS : "", DEPENDENCIES);
+                        "create_task".equals(tool) ? CODING_TARGETS : "", DEPENDENCIES, article("create_task".equals(tool)));
     }
 
     /** The per-turn reminder, next to the user's words. */

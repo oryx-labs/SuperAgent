@@ -14,6 +14,8 @@ import com.superagent.core.task.Task;
 import com.superagent.core.task.TaskSource;
 import com.superagent.core.task.TaskStatus;
 import com.superagent.core.tenant.TenantContext;
+import com.superagent.core.error.NeedsUserException;
+import com.superagent.core.usage.UsageContext;
 import com.superagent.glossary.GlossaryService;
 import com.superagent.task.harness.HarnessHost;
 import com.superagent.task.harness.HarnessRun;
@@ -60,22 +62,38 @@ class SubtitleHarnessTest {
     private TranscriptAligner.Alignment alignment;
     private final MemoryGlossary terms = new MemoryGlossary();
     private SubtitleHarness harness;
+    /** Per call, by model: what goes wrong before an answer (null: nothing). */
+    private Function<String, RuntimeException> trouble = m -> null;
+    private SpeechToText.Limits limits = new SpeechToText.Limits(true, Long.MAX_VALUE, java.util.Set.of());
 
     @BeforeEach
     void setUp() {
         TenantContext.set("acme");
-        SpeechToText speech = (m, file, prompt, language, paying) -> {
-            synchronized (transcribed) {
-                transcribed.add(m.model() + " | " + prompt);
+        SpeechToText speech = new SpeechToText() {
+            @Override
+            public Transcript transcribe(SpeechModel m, Path file, String prompt, String language, UsageContext paying) {
+                synchronized (transcribed) {
+                    transcribed.add(m.model() + " | " + prompt);
+                }
+                RuntimeException wrong = trouble.apply(m.model());
+                if (wrong != null) {
+                    throw wrong;
+                }
+                Transcript t = heard.get(m.model());
+                if (t == null) {
+                    throw new IllegalStateException("HTTP 500");
+                }
+                return t;
             }
-            Transcript t = heard.get(m.model());
-            if (t == null) {
-                throw new IllegalStateException("HTTP 500");
+
+            @Override
+            public Limits limits() {
+                return limits;
             }
-            return t;
         };
         TranscriptAligner aligner = (versions, skeleton) -> alignment;
         harness = new SubtitleHarness(caps, speech, aligner, new GlossaryService(terms));
+        harness.retryPauseMillis = 0;
     }
 
     @AfterEach
@@ -200,6 +218,98 @@ class SubtitleHarnessTest {
         assertThat(host.delivered).containsKey("第02课.srt");
     }
 
+    @Test
+    void aFileTooBigWithoutFfmpegStopsOnceWithoutAnotherModelAndGoesOnFromTranscribingWhenFixed() {
+        caps.speech = List.of(new SpeechModel("openai", "whisper-1", true), new SpeechModel("openai", "gpt-4o-transcribe", false));
+        String tooBig = "这个文件有 26 MB，超过转写单次上限 24 MB，服务器上又没有 ffmpeg，没法自动转码切段。办法：请管理员在「模型」页安装 ffmpeg";
+        trouble = m -> new NeedsUserException(tooBig);
+        Host host = new Host();
+
+        HarnessState s = drive(host, null);
+
+        assertThat(host.status).isEqualTo(TaskStatus.NEEDS_CONFIRMATION);
+        assertThat(host.escalated).isEmpty();
+        assertThat(s.steps).extracting(st -> st.status).containsExactly(HarnessState.Status.DONE, HarnessState.Status.DONE,
+                HarnessState.Status.WAITING, HarnessState.Status.PENDING, HarnessState.Status.PENDING, HarnessState.Status.PENDING,
+                HarnessState.Status.PENDING);
+        assertThat(transcribed).hasSize(2); // each engine once: no retry of what can't get better
+        assertThat(host.asks).singleElement().satisfies(a -> assertThat(a).contains("ffmpeg", "24 MB").containsOnlyOnce("26 MB"));
+        assertThat(host.prompts).isEmpty(); // no model was asked to make up for the transcription
+
+        drive(host, s, "继续"); // nothing changed: stops again, quietly
+        assertThat(host.status).isEqualTo(TaskStatus.NEEDS_CONFIRMATION);
+        assertThat(host.repeated).containsExactly(false, true);
+        assertThat(host.asks).hasSize(1);
+        assertThat(host.notes).filteredOn(n -> n.startsWith("同时听写")).hasSize(1);
+        assertThat(host.notes).filteredOn(n -> n.contains("听写失败")).hasSize(2);
+
+        // A mistyped or deleted file id: it stops and says so, rather than failing or running the old audio.
+        drive(host, s, "已转好，用这个 33333333-3333-3333-3333-333333333333");
+        assertThat(host.status).isEqualTo(TaskStatus.NEEDS_CONFIRMATION);
+        assertThat(host.asks).last().asString().contains("没法用作音频", "33333333-3333-3333-3333-333333333333");
+        assertThat(transcribed).hasSize(4); // not one call more
+
+        trouble = m -> null;
+        heard.put("whisper-1", timed("大家好"));
+        heard.put("gpt-4o-transcribe", untimed("gpt-4o-transcribe"));
+        alignment = new TranscriptAligner.Alignment(List.of("whisper-1", "gpt-4o-transcribe"),
+                List.of(new TranscriptAligner.AlignedCue(0, 0, 3, List.of(Span.agreed("大家好")))));
+        drive(host, s, "继续");
+
+        assertThat(host.status).isEqualTo(TaskStatus.DONE);
+        assertThat(host.notes).filteredOn(n -> n.startsWith("── 素材") || n.startsWith("── 术语")).hasSize(2); // not done again
+        assertThat(host.notes).filteredOn(n -> n.startsWith("── 听写")).hasSize(3); // the first stop, the bad file id (news), the go that worked
+        assertThat(host.delivered.get("第02课.srt")).contains("大家好");
+        assertThat(host.escalated).isEmpty();
+    }
+
+    @Test
+    void aPassingFailureIsTriedAgainWithinTheStepAndOneThatLastsFailsWithoutAStrongerModel() {
+        caps.speech = List.of(new SpeechModel("openai", "whisper-1", true));
+        heard.put("whisper-1", timed("大家好"));
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        trouble = m -> calls.incrementAndGet() == 1 ? new IllegalStateException("转写失败：connection reset") : null;
+        Host host = new Host();
+
+        drive(host, null);
+
+        assertThat(host.status).isEqualTo(TaskStatus.DONE);
+        assertThat(transcribed).hasSize(2);
+
+        transcribed.clear();
+        trouble = m -> new IllegalStateException("转写失败：HTTP 503");
+        Host failing = new Host();
+        drive(failing, null);
+        assertThat(failing.status).isEqualTo(TaskStatus.ERROR);
+        assertThat(transcribed).hasSize(1 + SubtitleHarness.TRANSCRIBE_RETRIES);
+        assertThat(failing.escalated).containsExactly(false);
+    }
+
+    @Test
+    void subtitlesGivenAsReferenceGiveTheirTermsAndTheConfirmTableSaysWhetherThereIsFfmpeg() throws Exception {
+        caps.speech = List.of(new SpeechModel("openai", "whisper-1", true));
+        heard.put("whisper-1", timed("大家好"));
+        Host host = new Host();
+        host.reference = "第02课_字幕.srt";
+
+        drive(host, null);
+
+        assertThat(host.status).isEqualTo(TaskStatus.DONE);
+        assertThat(terms.list("p1")).extracting(GlossaryTerm::term).contains("LoRA", "GPT-4o");
+        assertThat(transcribed).allMatch(p -> p.contains("LoRA"));
+
+        assertThat(harness.models()).contains("ffmpeg：服务器已安装");
+        limits = new SpeechToText.Limits(false, 24L * 1024 * 1024, java.util.Set.of("mp3", "wav"));
+        assertThat(harness.models()).contains("⚠️ ffmpeg：服务器没有安装", "24 MB", "mp3、wav", "安装 ffmpeg");
+        Path big = tmp.resolve("big.mp3");
+        try (var f = new java.io.RandomAccessFile(big.toFile(), "rw")) {
+            f.setLength(26L * 1024 * 1024);
+        }
+        assertThat(SubtitleHarness.unfit(big, limits)).contains("26 MB", "24 MB", "单声道 mp3", "继续");
+        assertThat(SubtitleHarness.unfit(Files.write(tmp.resolve("a.mov"), new byte[]{1}), limits)).contains(".mov");
+        assertThat(SubtitleHarness.unfit(Files.write(tmp.resolve("a.mp3"), new byte[]{1}), limits)).isNull();
+    }
+
     // --- the parts on their own ---
 
     @Test
@@ -311,6 +421,10 @@ class SubtitleHarnessTest {
     private final class Host implements HarnessHost {
         Function<String, String> calibrate = m -> "{}";
         String rebreak = "{}";
+        String reference = "第02课.pptx";
+        final List<String> notes = new ArrayList<>();
+        final List<Boolean> repeated = new ArrayList<>();
+        final List<Boolean> escalated = new ArrayList<>();
         int rebreaks;
         int asksBefore;
         final List<String> prompts = new ArrayList<>();
@@ -338,10 +452,17 @@ class SubtitleHarnessTest {
 
         @Override
         public Path fetch(Task task, String fileId, Path dir) {
+            if (!fileId.equals(AUDIO_ID) && !fileId.equals(DECK_ID)) {
+                throw new IllegalArgumentException("找不到文件");
+            }
             try {
                 Path up = Files.createDirectories(dir.resolve("uploads"));
                 if (fileId.equals(AUDIO_ID)) {
                     return Files.write(up.resolve("第02课.mp3"), new byte[]{1});
+                }
+                if (reference.endsWith(".srt")) {
+                    return Files.writeString(up.resolve(reference), "1\n00:00:00,000 --> 00:00:03,000\nLoRA 低秩适配\n\n"
+                            + "2\n00:00:03,000 --> 00:00:06,000\nGPT-4o 与 RAG\n");
                 }
                 Path deck = up.resolve("第02课.pptx");
                 try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(deck))) {
@@ -376,10 +497,23 @@ class SubtitleHarnessTest {
         }
         @Override public Task workIn(Task task, String dir) { return task; }
         @Override public void progress(Task task, int percent) { }
-        @Override public void note(Task task, String text) { }
+        @Override public void note(Task task, String text) { notes.add(text); }
         @Override public void ask(Task task, String text) { asks.add(text); }
         @Override public void tell(Task task, String text) { }
         @Override public void save(Task task, HarnessState state) { }
+        @Override public void settle(Task task, TaskStatus s, int progress, String output, String error, boolean again,
+                                     boolean escalate) {
+            if (s == TaskStatus.ERROR) {
+                status = s;
+                escalated.add(escalate);
+                return;
+            }
+            settle(task, s, progress, output, error, again);
+        }
+        @Override public void settle(Task task, TaskStatus s, int progress, String output, String error, boolean again) {
+            repeated.add(again);
+            settle(task, s, progress, output, error);
+        }
         @Override public void settle(Task task, TaskStatus s, int progress, String output, String error) {
             status = s;
             this.output = output;

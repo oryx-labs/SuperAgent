@@ -122,8 +122,27 @@ public class CodexStreamParser {
      * 20588 in, 20224 of them cached) and reasoning inside output, so input is split and reasoning kept as a part.
      */
     public java.util.List<com.superagent.core.usage.TokenUsage> tokens(String model) {
+        return tokens(model, null);
+    }
+
+    /**
+     * What the run used when its report is the thread's running total ({@code exec resume}): the report less
+     * {@code before}, the thread's total ahead of the run (see {@link CodexRollouts}).
+     */
+    public java.util.List<com.superagent.core.usage.TokenUsage> tokens(String model, JsonNode before) {
+        long[] t = tokens.clone();
+        if (before != null) {
+            t[0] -= Tokens.n(before, "input_tokens");
+            t[1] -= Tokens.n(before, "cached_input_tokens");
+            t[2] -= Tokens.n(before, "cache_write_input_tokens");
+            t[3] -= Tokens.n(before, "output_tokens");
+            t[4] -= Tokens.n(before, "reasoning_output_tokens");
+            for (int i = 0; i < t.length; i++) {
+                t[i] = Math.max(0, t[i]);
+            }
+        }
         return java.util.List.of(Tokens.fromTotalInput(model == null || model.isBlank() ? "default" : model,
-                tokens[0], tokens[1], tokens[2], tokens[3], tokens[4]));
+                t[0], t[1], t[2], t[3], t[4]));
     }
 
     private void announceTool(JsonNode item, List<ParsedEvent> out) {

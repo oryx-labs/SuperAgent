@@ -1,9 +1,11 @@
 package com.superagent.media;
 
 import com.superagent.core.chat.RunCredential;
+import com.superagent.core.error.NeedsUserException;
 import com.superagent.core.usage.UsageContext;
 import com.superagent.core.usage.UsageRecorder;
 import com.superagent.platform.provider.CredentialService;
+import com.superagent.platform.provider.FfmpegService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -17,12 +19,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
  * Speech to text with timings, on the company's own OpenAI keys (the Codex pool: the same account, and its failover).
  * The platform makes the call, so the key never reaches an agent's shell. Long or unusual files are cut into mono mp3
- * pieces with ffmpeg first, when the server has it; each piece's timings are shifted back onto the whole.
+ * pieces with ffmpeg first, when the server has it (looked up on each call, so one installed meanwhile is used at
+ * once); each piece's timings are shifted back onto the whole.
  */
 @Service
 public class Transcriber {
@@ -95,18 +99,27 @@ public class Transcriber {
 
     private final CredentialService credentials;
     private final Api api;
-    private final Ffmpeg ffmpeg; // null: the server has none, so only files the API takes as they are
+    private final Supplier<Ffmpeg> ffmpeg; // gives null: the server has none, so only files the API takes as they are
     private UsageRecorder usage; // null in tests
 
     @Autowired
-    public Transcriber(CredentialService credentials) {
-        this(credentials, new OpenAiTranscriptions(), Ffmpeg.find());
+    public Transcriber(CredentialService credentials, FfmpegService ffmpeg) {
+        this(credentials, new OpenAiTranscriptions(), () -> ffmpeg.find().map(Ffmpeg::new).orElse(null));
     }
 
     Transcriber(CredentialService credentials, Api api, Ffmpeg ffmpeg) {
+        this(credentials, api, () -> ffmpeg);
+    }
+
+    private Transcriber(CredentialService credentials, Api api, Supplier<Ffmpeg> ffmpeg) {
         this.credentials = credentials;
         this.api = api;
         this.ffmpeg = ffmpeg;
+    }
+
+    /** Whether the server has ffmpeg now: without it a file goes in as it is, at most 24 MB in one of the formats. */
+    public boolean converts() {
+        return ffmpeg.get() != null;
     }
 
     @Autowired(required = false)
@@ -116,7 +129,7 @@ public class Transcriber {
 
     /**
      * {@code language}: ISO-639-1 ("zh", "en"), or null to detect it. {@code paying}: who the minutes go on. A problem
-     * the user can fix (no key, a file it can't take) is an {@link IllegalArgumentException}.
+     * the user must fix (no key, a file it can't take) is a {@link NeedsUserException}.
      */
     public Result transcribe(Path file, String language, UsageContext paying) throws IOException {
         return transcribe(MODEL, file, null, language, paying);
@@ -125,8 +138,9 @@ public class Transcriber {
     /** {@code prompt}: terms to spell right (null: none). */
     public Result transcribe(String model, Path file, String prompt, String language, UsageContext paying) throws IOException {
         if (!USD_PER_MINUTE.containsKey(model)) {
-            throw new IllegalArgumentException("不支持的转写模型：" + model);
+            throw new NeedsUserException("不支持的转写模型：" + model);
         }
+        Ffmpeg ffmpeg = this.ffmpeg.get();
         String ext = extension(file);
         long size = Files.size(file);
         boolean timed = timed(model);
@@ -139,10 +153,11 @@ public class Transcriber {
             } else if (size <= MAX_BYTES && ACCEPTED.contains(ext)) {
                 pieces = List.of(file);
             } else if (ffmpeg == null) {
-                throw new IllegalArgumentException((size > MAX_BYTES
+                throw new NeedsUserException((size > MAX_BYTES
                         ? String.format(Locale.ROOT, "这个文件有 %.0f MB，超过转写单次上限 24 MB", size / 1048576.0)
                         : "转写不直接支持 ." + ext + " 格式（支持 " + String.join("、", ACCEPTED.stream().sorted().toList()) + "）")
-                        + "。服务器装上 ffmpeg 后平台会自动转换、切段；现在可以先把它转成 mp3 并压到 24 MB 以内再转写");
+                        + "，服务器上又没有 ffmpeg，没法自动转码切段。办法：请管理员在「模型」页安装 ffmpeg（装好不用重启）；"
+                        + "或者先把它转成单声道 mp3 并压到 24 MB 以内再上传。处理好后回复「继续」");
             } else {
                 scratch = Files.createTempDirectory("sa-transcribe-");
                 pieces = ffmpeg.split(file, scratch, PIECE_SECONDS);
@@ -199,7 +214,8 @@ public class Transcriber {
         try {
             choice = credentials.current(PROVIDER);
         } catch (CredentialService.NoCompanyKeyException e) {
-            throw new IllegalArgumentException("语音转写用的是公司的 OpenAI Key（「模型」里 OpenAI Codex 那一组），还没有配置：请管理员先添加");
+            throw new NeedsUserException("语音转写用的是公司的 OpenAI Key（「模型」里 OpenAI Codex 那一组），还没有配置：请管理员先添加，"
+                    + "然后回复「继续」");
         }
         for (int attempt = 0; ; attempt++) {
             try {

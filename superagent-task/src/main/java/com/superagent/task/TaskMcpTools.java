@@ -7,6 +7,7 @@ import com.superagent.api.task.TaskDto;
 import com.superagent.core.link.UnreadableMaterialsException;
 import com.superagent.runtime.mcp.McpGrants;
 import com.superagent.runtime.mcp.McpToolException;
+import com.superagent.task.harness.article.GenrePacks;
 import com.superagent.runtime.mcp.McpToolProvider;
 import com.superagent.runtime.mcp.McpToolResult;
 import org.springframework.stereotype.Component;
@@ -27,9 +28,16 @@ import static com.superagent.runtime.mcp.McpTools.tool;
 public class TaskMcpTools implements McpToolProvider {
 
     private final TaskService tasks;
+    private final GenrePacks genres;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TaskMcpTools(TaskService tasks, GenrePacks genres) {
+        this.tasks = tasks;
+        this.genres = genres;
+    }
 
     public TaskMcpTools(TaskService tasks) {
-        this.tasks = tasks;
+        this(tasks, GenrePacks.none());
     }
 
     @Override
@@ -46,6 +54,7 @@ public class TaskMcpTools implements McpToolProvider {
                                 opt("branch", "string", "从哪个分支开始：本地仓库不填就用它当前所在的分支；远程仓库不填就用默认分支"),
                                 opt("delivery", "string", "编码任务做完怎么交付：merge = 合并回本地分支（本地仓库默认）；pr = 推送新分支并开 PR/MR（远程仓库默认）"),
                                 req("kind", "string", TaskKinds.DESCRIPTION),
+                                opt("genre", "string", TaskKinds.GENRE_DESCRIPTION),
                                 opt("continues_from", "string", "接着哪个任务做（任务 id，用 list_tasks 查）：新任务会等它完成，拿到它的结论，在它的基础上继续，而不是从头来"),
                                 opt("after", "string", TaskWaits.DESCRIPTION),
                                 opt("materials", "string", "要读的外部资料链接（参数表「资料」那一行里的链接），多个用换行分开；"
@@ -53,8 +62,10 @@ public class TaskMcpTools implements McpToolProvider {
                         "title", "brief", "kind"),
                 tool("coding_targets", "编码任务能在哪里做：你所在项目配置的仓库（优先用）、允许的本地代码目录和其中的 git 仓库、用户最近用过的代码位置、是否授权了 GitHub/GitLab。"
                         + "列编码任务的参数表之前先调用，用它填「代码位置」并给出可选项。", props(), (String[]) null),
-                tool("subtitle_models", "字幕任务这次会用哪些模型：听写模型（几个、哪些、哪个带时间轴）和校准模型（几个、哪些）。"
-                        + "列字幕任务的参数表之前先调用，把结果填进「听写模型」「校准模型」两行；没有可用的听写模型时如实告诉用户要管理员先配置。",
+                tool("article_genres", "写作任务有哪些文体可选：公司的文体包（名字、适用场景、是否要读代码仓库）。"
+                        + "列写作任务的参数表之前先调用，按内容选一个填进「文体」一行；没有合适的就选「通用长文」。", props(), (String[]) null),
+                tool("subtitle_models", "字幕任务这次会用哪些模型：听写模型（几个、哪些、哪个带时间轴）和校准模型（几个、哪些），以及服务器有没有 ffmpeg（没有时音频的大小和格式限制）。"
+                        + "列字幕任务的参数表之前先调用，把结果填进「听写模型」「校准模型」「ffmpeg」三行；没有可用的听写模型时如实告诉用户要管理员先配置。",
                         props(), (String[]) null),
                 tool("list_tasks", "列出当前用户的任务：状态、进度、代码仓库，以及在等哪些任务完成。", props(), (String[]) null),
                 tool("get_task", "查看某个任务的状态与进度，以及它在等哪些任务。", props(req("id", "string", "任务 id")), "id"),
@@ -77,7 +88,7 @@ public class TaskMcpTools implements McpToolProvider {
                             str(args, "title"), str(args, "brief"), "web_chat",
                             strOrNull(args, "repo"), strOrNull(args, "branch"), null, null, null,
                             TaskKinds.require(args), null, strOrNull(args, "continues_from"), strOrNull(args, "delivery"),
-                            TaskWaits.parse(args)),
+                            TaskWaits.parse(args), TaskKinds.genre(args)),
                             grant.owner(), grant.agentId(), grant.sessionId(), grant.messageId(),
                             materials == null ? null : List.of(materials));
                 } catch (UnreadableMaterialsException e) {
@@ -97,6 +108,11 @@ public class TaskMcpTools implements McpToolProvider {
                         + "结果出来后会自动发到这个对话里。现在用一两句话告诉用户任务名和要做什么，然后结束这一轮，不要在对话里接着做。";
             }
             case "coding_targets" -> tasks.codingTargets(grant.owner(), grant.agentId());
+            case "article_genres" -> {
+                List<String> list = genres.describe();
+                yield list.isEmpty() ? "公司还没有文体包，写作任务按通用写法执行。" : "可选的文体：\n- " + String.join("\n- ", list)
+                        + "\n没有合适的就选「" + GenrePacks.FALLBACK + "」。";
+            }
             case "subtitle_models" -> tasks.subtitleModels();
             case "list_tasks" -> {
                 List<TaskDto> list = tasks.list(grant.owner());

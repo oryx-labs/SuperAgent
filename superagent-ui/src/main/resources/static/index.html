@@ -16,20 +16,20 @@
     <!-- Main menu: the everyday areas, the workspace tools in a dropdown, and administration for admins. -->
     <nav class="topnav" aria-label="Main">
       <a class="nav__item" href="#todo" data-view="todo"><span data-i18n="nav.todo">To-do</span><span class="nav__badge" id="todoBadge" hidden></span></a>
-      <a class="nav__item is-active" href="#chat" data-view="chat"><span data-i18n="nav.agents">Agents</span></a>
-      <a class="nav__item" href="#tasks" data-view="tasks"><span data-i18n="nav.tasks">Tasks</span></a>
+      <a class="nav__item is-active" href="#chat" data-view="chat"><span data-i18n="nav.agents">Chat</span></a>
+      <a class="nav__item" href="#tasks" data-view="tasks"><span data-i18n="nav.tasks">Work</span></a>
       <a class="nav__item" href="#automation" data-view="automation"><span data-i18n="nav.automation">Automation</span></a>
-      <a class="nav__item" href="#files" data-view="files"><span data-i18n="nav.files">Resources</span></a>
       <div class="topmenu" id="workspaceMenu">
         <button class="topmenu__btn" type="button" id="workspaceBtn" aria-haspopup="menu" aria-expanded="false">
-          <span data-i18n="nav.workspace">Workspace</span><span class="topmenu__current" id="workspaceCurrent"></span>
+          <span data-i18n="nav.workspace">Resources</span><span class="topmenu__current" id="workspaceCurrent"></span>
           <span class="user__caret" aria-hidden="true"></span>
         </button>
         <div class="topmenu__panel" role="menu">
           <nav class="nav" aria-label="Workspace">
+            <a class="nav__item" href="#files" data-view="files"><span class="nav__dot"></span><span data-i18n="nav.files">Files</span></a>
+            <a class="nav__item" href="#skills" data-view="skills"><span class="nav__dot"></span><span data-i18n="nav.skills">Skills</span></a>
             <a class="nav__item" href="#projects" data-view="projects"><span class="nav__dot"></span><span data-i18n="nav.projects">Projects</span></a>
             <a class="nav__item" href="#connectors" data-view="connectors"><span class="nav__dot"></span><span data-i18n="nav.connectors">Connectors</span></a>
-            <a class="nav__item" href="#skills" data-view="skills"><span class="nav__dot"></span><span data-i18n="nav.skills">Skills</span></a>
             <a class="nav__item" href="#usage" data-view="usage"><span class="nav__dot"></span><span data-i18n="nav.usage">Usage</span></a>
           </nav>
         </div>
@@ -157,17 +157,22 @@
     </aside>
 
     <section class="admin" data-pane="todo" aria-label="To-do" hidden>
+      <!-- To-do on the left like the Work page: what needs the user, then the inbox of received messages. -->
+      <div class="todo-layout">
+      <aside class="work-side todo-side" id="todoTabs" role="tablist" aria-label="To-do">
+        <div class="ws-head" data-i18n="todo.sideTodo">To-do</div>
+        <button type="button" class="ws-item ws-tab is-active" data-filter="all"><span class="ws-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13.5 6.5 5h11l2.5 8.5V19H4z"/><path d="M4 13.5h4.5l1 2h5l1-2H20"/></svg></span><span class="ws-item__label" data-i18n="todo.tabAll">All</span><b class="ws-item__count"></b></button>
+        <button type="button" class="ws-item ws-tab" data-filter="confirm"><span class="ws-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4M12 17v.5"/></svg></span><span class="ws-item__label" data-i18n="todo.tabConfirm">To confirm</span><b class="ws-item__count"></b></button>
+        <button type="button" class="ws-item ws-tab" data-filter="action"><span class="ws-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="2.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span><span class="ws-item__label" data-i18n="todo.tabAction">To do</span><b class="ws-item__count"></b></button>
+        <button type="button" class="ws-item ws-tab" data-filter="done"><span class="ws-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span><span class="ws-item__label" data-i18n="todo.tabDone">Done</span><b class="ws-item__count"></b></button>
+        <button type="button" class="ws-item ws-tab" data-filter="notice"><span class="ws-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></span><span class="ws-item__label" data-i18n="todo.tabNotice">Notices</span><b class="ws-item__count"></b></button>
+        <button type="button" class="ws-item ws-tab" data-filter="ignored"><span class="ws-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="4" rx="1"/><path d="M5.5 9v9.5h13V9M10 13h4"/></svg></span><span class="ws-item__label" data-i18n="todo.tabIgnored">Ignored</span><b class="ws-item__count"></b></button>
+        <div class="ws-head" data-i18n="todo.sideInbox">Inbox</div>
+        <button type="button" class="ws-item ws-tab" data-filter="messages"><span class="ws-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4 7 8 6 8-6"/></svg></span><span class="ws-item__label" data-i18n="todo.tabMessages">Inbox</span><b class="ws-item__count"></b></button>
+      </aside>
+      <div class="todo-main">
       <div class="todo-stats" id="todoStats"></div>
-      <div class="model-tabs page-tabs todo-tabs" id="todoTabs" role="tablist">
-        <button type="button" class="model-tab is-active" data-filter="all"><span data-i18n="todo.tabAll">All</span> <b></b></button>
-        <button type="button" class="model-tab" data-filter="confirm"><span data-i18n="todo.tabConfirm">To confirm</span> <b></b></button>
-        <button type="button" class="model-tab" data-filter="action"><span data-i18n="todo.tabAction">To do</span> <b></b></button>
-        <button type="button" class="model-tab" data-filter="done"><span data-i18n="todo.tabDone">Done</span> <b></b></button>
-        <button type="button" class="model-tab" data-filter="notice"><span data-i18n="todo.tabNotice">Notices</span> <b></b></button>
-        <button type="button" class="model-tab" data-filter="ignored"><span data-i18n="todo.tabIgnored">Ignored</span> <b></b></button>
-        <button type="button" class="model-tab" data-filter="messages"><span data-i18n="todo.tabMessages">Messages</span> <b></b></button>
-        <button class="link-btn todo-read-all" type="button" id="todoReadAll" data-i18n="todo.readAll">Mark all read</button>
-      </div>
+      <div class="todo-toolbar"><button class="link-btn todo-read-all" type="button" id="todoReadAll" data-i18n="todo.readAll">Mark all read</button></div>
       <div class="admin__body">
         <div id="todoItems">
         <table class="ctable todo-table"><thead><tr><th class="todo-col-kind" data-i18n="todo.colKind">Type</th><th data-i18n="todo.colItem">Item</th><th class="todo-col-from" data-i18n="todo.colFrom">From</th><th class="todo-col-time" data-i18n="todo.colTime">Updated</th><th class="ctable__actions-col"></th></tr></thead><tbody id="todoList"></tbody></table>
@@ -186,6 +191,8 @@
           </table>
           <p class="kb-empty" id="ibEventsEmpty" data-i18n="ib.eventsEmpty" hidden></p>
         </div>
+      </div>
+      </div>
       </div>
     </section>
 
@@ -345,6 +352,8 @@
 
     <section class="admin" data-pane="tasks" aria-label="Tasks" hidden>
       <div class="task-list-view" id="taskListView">
+        <!-- Views and projects, each project opening onto its latest tasks: the work, not the agents, comes first. -->
+        <aside class="work-side" id="workSide" aria-label="Work"></aside>
         <div class="admin__body">
           <!-- Narrow the list by topic tag, with what the tag's tasks add up to. -->
           <div class="task-filter" id="taskFilter">
@@ -412,6 +421,10 @@
               <button type="button" class="model-tab hn-tab" data-tab="scmp" id="hnTabCompare" hidden>Compare</button>
               <button type="button" class="model-tab hn-tab" data-tab="sdoubt" id="hnTabDoubts" hidden>Doubts</button>
               <button type="button" class="model-tab hn-tab" data-tab="sterm" id="hnTabTerms" hidden>Terms</button>
+              <button type="button" class="model-tab hn-tab" data-tab="afinal" id="hnTabFinal" hidden>Final</button>
+              <button type="button" class="model-tab hn-tab" data-tab="aoutline" id="hnTabOutline" hidden>Outline</button>
+              <button type="button" class="model-tab hn-tab" data-tab="adraft" id="hnTabDraft" hidden>First draft</button>
+              <button type="button" class="model-tab hn-tab" data-tab="areview" id="hnTabReviews" hidden>Reviews</button>
               <button type="button" class="model-tab" data-tab="output" data-i18n="tasks.tabOutput">Output</button>
               <button type="button" class="model-tab" data-tab="subtasks" id="taskSubtasksTab" hidden>Subtasks</button>
               <button type="button" class="model-tab" data-tab="usage" data-i18n="tasks.tabUsage">Cost</button>
@@ -436,6 +449,10 @@
             <div class="task-pane" data-pane-tab="scmp" hidden><div id="sbCompare"></div></div>
             <div class="task-pane" data-pane-tab="sdoubt" hidden><div id="sbDoubts"></div></div>
             <div class="task-pane" data-pane-tab="sterm" hidden><div id="sbTerms"></div></div>
+            <div class="task-pane" data-pane-tab="afinal" hidden><div id="atFinal"></div></div>
+            <div class="task-pane" data-pane-tab="aoutline" hidden><div id="atOutline"></div></div>
+            <div class="task-pane" data-pane-tab="adraft" hidden><div id="atDraft"></div></div>
+            <div class="task-pane" data-pane-tab="areview" hidden><div id="atReview"></div></div>
             <div class="task-pane" data-pane-tab="run" id="taskRunPane">
               <section class="task-phases" id="taskPhasesPanel" hidden>
                 <h3 class="task-section__title" data-i18n="tasks.phases">Flow</h3>
@@ -686,6 +703,16 @@
             <p class="node-card__hint" id="nodeHint"></p>
             <button class="btn btn--sm" type="button" id="nodeInstallBtn" hidden></button>
             <button class="link-btn link-btn--muted" type="button" id="nodeLogBtn" data-i18n="inst.log" hidden>Log</button>
+          </div>
+          <!-- ffmpeg: transcription converts and cuts audio with it (any size, any format). -->
+          <div class="node-card" id="ffmpegCard">
+            <div class="node-card__main">
+              <span class="node-card__title" data-i18n="ffmpeg.title">ffmpeg</span>
+              <span class="node-card__state" id="ffmpegState"></span>
+            </div>
+            <p class="node-card__hint" id="ffmpegHint"></p>
+            <button class="btn btn--sm" type="button" id="ffmpegInstallBtn" data-i18n="ffmpeg.install" hidden>Install ffmpeg</button>
+            <button class="link-btn link-btn--muted" type="button" id="ffmpegLogBtn" data-i18n="inst.log" hidden>Log</button>
           </div>
           <table class="ctable">
             <thead>
@@ -1648,6 +1675,7 @@
   <script src="/vendor/purify.min.js"></script>
   <script src="/vendor/highlight.min.js"></script>
   <script src="/js/core.js"></script>
+  <script src="/js/mermaid-view.js"></script>
   <script src="/js/images.js"></script>
   <script src="/js/chat.js"></script>
   <script src="/js/collab.js"></script>
@@ -1670,6 +1698,7 @@
   <script src="/js/tasks.js"></script>
   <script src="/js/task-harness.js"></script>
   <script src="/js/task-subtitle.js"></script>
+  <script src="/js/task-article.js"></script>
   <script src="/js/timing.js"></script>
   <script src="/js/auth.js"></script>
   <script src="/js/models.js"></script>

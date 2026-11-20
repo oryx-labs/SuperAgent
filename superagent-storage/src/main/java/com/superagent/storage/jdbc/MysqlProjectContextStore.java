@@ -33,6 +33,10 @@ public class MysqlProjectContextStore implements ProjectContextStore {
                   position       INT           NOT NULL,
                   created_at     DATETIME(3)   NOT NULL,
                   updated_at     DATETIME(3)   NOT NULL,
+                  updated_by     VARCHAR(128),
+                  agent_id       VARCHAR(64),
+                  session_id     VARCHAR(64),
+                  task_id        VARCHAR(64),
                   PRIMARY KEY (company_id, id),
                   KEY idx_project_repo_project (company_id, project_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -47,6 +51,9 @@ public class MysqlProjectContextStore implements ProjectContextStore {
                   glossary   TEXT,
                   updated_by VARCHAR(128),
                   updated_at DATETIME(3)  NOT NULL,
+                  agent_id   VARCHAR(64),
+                  session_id VARCHAR(64),
+                  task_id    VARCHAR(64),
                   PRIMARY KEY (company_id, project_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
@@ -69,16 +76,30 @@ public class MysqlProjectContextStore implements ProjectContextStore {
                   KEY idx_project_memory_project (company_id, project_id, deleted)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        // Provenance came later: tables made before it don't get the columns from CREATE TABLE IF NOT EXISTS.
+        for (String table : List.of("project_repo", "project_brief")) {
+            for (String column : List.of("updated_by:VARCHAR(128)", "agent_id:VARCHAR(64)", "session_id:VARCHAR(64)",
+                    "task_id:VARCHAR(64)")) {
+                String[] c = column.split(":");
+                Integer present = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = SCHEMA() "
+                        + "AND LOWER(table_name) = ? AND LOWER(column_name) = ?", Integer.class, table, c[0]);
+                if (present == null || present == 0) {
+                    jdbc.execute("ALTER TABLE " + table + " ADD COLUMN " + c[0] + " " + c[1]);
+                }
+            }
+        }
     }
 
     private final RowMapper<ProjectRepo> repoMapper = (rs, n) -> new ProjectRepo(rs.getString("id"), rs.getString("project_id"),
             rs.getString("name"), rs.getString("location"), rs.getString("default_branch"), rs.getString("delivery"),
             rs.getString("purpose"), rs.getInt("position"), instant(rs.getObject("created_at", LocalDateTime.class)),
-            instant(rs.getObject("updated_at", LocalDateTime.class)));
+            instant(rs.getObject("updated_at", LocalDateTime.class)), rs.getString("updated_by"), rs.getString("agent_id"),
+            rs.getString("session_id"), rs.getString("task_id"));
 
     private final RowMapper<ProjectBrief> briefMapper = (rs, n) -> new ProjectBrief(rs.getString("project_id"),
             rs.getString("goal"), rs.getString("background"), rs.getString("norms"), rs.getString("glossary"),
-            rs.getString("updated_by"), instant(rs.getObject("updated_at", LocalDateTime.class)));
+            rs.getString("updated_by"), instant(rs.getObject("updated_at", LocalDateTime.class)), rs.getString("agent_id"),
+            rs.getString("session_id"), rs.getString("task_id"));
 
     private final RowMapper<ProjectMemory> memoryMapper = (rs, n) -> new ProjectMemory(rs.getString("id"),
             rs.getString("project_id"), rs.getString("title"), rs.getString("content"), rs.getString("agent_id"),
@@ -95,9 +116,11 @@ public class MysqlProjectContextStore implements ProjectContextStore {
     @Override
     public void saveRepo(ProjectRepo r) {
         jdbc.update("REPLACE INTO project_repo (company_id, id, project_id, name, location, default_branch, delivery, purpose,"
-                        + " position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        + " position, created_at, updated_at, updated_by, agent_id, session_id, task_id)"
+                        + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 TenantSchema.company(), r.id(), r.projectId(), r.name(), r.location(), r.defaultBranch(), r.delivery(),
-                r.purpose(), r.position(), utc(r.createdAt()), utc(r.updatedAt()));
+                r.purpose(), r.position(), utc(r.createdAt()), utc(r.updatedAt()), r.updatedBy(), r.agentId(), r.sessionId(),
+                r.taskId());
     }
 
     @Override
@@ -114,9 +137,10 @@ public class MysqlProjectContextStore implements ProjectContextStore {
 
     @Override
     public void saveBrief(ProjectBrief b) {
-        jdbc.update("REPLACE INTO project_brief (company_id, project_id, goal, background, norms, glossary, updated_by, updated_at)"
-                        + " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", TenantSchema.company(), b.projectId(), b.goal(), b.background(),
-                b.norms(), b.glossary(), b.updatedBy(), utc(b.updatedAt()));
+        jdbc.update("REPLACE INTO project_brief (company_id, project_id, goal, background, norms, glossary, updated_by, updated_at,"
+                        + " agent_id, session_id, task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", TenantSchema.company(),
+                b.projectId(), b.goal(), b.background(), b.norms(), b.glossary(), b.updatedBy(), utc(b.updatedAt()),
+                b.agentId(), b.sessionId(), b.taskId());
     }
 
     @Override

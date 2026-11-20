@@ -51,17 +51,20 @@ function renderHarness(h, t) {
   const on = !!h;
   const general = !!(h && h.general);
   const subtitle = !!(h && h.harness === "subtitle");
+  const article = !!(h && h.harness === "article");
   hnShown = h || null;
   hnEl.box.hidden = !on;
-  hnEl.box.classList.toggle("hn--general", general || subtitle);
-  Object.values(hnEl.tabs).forEach(b => { b.hidden = !on || general || subtitle; });
+  hnEl.box.classList.toggle("hn--general", general || subtitle || article);
+  Object.values(hnEl.tabs).forEach(b => { b.hidden = !on || general || subtitle || article; });
   Object.values(hnEl.gtabs).forEach(b => { b.hidden = !general; });
   sbShowTabs(subtitle);
-  hnArrangeTabs(general, subtitle);
+  atShowTabs(article);
+  hnArrangeTabs(general, subtitle, article);
   tel.tabs.querySelector('[data-tab="output"]').textContent = L(general ? "hn.g.tabOutput" : "tasks.tabOutput");
   if (!on) return;
   if (general) { hnEl.stop.hidden = true; renderGeneral(h, t); return; }
   if (subtitle) { hnEl.stop.hidden = true; renderSubtitle(h, t); return; }
+  if (article) { hnEl.stop.hidden = true; renderArticle(h, t); return; }
   const reviews = h.reviews || [];
   // Tasks from before acceptance had no such step.
   hnEl.tabs.haccept.hidden = !h.steps.some(s => s.key === "accept");
@@ -150,22 +153,30 @@ function renderHarnessPipe(h) {
   }));
 }
 
-/** A step's name; in a general flow that went back, the round it is on ("执行 · 第 2 轮"). */
+/** A step's name; in a general or writing flow that went back, the round it is on ("执行 · 第 2 轮"). */
 function hnStepName(h, s) {
   const key = h.general ? (h.harness === "complex" && s.key === "execute" ? "g.sum" : "g." + s.key)
-    : h.harness === "subtitle" ? "s." + s.key : s.key;
+    : h.harness === "subtitle" ? "s." + s.key : h.harness === "article" ? "a." + s.key : s.key;
   const name = L("hn.step." + key) === "hn.step." + key ? s.name : L("hn.step." + key);
   const round = h.general && h.general.round > 1 && (s.key === "execute" || s.key === "check")
-    && s.status !== "pending" ? h.general.round : 0;
+    && s.status !== "pending" ? h.general.round : h.article && s.status !== "pending" ? hnArticleRound(h.article, s) : 0;
   return round ? name + " · " + L("hn.g.round", { n: round }) : name;
+}
+
+/** How many times a writing task's check, review or revise ran (counting the one under way); 0 for the first. */
+function hnArticleRound(a, s) {
+  const list = s.key === "check" ? a.checks : s.key === "review" ? a.reviews : s.key === "revise" ? a.revisions : null;
+  if (!list) return 0;
+  const n = list.length + (s.status === "running" ? 1 : 0);
+  return n > 1 ? n : 0;
 }
 
 /**
  * A general task leads with what it produced and how it was checked, a subtitle task with its subtitles and their
  * disputes; any other task keeps the page's order.
  */
-function hnArrangeTabs(general, subtitle) {
-  const first = general ? HN_GENERAL_FIRST : subtitle ? SB_FIRST : null;
+function hnArrangeTabs(general, subtitle, article) {
+  const first = general ? HN_GENERAL_FIRST : subtitle ? SB_FIRST : article ? AT_FIRST : null;
   const order = first
     ? [...first.map(k => hnTabOrder.find(b => b.dataset.tab === k)),
       ...hnTabOrder.filter(b => !first.includes(b.dataset.tab))]

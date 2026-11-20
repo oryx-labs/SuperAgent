@@ -15,6 +15,11 @@ public interface TaskHarness {
     /** A new task's state: its steps, all pending, and what it was set up with. */
     HarnessState start(Task task, String delivery);
 
+    /** {@code genre}: what the creator asked for (a writing task's genre); flows that have none ignore it. */
+    default HarnessState start(Task task, String delivery, String genre) {
+        return start(task, delivery);
+    }
+
     /**
      * Runs from the current step until the task is done, waits on the user, fails or is stopped; settles the task
      * through {@link HarnessRun}. {@link HarnessRun#reply()} is what the user sent, when they answered a wait.

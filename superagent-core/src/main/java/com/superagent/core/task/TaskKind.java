@@ -15,7 +15,13 @@ public enum TaskKind {
     /** Splits itself into subtasks that run side by side, then sums up what they found. */
     COMPLEX,
     /** Subtitles from audio: every speech model transcribes, the platform votes, text models settle the disputes. */
-    SUBTITLE;
+    SUBTITLE,
+    /**
+     * Long-form writing (articles, reports, technical pieces, lecture notes): brief → sources → outline (the user
+     * confirms) → draft → platform checks → independent review → revise → deliver. Not {@code writing}: that name
+     * belonged to a retired kind whose old rows must not be picked up by this flow.
+     */
+    ARTICLE;
 
     public String storageName() {
         return name().toLowerCase();

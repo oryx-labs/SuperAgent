@@ -23,9 +23,9 @@ import static com.superagent.runtime.mcp.McpTools.strOrNull;
 import static com.superagent.runtime.mcp.McpTools.tool;
 
 /**
- * Lets an agent change its own settings (or a child agent's) in a chat, once the user agrees. Only the fields the
- * caller passes are touched; the rest keep their value (see {@link AgentService#mergeUpdate}). Chats only, like
- * {@link AgentCreateMcpTools}: changing an agent is a lasting edit the user confirms first.
+ * Lets an agent change its own settings (or a child agent's) in a chat, directly: it says what it changed in its reply
+ * instead of asking first. Only the fields the caller passes are touched; the rest keep their value (see
+ * {@link AgentService#mergeUpdate}, which also keeps a SuperAgent's name and character fixed).
  */
 @Component
 public class AgentUpdateMcpTools implements McpToolProvider {
@@ -50,10 +50,9 @@ public class AgentUpdateMcpTools implements McpToolProvider {
                 .collect(Collectors.joining("、"));
         ObjectNode skills = opt("skill_ids", "array", "可选，要绑定的技能 id（用 skill_list 查）；传空数组清空，不传则保持原样");
         skills.putObject("items").put("type", "string");
-        // "确认修改吗？" is what the chat page turns into a "✓ 确认修改" button (chat-stream.js QUICK_CONFIRM): keep it word for word.
         return List.of(tool("agent_update", "修改 Agent 的设定，只改你传的字段，其余保持不变。"
                         + "不传 agent_id 就是当前对话的 Agent；也可以改你拥有的下级 Agent。"
-                        + "调用之前先在回复里列出改前和改后的内容，问用户「确认修改吗？」，用户确认后才调用。"
+                        + "不需要先问用户，直接调用；改完在回复里用一两句话说明改了什么（改前→改后）。"
                         + "SuperAgent 的名称和性格不能改。",
                 props(opt("agent_id", "string", "可选，要改的 Agent id；不传=当前对话的 Agent"),
                         opt("name", "string", "可选，名称"),

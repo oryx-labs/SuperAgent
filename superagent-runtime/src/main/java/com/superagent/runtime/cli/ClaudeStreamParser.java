@@ -6,8 +6,13 @@ import com.superagent.core.chat.AgentEventType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.superagent.core.usage.TokenUsage;
+
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -31,26 +36,27 @@ public class ClaudeStreamParser {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    /** A parsed, normalised event with its text/JSON payload, and the turn cost on a result line. */
     /**
-     * A parsed event. On a result line, {@code costUsd} is the turn cost and
-     * {@code permissionDenials} names tool calls the CLI refused without asking — in
-     * {@code -p} mode there is no one to approve them, so they'd otherwise be invisible.
+     * A parsed event. On a result line, {@code permissionDenials} names tool calls the CLI refused without asking — in
+     * {@code -p} mode there is no one to approve them, so they'd otherwise be invisible — and {@code usage} is what the
+     * result reports about tokens and cost (see {@link ClaudeUsageLedger} for turning it into this turn's share).
      */
-    public record ParsedEvent(AgentEventType type, String payload, Double costUsd, List<String> permissionDenials,
-                              List<com.superagent.core.usage.TokenUsage> tokens) {
-
-        public ParsedEvent(AgentEventType type, String payload, Double costUsd, List<String> permissionDenials) {
-            this(type, payload, costUsd, permissionDenials, List.of());
-        }
+    public record ParsedEvent(AgentEventType type, String payload, List<String> permissionDenials, ResultUsage usage) {
 
         public ParsedEvent(AgentEventType type, String payload) {
-            this(type, payload, null, List.of());
+            this(type, payload, List.of(), null);
         }
+    }
 
-        public ParsedEvent(AgentEventType type, String payload, Double costUsd) {
-            this(type, payload, costUsd, List.of());
-        }
+    /**
+     * What a result reports. Checked against real runs (Claude Code 2.1.318, recorded in test resources {@code usage/}):
+     * {@code modelUsage} and
+     * {@code total_cost_usd} are running totals for the whole conversation, across {@code --resume} and kept
+     * processes alike; {@code model_usage_since_last_result} (newer CLIs only) is this turn's, per model, the CLI's own
+     * side calls included. {@code calls} is the sum of this turn's API calls as the assistant messages carried them.
+     */
+    public record ResultUsage(String sessionId, List<TokenUsage> sinceLast, Double sinceLastCostUsd,
+                              List<TokenUsage> cumulative, Double totalCostUsd, List<TokenUsage> calls) {
     }
 
     public Optional<ParsedEvent> parse(String line) {
@@ -151,9 +157,12 @@ public class ClaudeStreamParser {
 
     // --- tokens ---
 
-    /** Each API call's usage as the assistant messages carry it (repeated per content block: the last one stands). */
-    private final java.util.Map<String, JsonNode> messageUsage = new java.util.LinkedHashMap<>();
-    private final java.util.Map<String, String> messageModel = new java.util.HashMap<>();
+    /**
+     * Each API call's usage as the assistant messages carry it. A message comes once per content block, each carrying
+     * the call's final usage (recorded: text then tool_use, both output 91); keyed by id, so it's counted once.
+     */
+    private final Map<String, JsonNode> messageUsage = new LinkedHashMap<>();
+    private final Map<String, String> messageModel = new HashMap<>();
     private boolean resultSeen;
 
     private void noteUsage(JsonNode root) {
@@ -167,39 +176,24 @@ public class ClaudeStreamParser {
         messageModel.put(id, message.path("model").asText(null));
     }
 
-    /**
-     * The run's tokens from its result. {@code modelUsage} is the whole run, per model (the main loop and the CLI's
-     * own side calls, e.g. a cheaper model naming the session); {@code usage} alone covers only the main loop.
-     */
-    private List<com.superagent.core.usage.TokenUsage> resultTokens(JsonNode root, Double cost) {
-        List<com.superagent.core.usage.TokenUsage> out = new ArrayList<>();
-        JsonNode byModel = root.path("modelUsage");
-        if (byModel.isObject() && byModel.size() > 0) {
-            byModel.fields().forEachRemaining(e -> {
-                JsonNode m = e.getValue();
-                out.add(new com.superagent.core.usage.TokenUsage(e.getKey(), Tokens.n(m, "inputTokens"),
-                        Tokens.n(m, "cacheReadInputTokens"), Tokens.n(m, "cacheCreationInputTokens"),
-                        Tokens.n(m, "cacheCreationEphemeral1hInputTokens"), Tokens.n(m, "outputTokens"),
-                        Tokens.n(m, "thinkingTokens"), m.path("costUSD").isNumber() ? m.path("costUSD").asDouble() : null));
-            });
-            return out;
+    private static List<TokenUsage> byModel(JsonNode byModel) {
+        if (!byModel.isObject()) {
+            return null;
         }
-        JsonNode u = root.path("usage");
-        if (u.isObject()) {
-            out.add(fromClaudeUsage(null, u, cost));
-        }
+        List<TokenUsage> out = new ArrayList<>();
+        byModel.fields().forEachRemaining(e -> {
+            JsonNode m = e.getValue();
+            out.add(new TokenUsage(e.getKey(), Tokens.n(m, "inputTokens"), Tokens.n(m, "cacheReadInputTokens"),
+                    Tokens.n(m, "cacheCreationInputTokens"), Tokens.n(m, "cacheCreationEphemeral1hInputTokens"),
+                    Tokens.n(m, "outputTokens"), Tokens.n(m, "thinkingTokens"),
+                    m.path("costUSD").isNumber() ? m.path("costUSD").asDouble() : null));
+        });
         return out;
     }
 
-    /**
-     * What the calls made so far used, when the run ended without a result (stopped, timed out, crashed): the
-     * result's totals are the true count, so this is only for runs that never got one.
-     */
-    public List<com.superagent.core.usage.TokenUsage> unreportedTokens() {
-        if (resultSeen) {
-            return List.of();
-        }
-        java.util.Map<String, long[]> sum = new java.util.LinkedHashMap<>();
+    /** The calls this run made so far, per model the messages named, each counted once. */
+    private List<TokenUsage> callTokens() {
+        Map<String, long[]> sum = new LinkedHashMap<>();
         messageUsage.forEach((id, u) -> {
             long[] t = sum.computeIfAbsent(String.valueOf(messageModel.get(id)), k -> new long[6]);
             t[0] += Tokens.n(u, "input_tokens");
@@ -207,17 +201,47 @@ public class ClaudeStreamParser {
             t[2] += Tokens.n(u, "cache_creation_input_tokens");
             t[3] += Tokens.n(u.path("cache_creation"), "ephemeral_1h_input_tokens");
             t[4] += Tokens.n(u, "output_tokens");
+            t[5] += Tokens.n(u.path("output_tokens_details"), "thinking_tokens");
         });
-        List<com.superagent.core.usage.TokenUsage> out = new ArrayList<>();
-        sum.forEach((model, t) -> out.add(new com.superagent.core.usage.TokenUsage("null".equals(model) ? null : model,
-                t[0], t[1], t[2], t[3], t[4], 0, null)));
+        List<TokenUsage> out = new ArrayList<>();
+        sum.forEach((model, t) -> out.add(new TokenUsage("null".equals(model) ? null : model,
+                t[0], t[1], t[2], t[3], t[4], t[5], null)));
         return out;
     }
 
-    private static com.superagent.core.usage.TokenUsage fromClaudeUsage(String model, JsonNode u, Double cost) {
-        return new com.superagent.core.usage.TokenUsage(model, Tokens.n(u, "input_tokens"), Tokens.n(u, "cache_read_input_tokens"),
-                Tokens.n(u, "cache_creation_input_tokens"), Tokens.n(u.path("cache_creation"), "ephemeral_1h_input_tokens"),
-                Tokens.n(u, "output_tokens"), Tokens.n(u.path("output_tokens_details"), "thinking_tokens"), cost);
+    /**
+     * What the calls made so far used, when the run ended without a result (stopped, timed out, crashed); empty once
+     * a result reported the turn, so nothing is counted twice.
+     */
+    public List<TokenUsage> unreportedTokens() {
+        return resultSeen ? List.of() : callTokens();
+    }
+
+    private ResultUsage resultUsage(JsonNode root) {
+        List<TokenUsage> sinceLast = byModel(root.path("model_usage_since_last_result"));
+        Double sinceLastCost = sinceLast == null || sinceLast.stream().anyMatch(t -> t.cliCostUsd() == null) ? null
+                : sinceLast.stream().mapToDouble(TokenUsage::cliCostUsd).sum();
+        List<TokenUsage> cumulative = byModel(root.path("modelUsage"));
+        Double total = root.path("total_cost_usd").isNumber() ? root.path("total_cost_usd").asDouble() : null;
+        List<TokenUsage> calls = callTokens();
+        JsonNode u = root.path("usage");
+        if (calls.isEmpty() && u.isObject()) {
+            // No assistant message seen (e.g. the CLI failed before streaming): the result's usage is this turn's main loop.
+            calls = List.of(new TokenUsage(null, Tokens.n(u, "input_tokens"), Tokens.n(u, "cache_read_input_tokens"),
+                    Tokens.n(u, "cache_creation_input_tokens"), Tokens.n(u.path("cache_creation"), "ephemeral_1h_input_tokens"),
+                    Tokens.n(u, "output_tokens"), Tokens.n(u.path("output_tokens_details"), "thinking_tokens"), null));
+        }
+        if (cumulative != null && cumulative.size() == 1) {
+            // Through a relay a message may name the model its own way (seen: "MaaS_Cl_Sonnet_5.5_…" for
+            // claude-sonnet-5-5); with one model in the result, that's the one it priced.
+            String model = cumulative.get(0).model();
+            calls = List.of(calls.stream().reduce(new TokenUsage(model, 0, 0, 0, 0, 0, 0, null), (a, b) -> new TokenUsage(model,
+                    a.input() + b.input(), a.cacheRead() + b.cacheRead(), a.cacheWrite() + b.cacheWrite(),
+                    a.cacheWrite1h() + b.cacheWrite1h(), a.output() + b.output(), a.reasoning() + b.reasoning(), null)));
+        }
+        String session = root.path("session_id").asText("");
+        return new ResultUsage(session.isEmpty() ? null : session, sinceLast, sinceLastCost,
+                cumulative == null ? List.of() : cumulative, total, calls);
     }
 
     private Optional<ParsedEvent> parseResult(JsonNode root) {
@@ -230,12 +254,11 @@ public class ClaudeStreamParser {
             root.path("errors").forEach(e -> errors.add(e.isTextual() ? e.asText() : e.toString()));
             text = errors.isEmpty() ? root.path("subtype").asText("error") : String.join("; ", errors);
         }
-        Double cost = root.has("total_cost_usd") ? root.path("total_cost_usd").asDouble() : null;
         List<String> denials = new ArrayList<>();
         root.path("permission_denials").forEach(d -> denials.add(describeDenial(d)));
+        ResultUsage usage = resultUsage(root);
         resultSeen = true;
-        return Optional.of(new ParsedEvent(
-                isError ? AgentEventType.ERROR : AgentEventType.RESULT, text, cost, denials, resultTokens(root, cost)));
+        return Optional.of(new ParsedEvent(isError ? AgentEventType.ERROR : AgentEventType.RESULT, text, denials, usage));
     }
 
     private static String describeDenial(JsonNode d) {

@@ -63,6 +63,7 @@ public class CodexCliAgentRunner implements AgentRunner {
     private final String command;
     private final long timeoutSeconds;
     private CliPaths cliPaths; // null in tests: the command runs from the process PATH as given
+    private Path codexHome = CodexRollouts.home();
 
     /** Run the CLI from the shared search path, so one the Models page installed (e.g. on a private Node) is found. */
     @Autowired(required = false)
@@ -77,6 +78,10 @@ public class CodexCliAgentRunner implements AgentRunner {
         this.timeoutSeconds = timeoutSeconds;
     }
 
+    void setCodexHome(Path codexHome) {
+        this.codexHome = codexHome;
+    }
+
     @Override
     public AgentType type() {
         return AgentType.CODEX;
@@ -89,6 +94,13 @@ public class CodexCliAgentRunner implements AgentRunner {
             // Only possible if the first turn died before Codex reported a thread: there's no
             // conversation to resume, so start one under the same SuperAgent session id.
             log.warn("session {} has no recorded codex thread; starting a new one", request.sessionId());
+        }
+        // A resumed thread reports its running total: measure the run from the thread's total so far.
+        com.fasterxml.jackson.databind.JsonNode before = threadId == null ? null
+                : CodexRollouts.lastTotal(codexHome, threadId).orElse(null);
+        if (threadId != null && before == null) {
+            log.warn("session {}: no rollout total found for codex thread {}; this turn's tokens aren't billed",
+                    request.sessionId(), threadId);
         }
         List<String> cmd = buildCommand(request, threadId);
         log.info("session {} running: {} (cwd={})", request.sessionId(), String.join(" ", cmd), request.workspaceDir());
@@ -156,7 +168,9 @@ public class CodexCliAgentRunner implements AgentRunner {
             process.destroyForcibly();
             emit(sink, request, seq, AgentEventType.ERROR, "Codex run interrupted");
         } finally {
-            Tokens.emit(sink, request.sessionId(), seq + 1, parser.tokens(request.model()));
+            if (threadId == null || before != null) {
+                Tokens.emit(sink, request.sessionId(), seq + 1, parser.tokens(request.model(), before));
+            }
         }
     }
 

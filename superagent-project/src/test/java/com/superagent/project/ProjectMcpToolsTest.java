@@ -102,4 +102,56 @@ class ProjectMcpToolsTest {
         assertThatThrownBy(() -> tools.call(chat("a1"), "project_memory_write", args("title", "x")))
                 .isInstanceOf(McpToolException.class).hasMessageContaining("归档");
     }
+
+    @Test
+    void anAgentKeepsTheBriefAndReposWhenTheOwnerSetItOff() {
+        String pid = projects.create("ada", "看板", null).id();
+        projects.setAgentProject("a1", "ada", pid);
+        projects.saveBrief(pid, "ada", new com.superagent.api.project.ProjectRequests.Brief("旧目标", "给 A 客户", null, null));
+
+        String reply = tools.call(chat("a1"), "project_update", args("goal", "十二月上线", "glossary", "GMV：成交额")).text();
+        assertThat(reply).contains("已更新项目说明");
+        assertThat(projects.brief(pid, "ada")).extracting("goal", "background", "glossary", "agentId", "agentName", "updatedBy")
+                .containsExactly("十二月上线", "给 A 客户", "GMV：成交额", "a1", "a1", "ada");
+        assertThat(projects.context("a1", null)).get().asString().contains("十二月上线", "【沉淀到项目】", "project_update",
+                "project_memory_write", "project_folder");
+
+        // Repositories: add, change one field, delete; each change records the agent and the conversation.
+        tools.call(chat("a1"), "project_update", args("repo_action", "add", "repo_name", "api", "repo_location", "/code/api",
+                "repo_delivery", "pr", "repo_purpose", "后端"));
+        var repo = projects.repos(pid, "ada").get(0);
+        assertThat(repo).extracting("name", "delivery", "agentId", "updatedBy").containsExactly("api", "pr", "a1", "ada");
+        tools.call(chat("a1"), "project_update", args("repo_action", "update", "repo_id", repo.id(), "repo_default_branch", "dev"));
+        assertThat(projects.repos(pid, "ada").get(0)).extracting("name", "location", "defaultBranch", "delivery")
+                .containsExactly("api", "/code/api", "dev", "pr");
+        assertThat(tools.call(chat("a1"), "project_update", args("repo_action", "delete", "repo_id", repo.id())).text())
+                .contains("已删除仓库「api」");
+        assertThat(projects.repos(pid, "ada")).isEmpty();
+
+        // A run set off by someone who isn't the owner can't; nor can anyone once the project is archived.
+        McpGrants.Grant bobs = new McpGrants.Grant("tok", McpGrants.Kind.CHAT, "bob", null, "a1", "s2", "m1", null);
+        assertThatThrownBy(() -> tools.call(bobs, "project_update", args("goal", "x")))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("需要项目负责人来改");
+        assertThatThrownBy(() -> tools.call(chat("a2"), "project_update", args("goal", "x")))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("不在任何项目里");
+        projects.archive(pid, "ada");
+        assertThatThrownBy(() -> tools.call(chat("a1"), "project_update", args("goal", "x")))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("归档");
+        assertThat(projects.brief(pid, "ada").goal()).isEqualTo("十二月上线");
+
+        // Another company sees none of it.
+        TenantContext.set("other");
+        assertThatThrownBy(() -> tools.call(chat("a1"), "project_update", args("goal", "x"))).isInstanceOf(McpToolException.class);
+        TenantContext.set("acme");
+    }
+
+    @Test
+    void aTaskSetOffByTheOwnerCanChangeTheBrief() {
+        String pid = projects.create("ada", "看板", null).id();
+        projects.setAgentProject("a1", "ada", pid);
+        projects.recordTask("t1", "a1");
+        McpGrants.Grant task = new McpGrants.Grant("tok", McpGrants.Kind.TASK, "ada", "t1", null, null, null, null);
+        tools.call(task, "project_update", args("norms", "金额保留两位"));
+        assertThat(projects.brief(pid, "ada")).extracting("norms", "updatedBy").containsExactly("金额保留两位", "ada");
+    }
 }

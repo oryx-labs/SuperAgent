@@ -155,26 +155,12 @@ public class ProjectService implements ProjectAccess {
 
     public List<ProjectRepoDto> repos(String id, String user) {
         requireMember(id, user);
-        return context.repos(id).stream().map(ProjectService::toDto).toList();
+        return context.repos(id).stream().map(this::toDto).toList();
     }
 
     /** Adds a repository ({@code repoId} null) or changes one. Owner only. */
     public List<ProjectRepoDto> saveRepo(String id, String user, String repoId, ProjectRequests.Repo r) {
-        requireWritable(requireOwner(id, user));
-        List<ProjectRepo> current = context.repos(id);
-        String name = required(r == null ? null : r.name(), "请填写仓库名称", NAME_MAX);
-        String location = required(r.location(), "请填写仓库地址（本地路径或 git 地址）", 1024);
-        String delivery = blank(r.delivery()) == null ? ProjectRepo.MERGE : r.delivery().strip().toLowerCase();
-        if (!ProjectRepo.MERGE.equals(delivery) && !ProjectRepo.PR.equals(delivery)) {
-            throw new IllegalArgumentException("交付方式只能是 merge 或 pr");
-        }
-        Instant now = Instant.now();
-        ProjectRepo existing = repoId == null ? null : current.stream().filter(x -> x.id().equals(repoId)).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("没有这个仓库"));
-        context.saveRepo(new ProjectRepo(existing == null ? UUID.randomUUID().toString() : existing.id(), id, name, location,
-                blank(r.defaultBranch()), delivery, limit(blank(r.purpose()), TEXT_MAX, "用途说明"),
-                existing == null ? current.stream().mapToInt(ProjectRepo::position).max().orElse(-1) + 1 : existing.position(),
-                existing == null ? now : existing.createdAt(), now));
+        writeRepo(requireWritable(requireOwner(id, user)), repoId, r, new Origin(user, null, null, null));
         return repos(id, user);
     }
 
@@ -184,18 +170,110 @@ public class ProjectService implements ProjectAccess {
         return repos(id, user);
     }
 
+    private ProjectRepo writeRepo(Project p, String repoId, ProjectRequests.Repo r, Origin origin) {
+        List<ProjectRepo> current = context.repos(p.id());
+        String name = required(r == null ? null : r.name(), "请填写仓库名称", NAME_MAX);
+        String location = required(r.location(), "请填写仓库地址（本地路径或 git 地址）", 1024);
+        String delivery = blank(r.delivery()) == null ? ProjectRepo.MERGE : r.delivery().strip().toLowerCase();
+        if (!ProjectRepo.MERGE.equals(delivery) && !ProjectRepo.PR.equals(delivery)) {
+            throw new IllegalArgumentException("交付方式只能是 merge 或 pr");
+        }
+        Instant now = Instant.now();
+        ProjectRepo existing = repoId == null ? null : repoIn(current, repoId);
+        ProjectRepo repo = new ProjectRepo(existing == null ? UUID.randomUUID().toString() : existing.id(), p.id(), name, location,
+                blank(r.defaultBranch()), delivery, limit(blank(r.purpose()), TEXT_MAX, "用途说明"),
+                existing == null ? current.stream().mapToInt(ProjectRepo::position).max().orElse(-1) + 1 : existing.position(),
+                existing == null ? now : existing.createdAt(), now, origin.user(), origin.agentId(), origin.sessionId(),
+                origin.taskId());
+        context.saveRepo(repo);
+        return repo;
+    }
+
+    private static ProjectRepo repoIn(List<ProjectRepo> repos, String repoId) {
+        return repos.stream().filter(x -> x.id().equals(repoId)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("没有这个仓库：" + repoId));
+    }
+
     // --- brief ---
 
     public ProjectBriefDto brief(String id, String user) {
         requireMember(id, user);
-        return context.brief(id).map(this::toDto).orElse(new ProjectBriefDto(null, null, null, null, null, null, null));
+        return context.brief(id).map(this::toDto).orElse(new ProjectBriefDto(null, null, null, null, null, null, null, null, null));
     }
 
     public ProjectBriefDto saveBrief(String id, String user, ProjectRequests.Brief b) {
         requireWritable(requireOwner(id, user));
-        context.saveBrief(new ProjectBrief(id, limit(blank(b.goal()), TEXT_MAX, "目标"), limit(blank(b.background()), TEXT_MAX, "背景"),
-                limit(blank(b.norms()), TEXT_MAX, "规范"), limit(blank(b.glossary()), TEXT_MAX, "术语"), user, Instant.now()));
+        writeBrief(id, b, new Origin(user, null, null, null));
         return brief(id, user);
+    }
+
+    private ProjectBrief writeBrief(String projectId, ProjectRequests.Brief b, Origin origin) {
+        ProjectBrief brief = new ProjectBrief(projectId, limit(blank(b.goal()), TEXT_MAX, "目标"),
+                limit(blank(b.background()), TEXT_MAX, "背景"), limit(blank(b.norms()), TEXT_MAX, "规范"),
+                limit(blank(b.glossary()), TEXT_MAX, "术语"), origin.user(), Instant.now(), origin.agentId(), origin.sessionId(),
+                origin.taskId());
+        context.saveBrief(brief);
+        return brief;
+    }
+
+    // --- agents keeping the brief and repositories ---
+
+    /** Who a change came from: the person, and the agent with its conversation or task when one acted for them. */
+    private record Origin(String user, String agentId, String sessionId, String taskId) {
+    }
+
+    /**
+     * An agent changes the brief of the project it's working in, on behalf of {@code initiator} (who set the run off),
+     * who must be the project's owner. Fields left null keep their value; blank clears one.
+     */
+    public ProjectBrief updateBriefAsAgent(String agentId, String taskId, String sessionId, String initiator,
+                                           ProjectRequests.Brief change) {
+        Project p = ownedProjectOfRun(agentId, taskId, initiator);
+        ProjectBrief cur = context.brief(p.id()).orElse(new ProjectBrief(p.id(), null, null, null, null, null, null));
+        ProjectRequests.Brief merged = new ProjectRequests.Brief(pick(change.goal(), cur.goal()),
+                pick(change.background(), cur.background()), pick(change.norms(), cur.norms()),
+                pick(change.glossary(), cur.glossary()));
+        return writeBrief(p.id(), merged, new Origin(initiator, agentId, sessionId, taskId));
+    }
+
+    /**
+     * An agent adds ({@code repoId} null) or changes a repository of the project it's working in; fields left null on a
+     * change keep their value. Owner only, as {@link #updateBriefAsAgent}.
+     */
+    public ProjectRepo saveRepoAsAgent(String agentId, String taskId, String sessionId, String initiator, String repoId,
+                                       ProjectRequests.Repo change) {
+        Project p = ownedProjectOfRun(agentId, taskId, initiator);
+        ProjectRequests.Repo r = change;
+        if (repoId != null) {
+            ProjectRepo cur = repoIn(context.repos(p.id()), repoId);
+            r = new ProjectRequests.Repo(pick(change.name(), cur.name()), pick(change.location(), cur.location()),
+                    pick(change.defaultBranch(), cur.defaultBranch()), pick(change.delivery(), cur.delivery()),
+                    pick(change.purpose(), cur.purpose()));
+        }
+        return writeRepo(p, repoId, r, new Origin(initiator, agentId, sessionId, taskId));
+    }
+
+    /** An agent removes a repository of the project it's working in; returns its name. */
+    public String deleteRepoAsAgent(String agentId, String taskId, String initiator, String repoId) {
+        Project p = ownedProjectOfRun(agentId, taskId, initiator);
+        ProjectRepo repo = repoIn(context.repos(p.id()), repoId);
+        context.deleteRepo(p.id(), repo.id());
+        return repo.name();
+    }
+
+    private Project ownedProjectOfRun(String agentId, String taskId, String initiator) {
+        Project p = projectOfRun(agentId, taskId).flatMap(store::find)
+                .orElseThrow(() -> new IllegalArgumentException("你不在任何项目里，没有项目说明和仓库可改"));
+        requireWritable(p);
+        if (initiator == null || !Objects.equals(p.owner(), initiator)) {
+            throw new ProjectForbiddenException("需要项目负责人来改：项目说明和仓库只有负责人（" + displayName(p.owner())
+                    + "）发起的对话或任务才能修改，可以把修改建议告诉用户，或记进项目记忆");
+        }
+        return p;
+    }
+
+    private static String pick(String change, String current) {
+        return change == null ? current : change;
     }
 
     // --- memory ---
@@ -505,13 +583,18 @@ public class ProjectService implements ProjectAccess {
                 p.createdAt(), p.updatedAt(), p.archivedAt());
     }
 
-    private static ProjectRepoDto toDto(ProjectRepo r) {
-        return new ProjectRepoDto(r.id(), r.name(), r.location(), r.defaultBranch(), r.delivery(), r.purpose());
+    private ProjectRepoDto toDto(ProjectRepo r) {
+        return new ProjectRepoDto(r.id(), r.name(), r.location(), r.defaultBranch(), r.delivery(), r.purpose(), r.updatedBy(),
+                r.updatedBy() == null ? null : displayName(r.updatedBy()), r.updatedAt(), r.agentId(), agentName(r.agentId()));
     }
 
     private ProjectBriefDto toDto(ProjectBrief b) {
         return new ProjectBriefDto(b.goal(), b.background(), b.norms(), b.glossary(), b.updatedBy(),
-                b.updatedBy() == null ? null : displayName(b.updatedBy()), b.updatedAt());
+                b.updatedBy() == null ? null : displayName(b.updatedBy()), b.updatedAt(), b.agentId(), agentName(b.agentId()));
+    }
+
+    private String agentName(String agentId) {
+        return agentId == null ? null : agents.find(agentId).map(Agent::name).orElse(null);
     }
 
     private ProjectMemoryDto toDto(ProjectMemory m) {

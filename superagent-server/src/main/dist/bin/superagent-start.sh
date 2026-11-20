@@ -38,6 +38,12 @@ if [ -z "$java_major" ] || [ "$java_major" -lt 21 ]; then
   exit 1
 fi
 
+# --- ffmpeg (optional): subtitles and transcription convert and cut audio with it ---
+if ! command -v ffmpeg >/dev/null 2>&1 && [ ! -x /opt/homebrew/bin/ffmpeg ] && [ ! -x /usr/local/bin/ffmpeg ]; then
+  echo "Note: ffmpeg not found. Transcription then only takes files under 24 MB in formats the API accepts." >&2
+  echo "      Install it (brew install ffmpeg / apt-get install ffmpeg) or from the Models page." >&2
+fi
+
 JAVA_OPTS="${JAVA_OPTS:--Xms512m -Xmx2g}"
 # shellcheck disable=SC2206
 cmd=("$JAVA" $JAVA_OPTS

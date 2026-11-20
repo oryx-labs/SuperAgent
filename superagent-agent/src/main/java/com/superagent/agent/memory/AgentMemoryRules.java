@@ -111,23 +111,33 @@ final class AgentMemoryRules {
     }
 
     static String prompt(String agentName, String currentMemory, String transcript) {
+        return prompt(agentName, currentMemory, List.of(), transcript);
+    }
+
+    /** {@code agentOwned}: categories the agent wrote itself, which the model may only add to. */
+    static String prompt(String agentName, String currentMemory, List<String> agentOwned, String transcript) {
+        String owned = agentOwned.isEmpty() ? "" : """
+                - 这些类别是 Agent 自己写的，**不要删改其中已有的内容**，只能往里补充新信息：%s
+                """.formatted(String.join("、", agentOwned));
         return """
                 你负责维护 Agent「%s」的长期记忆。下面是它现有的记忆，以及它和用户之间新发生的对话。
                 请判断新对话里有没有**以后仍然有用**的信息，并据此更新记忆。
 
                 ## 记什么（宁缺毋滥）
-                - 只记以后的对话真正用得上的：用户的身份背景、偏好与习惯、长期目标与项目、已做出的决定和约定、
-                  进行中的事项与待办、需要记住的关键事实（名称、数字、链接、结论）。
+                - 只记以后的对话真正用得上的：用户的身份背景、偏好与习惯、对项目的理解、已做出的决定和约定、
+                  踩过的坑、进行中的事项与待办、需要记住的关键事实（名称、数字、链接、结论）。
                 - 不记：寒暄客套、一次性的问答、已经结束且不再相关的细节、可以随时重新查到的通用知识、
                   对话过程本身（「用户问了…助手答了…」）。
                 - 不确定有没有价值的，不记。
 
-                ## 怎么写
-                - 输出完整的新记忆（Markdown），只用下面这些小节，没有内容的小节整节省略：
-                  `## 关于用户` / `## 目标与项目` / `## 决定与约定` / `## 进行中与待办` / `## 关键事实`
+                ## 怎么写（按类别分段）
+                - 记忆按类别分段，每个类别一个 `## 类别名` 小节。常用类别：`## 项目理解` / `## 用户偏好` / `## 工作约定` /
+                  `## 踩过的坑` / `## 进行中与待办` / `## 关键事实`；现有记忆里的其他类别照原名保留，确有需要可以新增类别。
+                - 现有记忆里没写类别的内容，归到最合适的类别里，一条都不能丢。
+                - 输出完整的新记忆：每个有内容的类别都要输出；只有要整类删掉时，才输出一个空的 `## 类别名` 小节。
                 - 每条一行、用短句，写结论不写过程；合并重复，过时或被推翻的直接删掉，新旧冲突以新的为准。
-                - 已完成的待办移除（若结论有长期价值，写进「决定与约定」或「关键事实」）。
-                - 全文不超过 %d 字；超了就进一步压缩、删掉价值最低的条目。
+                - 已完成的待办移除（若结论有长期价值，写进「工作约定」或「关键事实」）。
+                %s- 全文不超过 %d 字；超了就进一步压缩、删掉价值最低的条目。
                 - 不要编造对话里没有的内容。
 
                 ## 输出要求
@@ -139,7 +149,7 @@ final class AgentMemoryRules {
 
                 ## 新对话
                 %s
-                """.formatted(agentName, MAX_MEMORY_CHARS, NO_CHANGE, agentName,
+                """.formatted(agentName, owned, MAX_MEMORY_CHARS, NO_CHANGE, agentName,
                 currentMemory == null || currentMemory.isBlank() ? "（暂无）" : currentMemory.strip(), transcript);
     }
 

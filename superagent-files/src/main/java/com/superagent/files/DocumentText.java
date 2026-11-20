@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-/** The text of a reference document page by page: a deck's slides, a PDF's pages; plain text is one page. */
+/** The text of a reference document page by page: a deck's slides, a PDF's pages; plain text and subtitles are one page. */
 public final class DocumentText {
 
     private static final Pattern SLIDE = Pattern.compile("ppt/slides/slide(\\d+)\\.xml");
@@ -34,7 +34,7 @@ public final class DocumentText {
 
     /** Whether {@link #pages} can read it. */
     public static boolean readable(Path file) {
-        return List.of("pptx", "pdf", "txt", "md").contains(extension(file));
+        return List.of("pptx", "pdf", "txt", "md", "srt", "vtt").contains(extension(file));
     }
 
     /** Empty for a kind it can't read. */
@@ -44,8 +44,32 @@ public final class DocumentText {
             case "pdf" -> pdf(file);
             case "txt", "md" -> Files.size(file) > MAX_TEXT_BYTES ? List.of()
                     : List.of(new Page(1, Files.readString(file, StandardCharsets.UTF_8)));
+            case "srt", "vtt" -> Files.size(file) > MAX_TEXT_BYTES ? List.of()
+                    : List.of(new Page(1, subtitleText(Files.readString(file, StandardCharsets.UTF_8))));
             default -> List.of();
         };
+    }
+
+    /** A subtitle file's words only: no WEBVTT header, notes or style blocks, cue numbers or timings. */
+    static String subtitleText(String subtitles) {
+        StringBuilder sb = new StringBuilder();
+        boolean skipBlock = false;
+        for (String raw : subtitles.replace("\uFEFF", "").split("\\R")) {
+            String line = raw.strip();
+            if (line.isEmpty()) {
+                skipBlock = false;
+                continue;
+            }
+            if (skipBlock || line.contains("-->") || line.matches("\\d+")) {
+                continue;
+            }
+            if (line.startsWith("WEBVTT") || line.startsWith("NOTE") || line.equals("STYLE") || line.equals("REGION")) {
+                skipBlock = true;
+                continue;
+            }
+            sb.append(line.replaceAll("<[^>]+>", "")).append('\n');
+        }
+        return sb.toString().strip();
     }
 
     private static List<Page> slides(Path file) throws IOException {

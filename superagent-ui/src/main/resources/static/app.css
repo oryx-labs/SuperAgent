@@ -1004,6 +1004,58 @@ button.stat-card:hover { border-color: var(--line-strong); }
 
 /* ---------- Tasks ---------- */
 .task-list-view, .task-detail-view { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+/* Only the Work page puts a side panel beside its list; Automation and Models share the class. */
+#taskListView { flex-direction: row; }
+#taskListView > .admin__body { min-width: 0; }
+
+/* Work side panel: views, then projects opening onto their latest tasks. Classes are ws-*: work-item is taken. */
+.work-side { flex: 0 0 248px; overflow-y: auto; background: #fafafa; border-right: 1px solid var(--line); padding: 18px 12px 24px; }
+.ws-head { display: flex; align-items: center; font-size: 12.5px; font-weight: 500; color: var(--muted); padding: 18px 10px 6px; }
+.ws-head:first-child { padding-top: 0; }
+.ws-item { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 8px 0 10px; border-radius: 8px;
+  cursor: pointer; font-size: 14px; color: #27272a; user-select: none; }
+.ws-item:hover { background: #f0f0f1; }
+.ws-item:focus-visible { outline: 2px solid var(--line-strong); outline-offset: -2px; }
+.ws-item.is-active { background: #e9e9eb; color: var(--ink); font-weight: 500; }
+.ws-icon { flex: 0 0 18px; width: 18px; height: 18px; color: #52525b; display: inline-flex; }
+.ws-icon svg { width: 18px; height: 18px; }
+.ws-item.is-active .ws-icon { color: var(--ink); }
+.ws-item__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-item__count { flex: 0 0 auto; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ws-caret { flex: 0 0 20px; width: 20px; height: 20px; border: 0; border-radius: 5px; background: none; padding: 0;
+  cursor: pointer; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+.ws-caret::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform .15s; }
+.ws-caret.is-open::before { transform: rotate(45deg) translate(-1px, -1px); }
+.ws-caret:hover { background: #e4e4e7; color: var(--ink); }
+.ws-tasks { list-style: none; margin: 2px 0 6px 19px; padding: 0 0 0 10px; border-left: 1px solid var(--line); }
+.ws-task { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 6px 0 8px; border-radius: 7px; cursor: pointer; font-size: 13.5px; }
+.ws-task:hover { background: #f0f0f1; }
+.ws-task__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #3f3f46; }
+.ws-task__agent { flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 1px solid var(--line);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
+.ws-tasks__empty { padding: 6px 8px; font-size: 12.5px; color: var(--muted); }
+.ws-dot { flex: 0 0 12px; width: 12px; height: 12px; border-radius: 50%; box-sizing: border-box; border: 1.5px dashed #a1a1aa; }
+.ws-dot.is-running, .ws-dot.is-waiting { border: 2px solid #2563eb; background: conic-gradient(#2563eb 0 50%, transparent 0); }
+.ws-dot.is-needs_confirmation { border: 2px solid #ea580c; background: conic-gradient(#ea580c 0 50%, transparent 0); }
+.ws-dot.is-done { border: 0; background: #16a34a; }
+.ws-dot.is-error { border: 0; background: #dc2626; }
+.ws-dot.is-stopped { border: 1.5px solid #a1a1aa; }
+.ws-task.is-active { background: #e9e9eb; }
+.ws-task .ws-item__count { font-size: 12px; }
+/* Status sections in the task list: sticky headers under the column titles, foldable. */
+.ttable tbody tr.t-section td { position: sticky; top: 35px; z-index: 1; background: #fafafa; padding: 9px 14px;
+  border-bottom: 1px solid var(--line); cursor: pointer; user-select: none; }
+.ttable tbody tr.t-section td > * { vertical-align: middle; }
+.t-section__caret { display: inline-block; width: 6px; height: 6px; margin: 0 10px 2px 2px; border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted); transform: rotate(45deg); transition: transform .15s; }
+.t-section.is-folded .t-section__caret { transform: rotate(-45deg); }
+.t-section .ws-dot { display: inline-block; margin-right: 8px; }
+.t-section__name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.t-section__count { margin-left: 8px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ttable tbody tr.t-section:hover td { background: #f4f4f5; }
+.ttable tbody tr.t-section-more td { padding: 8px 14px 14px 38px; border-bottom: 1px solid var(--line); }
+@media (max-width: 900px) { .work-side { display: none; } }
 
 .ttable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .ttable thead th {
@@ -1919,8 +1971,14 @@ small.model-note { display: block; margin-top: 4px; }
 .todo-row__actions > * + * { margin-left: 10px; }
 .todo-row.is-closed { opacity: .6; }
 .btn--sm { padding: 4px 10px; font-size: 12px; }
-.todo-tabs { padding-top: 14px; align-items: center; }
-.todo-read-all { margin-left: auto; font-size: 12px; }
+.todo-layout { flex: 1 1 auto; display: flex; min-height: 0; }
+.todo-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.todo-main > .admin__body { flex: 1 0 auto; overflow: visible; }
+.todo-toolbar { display: flex; justify-content: flex-end; padding: 4px 28px 0; }
+.todo-toolbar:has(.todo-read-all[hidden]) { display: none; }
+.todo-read-all { font-size: 12px; }
+button.ws-item { width: 100%; border: 0; background: none; font: inherit; font-size: 14px; text-align: left; }
+button.ws-item.is-active { background: #e9e9eb; }
 .todo-stats { display: grid; grid-template-columns: 3fr 4fr; gap: 14px; padding: 20px 28px 6px; }
 @media (max-width: 900px) { .todo-stats { grid-template-columns: 1fr; } }
 .todo-stats__panel { border: 1px solid var(--line); border-radius: 12px; background: var(--paper); overflow: hidden; }
@@ -2994,3 +3052,32 @@ body {
 .user__avatar { width: 28px; height: 28px; font-size: 12px; }
 .user__name { font-size: 12.5px; }
 .user__org { font-size: 10.5px; }
+
+/* A writing task's detail: the draft, the outline, the first draft beside the current one, the review rounds. */
+.at-doc { padding: 4px 2px; }
+.at-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0 0 14px; font-size: 12.5px; }
+.at-facts dt { color: var(--muted); }
+.at-facts dd { margin: 0; }
+.at-thesis { margin: 0 0 10px; font-weight: 550; }
+.at-label { margin: 10px 0 6px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.at-list { margin: 0 0 10px; padding-left: 20px; font-size: 12.5px; }
+.at-table { width: 100%; font-size: 12.5px; }
+.at-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.at-table .is-bad { color: #b91c1c; }
+.at-table .is-ok { color: #15803d; }
+.at-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.at-side__col { min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 0 14px 10px; background: var(--paper); }
+.at-round { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; overflow: hidden; background: var(--paper); }
+.at-round > summary { cursor: pointer; list-style: none; }
+.at-round > summary::-webkit-details-marker { display: none; }
+.at-round > :not(summary) { padding: 0 12px; }
+.at-block:empty { display: none; }
+.at-note { margin: 6px 0; font-size: 12.5px; color: var(--muted); }
+.at-sev--high { color: #b91c1c; }
+.at-sev--low { color: var(--muted); }
+
+/* Mermaid diagrams in a document: centred, scroll sideways rather than shrink; a broken one stays as source. */
+.mermaid-diagram { margin: 18px 0; padding: 12px; overflow-x: auto; text-align: center; border: 1px solid #e4e4e7; border-radius: 8px; background: #fafafa; }
+.mermaid-diagram svg { max-width: 100%; height: auto; }
+.mermaid-error { border-left: 3px solid #a1a1aa; }
+.mermaid-error__note { margin: 14px 0 4px; font-size: 13px; color: #b91c1c; }

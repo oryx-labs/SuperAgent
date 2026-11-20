@@ -52,16 +52,42 @@ final class CodingPrompts {
     static final String SPEC_RETRY = """
             上一版缺少可检查的「## 验收标准」（编号列表）或「## 验证命令」（代码块里每行一条命令）。请按格式把整份规格重新输出一遍。""";
 
+    /** How much of a failing command's output goes back to a model: the end is where it says what broke. */
+    static final int LOG_CHARS = 1500;
+
+    /** Keeps the conversation (and so every later turn's cost) from growing on tool output nobody needs. */
+    static final String TOOL_USE = """
+            控制上下文，别让工具输出撑大对话：
+            - 构建和测试用安静模式，只看结尾和失败部分，如 `mvn -q ...`，或加 `| tail -n 80`、`| grep -E "FAIL|ERROR"` 过滤；
+            - 读大文件用 grep 或指定行范围，不要整页读；
+            - 已经读过、也没改过的文件不要重复读。""";
+
     static String develop(HarnessState s) {
         return """
                 规格已经确认。现在是【开发】这一步：在当前工作区按规格实现。
 
                 - 只在这个工作区里改，不要切换分支、不要动 %s 分支、不要推送。
                 - 每完成一块就 git commit（提交信息写清做了什么）；结束时没提交的改动平台会替你提交。
-                - 写完后自己先跑一遍验证命令，失败就修：
+                - 结束前先对照规格的验收标准逐条自查，每条都要做到；做不到就继续改，别带着缺口交付。
+                - 自查之后再自己跑一遍验证命令，失败就修：
                 %s
-                - 完成后简短说明：改了哪些文件、各做了什么、自己跑验证的结果。不要说「已全部完成」之类的话，平台会自己跑验证来判断。
-                """.formatted(s.baseBranch, commands(s));
+                - 完成后写交付说明（后面验收人会读它）：先逐条列出验收标准 `N. 怎么做到的 | 证据`（文件、测试名、验证输出的哪一段），\
+                再写改了哪些文件、自己跑验证的结果。不要说「已全部完成」之类的话，平台会自己跑验证来判断。
+
+                %s
+                """.formatted(s.baseBranch, commands(s), TOOL_USE);
+    }
+
+    /** Only the hand-over note was wanting: write it again, touching nothing else. */
+    static String fixNotes(List<HarnessState.Finding> issues) {
+        StringBuilder sb = new StringBuilder("验收认为代码没问题，只是交付说明缺了下面这些内容：\n");
+        issues.forEach(f -> sb.append("- ").append(ReviewLoop.tag(f.id())).append(" ").append(f.text())
+                .append(f.where() == null || f.where().isBlank() ? "" : "（" + f.where() + "）").append("\n"));
+        return sb.append("""
+
+                这一步只补写交付说明：不要改任何文件，不要跑构建或测试，也不要提交。按开发时的格式重写完整的交付说明\
+                （逐条验收标准 `N. 怎么做到的 | 证据`，改了哪些文件，验证结果，以及上面缺的内容）。\
+                需要的事实从已有的改动和平台的验证输出里找，不要凭空编。""").toString();
     }
 
     static String fix(HarnessState s, HarnessState.Round round) {
@@ -69,13 +95,14 @@ final class CodingPrompts {
         for (HarnessState.Check c : round.checks()) {
             if (c.exitCode() != 0) {
                 failing.append("\n命令：").append(c.command()).append("\n退出码：").append(c.exitCode())
-                        .append("\n输出末尾：\n").append(c.logTail()).append("\n");
+                        .append("\n输出末尾：\n").append(Git.tail(c.logTail(), LOG_CHARS)).append("\n");
             }
         }
         return """
                 平台在工作区里跑了验证命令（第 %d 轮），下面这些没有通过。找到原因并修好代码（不要改验证命令、不要删测试来让它通过），\
                 修完自己再跑一遍，然后用一两句话说明改了什么。
-                %s""".formatted(round.round(), failing);
+                %s
+                %s""".formatted(round.round(), failing, TOOL_USE);
     }
 
     private static final String FOCUS = """
@@ -145,7 +172,7 @@ final class CodingPrompts {
         if (last != null) {
             for (HarnessState.Check c : last.checks()) {
                 checks.append("\n命令：").append(c.command()).append(" → 退出码 ").append(c.exitCode())
-                        .append("\n输出末尾：\n").append(Git.tail(c.logTail(), 1500)).append("\n");
+                        .append("\n输出末尾：\n").append(Git.tail(c.logTail(), LOG_CHARS)).append("\n");
             }
         }
         return """
@@ -163,6 +190,9 @@ final class CodingPrompts {
 
                 验收标准：
                 %s
+                开发的交付说明：
+                %s
+
                 平台第 %s 轮验证的输出：
                 %s
 
@@ -174,11 +204,13 @@ final class CodingPrompts {
                 按下面的格式回复：
 
                 ## 逐条核对
-                每条标准一行，编号和上面一致：`N. ✅ | 依据` 或 `N. ❌ | 原因`。依据要具体：哪个文件、哪个测试、验证输出里哪一段能看到。
-
+                每条标准一行，编号和上面一致：`N. ✅ | 依据` 或 `N. ❌ | 类别 | 原因`。依据要具体：哪个文件、哪个测试、验证输出里哪一段能看到。
+                ❌ 的类别二选一：`说明缺失`（交付说明、实测结论、检查结果这类说明性的东西没写，代码本身没问题）、\
+                `实现问题`（代码或行为不符合要求）。拿不准就写 `实现问题`。
+                
                 ## 结论
                 最后单独一行：全部 ✅ 写 `VERDICT: PASS`，否则写 `VERDICT: FAIL`。
-                """.formatted(round, READ_ONLY, s.branch, title, s.spec, criteria, last == null ? "?" : last.round(),
+                """.formatted(round, READ_ONLY, s.branch, title, s.spec, criteria, blankAs(s.handoff), last == null ? "?" : last.round(),
                 checks.isEmpty() ? "（没有）" : checks, shortSha(s.baseSha), diff);
     }
 
@@ -198,7 +230,9 @@ final class CodingPrompts {
 
                 认为某条不是问题、不该改的，可以不改，但要说明理由，审查人会裁定。最后按编号逐条回复，每条一行：
                 `问题 #编号：已修 | 改了什么` 或 `问题 #编号：不同意 | 理由`
-                （验收标准的编号写成 `问题 验收 N`）""").toString();
+                （验收标准的编号写成 `问题 验收 N`）
+
+                """ + TOOL_USE).toString();
     }
 
     /** The marker a resolver writes when the two sides want contradictory things: the user decides, not the model. */
@@ -309,9 +343,13 @@ final class CodingPrompts {
         String t = text == null ? "" : text.strip();
         List<String> criteria = new ArrayList<>();
         for (String line : section(t, "验收标准").lines().toList()) {
-            Matcher m = Pattern.compile("^\\s*(?:\\d+[.、)）]|[-*])\\s*(.+)$").matcher(line);
-            if (m.find() && !m.group(1).isBlank()) {
-                criteria.add(m.group(1).strip());
+            Matcher m = Pattern.compile("^(\\s*)(?:\\d+[.、)）]|[-*])\\s*(.+)$").matcher(line);
+            if (m.find() && !m.group(2).isBlank()) {
+                if (!m.group(1).isEmpty() && line.stripLeading().matches("[-*]\\s.*") && !criteria.isEmpty()) {
+                    criteria.set(criteria.size() - 1, criteria.get(criteria.size() - 1) + " " + m.group(2).strip()); // a sub-point
+                } else {
+                    criteria.add(m.group(2).strip());
+                }
             }
         }
         List<String> commands = new ArrayList<>();
@@ -339,6 +377,7 @@ final class CodingPrompts {
     private static final Pattern RULING = Pattern.compile("(?m)裁定\\s*(?:#|验收\\s*)?(\\w+)\\s*[：:]\\s*(接受|驳回)\\s*(?:\\|\\s*(.+?))?\\s*$");
     private static final Pattern VERDICT = Pattern.compile("(?mi)^[\\s>*`_-]*VERDICT\\s*[：:]\\s*[*`_]*\\s*(PASS|FAIL)\\b");
     private static final Pattern REBUTTAL = Pattern.compile("(?m)问题\\s*(#|验收\\s*)?(\\w+)\\s*[：:]\\s*不同意\\s*(?:\\|\\s*(.+?))?\\s*$");
+    private static final Pattern KIND = Pattern.compile("^[\\[【`*]*(说明缺失|实现问题)[\\]】`*]*\\s*(?:[|｜:：]\\s*)?");
     private static final Pattern CHECKED = Pattern.compile("(?m)^\\s*(?:验收\\s*)?(\\d+)\\s*[.、:：)）]?\\s*(✅|❌)\\s*(?:[|｜]\\s*)?(.*?)\\s*$");
 
     static Review parseReview(String text) {
@@ -381,7 +420,14 @@ final class CodingPrompts {
             int i = Integer.parseInt(c.group(1)) - 1;
             if (i >= 0 && i < checked.size()) {
                 String why = c.group(3).replaceFirst("^[|｜]\\s*", "").strip();
-                checked.set(i, new HarnessState.Criterion(checked.get(i).text(), c.group(2).equals("✅"), why.isEmpty() ? null : why));
+                boolean met = c.group(2).equals("✅");
+                Matcher k = KIND.matcher(why);
+                boolean note = !met && k.find() && k.group(1).equals("说明缺失");
+                if (k.reset().find()) {
+                    why = why.substring(k.end()).strip();
+                }
+                checked.set(i, new HarnessState.Criterion(checked.get(i).text(), met, why.isEmpty() ? null : why, false,
+                        note ? HarnessState.Criterion.NOTE : null));
             }
         }
         return new Acceptance(checked, verdict(t));

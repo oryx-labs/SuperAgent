@@ -31,4 +31,13 @@ class ChatProjectContextTest {
         assertThat(ChatService.characterAndProject(agent("out"), projects)).doesNotContain("项目共同上下文");
         assertThat(ChatService.characterAndProject(agent("in"), null)).doesNotContain("项目共同上下文"); // projects not wired
     }
+
+    @Test
+    void chatsWithThePlatformToolsAreToldToSettleWhatTheyLearn() {
+        assertThat(ChatService.toolRules(true)).contains("【沉淀规则】", "agent_memory_write", "agent_update", "一两句话说明")
+                .doesNotContain("project_update"); // the project half comes with the project's context
+        assertThat(ChatService.toolRules(false)).isNull();
+        assertThat(com.superagent.runtime.mcp.McpGrants.WORK_TOOLS).contains("mcp__superagent__agent_memory_write",
+                "mcp__superagent__project_update", "mcp__superagent__project_memory_write");
+    }
 }

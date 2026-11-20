@@ -233,7 +233,11 @@ public class CodingHarness implements TaskHarness {
         }
         s.spec = spec.text();
         s.criteria = spec.criteria().stream().map(c -> new HarnessState.Criterion(c, false, null)).toList();
-        s.verifyCommands = spec.commands();
+        VerifyCommands.Merged merged = VerifyCommands.merge(spec.commands(), Path.of(s.dir));
+        s.verifyCommands = merged.commands();
+        if (!merged.dropped().isEmpty()) {
+            s.spec = s.spec + "\n\n已合并：" + String.join("；", merged.dropped());
+        }
         s.specApproved = false;
         run.waitFor(step, specSummary(s));
     }
@@ -247,6 +251,7 @@ public class CodingHarness implements TaskHarness {
             run.stopped(step);
             return;
         }
+        s.handoff = turn.text();
         ws.commitAll(s, "开发：" + run.task().title());
         ws.recordChanges(s);
         if (s.files.isEmpty()) {
@@ -374,8 +379,52 @@ public class CodingHarness implements TaskHarness {
             run.waitFor(step, stopMessage(s, stop, blocking));
             return;
         }
+        if (what.equals("验收") && onlyNotes(round, blocking)) {
+            run.tell("第 " + round.round() + " 轮验收只是交付说明缺内容，让开发模型补写说明，不改代码、不重跑验证和审查");
+            fixNotes(run, step, ws, blocking);
+            return;
+        }
         run.tell("第 " + round.round() + " 轮" + what + "发现 " + blocking.size() + " 个要改的问题，交回开发模型修复，修完重新验证、审查和验收");
         fix(run, ws, blocking, what, null);
+    }
+
+    /** Every blocking issue is an unmet criterion the acceptor marked as a missing note; anything else may be the code. */
+    private static boolean onlyNotes(HarnessState.ReviewRound round, List<HarnessState.Finding> blocking) {
+        return !blocking.isEmpty() && blocking.stream().allMatch(f -> {
+            if (f.id() == null || !f.id().startsWith("AC") || !f.id().substring(2).chars().allMatch(Character::isDigit)) {
+                return false;
+            }
+            int i = Integer.parseInt(f.id().substring(2)) - 1;
+            return i >= 0 && i < round.criteria().size() && round.criteria().get(i).noteOnly();
+        });
+    }
+
+    /**
+     * The developer rewrites the hand-over note in its own conversation, then only the acceptance runs again. If it
+     * touched the code anyway, the whole way (verify, review, accept) runs again.
+     */
+    private void fixNotes(HarnessRun run, HarnessState.Step step, Workspace ws, List<HarnessState.Finding> issues) {
+        HarnessState s = run.state();
+        Workspace.Snapshot before = ws.snapshot(s);
+        HarnessHost.Turn turn = turn(run, CodingPrompts.fixNotes(issues), DEVELOP);
+        if (turn.cancelled()) {
+            run.stopped(step);
+            return;
+        }
+        s.handoff = turn.text();
+        s.loopRound++; // counts as a round for the stop rules
+        // a commit of its own moves HEAD, an uncommitted edit shows in the status: either is a change to the code
+        boolean changed = !ws.snapshot(s).equals(before);
+        ws.commitAll(s, "补写交付说明时改了代码（第 " + s.loopRound + " 轮）");
+        if (changed) {
+            ws.recordChanges(s);
+            s.fixBudget = FIX_ROUNDS;
+            run.note("补写说明时代码有变化，回到完整流程：重新验证、审查、验收");
+            resetFrom(s, VERIFY);
+        } else {
+            resetFrom(s, ACCEPT);
+        }
+        run.save();
     }
 
     /** The developer fixes {@code issues} in its own conversation; then everything from verify on runs again. */
@@ -388,6 +437,7 @@ public class CodingHarness implements TaskHarness {
         }
         ws.commitAll(s, "按" + from + "意见修改（第 " + s.loopRound + " 轮）");
         ws.recordChanges(s);
+        s.handoff = (s.handoff == null ? "" : s.handoff + "\n\n") + "（第 " + s.loopRound + " 轮修改后）\n" + fix.text();
         s.pendingRebuttals = CodingPrompts.parseRebuttals(fix.text());
         s.fixBudget = FIX_ROUNDS;
         resetFrom(s, VERIFY); // the fix is verified, reviewed and accepted again
@@ -707,7 +757,7 @@ public class CodingHarness implements TaskHarness {
             } else if (!v.passed()) {
                 StringBuilder why = new StringBuilder("验证命令没有通过：");
                 v.checks().stream().filter(x -> x.exitCode() != 0).forEach(x -> why.append("\n命令：").append(x.command())
-                        .append(" → 退出码 ").append(x.exitCode()).append("\n输出末尾：\n").append(Git.tail(x.logTail(), 2000)));
+                        .append(" → 退出码 ").append(x.exitCode()).append("\n输出末尾：\n").append(Git.tail(x.logTail(), CodingPrompts.LOG_CHARS)));
                 reason = why.toString();
             } else {
                 Looked look = look(run, ws, CodingPrompts.resolveReview(title, s, files, snippets.toString(),
@@ -792,7 +842,7 @@ public class CodingHarness implements TaskHarness {
         for (String cmd : s.verifyCommands) {
             run.note("▶ " + cmd);
             Git.Result r = git.shell(Path.of(s.dir), cmd, checkTimeoutSeconds);
-            checks.add(new HarnessState.Check(cmd, r.exit(), r.millis(), Git.tail(r.output(), 4000)));
+            checks.add(new HarnessState.Check(cmd, r.exit(), r.millis(), Git.tail(r.output(), CodingPrompts.LOG_CHARS)));
             run.note((r.ok() ? "✓ " : "✕ ") + cmd + " · 退出码 " + r.exit() + " · " + seconds(r.millis()));
             if (run.cancelled()) {
                 break;

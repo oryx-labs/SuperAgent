@@ -39,7 +39,39 @@ public final class HarnessViews {
                                 c.verdict(), c.checker(), c.issues())).toList(), s.reply),
                 s.conflicts.stream().map(c -> new HarnessDto.ConflictRound(c.round(), c.at(), c.model(), c.commit(), c.files(),
                         c.summary(), c.checks().stream().map(p -> new HarnessDto.PlatformCheck(p.name(), p.passed(), p.detail()))
-                                .toList(), c.verdict(), c.passed(), c.reason())).toList());
+                                .toList(), c.verdict(), c.passed(), c.reason())).toList(),
+                s.article == null ? null : article(s.article));
+    }
+
+    private static HarnessDto.Article article(HarnessState.Article a) {
+        HarnessState.Article.Brief b = a.brief;
+        return new HarnessDto.Article(
+                b == null ? null : new HarnessDto.Brief(b.genre(), b.audience(), b.knows(), b.purpose(), b.thesis(), b.words(),
+                        b.style(), b.mustUse(), b.exclude(), b.acceptance()),
+                a.sources.stream().map(x -> new HarnessDto.Source(x.id(), x.title(), x.ref(), x.status(), x.summary())).toList(),
+                a.claims.stream().map(c -> new HarnessDto.Claim(c.text(), c.sources(), c.status())).toList(),
+                a.judgement, a.outline, a.titles, a.thesis,
+                a.sections.stream().map(x -> new HarnessDto.Section(x.title(), x.point(), x.sources(), x.words())).toList(),
+                a.outlineApproved, a.approvals, a.approvedBy, a.draftFileId, a.draftName, a.draftSnapshot,
+                a.checks.stream().map(c -> new HarnessDto.ArticleCheck(c.round(), c.at(), c.passed(),
+                        c.items().stream().map(i -> new HarnessDto.Issue(i.check(), i.level(), i.where(), i.note())).toList())).toList(),
+                a.reviews.stream().map(r -> new HarnessDto.ArticleReview(r.round(), r.at(), r.editorModel(), r.checkerModel(),
+                        r.scores().stream().map(x -> new HarnessDto.Score(x.dimension(), x.name(), x.score(), x.quote(), x.advice())).toList(),
+                        r.total(), items(r.editor()), r.titles(),
+                        r.facts().stream().map(f -> new HarnessDto.Fact(f.statement(), f.sources(), f.verdict(), f.evidence(), f.adjusted()))
+                                .toList(), r.reader(), r.retelling(), r.consistent(), items(r.merged()), r.route(), r.passed())).toList(),
+                a.revisions.stream().map(v -> new HarnessDto.Revision(v.round(), v.at(), v.from(), items(v.items()),
+                        v.responses().stream().map(x -> new HarnessDto.Response(x.id(), x.action(), x.note())).toList(), v.changed()))
+                        .toList(),
+                a.fixRounds, a.reviewReturns, a.outlineReturns, a.researchReturns,
+                com.superagent.task.harness.article.ArticleHarness.RETURNS, a.checkWaived, a.acceptedAsIs,
+                a.pack != null ? a.pack.name() : a.genre,
+                a.evidence.stream().map(e -> new HarnessDto.Evidence(e.id(), e.type(), e.key(), e.body())).toList());
+    }
+
+    private static java.util.List<HarnessDto.Item> items(java.util.List<HarnessState.Article.Item> list) {
+        return list.stream().map(i -> new HarnessDto.Item(i.id(), i.severity(), i.type(), i.text(), i.where(), i.from(), i.outline()))
+                .toList();
     }
 
     private static HarnessDto.Finding finding(HarnessState.Finding f) {

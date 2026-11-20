@@ -4,7 +4,7 @@
 
 // ---------- tasks ----------
 Object.assign(api, {
-  listTasks: (page, status, narrow) => fetch("/api/v1/tasks?page=" + page + "&size=" + TASK_PAGE_SIZE
+  listTasks: (page, status, narrow, size) => fetch("/api/v1/tasks?page=" + page + "&size=" + (size || TASK_PAGE_SIZE)
     + (status ? "&status=" + encodeURIComponent(status) : "")
     + ["project", "tag", "agent", "source"].map(k => narrow && narrow[k] ? "&" + k + "=" + encodeURIComponent(narrow[k]) : "").join(""))
     .then(r => r.json()),
@@ -119,7 +119,9 @@ async function loadTasks() {
   let list = [];
   let page = null;
   loadTaskFacets();
-  try { const res = await api.listTasks(taskPage, "", taskNarrow); page = res && res.data; } catch (e) { /* ignore */ }
+  renderWorkSide();
+  if (!taskStatus) { await renderTaskSections(); return; }
+  try { const res = await api.listTasks(taskPage, taskStatus, taskNarrow); page = res && res.data; } catch (e) { /* ignore */ }
   list = (page && page.items) || [];
   tfEl.sum.textContent = page && taskNarrow.tag
     ? L("tasks.filterSum", { n: page.total, spend: "$" + Number(page.spend || 0).toFixed(2) }) : "";
@@ -133,6 +135,221 @@ async function loadTasks() {
     tel.rows.appendChild(taskRow(t));
     if (taskExpanded.has(t.id)) showSubtaskRows(t); // kept open across reloads
   });
+}
+
+// ---------- the side panel: views by status, and projects opening onto their latest tasks ----------
+// Outline icons (stroke = currentColor) so the panel stays monochrome.
+const WS_ICONS = {
+  all: '<path d="M9 4h6v3H9z"/><path d="M7 5H5v15h14V5h-2"/><path d="m9 13 2 2 4-4"/>',
+  active: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
+  confirm: '<path d="M12 3 2.5 20h19z"/><path d="M12 10v4M12 17v.5"/>',
+  done: '<circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
+  folder: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/>',
+};
+const WORK_VIEWS = [
+  { key: "", label: "work.viewAll", icon: "all" },
+  { key: "active", label: "work.viewActive", icon: "active" },
+  { key: "needs_confirmation", label: "work.viewConfirm", icon: "confirm" },
+  { key: "done", label: "work.viewDone", icon: "done" },
+];
+const WORK_PREVIEW = 5;
+let taskStatus = "";
+const workOpenProjects = new Set();
+const workSide = document.getElementById("workSide");
+
+function wsIcon(name) {
+  const span = document.createElement("span");
+  span.className = "ws-icon";
+  span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" '
+    + 'stroke-linejoin="round" aria-hidden="true">' + WS_ICONS[name] + "</svg>";
+  return span;
+}
+
+async function renderWorkSide() {
+  if (!projectList.length) await refreshProjects();
+  workSide.innerHTML = "";
+  workSide.appendChild(wsHead(L("work.views")));
+  WORK_VIEWS.forEach(v => workSide.appendChild(
+    wsItem(L(v.label), v.icon, !taskNarrow.project && taskStatus === v.key, () => pickWorkView(v.key))));
+  const live = projectList.filter(p => p.status !== "archived");
+  if (!live.length) return;
+  workSide.appendChild(wsHead(L("work.projects")));
+  live.forEach(p => {
+    const open = workOpenProjects.has(p.id);
+    const row = wsItem(p.name, "folder", taskNarrow.project === p.id && !taskStatus, () => pickWorkProject(p.id));
+    const caret = document.createElement("button");
+    caret.type = "button";
+    caret.className = "ws-caret" + (open ? " is-open" : "");
+    caret.title = L(open ? "work.collapse" : "work.expand");
+    caret.setAttribute("aria-label", caret.title);
+    caret.setAttribute("aria-expanded", String(open));
+    caret.addEventListener("click", e => {
+      e.stopPropagation();
+      if (open) workOpenProjects.delete(p.id); else workOpenProjects.add(p.id);
+      renderWorkSide();
+    });
+    row.appendChild(caret);
+    workSide.appendChild(row);
+    if (open) workSide.appendChild(wsPreview(p.id, row));
+  });
+}
+
+function wsHead(text) {
+  const h = document.createElement("div");
+  h.className = "ws-head";
+  h.textContent = text;
+  return h;
+}
+
+function wsItem(text, icon, active, onClick) {
+  const b = document.createElement("div");
+  b.className = "ws-item" + (active ? " is-active" : "");
+  b.setAttribute("role", "button");
+  b.tabIndex = 0;
+  const label = document.createElement("span");
+  label.className = "ws-item__label";
+  label.textContent = text;
+  label.title = text;
+  b.append(wsIcon(icon), label);
+  b.addEventListener("click", onClick);
+  b.addEventListener("keydown", e => { if (e.key === "Enter") onClick(); });
+  return b;
+}
+
+// Under an open project: its tasks by status, each a filter for the list. Empty statuses are left out.
+function wsPreview(projectId, row) {
+  const ul = document.createElement("ul");
+  ul.className = "ws-tasks";
+  Promise.all(TASK_SECTIONS.map(sec => api.listTasks(1, sec.key, { project: projectId }, 1)
+    .then(res => (res && res.data && res.data.total) || 0).catch(() => 0))).then(counts => {
+    const total = counts.reduce((a, b) => a + b, 0);
+    const count = document.createElement("span");
+    count.className = "ws-item__count";
+    count.textContent = total;
+    row.insertBefore(count, row.querySelector(".ws-caret"));
+    if (!total) {
+      const li = document.createElement("li");
+      li.className = "ws-tasks__empty";
+      li.textContent = L("work.noTasks");
+      ul.appendChild(li);
+    }
+    TASK_SECTIONS.forEach((sec, i) => {
+      if (!counts[i]) return;
+      const li = document.createElement("li");
+      li.className = "ws-task" + (taskNarrow.project === projectId && taskStatus === sec.key ? " is-active" : "");
+      const dot = document.createElement("span");
+      dot.className = "ws-dot is-" + (sec.key === "active" ? "running" : sec.key);
+      const name = document.createElement("span");
+      name.className = "ws-task__title";
+      name.textContent = L(sec.label);
+      const n = document.createElement("span");
+      n.className = "ws-item__count";
+      n.textContent = counts[i];
+      li.append(dot, name, n);
+      li.addEventListener("click", () => pickWorkProject(projectId, sec.key));
+      ul.appendChild(li);
+    });
+  });
+  return ul;
+}
+
+function pickWorkView(key) {
+  taskStatus = key;
+  taskNarrow.project = "";
+  taskPage = 1;
+  loadTasks();
+}
+
+function pickWorkProject(id, status) {
+  taskNarrow.project = id;
+  taskStatus = status || "";
+  workOpenProjects.add(id);
+  taskPage = 1;
+  loadTasks();
+}
+
+// ---------- the list in sections by status: what needs the user first, finished work last ----------
+// Each section asks for its own tasks, so paging doesn't split a section across pages.
+const TASK_SECTIONS = [
+  { key: "needs_confirmation", label: "work.secConfirm", limit: 20 },
+  { key: "active", label: "work.secActive", limit: 20 },
+  { key: "error", label: "work.secError", limit: 20 },
+  { key: "done", label: "work.secDone", limit: 10 },
+  { key: "stopped", label: "work.secStopped", limit: 10, folded: true },
+];
+const sectionLimit = {};
+const sectionFolded = new Set(TASK_SECTIONS.filter(x => x.folded).map(x => x.key));
+let sectionsToken = 0;
+
+async function renderTaskSections() {
+  const token = ++sectionsToken;
+  const pages = await Promise.all(TASK_SECTIONS.map(sec =>
+    api.listTasks(1, sec.key, taskNarrow, sectionLimit[sec.key] || sec.limit)
+      .then(res => (res && res.data) || null).catch(() => null)));
+  if (token !== sectionsToken) return; // a newer load is drawing the list
+  tel.pager.hidden = true;
+  tel.rows.innerHTML = "";
+  const total = pages.reduce((n, p) => n + (p ? p.total : 0), 0);
+  tfEl.sum.textContent = taskNarrow.tag ? L("tasks.filterSum", { n: total,
+    spend: "$" + pages.reduce((n, p) => n + Number((p && p.spend) || 0), 0).toFixed(2) }) : "";
+  tel.empty.hidden = total > 0;
+  const all = pages.flatMap(p => (p && p.items) || []);
+  tel.rows.closest("table").classList.toggle("is-solo", new Set(all.map(t => t.createdBy)).size <= 1);
+  TASK_SECTIONS.forEach((sec, i) => {
+    const page = pages[i];
+    if (!page || !page.total) return;
+    const folded = sectionFolded.has(sec.key);
+    tel.rows.appendChild(sectionHead(sec, page.total, folded));
+    if (folded) return;
+    page.items.forEach(t => {
+      tel.rows.appendChild(taskRow(t));
+      if (taskExpanded.has(t.id)) showSubtaskRows(t);
+    });
+    if (page.total > page.items.length) tel.rows.appendChild(sectionMore(sec, page.total - page.items.length));
+  });
+}
+
+function sectionHead(sec, count, folded) {
+  const tr = document.createElement("tr");
+  tr.className = "t-section is-" + sec.key + (folded ? " is-folded" : "");
+  const td = document.createElement("td");
+  td.colSpan = 9;
+  const caret = document.createElement("span");
+  caret.className = "t-section__caret";
+  const dot = document.createElement("span");
+  dot.className = "ws-dot is-" + (sec.key === "active" ? "running" : sec.key);
+  const name = document.createElement("span");
+  name.className = "t-section__name";
+  name.textContent = L(sec.label);
+  const n = document.createElement("span");
+  n.className = "t-section__count";
+  n.textContent = count;
+  td.append(caret, dot, name, n);
+  tr.appendChild(td);
+  tr.title = L(folded ? "work.expand" : "work.collapse");
+  tr.addEventListener("click", () => {
+    if (folded) sectionFolded.delete(sec.key); else sectionFolded.add(sec.key);
+    renderTaskSections();
+  });
+  return tr;
+}
+
+function sectionMore(sec, left) {
+  const tr = document.createElement("tr");
+  tr.className = "t-section-more";
+  const td = document.createElement("td");
+  td.colSpan = 9;
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "link-btn";
+  b.textContent = L("work.showMore", { n: left });
+  b.addEventListener("click", () => {
+    sectionLimit[sec.key] = (sectionLimit[sec.key] || sec.limit) + 30;
+    renderTaskSections();
+  });
+  td.appendChild(b);
+  tr.appendChild(td);
+  return tr;
 }
 
 // ---------- a complex task's subtasks, as a tree under it in the list ----------
@@ -239,10 +456,10 @@ function filterByTag(tag) {
   loadTasks();
 }
 
-/** general | coding | complex | subtask (a complex task's part). */
+/** general | coding | complex | article | subtask (a complex task's part). */
 function taskKind(t) {
   if (t.parentId) return "subtask";
-  return t.flow === "coding" || t.flow === "complex" ? t.flow : "general";
+  return t.flow === "coding" || t.flow === "complex" || t.flow === "article" ? t.flow : "general";
 }
 
 /** "Waiting: A, B to finish", or why it can't start on its own; "" for a task that waits for nothing. */
@@ -548,7 +765,9 @@ function renderDetail(d) {
   // A complex task still at work opens on its subtasks: that is where its progress is. A general task always opens
   // on what it produced.
   const answered = last || (d.harness && d.harness.delivery);
+  // A writing task opens on its final draft once delivered, on its run while at work.
   setTaskTab(d.harness && d.harness.harness === "subtitle" ? "ssub"
+    : d.harness && d.harness.harness === "article" ? (t.status === "done" ? "afinal" : "run")
     : task.general && !(t.flow === "complex" && t.subtasks && isActiveStatus(t.status)) ? "output"
     : answered && t.status === "done" ? "output" : t.flow === "complex" && t.subtasks ? "subtasks" : "run");
   loadTaskFiles(t.id);

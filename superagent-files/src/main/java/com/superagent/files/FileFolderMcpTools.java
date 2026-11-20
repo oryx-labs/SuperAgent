@@ -38,9 +38,12 @@ public class FileFolderMcpTools implements McpToolProvider {
     private final FileService files;
     private final FileFolderService folders;
 
-    public FileFolderMcpTools(FileService files, FileFolderService folders) {
+    private final ProjectFolderService projectFolders;
+
+    public FileFolderMcpTools(FileService files, FileFolderService folders, ProjectFolderService projectFolders) {
         this.files = files;
         this.folders = folders;
+        this.projectFolders = projectFolders;
     }
 
     @Override
@@ -57,9 +60,12 @@ public class FileFolderMcpTools implements McpToolProvider {
                                 opt("folder", "string", "只查这个目录及其子目录，" + path + "；填「未归档」查没放目录的文件")),
                         (String[]) null),
                 tool("file_folders", "列出用户的目录树和每个目录里的文件数。", props(), (String[]) null),
-                tool("file_move", "把用户能看到的一个文件移到他的某个目录（只影响他自己看到的位置，不影响别人）。",
+                tool("file_move", "把用户能看到的一个文件移到他的某个目录（只影响他自己看到的位置，不影响别人）；"
+                                + "带 project_folder 则把它放进你所在项目的共享目录，项目成员都能看到。",
                         props(req("file_id", "string", "文件 id（用 file_find 查）"),
-                                opt("folder", "string", path + "；不填则移出目录，回到未归档")),
+                                opt("folder", "string", path + "；不填则移出目录，回到未归档"),
+                                opt("project_folder", "string", "放进你所在项目的哪个目录（项目里的目录路径）；"
+                                        + "传空字符串或 / 放在项目根目录。传了它就只放进项目，不动用户自己的目录")),
                         "file_id"),
                 tool("file_create_folder", "新建目录。只有用户明确要求新建时才用，不要自己决定建目录。",
                         props(req("path", "string", path + "，上级不存在会一起建，最多 3 层")), "path"),
@@ -83,6 +89,11 @@ public class FileFolderMcpTools implements McpToolProvider {
                 case "file_find" -> find(user, strOrNull(args, "query"), strOrNull(args, "folder"));
                 case "file_folders" -> tree(user);
                 case "file_move" -> {
+                    if (args.has("project_folder") && !args.get("project_folder").isNull()) {
+                        String where = projectFolders.mountByAgent(user, grant.agentId(), grant.taskId(), require(args, "file_id"),
+                                args.get("project_folder").asText(""));
+                        yield "已放进" + where + "，项目成员都能看到。";
+                    }
                     String folder = strOrNull(args, "folder");
                     folders.moveToPath(user, require(args, "file_id"), folder);
                     yield folder == null || folder.isBlank() ? "已移出目录，回到未归档。" : "已移到目录「" + folder.strip() + "」。";
@@ -96,7 +107,8 @@ public class FileFolderMcpTools implements McpToolProvider {
                 }
                 default -> throw new McpToolException("Unknown tool: " + name);
             });
-        } catch (IllegalArgumentException | NotFoundException | ForbiddenException e) {
+        } catch (IllegalArgumentException | NotFoundException | ForbiddenException
+                 | com.superagent.core.error.ConflictException e) {
             throw new McpToolException(e.getMessage());
         }
     }
