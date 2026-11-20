@@ -257,6 +257,7 @@ public class CredentialService {
      * model the CLI is known to run.
      */
     ProviderCredential check(ProviderCredential c) {
+        Instant startedAt = Instant.now();
         List<String> candidates = testModels(c.providerKey());
         ProviderCredential checked;
         // Vendors and Codex list models with the key alone; Claude needs a model to ask.
@@ -294,6 +295,22 @@ public class CredentialService {
             }
             checked = failure == null ? c.withHealth(ProviderCredential.OK, null)
                     : c.withHealth(ProviderCredential.ERROR, tail(failure.getMessage() == null ? failure.toString() : failure.getMessage()));
+        }
+        return saveUnlessNewerVerdict(c.id(), startedAt, checked);
+    }
+
+    /**
+     * Saves a check's verdict unless a newer one landed while this check was probing — a live run's failover or
+     * an admin's manual check is fresher evidence than a probe that started before it. Also keeps a key deleted
+     * mid-check deleted (a blind save would resurrect its row).
+     */
+    private ProviderCredential saveUnlessNewerVerdict(String id, Instant startedAt, ProviderCredential checked) {
+        ProviderCredential now = store.find(id).orElse(null);
+        if (now == null) {
+            return checked;
+        }
+        if (now.checkedAt() != null && now.checkedAt().isAfter(startedAt)) {
+            return now;
         }
         store.save(checked);
         return checked;
