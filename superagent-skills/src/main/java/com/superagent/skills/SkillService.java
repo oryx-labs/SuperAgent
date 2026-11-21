@@ -481,4 +481,30 @@ public class SkillService {
     public List<Skill> companySkills() {
         return live().filter(s -> s.enabled() && ownerOf(s) == null).toList();
     }
+
+    /** Employee handover: rewrite {@code personal:from} skills to {@code personal:to}. Company skills untouched. */
+    public int transferPersonalSkills(String fromUserId, String toUserId) {
+        if (fromUserId == null || toUserId == null || fromUserId.equals(toUserId)) {
+            return 0;
+        }
+        String fromSpace = "personal:" + fromUserId;
+        String toSpace = "personal:" + toUserId;
+        int n = 0;
+        for (Skill s : store.list()) {
+            if (!s.deleted() && fromSpace.equals(s.space())) {
+                store.save(s.withSpace(toSpace, toUserId));
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** Live personal skills owned by this user id. */
+    public int countPersonal(String userId) {
+        if (userId == null) {
+            return 0;
+        }
+        String space = "personal:" + userId;
+        return (int) live().filter(s -> space.equals(s.space())).count();
+    }
 }

@@ -41,4 +41,9 @@ public record SuperAgentWork(
         return new SuperAgentWork(taskId, owner, planId, title, memberId, memberName, newStatus,
                 newSummary != null ? newSummary : summary, assignedAt, finished, Instant.now(), messageId);
     }
+
+    public SuperAgentWork withOwner(String newOwner) {
+        return new SuperAgentWork(taskId, newOwner, planId, title, memberId, memberName, status, summary,
+                assignedAt, finishedAt, Instant.now(), messageId);
+    }
 }

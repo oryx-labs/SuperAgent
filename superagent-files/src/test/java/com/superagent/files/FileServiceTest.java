@@ -124,6 +124,11 @@ class FileServiceTest {
         @Override public Map<String, String> placements(String owner) { return new HashMap<>(placed.getOrDefault(owner, Map.of())); }
         @Override public void place(String owner, String fileId, String folderId, String by) {
             placed.computeIfAbsent(owner, k -> new HashMap<>()).put(fileId, folderId); }
+        @Override public void transferPlacements(String fromOwner, String toOwner) {
+            Map<String, String> from = placed.remove(fromOwner);
+            if (from == null || from.isEmpty()) return;
+            placed.computeIfAbsent(toOwner, k -> new HashMap<>()).putAll(from);
+        }
     }
 
     private FileStorageService storage;

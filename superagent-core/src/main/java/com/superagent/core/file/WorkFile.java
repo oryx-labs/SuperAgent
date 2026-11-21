@@ -95,4 +95,9 @@ public record WorkFile(
         return new WorkFile(id, name, kind, mimeType, size, storage, location, owner, agentId, taskId, origin,
                 true, createdAt, Instant.now(), tags, tagState);
     }
+
+    public WorkFile withOwner(String newOwner) {
+        return new WorkFile(id, name, kind, mimeType, size, storage, location, newOwner, agentId, taskId, origin,
+                deleted, createdAt, Instant.now(), tags, tagState);
+    }
 }

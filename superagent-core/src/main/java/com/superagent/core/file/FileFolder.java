@@ -20,4 +20,8 @@ public record FileFolder(String id, String owner, String name, String parentId, 
     public FileFolder asDeleted() {
         return new FileFolder(id, owner, name, parentId, true, createdAt, Instant.now());
     }
+
+    public FileFolder withOwner(String newOwner) {
+        return new FileFolder(id, newOwner, name, parentId, deleted, createdAt, Instant.now());
+    }
 }

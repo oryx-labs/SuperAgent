@@ -2892,6 +2892,95 @@ public class TaskService implements TaskRecovery {
         return new TaskEventDto(e.type().name().toLowerCase(), e.seq(), e.payload(), e.createdAt());
     }
 
+    /**
+     * Employee handover: stop actively running tasks owned by {@code fromUserId}, then reassign
+     * {@code createdBy} to {@code toUserId}. {@link TaskStatus#PENDING} / {@link TaskStatus#WAITING}
+     * keep their status; any in-memory queue entries move to the successor so {@link #tryDispatch}
+     * can continue them (tryDispatch alone never reloads PENDING rows from the store).
+     */
+    public TaskHandoverResult transferOwnership(String fromUserId, String toUserId) {
+        if (fromUserId == null || toUserId == null || fromUserId.equals(toUserId)) {
+            return new TaskHandoverResult(0, 0);
+        }
+        List<Task> mine = owned(fromUserId).toList();
+        java.util.Set<String> ids = mine.stream().map(Task::id).collect(java.util.stream.Collectors.toSet());
+        List<QueuedRun> moved = new ArrayList<>();
+        synchronized (schedulerLock) {
+            Deque<QueuedRun> q = queues.get(fromUserId);
+            if (q != null) {
+                for (java.util.Iterator<QueuedRun> it = q.iterator(); it.hasNext(); ) {
+                    QueuedRun run = it.next();
+                    if (ids.contains(run.taskId())) {
+                        moved.add(run);
+                        it.remove();
+                    }
+                }
+            }
+        }
+        int stopped = 0;
+        int reassigned = 0;
+        for (Task task : mine) {
+            Task current = task;
+            // Issue #22: only RUNNING / NEEDS_CONFIRMATION are stop-then-reassign.
+            // PENDING / WAITING keep their status and only change createdBy.
+            if (current.status() == TaskStatus.RUNNING || current.status() == TaskStatus.NEEDS_CONFIRMATION) {
+                try {
+                    stop(current.id(), fromUserId);
+                } catch (RuntimeException e) {
+                    log.warn("handover stop task {} failed: {}", current.id(), e.getMessage());
+                }
+                current = tasks.findTask(current.id()).orElse(current);
+                if (current.status() == TaskStatus.RUNNING || current.status() == TaskStatus.NEEDS_CONFIRMATION) {
+                    current = current.finished(TaskStatus.STOPPED, current.progress(), "因离职交接停止");
+                    tasks.save(current);
+                    publish(current, null);
+                }
+                stopped++;
+            }
+            current = tasks.findTask(current.id()).orElse(current);
+            if (current.status() != TaskStatus.DELETED && !toUserId.equals(current.createdBy())) {
+                tasks.save(current.withCreatedBy(toUserId));
+                reassigned++;
+            }
+        }
+        java.util.Set<String> movedIds = moved.stream().map(QueuedRun::taskId)
+                .collect(java.util.stream.Collectors.toSet());
+        synchronized (schedulerLock) {
+            Deque<QueuedRun> dest = queues.computeIfAbsent(toUserId, k -> new ArrayDeque<>());
+            java.util.Set<String> already = dest.stream().map(QueuedRun::taskId)
+                    .collect(java.util.stream.Collectors.toCollection(java.util.HashSet::new));
+            for (QueuedRun run : moved) {
+                Task t = tasks.findTask(run.taskId()).orElse(null);
+                if (t == null || t.status() != TaskStatus.PENDING || !already.add(run.taskId())) {
+                    continue;
+                }
+                dest.addLast(run);
+            }
+            // Admitted but not in any queue (e.g. race) would never start again — drop the mark
+            // so the scheduler / admit path can pick never-started PENDING work back up.
+            for (String id : ids) {
+                if (movedIds.contains(id)) {
+                    continue;
+                }
+                Task t = tasks.findTask(id).orElse(null);
+                if (t != null && t.status() == TaskStatus.PENDING && t.workspaceDir() == null) {
+                    admitted.remove(id);
+                }
+            }
+        }
+        tryDispatch(toUserId);
+        Runnable wake = wakeScheduler;
+        if (wake != null) {
+            wake.run();
+        }
+        log.info("handover tasks from {} to {}: stopped={}, reassigned={}, requeued={}",
+                fromUserId, toUserId, stopped, reassigned, movedIds.size());
+        return new TaskHandoverResult(stopped, reassigned);
+    }
+
+    public record TaskHandoverResult(int stopped, int reassigned) {
+    }
+
     @PreDestroy
     void shutdown() {
         executor.shutdownNow();

@@ -426,4 +426,21 @@ public class AutomationService {
                 : tasks.status(r.taskId()).map(st -> st.name().toLowerCase(Locale.ROOT)).orElse("deleted");
         return new AutomationRunDto(r.id(), r.trigger(), r.taskId(), status, r.skippedReason(), r.firedAt());
     }
+
+    /** Employee handover: reassign every automation owned by {@code fromUserId}. */
+    public int transferOwnership(String fromUserId, String toUserId) {
+        if (fromUserId == null || toUserId == null || fromUserId.equals(toUserId)) {
+            return 0;
+        }
+        int n = 0;
+        synchronized (lock) {
+            for (Automation a : store.list()) {
+                if (Objects.equals(a.owner(), fromUserId)) {
+                    store.save(a.withOwner(toUserId));
+                    n++;
+                }
+            }
+        }
+        return n;
+    }
 }

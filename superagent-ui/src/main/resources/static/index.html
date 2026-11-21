@@ -1278,6 +1278,27 @@
     </div>
   </div>
 
+  <div class="modal" id="handoverModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <form class="modal__card user-modal" id="handoverForm">
+      <h3 class="modal__title" data-i18n="users.handoverTitle">Employee handover</h3>
+      <p class="field-hint"><span data-i18n="users.handoverFrom">Leaving</span>: <strong id="hoFromLabel"></strong></p>
+      <label class="field"><span data-i18n="users.handoverTo">Successor</span>
+        <select id="hoTo" required></select>
+      </label>
+      <label class="field field--check"><input type="checkbox" id="hoDisable" checked />
+        <span data-i18n="users.handoverDisable">Disable the leaving account after handover</span></label>
+      <div class="field-hint" id="hoPreview" hidden></div>
+      <ul class="field-hint" id="hoWarnings" hidden></ul>
+      <p class="field-hint kb-modal__error" id="hoError" hidden></p>
+      <div class="modal__actions">
+        <button type="button" class="btn" data-close data-i18n="common.cancel">Cancel</button>
+        <button type="button" class="btn" id="hoPreviewBtn" data-i18n="users.handoverPreview">Preview</button>
+        <button type="submit" class="btn btn--primary" id="hoSubmit" data-i18n="users.handoverConfirm">Confirm handover</button>
+      </div>
+    </form>
+  </div>
+
   <div class="modal" id="userModal" hidden>
     <div class="modal__backdrop" data-close></div>
     <form class="modal__card user-modal" id="userForm">

@@ -44,6 +44,7 @@
     <module>superagent-task</module>
     <module>superagent-orchestrator</module>
     <module>superagent-event</module>
+    <module>superagent-handover</module>
     <module>superagent-web</module>
     <module>superagent-ui</module>
     <module>superagent-server</module>
@@ -153,6 +154,11 @@
       <dependency>
         <groupId>com.superagent</groupId>
         <artifactId>superagent-event</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.superagent</groupId>
+        <artifactId>superagent-handover</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

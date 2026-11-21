@@ -198,6 +198,19 @@ public class FileService {
         return store.listFor(owner, List.of());
     }
 
+    /** Employee handover: rewrite {@code owner} on every live file owned by {@code fromUserId}. */
+    public int transferOwnership(String fromUserId, String toUserId) {
+        if (fromUserId == null || toUserId == null || fromUserId.equals(toUserId)) {
+            return 0;
+        }
+        int n = 0;
+        for (WorkFile f : ownedBy(fromUserId)) {
+            store.save(f.withOwner(toUserId));
+            n++;
+        }
+        return n;
+    }
+
     String excerpt(WorkFile f) {
         if (WorkFile.LINK.equals(f.storage())) {
             return f.location(); // the address says what it's about

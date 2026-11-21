@@ -347,6 +347,18 @@ public class AgentMemoryService {
     // --- forgetting ---
 
     /** Deletes the agent's memory and its bookkeeping (when the agent itself is deleted). */
+    /** Employee handover: keep the memory document, rewrite its owner field with the agent. */
+    public void transferOwner(Agent agent, String newOwner) {
+        if (agent == null || newOwner == null) {
+            return;
+        }
+        states.find(agent.id()).ifPresent(s -> {
+            if (!newOwner.equals(s.owner())) {
+                states.save(s.withOwner(newOwner));
+            }
+        });
+    }
+
     public void forget(Agent agent) {
         states.delete(agent.id());
         backoff.remove(agent.id());

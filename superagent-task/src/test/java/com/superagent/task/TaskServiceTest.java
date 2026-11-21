@@ -23,6 +23,7 @@ import com.superagent.core.task.TaskStore;
 import com.superagent.runtime.attachment.ImageAttachmentStore;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -1309,5 +1310,78 @@ class TaskServiceTest {
         String targets = service.codingTargets("tester", "a1");
         assertThat(targets).startsWith("本项目的仓库").contains("api：/code/api", "交付方式 pr", "后端服务", "每个仓库建一个子任务");
         assertThat(service.codingTargets("tester", "a2")).doesNotContain("本项目的仓库").contains("最近用过的代码位置");
+    }
+
+    @Test
+    void handoverKeepsPendingAndWaitingTasksRunningOnlyStopsActiveOnes() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        TaskService service = service(new FakeRunner(() -> "done."), tasks);
+        Instant now = Instant.now();
+        tasks.save(new Task("t-wait", "waiting parent", "brief", com.superagent.core.task.TaskSource.TASK_FORM,
+                "repo", "main", null, com.superagent.core.task.TaskStatus.WAITING, 40, BigDecimal.ZERO,
+                "m", AgentType.CLAUDE, "/ws", "alice", null, now, now, null, now));
+        tasks.save(new Task("t-pend", "queued", "brief", com.superagent.core.task.TaskSource.TASK_FORM,
+                "repo", "main", null, com.superagent.core.task.TaskStatus.PENDING, 0, BigDecimal.ZERO,
+                "m", AgentType.CLAUDE, null, "alice", null, now, null, null, now));
+        tasks.save(new Task("t-run", "active", "brief", com.superagent.core.task.TaskSource.TASK_FORM,
+                "repo", "main", null, com.superagent.core.task.TaskStatus.RUNNING, 20, BigDecimal.ZERO,
+                "m", AgentType.CLAUDE, "/ws", "alice", null, now, now, null, now));
+        tasks.save(new Task("t-confirm", "confirm", "brief", com.superagent.core.task.TaskSource.TASK_FORM,
+                "repo", "main", null, com.superagent.core.task.TaskStatus.NEEDS_CONFIRMATION, 60, BigDecimal.ZERO,
+                "m", AgentType.CLAUDE, "/ws", "alice", null, now, now, null, now));
+
+        TaskService.TaskHandoverResult result = service.transferOwnership("alice", "bob");
+
+        assertThat(result.stopped()).isEqualTo(2);
+        assertThat(result.reassigned()).isEqualTo(4);
+        assertThat(tasks.findTask("t-wait").orElseThrow().status()).isEqualTo(com.superagent.core.task.TaskStatus.WAITING);
+        assertThat(tasks.findTask("t-wait").orElseThrow().createdBy()).isEqualTo("bob");
+        assertThat(tasks.findTask("t-pend").orElseThrow().status()).isEqualTo(com.superagent.core.task.TaskStatus.PENDING);
+        assertThat(tasks.findTask("t-pend").orElseThrow().createdBy()).isEqualTo("bob");
+        assertThat(tasks.findTask("t-run").orElseThrow().status()).isEqualTo(com.superagent.core.task.TaskStatus.STOPPED);
+        assertThat(tasks.findTask("t-run").orElseThrow().createdBy()).isEqualTo("bob");
+        assertThat(tasks.findTask("t-confirm").orElseThrow().status()).isEqualTo(com.superagent.core.task.TaskStatus.STOPPED);
+        assertThat(tasks.findTask("t-confirm").orElseThrow().createdBy()).isEqualTo("bob");
+    }
+
+    @Test
+    void handoverRequeuesPendingWorkSoSuccessorCanStartIt() throws Exception {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        CountDownLatch hold = new CountDownLatch(1);
+        AgentRunner slow = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                try {
+                    // First turn holds the owner's only slot; later turns (successor) finish.
+                    if (!hold.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("handover test latch timed out");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                if (c.isCancelled()) {
+                    return;
+                }
+                sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.RESULT, "done", Instant.now()));
+            }
+        };
+        TaskService service = service(slow, tasks, 1); // alice at parallel cap after the first starts
+        String running = service.create(brief("holds slot"), "alice").id();
+        await().atMost(Duration.ofSeconds(3)).until(() ->
+                tasks.findTask(running).map(t -> t.status().name()).orElse("").equals("RUNNING"));
+        String queued = service.create(brief("waiting in queue"), "alice").id();
+        await().atMost(Duration.ofSeconds(2)).until(() ->
+                tasks.findTask(queued).map(t -> t.status() == com.superagent.core.task.TaskStatus.PENDING
+                        && t.workspaceDir() == null).orElse(false));
+
+        service.transferOwnership("alice", "bob");
+        hold.countDown(); // release the cancelled first turn
+
+        await().atMost(Duration.ofSeconds(5)).until(() ->
+                tasks.findTask(queued).map(t -> t.status().name()).orElse("").equals("DONE"));
+        assertThat(tasks.findTask(queued).orElseThrow().createdBy()).isEqualTo("bob");
+        assertThat(tasks.findTask(running).orElseThrow().status())
+                .isIn(com.superagent.core.task.TaskStatus.STOPPED, com.superagent.core.task.TaskStatus.DONE);
+        assertThat(tasks.findTask(running).orElseThrow().createdBy()).isEqualTo("bob");
     }
 }

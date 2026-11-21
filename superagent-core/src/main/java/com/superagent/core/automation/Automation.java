@@ -67,4 +67,9 @@ public record Automation(
         return new Automation(id, name, prompt, type, cron, runAt, timezone, model, overlap, enabled, source, owner,
                 hash, nextRunAt, lastRunAt, lastTaskId, createdAt, Instant.now(), tier);
     }
+
+    public Automation withOwner(String newOwner) {
+        return new Automation(id, name, prompt, type, cron, runAt, timezone, model, overlap, enabled, source, newOwner,
+                apiTokenHash, nextRunAt, lastRunAt, lastTaskId, createdAt, Instant.now(), tier);
+    }
 }

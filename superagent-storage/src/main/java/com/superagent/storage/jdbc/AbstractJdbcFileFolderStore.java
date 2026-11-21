@@ -71,4 +71,22 @@ abstract class AbstractJdbcFileFolderStore implements FileFolderStore {
                 rs -> { out.put(rs.getString("file_id"), rs.getString("folder_id")); }, TenantSchema.company(), owner);
         return out;
     }
+
+    @Override
+    public void transferPlacements(String fromOwner, String toOwner) {
+        if (fromOwner == null || toOwner == null || fromOwner.equals(toOwner)) {
+            return;
+        }
+        Map<String, String> from = placements(fromOwner);
+        if (from.isEmpty()) {
+            return;
+        }
+        Instant now = Instant.now();
+        for (Map.Entry<String, String> e : from.entrySet()) {
+            jdbc.update("REPLACE INTO file_placement " + PLACEMENT,
+                    TenantSchema.company(), toOwner, e.getKey(), e.getValue(), "handover", utc(now));
+        }
+        jdbc.update("DELETE FROM file_placement WHERE company_id = ? AND owner = ?",
+                TenantSchema.company(), fromOwner);
+    }
 }

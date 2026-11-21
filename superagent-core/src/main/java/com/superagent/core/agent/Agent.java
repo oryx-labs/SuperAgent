@@ -79,6 +79,20 @@ public record Agent(
                 createdAt, Instant.now(), tier);
     }
 
+    public Agent withKind(AgentKind newKind) {
+        return new Agent(id, name, avatar, character, persona, model, status, owner, newKind, managedBy,
+                createdAt, Instant.now(), tier);
+    }
+
+    /**
+     * Employee handover: the leaving user's SuperAgent becomes an ordinary archive agent under the successor,
+     * so chat and memory stay usable without creating a second SuperAgent for them.
+     */
+    public Agent demoteSuperToArchive(String newOwner, String archiveName) {
+        return new Agent(id, archiveName, avatar, character, persona, model, status, newOwner, AgentKind.STANDARD,
+                managedBy, createdAt, Instant.now(), tier);
+    }
+
     /** Soft delete: marks the agent DELETED so it drops out of listings; the row is kept. */
     public Agent deleted() {
         return new Agent(id, name, avatar, character, persona, model, AgentStatus.DELETED, owner, kind, managedBy,

@@ -527,4 +527,46 @@ public class AgentService {
         return people.find(userId).map(u -> u.displayName() == null || u.displayName().isBlank()
                 ? u.username() : u.displayName()).orElse(userId);
     }
+
+    /**
+     * Employee handover: move every live agent owned by {@code fromUserId} to {@code toUserId}.
+     * SuperAgents are demoted to STANDARD archive agents so the successor keeps their own SuperAgent.
+     * Returns how many agents moved (including demoted SuperAgents).
+     */
+    public int transferOwnership(String fromUserId, String toUserId) {
+        if (fromUserId == null || toUserId == null || fromUserId.equals(toUserId)) {
+            return 0;
+        }
+        String label = displayName(fromUserId);
+        String archiveName = (label == null || label.isBlank() ? fromUserId : label) + " · 工作档案";
+        Instant now = Instant.now();
+        int moved = 0;
+        for (Agent agent : owned(fromUserId)) {
+            Agent next = agent.isSuper()
+                    ? agent.demoteSuperToArchive(toUserId, archiveName)
+                    : agent.withOwner(toUserId);
+            store.update(next);
+            if (memory != null) {
+                memory.transferOwner(next, toUserId);
+            }
+            // Successor becoming owner: drop their collaborator row if present.
+            members.members(agent.id()).stream()
+                    .filter(m -> m.username().equals(toUserId) && m.active())
+                    .findFirst()
+                    .ifPresent(m -> members.save(new AgentMember(agent.id(), toUserId, m.addedBy(), false,
+                            m.createdAt(), now)));
+            moved++;
+            log.info("handover agent {} from {} to {} ({})", agent.id(), fromUserId, toUserId,
+                    agent.isSuper() ? "demoted SuperAgent" : "standard");
+        }
+        // Leaving person's memberships on others' agents: deactivate.
+        for (String agentId : members.agentsOf(fromUserId)) {
+            members.members(agentId).stream()
+                    .filter(m -> m.username().equals(fromUserId) && m.active())
+                    .findFirst()
+                    .ifPresent(m -> members.save(new AgentMember(agentId, fromUserId, m.addedBy(), false,
+                            m.createdAt(), now)));
+        }
+        return moved;
+    }
 }

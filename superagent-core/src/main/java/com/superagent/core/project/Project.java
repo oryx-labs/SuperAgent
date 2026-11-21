@@ -24,6 +24,10 @@ public record Project(
         return new Project(id, name, description, owner, status, createdAt, Instant.now(), archivedAt);
     }
 
+    public Project withOwner(String newOwner) {
+        return new Project(id, name, description, newOwner, status, createdAt, Instant.now(), archivedAt);
+    }
+
     public Project withStatus(ProjectStatus next) {
         Instant now = Instant.now();
         return new Project(id, name, description, owner, next, createdAt, now, next == ProjectStatus.ARCHIVED ? now : null);

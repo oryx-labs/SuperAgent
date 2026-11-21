@@ -640,4 +640,41 @@ public class ProjectService implements ProjectAccess {
     private static String blank(String s) {
         return s == null || s.isBlank() ? null : s.strip();
     }
+
+    /**
+     * Employee handover: projects owned by {@code fromUserId} move to {@code toUserId}; the leaving
+     * person's memberships are deactivated; the successor is ensured as an active member/owner.
+     */
+    public int transferOwnership(String fromUserId, String toUserId) {
+        if (fromUserId == null || toUserId == null || fromUserId.equals(toUserId)) {
+            return 0;
+        }
+        Instant now = Instant.now();
+        int moved = 0;
+        for (Project p : store.list()) {
+            boolean owned = Objects.equals(p.owner(), fromUserId);
+            boolean member = store.members(p.id()).stream()
+                    .anyMatch(m -> m.username().equals(fromUserId) && m.active());
+            if (!owned && !member) {
+                continue;
+            }
+            if (owned) {
+                store.save(p.withOwner(toUserId));
+                moved++;
+            }
+            store.members(p.id()).stream()
+                    .filter(m -> m.username().equals(fromUserId) && m.active())
+                    .findFirst()
+                    .ifPresent(m -> store.saveMember(new ProjectMember(p.id(), fromUserId, m.addedBy(), false,
+                            m.createdAt(), now)));
+            boolean successorIn = store.members(p.id()).stream()
+                    .anyMatch(m -> m.username().equals(toUserId) && m.active());
+            if (owned || member) {
+                if (!successorIn) {
+                    store.saveMember(new ProjectMember(p.id(), toUserId, fromUserId, true, now, now));
+                }
+            }
+        }
+        return moved;
+    }
 }

@@ -84,6 +84,9 @@ public final class ApiPaths {
     /** The signed-in user's to-do home page: decisions, actions, finished work, heads-ups. */
     public static final String NOTICES = V1 + "/notices";
 
+    /** Admin employee handover: preview and execute ownership transfer. */
+    public static final String HANDOVER = V1 + "/admin/handover";
+
     private ApiPaths() {
     }
 }

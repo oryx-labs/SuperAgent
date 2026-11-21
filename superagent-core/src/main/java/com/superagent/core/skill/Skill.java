@@ -26,4 +26,9 @@ public record Skill(
     public Skill withDeleted(String by) {
         return new Skill(id, name, description, category, content, space, enabled, true, createdBy, by, createdAt, Instant.now());
     }
+
+    public Skill withSpace(String newSpace, String by) {
+        return new Skill(id, name, description, category, content, newSpace, enabled, deleted, createdBy, by,
+                createdAt, Instant.now());
+    }
 }

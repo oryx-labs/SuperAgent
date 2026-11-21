@@ -27,4 +27,10 @@ public interface FileFolderStore {
 
     /** Inserts or replaces. {@code by} says who decided: user, agent or auto. */
     void place(String owner, String fileId, String folderId, String by);
+
+    /**
+     * Moves every placement from {@code fromOwner} to {@code toOwner} (same file ids and folders).
+     * Rows under the old owner are removed after the new ones are written.
+     */
+    void transferPlacements(String fromOwner, String toOwner);
 }

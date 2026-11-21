@@ -262,4 +262,17 @@ public class FileFolderService {
         }
         return clean;
     }
+
+    /** Employee handover: move the person's folder tree and placements to the successor. */
+    public int transferOwnership(String fromUserId, String toUserId) {
+        if (fromUserId == null || toUserId == null || fromUserId.equals(toUserId)) {
+            return 0;
+        }
+        List<FileFolder> folders = store.list(fromUserId);
+        for (FileFolder f : folders) {
+            store.save(f.withOwner(toUserId));
+        }
+        store.transferPlacements(fromUserId, toUserId);
+        return folders.size();
+    }
 }

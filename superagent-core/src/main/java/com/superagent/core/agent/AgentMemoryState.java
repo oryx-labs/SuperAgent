@@ -51,6 +51,11 @@ public record AgentMemoryState(
                 agentSections, writtenBy, writtenSession, writtenTask, writtenAt);
     }
 
+    public AgentMemoryState withOwner(String newOwner) {
+        return new AgentMemoryState(agentId, newOwner, summarizedUntil, lastModel, sessionFailures, memory, Instant.now(),
+                agentSections, writtenBy, writtenSession, writtenTask, writtenAt);
+    }
+
     /** A person's own edit: what they leave is theirs, so no category is held for the agent any more. */
     public AgentMemoryState editedByPerson(String newMemory) {
         return new AgentMemoryState(agentId, owner, summarizedUntil, lastModel, sessionFailures, newMemory, Instant.now(),
