@@ -121,6 +121,10 @@ superagent-<version>/
 - `config/superagent.env`: secrets and deployment values, sourced by the start script. It includes the MySQL connection, `SERVER_PORT` and `JAVA_OPTS`. Outside systems (the GitHub OAuth app, the Feishu app) are set up by an administrator under **Admin → System Settings → Integrations**, not in this file. Every entry ships commented out. Keep the file at mode `600`.
 - `config/application.yml`: overrides the defaults built into the jar. Changes take effect on restart, with no repackaging.
 
+To allow companies without a Codex API key to use the server user's existing Codex CLI login, set
+`superagent.provider.codex.use-cli-login: true` in `config/application.yml` (default: `false`). A company's
+configured key takes priority. When enabled, companies without their own key share the server's CLI account.
+
 At minimum, set these before the first start:
 
 ```bash

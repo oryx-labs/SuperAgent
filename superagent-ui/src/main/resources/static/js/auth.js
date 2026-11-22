@@ -32,6 +32,7 @@ async function initAuth() {
   if (me.mustChangePassword) { openAccount(true); return false; } // nothing else works until they do: don't boot the app
   loadAvatarVersions(); // other people's pictures, for member lists
   loadPeopleNames();
+  refreshReplying(); // restore the sidebar spinners at once after a reload, not on the first poll tick
   // Admin-only sections: hide for non-admins.
   const showAdmin = !!me.admin;
   isAdmin = showAdmin;

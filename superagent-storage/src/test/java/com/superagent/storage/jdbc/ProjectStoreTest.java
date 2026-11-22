@@ -26,7 +26,7 @@ class ProjectStoreTest {
     @Test
     void projectsKeepMembersAndItemsMoveBetweenThem() {
         JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:project-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+                "jdbc:h2:mem:project-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
         MysqlProjectStore projects = new MysqlProjectStore(jdbc);
         MysqlProjectItemStore items = new MysqlProjectItemStore(jdbc);
         Instant now = Instant.now();
@@ -74,7 +74,7 @@ class ProjectStoreTest {
     @Test
     void contextAndSharedFoldersStayInTheirCompany() {
         JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:projctx-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+                "jdbc:h2:mem:projctx-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
         MysqlProjectContextStore context = new MysqlProjectContextStore(jdbc);
         MysqlProjectFolderStore folders = new MysqlProjectFolderStore(jdbc);
         Instant now = Instant.now();

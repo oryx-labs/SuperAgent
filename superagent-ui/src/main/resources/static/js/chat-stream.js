@@ -23,6 +23,7 @@ async function sendMessage(text, images, imageUrls, fileIds, fileNames) {
   const me = { abort: new AbortController(), detached: false };
   sending = me;
   setStreaming(true);
+  markReplying(activeAgentId);
   try {
     const resp = await fetch("/api/v1/sessions/" + activeSessionId + "/messages", {
       method: "POST",

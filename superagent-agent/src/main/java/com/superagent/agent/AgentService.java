@@ -37,6 +37,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -170,12 +171,39 @@ public class AgentService {
     /** The user's agents (their SuperAgent first, created now if they have none yet), then agents shared with them. */
     public List<AgentDto> list(String owner) {
         ensureSuperAgent(owner);
-        List<AgentDto> out = new ArrayList<>(owned(owner).stream()
-                .sorted(Comparator.comparing((Agent a) -> !a.isSuper()))
-                .map(a -> toDto(a, chatService.currentSessionId(a.id()), owner))
-                .toList());
-        sharedWith(owner).forEach(a -> out.add(toDto(a, chatService.currentSessionId(a.id()), owner)));
+        Map<String, Integer> saved = order == null ? Map.of() : order.positions(owner);
+        List<Agent> mine = owned(owner);
+        List<AgentDto> out = new ArrayList<>();
+        mine.stream().filter(Agent::isSuper).forEach(a -> out.add(toDto(a, chatService.currentSessionId(a.id()), owner)));
+        sidebarOrder(mine.stream().filter(a -> !a.isSuper()).toList(), saved)
+                .forEach(a -> out.add(toDto(a, chatService.currentSessionId(a.id()), owner)));
+        sidebarOrder(sharedWith(owner), saved).forEach(a -> out.add(toDto(a, chatService.currentSessionId(a.id()), owner)));
         return out;
+    }
+
+    /** Never-dragged agents first, newest created on top; dragged ones after, by saved position. Editing an agent moves nothing. */
+    private static List<Agent> sidebarOrder(List<Agent> agents, Map<String, Integer> saved) {
+        return agents.stream().sorted(Comparator
+                .comparing((Agent a) -> saved.containsKey(a.id()))
+                .thenComparing(a -> saved.getOrDefault(a.id(), 0))
+                .thenComparing(Agent::createdAt, Comparator.nullsLast(Comparator.reverseOrder()))).toList();
+    }
+
+    /** Saves the order of one sidebar group for this user; only agents they can see count, the SuperAgent never does. */
+    public void reorder(String user, List<String> agentIds) {
+        if (order == null || agentIds == null) {
+            return;
+        }
+        List<String> visible = new ArrayList<>(owned(user).stream().map(Agent::id).toList());
+        sharedWith(user).forEach(a -> visible.add(a.id()));
+        java.util.Set<String> superIds = new java.util.HashSet<>();
+        owned(user).stream().filter(Agent::isSuper).forEach(a -> superIds.add(a.id()));
+        for (String id : agentIds) {
+            if (!visible.contains(id) || superIds.contains(id)) {
+                throw new AgentNotFoundException(id);
+            }
+        }
+        order.save(user, agentIds.stream().distinct().toList());
     }
 
     /** The user's live agents, in the store's order (most recently updated first). */
@@ -383,6 +411,13 @@ public class AgentService {
         return chatService.resolveModel(requireViewer(id, user));
     }
     private com.superagent.core.agent.AgentParentStore parents; // null in tests: no parent agents
+
+    private com.superagent.core.agent.AgentOrderStore order; // null in tests: creation order
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setOrder(com.superagent.core.agent.AgentOrderStore order) {
+        this.order = order;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setParents(com.superagent.core.agent.AgentParentStore parents) {

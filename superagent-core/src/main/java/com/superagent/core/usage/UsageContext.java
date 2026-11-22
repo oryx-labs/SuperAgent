@@ -18,4 +18,5 @@ public record UsageContext(String user, String source, String agentId, String ta
     public static final String SOURCE_FILE_TAGS = "file_tags";
     public static final String SOURCE_TASK_TAGS = "task_tags";
     public static final String SOURCE_TRANSCRIBE = "transcribe";
+    public static final String SOURCE_SESSION_HANDOFF = "session_handoff";
 }

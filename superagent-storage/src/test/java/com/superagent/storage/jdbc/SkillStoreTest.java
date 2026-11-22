@@ -20,7 +20,7 @@ class SkillStoreTest {
     @Test
     void upsertsSkillsAndReplacesBindings() {
         MysqlSkillStore store = new MysqlSkillStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:skill-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:skill-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant now = Instant.now();
         Skill s = new Skill("s1", "写作", "写文章时", "写作", "短句", "team:技术中心", true, false, "ada", "ada", now, now);
         store.save(s);

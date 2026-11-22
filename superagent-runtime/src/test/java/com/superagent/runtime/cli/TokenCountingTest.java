@@ -44,6 +44,21 @@ class TokenCountingTest {
         assertThat(CodexRollouts.lastTotal(home, "00000000-0000-0000-0000-000000000000")).isEmpty();
     }
 
+    /** The rollout's {@code last_token_usage} is one request's input (cached part included), not a turn's sum. */
+    @Test
+    void aCodexTurnsContextIsTheRolloutsLastSingleRequest(@TempDir Path home) throws Exception {
+        Path day = Files.createDirectories(home.resolve("sessions/2026/11/19"));
+        String thread = "01a1f45e-5b40-7250-a4f1-0376d248f39c";
+        Files.writeString(day.resolve("rollout-2026-11-19T23-13-08-" + thread + ".jsonl"), String.join("\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":20886,"
+                        + "\"cached_input_tokens\":0},\"last_token_usage\":{\"input_tokens\":20886,\"cached_input_tokens\":0}}}}",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":41825,"
+                        + "\"cached_input_tokens\":20224},\"last_token_usage\":{\"input_tokens\":20939,\"cached_input_tokens\":20224}}}}",
+                ""));
+        assertThat(CodexRollouts.lastRequestInput(home, thread)).contains(20_939L);
+        assertThat(CodexRollouts.lastRequestInput(home, "00000000-0000-0000-0000-000000000000")).isEmpty();
+    }
+
     @Test
     void qwenDeepSeekAndKimiCountTheirOwnWay(@TempDir Path home) throws Exception {
         // Qwen Code: input is the whole prompt, cache reads included.

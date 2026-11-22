@@ -31,20 +31,50 @@ final class CodexRollouts {
 
     /** The thread's total so far, as {@code turn.completed} reports usage; empty when its rollout can't be found. */
     static Optional<JsonNode> lastTotal(Path home, String threadId) {
+        return rollout(home, threadId).flatMap(CodexRollouts::lastTotalIn);
+    }
+
+    /**
+     * The context the thread's last request read, cached part included ({@code last_token_usage}, the per-request
+     * figure next to the running total); empty when the rollout or that figure can't be found.
+     */
+    static Optional<Long> lastRequestInput(Path home, String threadId) {
+        return rollout(home, threadId).flatMap(CodexRollouts::lastRequestInputIn);
+    }
+
+    private static Optional<Path> rollout(Path home, String threadId) {
         Path sessions = home.resolve("sessions");
         if (threadId == null || !Files.isDirectory(sessions)) {
             return Optional.empty();
         }
         String suffix = "-" + threadId + ".jsonl";
         try (Stream<Path> found = Files.find(sessions, 4, (p, a) -> a.isRegularFile() && p.getFileName().toString().endsWith(suffix))) {
-            Optional<Path> rollout = found.findFirst();
-            return rollout.isEmpty() ? Optional.empty() : lastTotalIn(rollout.get());
+            return found.findFirst();
         } catch (IOException e) {
             return Optional.empty();
         }
     }
 
-    private static Optional<JsonNode> lastTotalIn(Path rollout) throws IOException {
+    private static Optional<Long> lastRequestInputIn(Path rollout) {
+        Long input = null;
+        try (BufferedReader r = Files.newBufferedReader(rollout, StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                if (!line.contains("\"token_count\"")) {
+                    continue;
+                }
+                JsonNode last = JSON.readTree(line).path("payload").path("info").path("last_token_usage");
+                if (last.path("input_tokens").canConvertToLong()) {
+                    input = Math.max(0, last.path("input_tokens").asLong());
+                }
+            }
+        } catch (IOException e) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(input);
+    }
+
+    private static Optional<JsonNode> lastTotalIn(Path rollout) {
         JsonNode total = null;
         try (BufferedReader r = Files.newBufferedReader(rollout, StandardCharsets.UTF_8)) {
             String line;
@@ -57,6 +87,8 @@ final class CodexRollouts {
                     total = t;
                 }
             }
+        } catch (IOException e) {
+            return Optional.empty();
         }
         return Optional.ofNullable(total);
     }

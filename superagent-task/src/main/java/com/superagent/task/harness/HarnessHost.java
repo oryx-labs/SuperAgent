@@ -10,6 +10,25 @@ import java.nio.file.Path;
 /** What a harness asks of the task service: run an agent turn, record what it did, and settle the task. */
 public interface HarnessHost {
 
+    /** The company's word list for checking the Markdown a task hands over; null = no text check. */
+    /**
+     * Whether the user's "confirm for me" rules let SuperAgent confirm this on their behalf (it is recorded and the
+     * user told). False when the feature is off, not allowed for this type, or anything is unclear: ask the person.
+     */
+    default boolean proxyConfirm(Task task, com.superagent.core.proxyconfirm.ConfirmType type, java.util.Map<String, Object> facts) {
+        return proxyDecide(task, type, facts).confirmed();
+    }
+
+    /** As {@link #proxyConfirm}, with the reason when SuperAgent was asked to and handed it back (null reason: it wasn't asked). */
+    default com.superagent.core.proxyconfirm.ProxyConfirmGate.Decision proxyDecide(Task task,
+            com.superagent.core.proxyconfirm.ConfirmType type, java.util.Map<String, Object> facts) {
+        return com.superagent.core.proxyconfirm.ProxyConfirmGate.Decision.refer(null);
+    }
+
+    default com.superagent.core.writing.StyleLexicon styleLexicon() {
+        return null;
+    }
+
     /** One agent turn in {@code dir} on conversation {@code conversation} ({@code first}: start it), shown under {@code label}. */
     Turn turn(Task task, String prompt, String conversation, boolean first, String label, Cancellation cancellation);
 

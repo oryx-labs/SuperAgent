@@ -46,7 +46,7 @@ class TaskModelChoiceStoreTest {
 
     private static JdbcTaskModelChoiceStore store() {
         return new JdbcTaskModelChoiceStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:choice-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")),
+                "jdbc:h2:mem:choice-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")),
                 JdbcTaskModelChoiceStore.MYSQL_DDL);
     }
 }

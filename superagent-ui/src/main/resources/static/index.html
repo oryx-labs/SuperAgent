@@ -30,6 +30,7 @@
             <a class="nav__item" href="#skills" data-view="skills"><span class="nav__dot"></span><span data-i18n="nav.skills">Skills</span></a>
             <a class="nav__item" href="#projects" data-view="projects"><span class="nav__dot"></span><span data-i18n="nav.projects">Projects</span></a>
             <a class="nav__item" href="#connectors" data-view="connectors"><span class="nav__dot"></span><span data-i18n="nav.connectors">Connectors</span></a>
+            <a class="nav__item" href="#proxy-confirm" data-view="proxy-confirm"><span class="nav__dot"></span><span data-i18n="pc.title">Confirm for me</span></a>
             <a class="nav__item" href="#usage" data-view="usage"><span class="nav__dot"></span><span data-i18n="nav.usage">Usage</span></a>
           </nav>
         </div>
@@ -76,6 +77,8 @@
       <ul class="thread-list" id="threadList"></ul>
       <button class="new-chat" type="button" id="newChatBtn" data-i18n="agent.new">+ New Agent</button>
     </section>
+    <div class="threads-resizer" id="threadsResizer" data-pane="chat" role="separator" aria-orientation="vertical"
+         data-i18n-title="agent.resizeSidebar" title="Drag to resize · double-click to reset"></div>
 
     <main class="chat" data-pane="chat" aria-label="Conversation">
       <div class="messages" id="messages">
@@ -250,6 +253,9 @@
 
     <section class="admin" data-pane="skills" aria-label="Skills" hidden>
       <!-- Skills as a card grid: search and filters on the left, mine / new on the right. -->
+      <!-- Categories on the left (from the skills' own category field), the grid on the right. -->
+      <div class="sk-layout">
+      <aside class="work-side" id="skSide" aria-label="Categories"></aside>
       <div class="admin__body sk-page">
         <div class="sk-bar">
           <label class="sk-search">
@@ -277,6 +283,7 @@
         <p class="sk-count" id="skCount"></p>
         <div class="sk-grid" id="skGrid"></div>
         <p class="kb-empty" id="skEmpty" hidden></p>
+      </div>
       </div>
     </section>
 
@@ -545,6 +552,15 @@
 
     <!-- Token usage, the raw cost of model runs: my own (Workspace → My usage), or the company's (Admin → Analytics →
          Usage, with a breakdown by person). This month by default; the detail in two kinds, agents and tasks. -->
+    <section class="admin" data-pane="proxy-confirm" aria-label="Confirm for me" hidden>
+      <div class="admin__head">
+        <div>
+          <h2 class="admin__title" data-i18n="pc.title">Confirm for me</h2>
+          <p class="admin__sub" data-i18n="pc.sub">When on, SuperAgent confirms what can go on by itself, by the rules below.</p>
+        </div>
+      </div>
+      <div class="admin__body"><div class="proxy-confirm" id="proxyConfirmBody"></div></div>
+    </section>
     <section class="admin" data-pane="usage" aria-label="Usage" hidden>
       <div class="admin__head">
         <div>
@@ -853,6 +869,10 @@
         </div>
       </div>
       <div class="admin__body">
+        <details class="proxy-confirm" id="proxyAuditPanel">
+          <summary data-i18n="pc.audit">Confirm for me — audit</summary>
+          <div id="proxyAuditBody"></div>
+        </details>
         <form class="settings-form" id="settingsForm">
           <h3 class="settings-form__section" data-i18n="settings.sectionCompany">Company</h3>
           <div class="field-row">
@@ -920,6 +940,20 @@
               <input type="number" id="sfReviewMaxSpend" min="1" max="1000" step="1" /></label>
           </div>
           <p class="field-hint" data-i18n="settings.reviewHint">Another model reviews a coding task and checks it against its spec; bugs go back to the developer until it passes. It stops and asks you after this many rounds or once the task has spent this much.</p>
+          <h3 class="settings-form__section" data-i18n="settings.sectionChatSession">Long conversations</h3>
+          <div class="field-row">
+            <label class="field"><span data-i18n="settings.chatMaxTokens">Context tokens at most</span>
+              <input type="number" id="sfChatMaxTokens" min="20000" max="5000000" step="10000" /></label>
+            <label class="field"><span data-i18n="settings.chatMaxTurns">Turns at most</span>
+              <input type="number" id="sfChatMaxTurns" min="5" max="1000" step="1" /></label>
+          </div>
+          <p class="field-hint" data-i18n="settings.chatSessionHint">When an Agent's conversation passes either limit, the next message continues in a fresh session that starts from a summary, the Agent's memory and the latest messages. People see one unbroken conversation.</p>
+          <h3 class="settings-form__section" data-i18n="settings.sectionDocStyle">Document standard</h3>
+          <label class="field"><span data-i18n="settings.docStyleOn">Put the standard in every task and conversation</span>
+            <input type="checkbox" id="sfDocStyleOn" /></label>
+          <label class="field"><span data-i18n="settings.docStyleSkill">Skill the standard comes from</span>
+            <select id="sfDocStyleSkill"></select></label>
+          <p class="field-hint" data-i18n="settings.docStyleHint">A short version (about 2,000 characters) of the skill goes into the system prompt of every task and conversation, and Markdown files are checked against its word list. Default: the 去 AI 味写作规范 skill.</p>
           <h3 class="settings-form__section" data-i18n="settings.sectionSubtitle">Subtitle tasks</h3>
           <label class="field"><span data-i18n="settings.subtitleMaxCalibrators">Calibrating models at most</span>
             <input type="number" id="sfSubtitleMaxCalibrators" min="1" max="10" step="1" /></label>
@@ -1152,8 +1186,16 @@
       <label class="field"><span data-i18n="conn.fName">Name</span><input type="text" id="cfName" /></label>
       <label class="field"><span data-i18n="conn.fDescription">Description</span>
         <input type="text" id="cfDescription" data-i18n-ph="common.optional" /></label>
+      <label class="field" id="cfProductField"><span data-i18n="conn.fProduct">Type</span>
+        <select id="cfProduct">
+          <option value="" data-i18n="conn.product.custom">Custom MCP server</option>
+          <option value="jira-cloud">Jira Cloud</option>
+          <option value="jira-dc">Jira Data Center</option>
+        </select></label>
+      <label class="field" id="cfSiteField" hidden><span data-i18n="conn.fSite">Jira address</span>
+        <input type="url" id="cfSite" placeholder="https://jira.example.com" autocomplete="off" /></label>
       <!-- An MCP server: how agents reach it and whose identity it acts with. -->
-      <div class="conn-section">
+      <div class="conn-section" id="cfMcpSection">
         <div class="field-row">
           <label class="field"><span data-i18n="conn.fTransport">Transport</span>
             <select id="cfTransport">
@@ -1710,6 +1752,7 @@
   <script src="/js/analytics.js"></script>
   <script src="/js/usage.js"></script>
   <script src="/js/todo.js"></script>
+  <script src="/js/proxy-confirm.js"></script>
   <script src="/js/automations.js"></script>
 </body>
 </html>

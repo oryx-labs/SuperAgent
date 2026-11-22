@@ -17,7 +17,7 @@ class NoticeStoreTest {
     @Test
     void upsertsByIdFindsByKeyAndHidesTrackingRows() {
         MysqlNoticeStore store = new MysqlNoticeStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:notice-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:notice-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant t = Instant.now();
         Notice track = new Notice("n1", "ada", "task:t1", Notice.Kind.TRACK, Notice.State.OPEN, "写周报", null, "写手",
                 "task", "t1", t, t);

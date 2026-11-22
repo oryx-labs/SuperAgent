@@ -171,44 +171,69 @@ final class Workspace {
     /** The files changed since the task started, with their line counts, and each one's diff (capped). */
     void recordChanges(HarnessState s) {
         Path dir = Path.of(s.dir);
+        // One call for the counts and the patches: the patches come in the same order as the counts, one
+        // "diff --git" section per file (a rename too, which a per-path diff of "old => new" would miss).
+        String out = git.text(dir, "diff", "--numstat", "-p", s.baseSha + "..HEAD");
+        int patchesAt = out.indexOf("\ndiff --git ");
+        String counts = patchesAt < 0 ? out : out.substring(0, patchesAt);
         List<HarnessState.ChangedFile> files = new ArrayList<>();
-        for (String line : git.text(dir, "diff", "--numstat", s.baseSha + "..HEAD").lines().toList()) {
+        for (String line : counts.lines().toList()) {
             String[] p = line.split("\t", 3);
             if (p.length == 3) {
                 files.add(new HarnessState.ChangedFile(p[2], num(p[0]), num(p[1])));
             }
         }
+        List<String> patches = patchesAt < 0 ? List.of() : List.of(out.substring(patchesAt + 1).split("\n(?=diff --git )"));
         s.files = files;
         s.patches.clear();
         int budget = 400_000;
-        for (HarnessState.ChangedFile f : files) {
-            if (budget <= 0) {
-                break;
-            }
-            String patch = git.git(dir, "diff", s.baseSha + "..HEAD", "--", f.path()).out();
+        for (int i = 0; i < files.size() && i < patches.size() && budget > 0; i++) {
+            String patch = patches.get(i).endsWith("\n") ? patches.get(i) : patches.get(i) + "\n";
             String kept = patch.length() > 40_000 ? patch.substring(0, 40_000) + "\n…（太长，只显示开头）" : patch;
-            s.patches.put(f.path(), kept);
+            s.patches.put(files.get(i).path(), kept);
             budget -= kept.length();
         }
     }
 
-    /** The worktree as it stands: HEAD and what {@code git status} lists (the CLIs' own session files aside). */
+    /**
+     * The worktree as it stands: HEAD and what {@code git status} lists (the CLIs' own session files aside), from one
+     * {@code status --porcelain=v2 --branch}, which carries the HEAD commit along with the entries.
+     */
     record Snapshot(String head, java.util.Set<String> status) {
     }
 
     Snapshot snapshot(HarnessState s) {
-        Path dir = Path.of(s.dir);
-        return new Snapshot(git.text(dir, "rev-parse", "HEAD"), status(dir));
+        return snapshot(Path.of(s.dir));
     }
 
-    private java.util.Set<String> status(Path dir) {
-        java.util.Set<String> out = new java.util.TreeSet<>();
-        for (String line : git.git(dir, "status", "--porcelain", "--untracked-files=all").out().lines().toList()) {
-            if (line.length() > 3 && !line.substring(3).startsWith(".superagent/")) {
-                out.add(line);
+    private Snapshot snapshot(Path dir) {
+        String head = null;
+        java.util.Set<String> entries = new java.util.TreeSet<>();
+        for (String line : git.text(dir, "status", "--porcelain=v2", "--branch", "--untracked-files=all").lines().toList()) {
+            if (line.startsWith("# branch.oid ")) {
+                head = line.substring("# branch.oid ".length()).strip();
+            } else if (!line.startsWith("#") && !line.isBlank() && !entryPath(line).startsWith(".superagent/")) {
+                entries.add(line);
             }
         }
-        return out;
+        return new Snapshot(head, entries);
+    }
+
+    /** The path a porcelain v2 entry is about (for a rename, its new path). */
+    static String entryPath(String line) {
+        String path = switch (line.charAt(0)) {
+            case '1' -> field(line, 8);
+            case '2' -> field(line, 9);
+            case 'u' -> field(line, 10);
+            default -> line.length() > 2 ? line.substring(2) : ""; // "? path", "! path"
+        };
+        int tab = path.indexOf('\t'); // a rename: "new\told"
+        return tab < 0 ? path : path.substring(0, tab);
+    }
+
+    private static String field(String line, int skip) {
+        String[] p = line.split(" ", skip + 1);
+        return p.length > skip ? p[skip] : "";
     }
 
     /**
@@ -217,14 +242,13 @@ final class Workspace {
      */
     boolean restore(HarnessState s, Snapshot before) {
         Path dir = Path.of(s.dir);
-        java.util.Set<String> now = status(dir);
-        if (git.text(dir, "rev-parse", "HEAD").equals(before.head()) && now.equals(before.status())) {
+        if (snapshot(dir).equals(before)) {
             return false;
         }
         git.text(dir, "reset", "-q", "--hard", before.head());
-        for (String line : status(dir)) {
-            if (line.startsWith("?? ") && !before.status().contains(line)) {
-                Path added = dir.resolve(line.substring(3)).normalize();
+        for (String line : snapshot(dir).status()) {
+            if (line.startsWith("? ") && !before.status().contains(line)) {
+                Path added = dir.resolve(entryPath(line)).normalize();
                 if (added.startsWith(dir)) {
                     try {
                         Files.deleteIfExists(added);

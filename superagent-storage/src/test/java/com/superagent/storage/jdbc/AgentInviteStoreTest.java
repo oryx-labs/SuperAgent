@@ -18,7 +18,7 @@ class AgentInviteStoreTest {
     @Test
     void savesUpdatesAndListsNewestFirst() {
         MysqlAgentInviteStore store = new MysqlAgentInviteStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:invite-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:invite-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant t = Instant.parse("2026-11-06T10:00:00Z");
         AgentInvite first = new AgentInvite("i1", "a1", "ada", List.of("bob", "carl"), "s1", "m1",
                 AgentInvite.Status.PENDING, t, t);

@@ -26,6 +26,7 @@ class TokenUsageServiceTest {
     private final List<UsageRecord> rows = new ArrayList<>();
     private final UsageStore store = new UsageStore() {
         @Override public void save(UsageRecord r) { rows.add(r); }
+        @Override public UsageRecord latestChatTurn(String sessionId) { return null; }
         @Override public List<UsageRecord> forTask(String taskId) { return rows.stream().filter(r -> taskId.equals(r.taskId())).toList(); }
         @Override public List<UsageRecord> between(String user, Instant from, Instant to) {
             return rows.stream().filter(r -> user == null || user.equals(r.user())).toList();

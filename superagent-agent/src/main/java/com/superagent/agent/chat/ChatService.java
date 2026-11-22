@@ -124,6 +124,14 @@ public class ChatService implements org.springframework.context.SmartLifecycle {
         this.modelRouter = modelRouter;
     }
     private com.superagent.core.usage.UsageRecorder usage; // null in tests: tokens aren't kept
+    private com.superagent.core.usage.UsageStore usageStore; // null in tests: only turn counts switch sessions
+    /** sessionId → summary of the session it replaced, read once by the new session's first turn. */
+    private final Map<String, String> handoffs = new ConcurrentHashMap<>();
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setUsageStore(com.superagent.core.usage.UsageStore usageStore) {
+        this.usageStore = usageStore;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setUsageRecorder(com.superagent.core.usage.UsageRecorder usage) {
@@ -348,9 +356,58 @@ public class ChatService implements org.springframework.context.SmartLifecycle {
             if (switching) {
                 memory.consolidateSoon(agent);
             }
+        } else {
+            String tooLong = tooLong(current);
+            if (tooLong != null) {
+                current = rotateForLength(agent, current, model, tooLong);
+            }
         }
         memory.recordModel(agent, model);
         return current;
+    }
+
+    /**
+     * Why {@code session} has grown too long for the next turn (the largest context a single request of its last turn
+     * read, or turn count), else null. The sum over a turn's requests is not the context: each tool call re-reads the
+     * whole conversation, so a long turn books its context several times over.
+     */
+    private String tooLong(ChatSession session) {
+        int maxTokens = settingsService.chatSessionMaxTokens();
+        com.superagent.core.usage.UsageRecord last = usageStore == null ? null
+                : usageStore.latestChatTurn(session.id());
+        long context = last == null ? 0 : last.contextTokens();
+        if (context > maxTokens) {
+            return "上一轮单次请求的上下文有 " + context + " token，超过阈值 " + maxTokens;
+        }
+        int maxTurns = settingsService.chatSessionMaxTurns();
+        long turns = store.listMessages(session.id()).stream().filter(m -> m.role() == MessageRole.ASSISTANT).count();
+        return turns > maxTurns ? "会话已有 " + turns + " 轮，超过阈值 " + maxTurns : null;
+    }
+
+    /** Moves a too-long session to a fresh one, carrying a cheap-model summary of it; the turn never fails for want of one. */
+    private ChatSession rotateForLength(Agent agent, ChatSession old, String model, String why) {
+        java.util.concurrent.atomic.AtomicReference<String> failed = new java.util.concurrent.atomic.AtomicReference<>();
+        String summary = null;
+        try {
+            summary = memory.handoff(agent, store.listMessages(old.id()), AgentMemoryService.HANDOFF_TIMEOUT, failed::set);
+        } catch (RuntimeException e) {
+            failed.set(e.getMessage());
+        }
+        ChatSession fresh = startSession(agent, old.workspaceDir(), model, ChatSession.TOO_LONG);
+        if (summary != null) {
+            handoffs.put(fresh.id(), summary);
+        }
+        log.info("agent {} moved to fresh session {}: {}", agent.id(), fresh.id(), why);
+        String detail = summary != null ? "新会话从交接摘要、Agent 记忆和最近的对话原文继续"
+                : "交接摘要未生成（" + failed.get() + "），新会话只从 Agent 记忆和最近的对话原文继续";
+        String text = "会话过长，已切换到新会话 #" + sessionNumber(agent.id(), fresh.id()) + "：" + why;
+        if (summary != null) {
+            runLog.info(agent, AgentLogService.SESSION, text, detail);
+        } else {
+            runLog.warn(agent, AgentLogService.SESSION, text, detail);
+        }
+        memory.consolidateSoon(agent);
+        return fresh;
     }
 
     /**
@@ -490,11 +547,23 @@ public class ChatService implements org.springframework.context.SmartLifecycle {
         if (user == null || session.agentId() == null || session.agentId().isBlank()) {
             return false;
         }
-        return agentStore.find(session.agentId())
+        return canOpenAgent(session.agentId(), user);
+    }
+
+    private boolean canOpenAgent(String agentId, String user) {
+        return agentStore.find(agentId)
                 .filter(a -> user.equals(a.owner())
                         || members.members(a.id()).stream().anyMatch(m -> m.username().equals(user))
                         || (projects != null && projects.sharesProject(a.id(), user)))
                 .isPresent();
+    }
+
+    /** The agents the user can open that are answering right now, so the sidebar can mark them while they look elsewhere. */
+    public List<String> replyingAgents(String user) {
+        if (user == null) {
+            return List.of();
+        }
+        return liveTurns.keySet().stream().filter(id -> canOpenAgent(id, user)).toList();
     }
 
     // --- sending a message (streamed) ---
@@ -532,12 +601,23 @@ public class ChatService implements org.springframework.context.SmartLifecycle {
             throw new IllegalArgumentException("这个 Agent 所在的项目已归档，只能查看，不能再对话");
         }
         // One turn at a time: in a shared agent, another member's turn may be running.
+        // Occupy the slot *before* sessionForTurn so the too-long check (which may block up to 90s waiting
+        // for a handoff summary) doesn't widen the race window between the busy-check and the reservation.
         String liveKey = agent != null ? agent.id() : sessionId;
-        LiveTurn running = liveTurns.get(liveKey);
-        if (running != null) {
-            throw new ChatBusyException(running.byName() + " 触发的回复正在进行中，请稍候");
+        LiveTurn earlyLive = agent != null ? new LiveTurn(user, displayName(user), Instant.now()) : null;
+        if (earlyLive != null) {
+            LiveTurn existing = liveTurns.putIfAbsent(liveKey, earlyLive);
+            if (existing != null) {
+                throw new ChatBusyException(existing.byName() + " 触发的回复正在进行中，请稍候");
+            }
+        } else {
+            LiveTurn running = liveTurns.get(liveKey);
+            if (running != null) {
+                throw new ChatBusyException(running.byName() + " 触发的回复正在进行中，请稍候");
+            }
         }
         String model = resolveModel(agent);
+        try {
         if (agent != null) {
             // The agent's current session, or a new one if the model changed; never an older one the page still shows.
             session = sessionForTurn(agent, model);
@@ -552,16 +632,18 @@ public class ChatService implements org.springframework.context.SmartLifecycle {
         }
         // Character first, then its project's shared context (every turn, so a resumed session sees it current),
         // then the index of the agent's skills (their full text is read on demand).
-        String systemPrompt;
+        String basePrompt;
         if (special != null) {
-            systemPrompt = special.systemPrompt(agent);
+            basePrompt = special.systemPrompt(agent);
         } else {
             String skillIndex = skills.install(session.workspaceDir(),
                     agent == null ? List.of() : skills.forAgent(agent.id(), agent.owner()), mcpGrants != null);
-            systemPrompt = joinPrompt(joinPrompt(joinPrompt(characterAndProject(agent, projects), skillIndex),
+            basePrompt = joinPrompt(joinPrompt(joinPrompt(characterAndProject(agent, projects), skillIndex),
                             toolRules(mcpGrants != null)),
                     worksInTasks(agent) ? ChatTaskResults.GUIDE : null);
         }
+
+        final String systemPrompt = joinPrompt(basePrompt, styleGuidePrompt(agent, content));
 
         // Images are stored under the user message's id before it's appended, so a bad upload stores nothing.
         String userMessageId = UUID.randomUUID().toString();
@@ -589,12 +671,20 @@ public class ChatService implements org.springframework.context.SmartLifecycle {
         String assistantMessageId = UUID.randomUUID().toString();
         Cancellation cancellation = new Cancellation();
         if (shuttingDown) {
+            liveTurns.remove(liveKey, earlyLive); // release the early reservation
             throw new ChatBusyException("服务正在重启，请稍后再发送");
         }
-        LiveTurn live = new LiveTurn(user, displayName(user), Instant.now());
-        live.sender(emitter);
-        if (liveTurns.putIfAbsent(liveKey, live) != null) {
-            throw new ChatBusyException("另一条消息刚刚触发了回复，请稍候");
+        // Upgrade the early placeholder (no-agent sessions didn't reserve yet).
+        LiveTurn live;
+        if (earlyLive != null) {
+            live = earlyLive;
+            live.sender(emitter);
+        } else {
+            live = new LiveTurn(user, displayName(user), Instant.now());
+            live.sender(emitter);
+            if (liveTurns.putIfAbsent(liveKey, live) != null) {
+                throw new ChatBusyException("另一条消息刚刚触发了回复，请稍候");
+            }
         }
         activeRuns.put(sessionId, cancellation);
 
@@ -602,7 +692,7 @@ public class ChatService implements org.springframework.context.SmartLifecycle {
         // A session's first turn starts from memory plus the latest messages; later turns resume their history
         // (the memory alone still rides along, for when the CLI has to start over on its own).
         String agentMemory = agent == null ? null
-                : session.agentSessionId() == null ? memory.context(agent, Set.of(userMessageId), user) : memory.read(agent);
+                : session.agentSessionId() == null ? memory.context(agent, Set.of(userMessageId), user, handoffs.remove(session.id())) : memory.read(agent);
         String turnPrompt = prompt;
         executor.execute(TenantContext.wrap(() -> {
             try {
@@ -614,6 +704,11 @@ public class ChatService implements org.springframework.context.SmartLifecycle {
             }
         }));
         return emitter;
+        } catch (RuntimeException | Error e) {
+            // sessionForTurn or other setup threw: release the early reservation so the next message isn't blocked
+            liveTurns.remove(liveKey, earlyLive);
+            throw e;
+        }
     }
 
     /** How to use the platform tools, for a chat that has them: hand results over as files, settle what's learnt. */
@@ -628,6 +723,26 @@ public class ChatService implements org.springframework.context.SmartLifecycle {
         }
         String project = projects == null ? null : projects.context(agent.id(), null).orElse(null);
         return joinPrompt(AgentCharacters.systemPrompt(agent), project);
+    }
+
+    private com.superagent.core.writing.StyleGuideSource styleGuide; // null in tests: no document standard
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setStyleGuide(com.superagent.core.writing.StyleGuideSource styleGuide) {
+        this.styleGuide = styleGuide;
+    }
+
+    /** The company's document standard, in every conversation (not only where an agent has the skill). */
+    String styleGuidePrompt(Agent agent, String message) {
+        return styleGuide(styleGuide, agent == null ? "" : agent.name() + " " + (agent.persona() == null ? "" : agent.persona()), message);
+    }
+
+    static String styleGuide(com.superagent.core.writing.StyleGuideSource source, String agentText, String message) {
+        if (source == null) {
+            return null;
+        }
+        boolean technical = com.superagent.core.writing.StyleGuideSource.looksTechnical(agentText + " " + (message == null ? "" : message));
+        return source.compactGuide(technical).orElse(null);
     }
 
     private static String joinPrompt(String a, String b) {

@@ -10,6 +10,9 @@ import com.superagent.task.harness.HarnessHost;
 import com.superagent.task.harness.HarnessRun;
 import com.superagent.task.harness.HarnessState;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceAccessMode;
+import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.api.parallel.ResourceLockTarget;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -30,6 +33,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * (not the agent's word) decide whether it passed, a failing check goes back for a fix, and the result is squash-merged
  * into the branch it started from, one commit per task even when several tasks share that branch.
  */
+// Merges go through MergeGuard, which MergeRecoveryTest counts: never alongside it. The lock is a shared one on each
+// test, not on the class (a class-level lock would run these tests one at a time).
+@ResourceLock(value = MergeRecoveryTest.MERGES, mode = ResourceAccessMode.READ, target = ResourceLockTarget.CHILDREN)
 class CodingHarnessTest {
 
     @TempDir
@@ -56,6 +62,8 @@ class CodingHarnessTest {
         /** How the developer resolves conflicts, one per go (then: both sides kept). */
         final java.util.ArrayDeque<java.util.function.Function<Path, String>> resolves = new java.util.ArrayDeque<>();
         final List<Boolean> repeats = new ArrayList<>();
+        int specFailures; // spec turns that throw failMessage
+        String failMessage = "API Error: 400 invalid_request_error: Invalid signature in thinking block";
         int idleDevelops; // develop turns that change nothing
         boolean commitNotes; // a later develop turn commits its change itself
         int quietNotes;   // later develop turns that change nothing
@@ -112,6 +120,9 @@ class CodingHarnessTest {
             try {
                 switch (label) {
                     case CodingHarness.SPEC -> {
+                        if (specFailures-- > 0) {
+                            throw new IllegalStateException(failMessage);
+                        }
                         return new Turn(spec, BigDecimal.ZERO, false);
                     }
                     case CodingHarness.DEVELOP -> {
@@ -191,7 +202,30 @@ class CodingHarnessTest {
         @Override public Optional<String> connectorToken(String connectorId, String owner) { return Optional.empty(); }
         @Override public Optional<String> connectorSite(String connectorId, String owner) { return Optional.empty(); }
         @Override public List<Path> localRoots() { return roots.isEmpty() ? List.of(tmp.resolve("project")) : roots; }
+        boolean proxy;
+        final List<java.util.Map<String, Object>> proxyFacts = new ArrayList<>();
+        @Override public boolean proxyConfirm(Task task, com.superagent.core.proxyconfirm.ConfirmType type, java.util.Map<String, Object> facts) {
+            proxyFacts.add(facts);
+            return proxy;
+        }
         @Override public Path workRoot() { return tmp.resolve("work"); }
+    }
+
+    @Test
+    void aSpecTheUsersRulesConfirmGoesOnWithoutAskingAndOtherwiseWaits() throws Exception {
+        Path repo = repo();
+        CodingHarness harness = new CodingHarness(60);
+        Task task = task("t-0002-bbbb", repo, "加 hello.txt");
+        Host host = new Host("hello.txt");
+        host.proxy = true;
+        HarnessState s = harness.start(task, null);
+        harness.drive(new HarnessRun(host, task, s, null, new Cancellation()));
+
+        assertThat(host.proxyFacts).first().satisfies(f -> assertThat(f).containsEntry("criteria", 2).containsEntry("commands", 2)
+                .containsKey("prdAligned"));
+        assertThat(s.specApproved).isTrue();
+        assertThat(host.asks).isEmpty();
+        assertThat(s.waitingOn).isNotEqualTo(CodingHarness.SPEC);
     }
 
     @Test
@@ -669,6 +703,38 @@ class CodingHarnessTest {
         harness.drive(new HarnessRun(host, task.withWorkspaceDir(s.dir), s, "继续", new Cancellation()));
         assertThat(host.status).isEqualTo(TaskStatus.DONE);
         assertThat(Files.readString(repo.resolve("shared.txt"))).isEqualTo("hi\n");
+    }
+
+    @Test
+    void anApiClientErrorGetsOneFreshConversationThenAsksOnceAndOtherErrorsFailAsBefore() throws Exception {
+        Path repo = repo();
+        CodingHarness harness = new CodingHarness(60);
+        Host host = new Host("n.txt");
+        host.specFailures = 3;
+        Task task = task("t-0207-aaaa", repo, "加 n.txt");
+        HarnessState s = harness.start(task, null);
+        harness.drive(new HarnessRun(host, task, s, null, new Cancellation()));
+
+        List<Call> specs = host.calls(CodingHarness.SPEC);
+        assertThat(specs).hasSize(2);
+        assertThat(specs.get(1).conversation()).isNotEqualTo(specs.get(0).conversation());
+        assertThat(specs.get(1).first()).isTrue();
+        assertThat(host.status).isEqualTo(TaskStatus.NEEDS_CONFIRMATION);
+        assertThat(host.asks).hasSize(1);
+        assertThat(host.asks.get(0)).contains("400", "换一个模型");
+
+        harness.drive(new HarnessRun(host, task.withWorkspaceDir(s.dir), s, "继续", new Cancellation()));
+        assertThat(host.asks).hasSize(1); // same reason: not told again
+        assertThat(host.repeats.get(host.repeats.size() - 1)).isTrue();
+
+        Host flaky = new Host("m.txt");
+        flaky.specFailures = 1;
+        flaky.failMessage = "API Error: 500 overloaded";
+        Task other = task("t-0208-aaaa", repo, "加 m.txt");
+        HarnessState s2 = harness.start(other, null);
+        harness.drive(new HarnessRun(flaky, other, s2, null, new Cancellation()));
+        assertThat(flaky.status).isEqualTo(TaskStatus.ERROR);
+        assertThat(flaky.calls(CodingHarness.SPEC)).hasSize(1);
     }
 
     @Test

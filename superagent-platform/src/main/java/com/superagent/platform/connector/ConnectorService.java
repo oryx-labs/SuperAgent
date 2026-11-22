@@ -66,12 +66,14 @@ public class ConnectorService {
     private final IntegrationService integrations;
     private final com.superagent.core.settings.SystemSettingStore settings;
     private final ConfluenceSite confluence;
+    private final JiraSite jira;
     private final SecureRandom random = new SecureRandom();
 
     public ConnectorService(ConnectorStore store, ConnectorCredentialStore credentials, EventSourceStore links,
                             ConnectorOAuthService oauth, SecretCipher cipher,
                             McpGrants grants, IntegrationService integrations,
-                            com.superagent.core.settings.SystemSettingStore settings, ConfluenceSite confluence) {
+                            com.superagent.core.settings.SystemSettingStore settings, ConfluenceSite confluence,
+                            JiraSite jira) {
         this.store = store;
         this.credentials = credentials;
         this.links = links;
@@ -81,6 +83,7 @@ public class ConnectorService {
         this.integrations = integrations;
         this.settings = settings;
         this.confluence = confluence;
+        this.jira = jira;
     }
 
     public List<ConnectorDto> list(String viewer, boolean admin) {
@@ -146,9 +149,50 @@ public class ConnectorService {
         return toDto(connector, viewer, true);
     }
 
+    /** Adds a Jira connector: Cloud (Atlassian's remote MCP, OAuth) or Data Center (mcp-atlassian, personal access token). */
+    public ConnectorDto createJira(JiraConnectorRequest r, String viewer) {
+        String product = r.product() == null ? "" : r.product().strip();
+        if (!JiraSite.CLOUD.equals(product) && !JiraSite.DC.equals(product)) {
+            throw new IllegalArgumentException("Jira 类型要选 Cloud 或 Data Center");
+        }
+        Instant now = Instant.now();
+        String id = product + "-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        Connector c = jiraConnector(id, product, r.name(), r.description(), r.siteUrl(), r.enabled() == null || r.enabled(), now, now);
+        store.save(c);
+        log.info("created connector {} ({})", c.id(), c.name());
+        return toDto(c, viewer, true);
+    }
+
+    /** A Jira connector runs the one way its product does; only its name, description, site and on/off are the admin's. */
+    private static Connector jiraConnector(String id, String product, String name, String description, String site,
+                                           boolean enabled, Instant created, Instant now) {
+        boolean cloud = JiraSite.CLOUD.equals(product);
+        return new Connector(id, cleanName(name, "Jira"), blank(description), ConnectorKind.MCP,
+                cloud ? ConnectorAuthMethod.OAUTH : ConnectorAuthMethod.PERSONAL_TOKEN, enabled,
+                cloud ? ConnectorTransport.HTTP : ConnectorTransport.STDIO,
+                cloud ? JIRA_CLOUD_MCP_URL : JiraSite.endpointFor(JiraSite.normalize(site), MCP_ATLASSIAN_COMMAND),
+                cloud ? null : "JIRA_PERSONAL_TOKEN", created, now);
+    }
+
+    private ConnectorDto updateJira(Connector existing, SaveConnectorRequest r, String viewer) {
+        String product = JiraSite.productOf(existing.id());
+        String oldSite = JiraSite.siteOf(existing.endpoint());
+        Connector updated = jiraConnector(existing.id(), product, r.name(), r.description(),
+                r.endpoint() != null ? r.endpoint() : oldSite, r.enabled() == null ? existing.enabled() : r.enabled(),
+                existing.createdAt(), Instant.now());
+        if (!java.util.Objects.equals(JiraSite.siteOf(updated.endpoint()), oldSite)) {
+            credentials.deleteAll(existing.id()); // tokens made on another Jira no longer apply
+        }
+        store.save(updated);
+        return toDto(updated, viewer, true);
+    }
+
     public ConnectorDto update(String id, SaveConnectorRequest request, String viewer) {
         Connector existing = require(id);
         requireOwn(id);
+        if (JiraSite.productOf(id) != null) {
+            return updateJira(existing, request, viewer);
+        }
         Connector updated = validated(existing, request);
         if (updated.authMethod() != existing.authMethod()) {
             credentials.deleteAll(id); // authorizations made for another method no longer apply
@@ -191,6 +235,8 @@ public class ConnectorService {
         if (GITLAB_ID.equals(id)) {
             // The token is only ever sent to the GitLab it was made on: the address is checked here and kept with it.
             label = GitLabSite.verify(blank(account), token.strip());
+        } else if (JiraSite.DC.equals(JiraSite.productOf(id))) {
+            label = jira.verify(JiraSite.siteOf(c.endpoint()), token.strip());
         } else if (CONFLUENCE_ID.equals(id)) {
             String site = confluenceSite().orElseThrow(() ->
                     new IllegalArgumentException("管理员还没在系统设置里填 Confluence 的地址"));
@@ -273,6 +319,15 @@ public class ConnectorService {
             token = usable.get();
         }
         McpServerSpec spec = spec(c, token);
+        if (JiraSite.DC.equals(JiraSite.productOf(c.id()))) {
+            String site = JiraSite.siteOf(c.endpoint());
+            if (site == null || token == null) {
+                return Optional.empty();
+            }
+            // The site rides in the endpoint only to be stored; the server is started with the plain command.
+            spec = new McpServerSpec(spec.name(), spec.transport(), null, Map.of(), "uvx",
+                    List.of(MCP_ATLASSIAN_COMMAND.substring("uvx ".length())), JiraSite.env(site, token));
+        }
         if (CONFLUENCE_ID.equals(c.id())) {
             Optional<String> site = confluenceSite();
             if (site.isEmpty()) {
@@ -474,7 +529,10 @@ public class ConnectorService {
     public static final String CONFLUENCE_ID = "confluence";
     public static final String GITLAB_ID = "gitlab";
     /** mcp-atlassian (Confluence and Jira, Cloud and self-hosted), pinned: run by uv, which fetches it on first use. */
-    static final String CONFLUENCE_COMMAND = "uvx mcp-atlassian@0.23.1";
+    static final String MCP_ATLASSIAN_COMMAND = "uvx mcp-atlassian@0.23.1";
+    static final String CONFLUENCE_COMMAND = MCP_ATLASSIAN_COMMAND;
+    /** Atlassian's official remote MCP server (v2); it takes the employee's OAuth token as {@code Authorization: Bearer}. */
+    static final String JIRA_CLOUD_MCP_URL = "https://mcp.atlassian.com/v2/mcp";
     static final String DINGTALK_TOOLS_COMMAND = "npx -y dingtalk-mcp@latest";
     /** DingTalk's official MCP server: which of its tool groups agents get. */
     static final String DINGTALK_PROFILES = "dingtalk-contacts,dingtalk-department,dingtalk-calendar,dingtalk-tasks,dingtalk-report";
@@ -530,7 +588,7 @@ public class ConnectorService {
                 c.authMethod() == ConnectorAuthMethod.OAUTH && oauth.isConfigured(oauth.providerFor(c.id())),
                 admin ? c.endpoint() : null, admin ? c.tokenEnv() : null, secretSet,
                 authorizedCount, c.createdAt(), c.updatedAt(), isSystem(c.id()), setUp(c),
-                CONFLUENCE_ID.equals(c.id()) ? confluenceSite().orElse(null) : null,
+                CONFLUENCE_ID.equals(c.id()) ? confluenceSite().orElse(null) : JiraSite.siteOf(c.endpoint()),
                 CONFLUENCE_ID.equals(c.id()) && confluenceSite().map(ConfluenceSite::isCloud).orElse(false)
                         || GITLAB_ID.equals(c.id()));
     }

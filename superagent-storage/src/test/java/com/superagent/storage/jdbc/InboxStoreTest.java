@@ -28,7 +28,7 @@ class InboxStoreTest {
     @Test
     void dedupesPendingAndProcessingRoundTrip() {
         MysqlInboxStore store = new MysqlInboxStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:inbox-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:inbox-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant now = Instant.now();
         assertThat(store.insertIfAbsent(event("e1", EventPriority.P1, now.minusSeconds(60)))).isTrue();
         assertThat(store.insertIfAbsent(event("e1", EventPriority.P1, now))).isFalse(); // redelivery

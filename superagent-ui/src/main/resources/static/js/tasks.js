@@ -161,7 +161,7 @@ function wsIcon(name) {
   const span = document.createElement("span");
   span.className = "ws-icon";
   span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" '
-    + 'stroke-linejoin="round" aria-hidden="true">' + WS_ICONS[name] + "</svg>";
+    + 'stroke-linejoin="round" aria-hidden="true">' + (WS_ICONS[name] || SK_CAT_ICONS[name] || "") + "</svg>";
   return span;
 }
 

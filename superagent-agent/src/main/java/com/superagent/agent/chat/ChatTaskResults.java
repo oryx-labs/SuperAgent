@@ -60,6 +60,10 @@ public class ChatTaskResults {
         if (e.repeated()) {
             return; // the chat already has this question
         }
+        if (e.retrying()) {
+            log.info("task {} failed, will be retried: {}", e.taskId(), e.error());
+            return; // told once, when the retries are used up
+        }
         post(e.taskId(), e.status(), report(e));
     }
 

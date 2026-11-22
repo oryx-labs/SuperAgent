@@ -14,7 +14,7 @@ class MysqlTaskPhaseStoreTest {
 
     private static JdbcTemplate h2() {
         DriverManagerDataSource ds = new DriverManagerDataSource(
-                "jdbc:h2:mem:phase-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
+                "jdbc:h2:mem:phase-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
         return new JdbcTemplate(ds);
     }
 

@@ -55,6 +55,7 @@ abstract class JsonLineCliRunner implements AgentRunner {
 
     private final String command;
     private final long timeoutSeconds;
+    private final Object[] sessionLocks = java.util.stream.IntStream.range(0, 256).mapToObj(i -> new Object()).toArray();
     private CliPaths cliPaths; // null in tests: the command runs from the process PATH as given
 
     protected JsonLineCliRunner(String command, long timeoutSeconds) {
@@ -69,6 +70,11 @@ abstract class JsonLineCliRunner implements AgentRunner {
 
     protected final String command() {
         return command;
+    }
+
+    /** Serializes runs that share a CLI home while allowing unrelated sessions to run concurrently. */
+    protected final Object sessionLock(AgentRunRequest request) {
+        return sessionLocks[Math.floorMod(java.util.Objects.hash(request.workspaceDir(), request.sessionId()), sessionLocks.length)];
     }
 
     /** The argv; temp files it creates go in {@code cleanup}, removed when the run ends. */

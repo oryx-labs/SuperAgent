@@ -84,6 +84,24 @@ class ClaudeUsageLedgerTest {
         assertThat(turn.costUsd()).isNull();
     }
 
+    /** A turn's context is its largest request, not the sum over requests (each tool call re-reads the conversation). */
+    @Test
+    void theTurnsContextIsItsLargestSingleRequest() {
+        var usage = result(CALL_A.formatted(3), CALL_B, TURN1);
+        // CALL_A read 8 + 28116 + 32, CALL_B 2 + 11148 + 17250 (more): the larger one is the turn's context.
+        assertThat(usage.contextTokens()).isEqualTo(28_400);
+    }
+
+    /** No assistant message seen (the CLI failed before streaming): the result's own call is the context. */
+    @Test
+    void withoutAssistantMessagesTheResultCallIsTheContext() {
+        var usage = result("{\"type\":\"result\",\"is_error\":false,\"result\":\"one\",\"session_id\":\"c7\","
+                + "\"usage\":{\"input_tokens\":12,\"cache_read_input_tokens\":9000,\"cache_creation_input_tokens\":1000,"
+                + "\"output_tokens\":4}}");
+        assertThat(usage.calls()).hasSize(1);
+        assertThat(usage.contextTokens()).isEqualTo(10_012);
+    }
+
     @Test
     void aSideCallSeenOnlyInTheTotalsIsBilledInFullFirstThenByDifferenceAndNotWithoutABaseline() {
         String side = "{\"type\":\"result\",\"is_error\":false,\"result\":\"ok\",\"session_id\":\"c9\",\"total_cost_usd\":%s,"

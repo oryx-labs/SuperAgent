@@ -33,6 +33,7 @@ class QuotaServiceTest {
         List<UsageRecord> used = new ArrayList<>();
         UsageStore usage = new UsageStore() {
             @Override public void save(UsageRecord r) { used.add(r); }
+            @Override public UsageRecord latestChatTurn(String sessionId) { return null; }
             @Override public List<UsageRecord> forTask(String taskId) { return List.of(); }
             @Override public List<UsageRecord> between(String user, Instant from, Instant to) {
                 return used.stream().filter(r -> !r.at().isBefore(from) && r.at().isBefore(to)).toList();
@@ -58,6 +59,6 @@ class QuotaServiceTest {
 
     private static UsageRecord record(Instant at, long input) {
         return new UsageRecord("u" + at.toEpochMilli(), at, "ada", "chat", null, null, null, "claude", "m", input, 0, 0, 0,
-                0, 0, null, null);
+                0, 0, 0, null, null);
     }
 }

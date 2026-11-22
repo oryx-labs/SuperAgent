@@ -45,6 +45,25 @@ public class FileMcpTools implements McpToolProvider {
         this.projectFolders = projectFolders;
     }
 
+    private org.springframework.beans.factory.ObjectProvider<com.superagent.core.writing.StyleGuideSource> style; // null in tests
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setStyle(org.springframework.beans.factory.ObjectProvider<com.superagent.core.writing.StyleGuideSource> style) {
+        this.style = style;
+    }
+
+    /** What to tell the agent about a Markdown file it just wrote: stock phrases, vague claims, heading jumps (empty: clean). */
+    String writingNotes(String name, String content) {
+        com.superagent.core.writing.StyleGuideSource source = style == null ? null : style.getIfAvailable();
+        if (source == null || name == null || !name.toLowerCase(java.util.Locale.ROOT).endsWith(".md")) {
+            return "";
+        }
+        java.util.List<String> notes = com.superagent.core.writing.TextChecks.warnings(content, source.lexicon()).stream()
+                .map(f -> "- " + f.check() + (f.where() == null ? "" : "（" + f.where() + "）") + "：" + f.note()).limit(12).toList();
+        return notes.isEmpty() ? "" : "\n文件已存。平台的文字核对有 " + notes.size() + " 处提醒，请改一轮后用 replace_id 覆盖这个文件：\n"
+                + String.join("\n", notes);
+    }
+
     @Override
     public Set<McpGrants.Kind> kinds() {
         return Set.of(McpGrants.Kind.CHAT, McpGrants.Kind.TASK);
@@ -88,7 +107,8 @@ public class FileMcpTools implements McpToolProvider {
         try {
             String text = switch (name) {
                 case "file_write" -> placed(grant, owner, files.writeText(origin, require(args, "name"),
-                        args.path("content").asText(""), strOrNull(args, "replace_id"), tags(args)), strOrNull(args, "folder"));
+                        args.path("content").asText(""), strOrNull(args, "replace_id"), tags(args)), strOrNull(args, "folder"))
+                        + writingNotes(args.path("name").asText(""), args.path("content").asText(""));
                 case "file_save" -> placed(grant, owner, files.saveFrom(origin, grants.workspaceFile(grant, require(args, "file")),
                         strOrNull(args, "name"), strOrNull(args, "replace_id"), tags(args)), strOrNull(args, "folder"));
                 case "file_get" -> {

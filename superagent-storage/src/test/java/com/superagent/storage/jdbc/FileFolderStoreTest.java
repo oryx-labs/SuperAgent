@@ -17,7 +17,7 @@ class FileFolderStoreTest {
     @Test
     void keepsFoldersPerPersonAndAPlacementPerPersonAndFile() {
         MysqlFileFolderStore store = new MysqlFileFolderStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:folder-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:folder-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant t = Instant.parse("2026-11-07T10:00:00Z");
         FileFolder top = new FileFolder("a", "ada", "项目", null, false, t, t);
         store.save(top);

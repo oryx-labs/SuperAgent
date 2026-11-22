@@ -41,7 +41,7 @@ class ProjectMcpToolsTest {
     void setUp() {
         TenantContext.set("acme");
         JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:projmcp-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+                "jdbc:h2:mem:projmcp-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
         AgentStore agents = mock(AgentStore.class);
         Instant now = Instant.now();
         for (String id : new String[]{"a1", "a2"}) {

@@ -17,7 +17,7 @@ class OrgStoreTest {
     @Test
     void keepsManagersAndTeams() {
         MysqlOrgStore store = new MysqlOrgStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:org-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:org-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         store.setManager("bob", "alice");
         store.setManager("bob", "carol"); // replaced, not added
         assertThat(store.manager("bob")).contains("carol");

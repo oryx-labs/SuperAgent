@@ -18,7 +18,7 @@ class AgentMemoryStateStoreTest {
     @Test
     void anotherCompanyNeitherSeesNorOverwritesAnAgentsMemory() {
         MysqlAgentMemoryStateStore store = new MysqlAgentMemoryStateStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:memory-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:memory-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant now = Instant.now();
         store.save(new AgentMemoryState("a1", "ada", null, "sonnet", 0, "likes tea", now)
                 .writtenByAgent("## 用户偏好\n- likes tea", "用户偏好", "ada", "s1", null));

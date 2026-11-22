@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>SuperAgent 降本技术方案</title>
+<style>
+:root{--ink:#111;--muted:#6b6b6b;--line:#e5e5e5;--bg:#fafafa;--brand:#2f6bff}
+*{box-sizing:border-box}body{margin:0;font:14px/1.7 -apple-system,"PingFang SC",sans-serif;color:var(--ink);background:var(--bg)}
+.page{max-width:1120px;margin:24px auto;padding:0 20px 60px}
+h1{font-size:24px;margin:0 0 8px}h2{font-size:19px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}h3{font-size:16px;margin:24px 0 8px}h4{font-size:14px;margin:16px 0 6px}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:8px;margin:10px 0 16px;font-size:13px}
+td,th{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}th{background:#f3f3f3;color:var(--muted);font-weight:600}
+code{background:#f0f0f0;padding:1px 5px;border-radius:4px;font-size:12px}pre{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:12px}
+blockquote{margin:8px 0;border-left:3px solid var(--brand);background:#f5f8ff;padding:6px 12px;color:#333}
+a{color:var(--brand);word-break:break-all}hr{border:0;border-top:1px solid var(--line);margin:24px 0}figure{margin:12px 0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px}figcaption{color:var(--muted);font-size:12px;margin-top:6px}
+li{margin:2px 0}details{margin:8px 0}
+</style>
+</head>
+<body><div class="page">
+<h1>SuperAgent 降本技术方案</h1>
+<blockquote>版本：2026-11-20 · 基准分支：<code>dev-3</code>（HEAD <code>d329963e</code>）· 状态：设计稿，未实施</blockquote>
+<blockquote>依据：#57《模型选型方案》、#57 附件《模型选型-业界调研》、#68《降本改造点明细》，加本次的代码核实、本地 MySQL 只读复核和联网补充调研。</blockquote>
+<blockquote>本次只读：没有改任何代码，没有改数据库，没有 commit / push。唯一的写入是本文及 <code>docs/superagent-cost-reduction.html</code>。</blockquote>
+<blockquote>名词：SuperAgent / Agent / Share Agent 保持原文。</blockquote>
+<h2>0. 结论摘要</h2>
+<table><thead><tr><th>问题</th><th>结论</th></tr></thead><tbody>
+<tr><td>钱花在哪</td><td>对话约 50%、任务约 48%；Opus 5.5 占 81–85%；缓存写入占 62%、缓存读取占 22%。根因是<b>长会话反复重写缓存</b>和<b>每一步都用最贵模型</b>，不是单价（1.3 节）。</td></tr>
+<tr><td>数据可信度</td><td>#57 的 $427 只是估算。本机数据库当前原始合计 $3,682，我独立复现的修正值：同窗口（11-09 至 11-19）约 $520，含 11-20 约 $641。<b>区间应放宽为 $374–$520</b>。6d28c29 之前 resume 把会话累计值又记了一次，库里至今没有干净数据（1.2 节）。</td></tr>
+<tr><td>降本目标</td><td><b>每个验收通过任务的平均花费 与 月总花费，降 30%（底线目标）到 40%（期望目标）</b>；全部做完的估计区间 30–52%，中间值约 40%，把握中低。质量底线见 1.5 节。</td></tr>
+<tr><td>降本分几层</td><td>五层：①选型/路由/级联/按角色分档 ②上下文与缓存 ③流程（减少返工、不该升档的不升档、提前停止）④度量与质量反馈闭环 ⑤预算与护栏（第 2 节）。</td></tr>
+<tr><td>新增内容</td><td>3 张新表（<code>model_outcome</code>、<code>model_bucket_stat</code>、<code>cost_guard_event</code>）+ <code>token_usage</code> 加 2 列；core 加 4 个接口；cost 加 4 个类；全部按公司隔离，配置放按公司的 <code>system_setting</code>（第 3 节）。</td></tr>
+<tr><td>落地顺序</td><td>阶段 0 设置与习惯（不改代码）→ 1 记账地基 + 护栏 → 2 会话与缓存 → 3 步骤分档与流程 → 4 度量闭环与数据驱动 → 5 对话分档（第 4 节）。</td></tr>
+<tr><td>本次补充调研的重要纠正</td><td>①「Anthropic 说先低 effort 全跑、失败再升档成本约一半」<b>原文未查到</b>，不能引用；②「context editing 在 100 轮评测 token 降 84%」<b>84% 是另一个数字</b>（agent 输入 token 中位数 84% 来自 prompt cache），context editing 的官方示例是 70,000→25,000；③RouteLLM 的 3.66x 官方未查到；④Claude Code 已有 <code>--effort</code>、<code>--max-budget-usd</code>（本机 2.1.318 实测），平台至今没用；⑤Claude Code 通过 API key 时主会话缓存默认只有 5 分钟，可用 <code>CLAUDE_CODE_PROMPT_CACHE_TTL=1h</code> 改（第 6 节）。</td></tr>
+<tr><td>#68 口径纠正（4 条）</td><td>①$427 → 区间 $374–$520；②$4.93 与 $4.09 差在口径，统一为「model_choice 全部行」；③「30–40% × 48%」应为 14–19%；④设置与会话降本重叠，给出叠加算法，累计由「35–50%」改为「30–52%（中间约 40%）」（1.6 节）。</td></tr>
+</tbody></table>
+<hr>
+<h2>1. 目标和现状</h2>
+<h3>1.1 口径</h3>
+<table><thead><tr><th>项</th><th>定义</th></tr></thead><tbody>
+<tr><td>数据源</td><td>本地 MySQL <code>superagent</code> 库，<code>company_id='superagent'</code>，只执行 SELECT</td></tr>
+<tr><td>花费</td><td><code>token_usage.cost_usd</code>（平台按 token 与价格估算），不是账单；<code>cost_usd</code> 为空的 2 行按 0 计</td></tr>
+<tr><td>窗口</td><td>#57 窗口 11-09 至 11-19；本次库里数据延伸到 11-20 14:19，两个窗口分别报</td></tr>
+<tr><td>任务数</td><td><code>task</code> 表 69 个（coding 23、general 42、complex 4）；token_usage 里带 task_id 的 69 个</td></tr>
+<tr><td>价格单位</td><td>$/百万 token；估算价与 CLI 自报价不相加</td></tr>
+</tbody></table>
+<h3>1.2 6d28c29 之前的重复记账，和我怎么复核</h3>
+<ul>
+<li>问题：Claude CLI 的 <code>result</code> 里 <code>modelUsage</code>、<code>total_cost_usd</code> 是<b>整个会话的累计值</b>。resume 的会话每一轮都把累计值记成本轮用量，历史被反复计费。6d28c29 的修复是 <code>ClaudeUsageLedger</code>：优先用 CLI 的 <code>model_usage_since_last_result</code>，否则用累计值减去上次值（<code>superagent-runtime/.../cli/ClaudeUsageLedger.java</code>）。</li>
+<li>证据 1（库里的形态）：长对话 <code>d585136f</code>（91 行、$2,538）里，11-18 的行出现 $15.76 → $18.29 → $22.20 这样递增的累计值，穿插 $0.1 级的单轮值。</li>
+<li>证据 2（修复未生效在库里）：11-20 13:26–14:19 的行，每行 cache_read 只有 0.03–0.8M，花费却是 $6.9–10.3；Opus 5.5 读缓存价 $0.2/M，0.8M 读取只值 $0.16；花费里还可能含缓存写入（我没有逐行核对 cache_write），所以这只是线索，不是证明。我据此<b>推测</b>：运行中的服务可能还没带 6d28c29 重启，或只部分生效（推测，未去服务器核对，需要用户确认）。</li>
+<li>复核方法（我独立写的，和 #57 的「相邻差值」不完全相同）：按会话分组（chat 用 session_id，task 用 task_id+模型），按时间排序；某行输出、输入、花费同时 ≥ 当前累计行的 0.9 倍时，只计与累计行的差值，并更新累计行；否则按单轮值计入。阈值取 0.8、0.9、1.0 结果相差 &lt; 0.1%。</li>
+</ul>
+<table><thead><tr><th>口径</th><th>窗口</th><th>合计</th><th>chat</th><th>task</th><th>备注</th></tr></thead><tbody>
+<tr><td>库里原始（含重复）</td><td>11-09 至 11-20</td><td><b>$3,682.13</b>（2,293 行）</td><td>$3,025.61</td><td>$639.50</td><td>其中 11-09 至 11-19 为 $3,051.44</td></tr>
+<tr><td>#57 修正值</td><td>11-09 至 11-19</td><td>$427（$374–$494）</td><td>$206</td><td>$210</td><td>方案 6.1/6.2</td></tr>
+<tr><td>本次复现（相邻累计行法）</td><td>11-09 至 11-19</td><td><b>$520</b></td><td>$258</td><td>$250</td><td>比 #57 高 22%</td></tr>
+<tr><td>本次复现</td><td>11-09 至 11-20</td><td><b>$641</b></td><td>$331</td><td>$294</td><td>11-20 单日约 $121</td></tr>
+<tr><td>采用</td><td>—</td><td>区间 <b>$374–$520</b>，中值取 $450</td><td></td><td></td><td>两种复现方法的并集；所有比例按 ±25% 看待</td></tr>
+</tbody></table>
+<p>任务侧的另一个旁证：<code>task.spend</code> 合计 $534.83（69 个任务），同样受累计值影响（#57 的 #53 案例里 task.spend $10.48，修正后约 $5.70）；不能当作干净口径。</p>
+<h3>1.3 钱花在哪（修正后，占比取 #57 与本次复现的范围）</h3>
+<table><thead><tr><th>维度</th><th>占比 / 数值</th><th>出处</th></tr></thead><tbody>
+<tr><td>来源</td><td>chat 48–52%，task 48–49%，其余约 2–3%</td><td>#57 6.2；本次复现</td></tr>
+<tr><td>模型</td><td>Opus 5.5 81–85%；Sonnet 5.5 5–9%；其余合计 &lt; 10%</td><td>#57 6.2；本次复现 81%</td></tr>
+<tr><td>费用类型</td><td>缓存写入 62%、缓存读取 22%、输出 13%、输入 3%</td><td>#57 6.4</td></tr>
+<tr><td>缓存 TTL</td><td><code>cache_write_1h</code> 合计 4,974 token，占缓存写入 543M 的 0.001%：<b>几乎全是 5 分钟缓存</b></td><td>本次 SELECT</td></tr>
+<tr><td>长对话</td><td>对话第 31 轮之后占对话花费 69%（#57）/ 74%（本次复现，行序号近似轮次）；61+ 轮每轮约 $4.6</td><td>#57 6.4；本次复现</td></tr>
+<tr><td>对话间隔</td><td>179 个相邻轮次对里，84 个（47%）间隔超过 5 分钟，26 个超过 60 分钟</td><td>本次 SELECT</td></tr>
+<tr><td>任务</td><td>coding 23 个均 $17.81（含 3 个 &gt; $30、1 个 $102.58 的大任务）；general 42 个均 $2.07；超过 $20 的 7 个任务占 task.spend 的 53%（$283 / $535）</td><td>本次 SELECT（task.spend 口径）</td></tr>
+<tr><td>判难度</td><td>model_choice 47 行 $5.82（占 1%），见 1.6 节</td><td>本次 SELECT</td></tr>
+</tbody></table>
+<h3>1.4 现状的 6 个毛病（对应代码）</h3>
+<table><thead><tr><th>#</th><th>毛病</th><th>代码位置（dev-3）</th></tr></thead><tbody>
+<tr><td>1</td><td>选型只看价格，没有质量数据回流</td><td><code>TaskModelRouter.reviewer</code> 里 <code>strongest(...)</code> 用价格代替能力；<code>HarnessState</code> 的 phase JSON 里的审查数据没落成结构化</td></tr>
+<tr><td>2</td><td>只有报错才升档，审查退回再多次也不升</td><td><code>TaskService.escalate</code> 由 <code>settle(ERROR)</code> 触发；<code>ReviewLoop.stop</code> 只会「停下问用户」，从不升档</td></tr>
+<tr><td>3</td><td>规格、开发、修复全用同一个任务模型</td><td><code>CodingHarness.turn(run, prompt, label)</code> → <code>run.turn(...)</code> 用 <code>run.task().model()</code>；而 <code>run.turnOn(Model, ...)</code> 已有，只是编码流程没用</td></tr>
+<tr><td>4</td><td>会话长度、缓存价不参与选型和管理</td><td><code>ModelPriceService.Candidate.blended()</code> = (3×输入+输出)/4，不含缓存价；<code>ChatService.rotateSession</code> 只在连续失败时触发</td></tr>
+<tr><td>5</td><td>重试层层叠加，确定性错误也重试</td><td><code>TaskService.recover</code>：<code>MAX_ATTEMPTS=10</code>、<code>ROTATE_AFTER=1</code>；771d839 只给字幕/普通任务加了 <code>escalate=false</code></td></tr>
+<tr><td>6</td><td>没有任务级、对话级的花费上限；没用 CLI 自带的预算和强度开关</td><td><code>SettingsService.codingReviewMaxSpend</code>（只管编码审查循环）；<code>ClaudeCliAgentRunner</code> 命令里没有 <code>--effort</code>、<code>--max-budget-usd</code></td></tr>
+</tbody></table>
+<h3>1.5 降本目标和底线</h3>
+<table><thead><tr><th>项</th><th>数值</th><th>怎么判定</th></tr></thead><tbody>
+<tr><td>目标（底线）</td><td>每月花费 <b>−30%</b></td><td>同口径（修正后的 <code>token_usage</code>）下，对比实施前 4 周与实施后 4 周的<b>每个验收通过任务的平均花费</b>，并按任务类型分层，避免大任务扰动</td></tr>
+<tr><td>目标（期望）</td><td><b>−40%</b></td><td>同上</td></tr>
+<tr><td>质量底线 1</td><td>编码任务「一次通过率」不低于基线 −5 个百分点</td><td>基线：coding 73.7%（14/19，「无升档」近似，#57 口径）；general 84.6%</td></tr>
+<tr><td>质量底线 2</td><td>平均审查返工轮次不高于基线</td><td>基线从阶段 1 之后的干净数据重新测</td></tr>
+<tr><td>质量底线 3</td><td>用户驳回/重开率不高于基线</td><td>阶段 1 上线后开始记录（现在没有）</td></tr>
+<tr><td>样本限制</td><td>现有只有 19 个 coding、39 个 general 任务，<b>统计上证明不了 5 个百分点的差异</b></td><td>所以采用「滚动窗口护栏」：任一分层最近 20 个任务一次通过率低于基线 −10 个百分点，自动回退该层的降档（第 5 节）</td></tr>
+</tbody></table>
+<h3>1.6 对 #68 / #57 的纠正（改前改后）</h3>
+<table><thead><tr><th>#</th><th>改前</th><th>改后</th><th>依据</th></tr></thead><tbody>
+<tr><td>1</td><td>「$427 / 11 天，区间 $374–$494」，折合月 $1,100–1,200</td><td><b>$374–$520</b>（中值 $450）；折合月约 <b>$1,000–1,420</b>，11-20 单日 $121 说明用量在上升，月度外推不稳</td><td>1.2 节：本次独立复现 $520（同窗口）；库里没有 6d28c29 之后的干净数据</td></tr>
+<tr><td>2</td><td>model_choice 来源 $4.93 与判难度 34 次 $4.09 两个数并存</td><td>统一口径为「<code>source='model_choice'</code> 的全部行」：47 行 / $5.82（11-19 前 41 行 / $5.04）。差异原因：Opus 判难度 35 行 / $4.20（≈ 34 次 / $4.09，单次 $0.12），再加 gpt-6-astra 6 行 / $0.83 ≈ $5.03 ≈ $4.93（差额来自各自取数时间）</td><td>本次 SELECT：<code>GROUP BY model</code>；原始取数时点不同，精确的 34 条无法还原（推断）</td></tr>
+<tr><td>3</td><td>「对话再降 30–40%，约占总额 10–15%」</td><td>30–40% × 对话占比 48% = <b>14.4–19.2%</b>；与长对话开新会话（C09）重叠，净增只算残余部分</td><td>算术；见下一条</td></tr>
+<tr><td>4</td><td>阶段节省直接相加：P0 20–30% + P1 5–10% + P4 5–10% + P3 5–15% ≈ 35–50%（实际相加会到 55% 以上）</td><td>按「池 × 残余」算，<b>累计 30–52%（中间约 40%）</b>；同一池里的杠杆不能相加</td><td>下面的叠加算法</td></tr>
+</tbody></table>
+<p><b>叠加算法</b>（避免重复计算）</p>
+<ol>
+<li>先把总花费拆成池：chat 池（占 50%）、task 池（占 48%）、其他（2%）。比例取 #57 与本次复现的中间值。</li>
+<li>每个杠杆写成「作用在哪个池里的残余成本上的比例」。</li>
+<li>同一池里的杠杆<b>连乘</b>：池的残余 = ∏(1 − aᵢ)。不同池的节省按池占比相加。</li>
+<li>「习惯」与「系统默认」是同一个杠杆的两种捕获程度（习惯取 50%，系统默认取 100%），不叠加。</li>
+</ol>
+<table><thead><tr><th>杠杆</th><th>作用的池</th><th>池内比例</th><th>折合占总额</th><th>把握</th></tr></thead><tbody>
+<tr><td>长对话开新会话（习惯 N1 或系统默认 C09，同一杠杆）</td><td>chat</td><td>习惯 13–23%（捕获 50%）；系统默认 26–46%（池：第 31 轮之后占 chat 的 69–74%，约总额 33–38%，捕获其中 40–60%）</td><td>6.5–11.5%（习惯）；13–23%（系统默认）</td><td>中</td></tr>
+<tr><td>缓存 TTL 调到 1 小时</td><td>chat、task</td><td>chat 残余 5–15%；task 残余 3–10%</td><td>约 3–9%</td><td><b>低</b>（无本平台实测，见 3.5 节）</td></tr>
+<tr><td>步骤分档（N4 固定模型是临时形态，C01 是永久形态，同一杠杆）</td><td>task</td><td>17–23%（Sonnet 单价是 Opus 的一半；执行类 Opus 约 $120.8 减半 $60 ≈ 14% 上限，乘 Sonnet 一次通过 8/10 的实现系数 60–80%）</td><td>8–11%</td><td>中</td></tr>
+<tr><td>判难度改中档</td><td>task</td><td>1–2%</td><td>0.5–1%</td><td>高</td></tr>
+<tr><td>数据驱动选型（探索 + 分桶）</td><td>task 残余</td><td>4–12%</td><td>2–6%</td><td>低</td></tr>
+<tr><td>对话默认中档</td><td>chat 残余（长会话杠杆之后）</td><td>10–25%</td><td>约 3–8%</td><td>低</td></tr>
+</tbody></table>
+<table><thead><tr><th>阶段（累计）</th><th>累计占总额（低 – 高）</th><th>与 #68 的差别</th></tr></thead><tbody>
+<tr><td>阶段 0 设置与习惯</td><td><b>14–23%</b></td><td>#57 写 20–30%：习惯只按 50% 捕获，且 N4 取 8–11% 而非 10–15%</td></tr>
+<tr><td>阶段 2 完成（会话与缓存）</td><td><b>24–42%</b></td><td></td></tr>
+<tr><td>阶段 3 完成（分档与流程）</td><td>25–42%</td><td>分档与阶段 0 的 N4 是同一杠杆，不再叠加</td></tr>
+<tr><td>阶段 4 完成（数据驱动）</td><td>26–47%</td><td></td></tr>
+<tr><td>阶段 5 完成（对话分档）</td><td><b>30–52%</b></td><td></td></tr>
+</tbody></table>
+<hr>
+<h2>2. 整体架构</h2>
+<h3>2.1 降本五层与模块归属</h3>
+<blockquote>项目分层（CLAUDE.md）：L0 api/core；L1 storage/runtime；L2 platform/files/skills/project；L3 task/agent/cost/docs/media；L4 orchestrator/event；L5 web/ui；L6 server。<b>一个模块只依赖更低层；task 与 agent 是兄弟，互不依赖。</b> task、agent 需要的降本能力，一律经 core 里的接口拿，由 cost（或 platform）实现，沿用现有的 <code>TaskModelSelector</code>、<code>ModelRouter</code> 做法。</blockquote>
+<table><thead><tr><th>层</th><th>管什么</th><th>归属模块（层级）</th><th>现状 → 本方案新增</th></tr></thead><tbody>
+<tr><td>① 选型 / 路由 / 级联 / 按角色分档</td><td>每一步用哪个模型和强度；什么时候升档</td><td><b>cost（L3）</b> <code>routing/TaskModelRouter</code>、新增 <code>routing/StepPolicyService</code>、<code>routing/BucketRouter</code>；接口在 <b>core（L0）</b> <code>core/task/</code></td><td>路由器已有；新增「按步骤取档」「读分桶统计」</td></tr>
+<tr><td>② 上下文与缓存</td><td>会话多长就换；缓存 TTL；换模型的代价</td><td><b>agent（L3）</b> <code>ChatService</code>；<b>task（L3）</b> <code>TaskSessionPool</code>；<b>runtime（L1）</b> Claude/Codex runner；<b>cost（L3）</b> <code>ModelPriceService</code></td><td>新增轮数/token 触发的开新会话、TTL 开关、比价含缓存价</td></tr>
+<tr><td>③ 流程</td><td>减少返工、不该升档的不升、提前停止</td><td><b>task（L3）</b> <code>harness/coding/ReviewLoop</code>、<code>CodingHarness</code>、<code>GeneralHarness</code>、<code>TaskService.recover</code></td><td>新增按信号升档、确定性错误短路</td></tr>
+<tr><td>④ 度量与反馈闭环</td><td>记录每步质量信号；分桶统计；评测集</td><td><b>core（L0）</b> 接口与记录类型；<b>storage（L1）</b> JDBC 实现；<b>cost（L3）</b> <code>usage/OutcomeService</code>、<code>routing/BucketRouter</code>；<b>task（L3）</b> harness 写入；<b>ui（L5）</b> 展示</td><td>全新</td></tr>
+<tr><td>⑤ 预算与护栏</td><td>任务上限、会话上限、告警、停止</td><td><b>core（L0）</b> <code>CostGuard</code> 接口；<b>cost（L3）</b> <code>guard/CostGuardService</code>；<b>platform（L2）</b> <code>SettingsService</code> 存按公司设置；<b>runtime（L1）</b> 传 <code>--max-budget-usd</code></td><td>全新</td></tr>
+</tbody></table>
+<h3>2.2 架构图</h3>
+<figure><svg viewBox="0 0 980 560" width="100%" role="img" aria-label="降本架构分层图">
+<style>.band{fill:#fafafa;stroke:#e5e5e5}.lab{font:600 12px sans-serif;fill:#6b6b6b}.b rect{fill:#fff;stroke:#111}.n rect{fill:#f5f8ff;stroke:#2f6bff}.t{font:600 13px sans-serif;fill:#111}.s{font:11px sans-serif;fill:#6b6b6b}.ar{stroke:#6b6b6b;fill:none;marker-end:url(#a)}.dash{stroke-dasharray:4 3}</style>
+<defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#6b6b6b"/></marker></defs>
+<rect class="band" x="5" y="5" width="970" height="70" rx="8"/><text class="lab" x="15" y="22">L5 web / ui</text>
+<rect class="band" x="5" y="85" width="970" height="150" rx="8"/><text class="lab" x="15" y="102">L3 cost / task / agent（同层兄弟，task 与 agent 互不依赖；经 core 接口协作）</text>
+<rect class="band" x="5" y="245" width="970" height="60" rx="8"/><text class="lab" x="15" y="262">L2 platform</text>
+<rect class="band" x="5" y="315" width="970" height="95" rx="8"/><text class="lab" x="15" y="332">L1 storage / runtime</text>
+<rect class="band" x="5" y="420" width="970" height="130" rx="8"/><text class="lab" x="15" y="437">L0 core / api：接口与记录类型</text>
+<g class="b"><rect x="20" y="28" width="300" height="40" rx="8"/><text x="30" y="48" class="t">设置页「成本」· 用量页「模型表现」</text><text x="30" y="66" class="s">层4/5 展示</text></g><g class="b"><rect x="340" y="28" width="300" height="40" rx="8"/><text x="350" y="48" class="t">SettingsController · UsageController</text><text x="350" y="66" class="s">web，只做 HTTP 映射</text></g><g class="n"><rect x="20" y="110" width="300" height="110" rx="8"/><text x="30" y="130" class="t">cost：层1 层4 层5</text><text x="30" y="148" class="s">StepPolicyService(新增) · BucketRouter(新增)<tspan x="30" dy="16"></tspan></text></g><text class="s" x="30" y="158">CostGuardService(新增) · OutcomeService(新增)</text><text class="s" x="30" y="174">TaskModelRouter · ModelPriceService(含缓存价)</text><text class="s" x="30" y="190">按公司设置 + 分桶统计 → 选模型/档位/强度</text><g class="b"><rect x="340" y="110" width="300" height="110" rx="8"/><text x="350" y="130" class="t">task：层3 流程 · 层2 会话</text><text x="350" y="148" class="s">CodingHarness · GeneralHarness · ReviewLoop(升档)</text></g><text class="s" x="350" y="158">TaskService.recover(确定性错误短路) · settle(护栏)</text><text class="s" x="350" y="174">TaskSessionPool(步骤边界压缩/TTL 判断)</text><text class="s" x="350" y="190">经 StepModelSelector / CostGuard 取决策</text><g class="b"><rect x="660" y="110" width="300" height="110" rx="8"/><text x="670" y="130" class="t">agent：层2 长对话轮换</text><text x="670" y="148" class="s">ChatService.rotateSession(新增触发：30 轮/300k/冷缓存)</text></g><text class="s" x="670" y="158">resolveModel（阶段5：默认中档）</text><text class="s" x="670" y="174">经 CostGuard 判断会话上限</text><g class="n"><rect x="20" y="268" width="940" height="32" rx="8"/><text x="30" y="288" class="t">platform：SettingsService 按公司的 cost.* 设置（system_setting：company_id + setting_key）</text><text x="30" y="306" class="s">档位矩阵 · 分桶规则 · 轮换阈值 · TTL · 护栏阈值</text></g><g class="n"><rect x="20" y="340" width="460" height="60" rx="8"/><text x="30" y="360" class="t">storage：JdbcModelOutcomeStore · JdbcBucketStatStore · JdbcCostGuardEventStore（新增）</text><text x="30" y="378" class="s">token_usage 加列 step / turn_no；表均带 company_id；用 TenantSchema.company()</text></g><g class="b"><rect x="500" y="340" width="460" height="60" rx="8"/><text x="510" y="360" class="t">runtime：ClaudeCliAgentRunner · CodexCliAgentRunner</text><text x="510" y="378" class="s">按 RunTuning 加 --effort / --max-budget-usd / TTL 环境变量；ClaudeUsageLedger(已有)</text></g><g class="n"><rect x="20" y="450" width="300" height="90" rx="8"/><text x="30" y="470" class="t">StepModelSelector · RunTuning</text><text x="30" y="488" class="s">(新增) 按步骤取模型与强度</text></g><g class="n"><rect x="340" y="450" width="300" height="90" rx="8"/><text x="350" y="470" class="t">CostGuard · ModelOutcome(Store)</text><text x="350" y="488" class="s">(新增) 预算判断与质量记录</text></g><g class="b"><rect x="660" y="450" width="300" height="90" rx="8"/><text x="670" y="470" class="t">TaskModelSelector · ModelRouter · UsageStore</text><text x="670" y="488" class="s">TenantContext.require()/run()/wrap()（已有）</text></g><path class="ar" d="M170,110 L170,70"/><path class="ar" d="M490,110 L490,70"/><path class="ar" d="M170,220 L170,268"/><path class="ar" d="M490,220 L490,268"/><path class="ar" d="M810,220 L810,268"/><path class="ar dash" d="M490,300 L490,340"/><path class="ar dash" d="M490,400 L490,450"/></svg><figcaption>图：降本五层与模块层级。蓝框 = 新增；黑框 = 已有（含本方案修改）。虚线 = 向下依赖 / 经接口。</figcaption></figure>
+<details><summary>Mermaid 源码（与上图一致）</summary><pre>flowchart TB
+  subgraph L5[&quot;L5 web / ui：设置页、用量页、统计表&quot;]
+    UI[&quot;superagent-ui · superagent-web&quot;]
+  end
+  subgraph L3[&quot;L3 同层兄弟，互不依赖&quot;]
+    COST[&quot;cost：TaskModelRouter · StepPolicyService(新增) · BucketRouter(新增) · CostGuardService(新增) · OutcomeService(新增) · ModelPriceService&quot;]
+    TASK[&quot;task：CodingHarness · GeneralHarness · ReviewLoop · TaskService · TaskSessionPool&quot;]
+    AGENT[&quot;agent：ChatService(会话轮换)&quot;]
+  end
+  subgraph L2[&quot;L2 platform&quot;]
+    PLAT[&quot;SettingsService：按公司的 cost.* 设置&quot;]
+  end
+  subgraph L1[&quot;L1 storage / runtime&quot;]
+    STO[&quot;storage：JdbcModelOutcomeStore(新增) · JdbcBucketStatStore(新增) · JdbcCostGuardEventStore(新增) · JdbcUsageStore(加列)&quot;]
+    RUN[&quot;runtime：ClaudeCliAgentRunner · CodexCliAgentRunner · ClaudeUsageLedger(已完成)&quot;]
+  end
+  subgraph L0[&quot;L0 core / api：接口与记录类型&quot;]
+    CORE[&quot;StepModelSelector(新增) · CostGuard(新增) · ModelOutcomeStore(新增) · RunTuning(新增) · TaskModelSelector · ModelRouter · UsageStore · TenantContext&quot;]
+  end
+  UI --&gt; COST
+  UI --&gt; PLAT
+  TASK -. 经接口 .-&gt; CORE
+  AGENT -. 经接口 .-&gt; CORE
+  COST -- 实现 --&gt; CORE
+  COST --&gt; PLAT
+  TASK --&gt; RUN
+  AGENT --&gt; RUN
+  STO -- 实现 --&gt; CORE
+  RUN --&gt; CORE</pre></details>
+<p>图例：层1 选型与分档 = cost + core 接口；层2 上下文与缓存 = agent/task/runtime；层3 流程 = task；层4 度量闭环 = core/storage/cost；层5 预算护栏 = core/cost/platform/runtime。</p>
+<h3>2.3 如何满足项目约定（逐项）</h3>
+<table><thead><tr><th>约定</th><th>本方案怎么满足</th></tr></thead><tbody>
+<tr><td>分层不变，只依赖更低层</td><td>task、agent 只依赖 core 里新增的接口；cost 实现它们；cost 与 task/agent 之间不新增依赖；新增 JDBC 实现放 storage（L1）；runtime（L1）只接收 <code>RunTuning</code> 值，不依赖上层</td></tr>
+<tr><td>新表带 company_id，查询过 <code>TenantContext.require()</code></td><td>3 张新表主键都以 <code>company_id</code> 起头；JDBC 实现照 <code>JdbcUsageStore</code>：建表用 <code>TenantSchema.create</code>，所有读写用 <code>TenantSchema.company()</code>（它就是 <code>TenantContext.require()</code>，没公司上下文就失败）</td></tr>
+<tr><td>后台线程用 <code>TenantContext.run(...)</code></td><td>分桶统计的定时刷新、开新会话摘要任务都在 <code>TenantContext.run(companyId, …)</code> 里执行，遍历公司时每个公司单独包一层；任务/对话线程已有 <code>TenantContext.wrap</code></td></tr>
+<tr><td>配置按公司放，不加全局设置</td><td>所有阈值放 <code>system_setting</code>（主键 <code>company_id + setting_key</code>），经 <code>SettingsService</code> 读写，键以 <code>cost.</code> 开头；不新增 <code>application.yml</code> 全局项（CLI 安装、价格目录、内置 MCP 地址这类平台级的才是全局）</td></tr>
+<tr><td>异常往上抛，不在抛出点吞掉</td><td>护栏触发用 <code>core/error</code> 的基类异常（预算超限 → <code>BusyException</code> 的子类或新增 <code>CostLimitException extends ConflictException</code>），由 <code>GlobalExceptionHandler</code>/harness 终态统一处理；写 <code>model_outcome</code> 失败不 catch，让它影响本次步骤并由中央处理（它是记账，不是业务路径，所以不能静默丢）</td></tr>
+<tr><td>模块放对位置</td><td>步骤分档、护栏、统计在 cost（已有「成本优化」职责）；会话轮换在 agent；harness 改动在 task；不把降本逻辑塞进 web</td></tr>
+</tbody></table>
+<hr>
+<h2>3. 各模块详细设计</h2>
+<blockquote>标记：【新增】= 现在代码里没有；【改】= 改已有类；【已有】= 已存在，仅说明衔接。</blockquote>
+<h3>3.1 core（L0）：接口与记录类型</h3>
+<table><thead><tr><th>项</th><th>内容</th></tr></thead><tbody>
+<tr><td>【新增】<code>core/task/StepModelSelector</code></td><td><code>Optional&lt;TaskModelChoice&gt; forStep(Task task, Step step, int attempt)</code>；<code>Step</code> = SPEC / DEVELOP / FIX / REVIEW / ACCEPT / CHECK / SUMMARY / PLAN。task 经它取每步的模型（含强度）。<code>default</code> 实现返回 empty，即退回现有行为。</td></tr>
+<tr><td>【新增】<code>core/task/RunTuning</code></td><td><code>record RunTuning(String effort, BigDecimal maxBudgetUsd, String cacheTtl, Integer compactAtTokens)</code>，全部可空；<code>RunTuning.none()</code></td></tr>
+<tr><td>【改】<code>core/chat/AgentRunRequest</code></td><td>末尾加一个字段 <code>RunTuning tuning</code>。现有构造调用点（如 <code>AgentMemoryService</code>、<code>FileTagger</code>）补 <code>RunTuning.none()</code>。这是机械改动，但调用点多，列入改动量「中」</td></tr>
+<tr><td>【新增】<code>core/usage/CostGuard</code></td><td><code>Decision check(GuardScope scope, String scopeId, BigDecimal spentUsd)</code>；<code>Decision</code> = OK / WARN / STOP + 原因；用于任务、对话会话、公司日</td></tr>
+<tr><td>【新增】<code>core/usage/ModelOutcomeStore</code></td><td><code>save(ModelOutcome)</code>；<code>buckets(...)</code> 的读取接口</td></tr>
+<tr><td>【新增】<code>core/usage/ModelOutcome</code></td><td>record：flow、step、difficulty、model、vendor、cli、effort、passedFirst、rounds、escalated、spendUsd、ctxTokensPeak、taskId、createdAt</td></tr>
+<tr><td>【改】<code>core/usage/UsageContext</code></td><td>加 <code>step</code>（如 <code>coding:develop</code>）。现有 <code>sessionId</code> 在任务侧传的是 null，要传</td></tr>
+<tr><td>【已有】<code>core/tenant/TenantContext</code></td><td><code>require()</code>、<code>run(companyId, work)</code>、<code>wrap(work)</code></td></tr>
+</tbody></table>
+<h3>3.2 storage（L1）：新表与新列</h3>
+<p>所有新表都在 <code>JdbcXxxStore</code> 里用 <code>TenantSchema.create(jdbc, DDL)</code> 建表（与 <code>JdbcUsageStore</code> 同做法）；列变更用 <code>information_schema.columns</code> 探测后 <code>ALTER TABLE ... ADD COLUMN</code>（已有做法：<code>MysqlAutomationStore</code>）。<b>新表只写 MySQL 实现</b>（项目约定：业务数据只存 MySQL）。</p>
+<table><thead><tr><th>表</th><th>字段（均带 company_id，主键以 company_id 起头）</th><th>用途</th></tr></thead><tbody>
+<tr><td>【新增】<code>model_outcome</code></td><td><code>company_id, id</code> PK；<code>task_id, flow, step, difficulty, model, vendor, cli, effort, passed_first(0/1), rounds, escalated(0/1), spend_usd DECIMAL(16,6), ctx_tokens_peak, created_at</code>；索引 <code>(company_id, flow, step, difficulty, model)</code>、<code>(company_id, task_id)</code></td><td>一行 = 一个任务的一个步骤的一次结果</td></tr>
+<tr><td>【新增】<code>model_bucket_stat</code></td><td><code>company_id, flow, step, difficulty, model</code> PK；<code>n, n_pass_first, pass_rate, avg_cost_per_success, last_pass_at, status(ACTIVE/PROBATION/REVOKED), updated_at</code></td><td>分桶统计的物化结果，路由读它，不实时扫表</td></tr>
+<tr><td>【新增】<code>cost_guard_event</code></td><td><code>company_id, id</code> PK；<code>at, scope(TASK/CHAT/COMPANY_DAY), scope_id, kind(WARN/STOP/ROTATE/SKIP_ESCALATE/TTL_SWITCH), spend_usd, limit_usd, detail</code></td><td>每次护栏触发都留痕，度量用</td></tr>
+<tr><td>【改】<code>token_usage</code></td><td>加列 <code>step VARCHAR(48) NULL</code>、<code>turn_no INT NULL</code>；<code>session_id</code> 任务侧补上（现在是 null）。ClickHouse 的 DDL 同步加 Nullable 列（该表两个实现共用同一份 SQL）</td><td>各步骤花费之和 = 任务 spend，验收误差 &lt; 5%</td></tr>
+<tr><td>【已有】<code>task_model_choice</code></td><td>主键 <code>(company_id, task_id, seq)</code>；<code>decided_by</code> 现有 judge/fixed/escalation/reviewer/default。新增 <code>decided_by</code> 取值 <code>step</code>、<code>bucket</code>、<code>explore</code></td><td>路由决策留痕沿用</td></tr>
+<tr><td>【已有】<code>system_setting</code></td><td><code>(company_id, setting_key)</code>，值 ≤ 4096</td><td>新增 <code>cost.*</code> 键</td></tr>
+</tbody></table>
+<p>迁移：只增不删；旧行的 <code>step</code> 为空，统计里归「无法归步骤」（这正是 #57 里约一半任务花费的现状）。</p>
+<h3>3.3 cost（L3）：路由、分档、统计、护栏</h3>
+<h4>3.3.1 步骤分档 <code>StepPolicyService</code>【新增】（实现 core 的 <code>StepModelSelector</code>）</h4>
+<ul>
+<li>档位：强 / 中 / 便宜。档里的模型来自 <code>ModelPriceService.candidates()</code>（<code>forTasks</code> 开关、价格排序），不写死模型 id；档位到模型的映射是<b>按公司设置</b>（见 3.7）。</li>
+<li>默认矩阵（沿用 #57 第三节，并按本次调研修正）：</li>
+</ul>
+<table><thead><tr><th>任务类型</th><th>SPEC</th><th>DEVELOP</th><th>FIX</th><th>REVIEW / ACCEPT</th><th>CHECK</th><th>SUMMARY / PLAN</th></tr></thead><tbody>
+<tr><td>编码</td><td>强</td><td>中</td><td>中；同一问题 2 轮未修好升强</td><td>强，换厂商</td><td>平台跑验证命令</td><td>—</td></tr>
+<tr><td>普通</td><td>中（复杂需求强）</td><td>按难度</td><td>同 DEVELOP；第 2 次退回升一档</td><td>—</td><td>平台硬核对 + 便宜档，<b>换厂商</b></td><td>—</td></tr>
+<tr><td>复杂（主任务）</td><td>强</td><td>子任务按各自规则</td><td>—</td><td>—</td><td>中</td><td>强</td></tr>
+<tr><td>字幕</td><td>术语：便宜</td><td>听写：2–3 个模型</td><td>重断句：中</td><td>—</td><td>平台规则</td><td>—</td></tr>
+</tbody></table>
+<ul>
+<li>与现有代码的衔接：<code>CodingHarness</code> 的 <code>spec(...)</code>、<code>develop(...)</code>、<code>fix(...)</code> 现在经私有方法 <code>turn(run, prompt, label)</code> → <code>run.turn(...)</code>（用任务模型）。改为先 <code>host.stepModel(task, STEP, attempt)</code>，有结果时调 <code>run.turnOn(model, prompt, conversation, label)</code>（<code>HarnessRun.turnOn</code> 已有）。换模型要开新会话（<code>TaskSessionPool</code> 已支持同 CLI 换模型 → 新会话同工作区；跨 CLI 同理）；规格已写在提示词里，所以新会话不丢信息。</li>
+<li>与现有路由的关系：<code>TaskModelRouter.choose/escalate/reviewer</code> 继续存在；<code>StepPolicyService</code> 在其上加一层，优先级：用户指定 / 固定模型 &gt; 分桶路由 &gt; 步骤矩阵 &gt; 原路由。固定模型打开时，<code>StepPolicyService</code> 只在固定集合内取档（沿用 <code>fixedStart/fixedNext</code> 的语义）。</li>
+</ul>
+<h4>3.3.2 关键算法：按「任务类型 + 步骤」分桶统计，修正选型 <code>BucketRouter</code>【新增】</h4>
+<p><b>桶</b>：<code>flow × step × difficulty</code>（difficulty 来自 <code>TaskModelChoice.difficulty</code>，easy/medium/hard，没有的归 <code>na</code>）。</p>
+<p><b>每个模型在桶内的两个指标</b></p>
+<ul>
+<li>一次通过率 = <code>passed_first</code> 为真的步骤数 / 步骤数。<code>passed_first</code> 的定义：该步骤的平台验证通过、且审查/验收/检查第一轮通过，没有升档，没有人工驳回。</li>
+<li>每次成功花费 = 该模型在桶内所有步骤花费之和（<b>含失败、重试、升档产生的花费</b>）/ 成功步骤数。这是关键：只看成功的那一次会低估便宜模型的真实成本。</li>
+</ul>
+<p><b>选型规则</b></p>
+<table><thead><tr><th>规则</th><th>值（默认，均为按公司设置）</th><th>说明</th></tr></thead><tbody>
+<tr><td>样本门槛</td><td>桶内某模型 n ≥ 20 才参与比较</td><td>不足则用步骤矩阵（3.3.1）</td></tr>
+<tr><td>候选集</td><td>通过率 ≥（桶内最优通过率 − 5 个百分点）的模型</td><td>先保质量</td></tr>
+<tr><td>选择</td><td>候选集里「每次成功花费」最低的</td><td>再省钱</td></tr>
+<tr><td>平手</td><td>价格低者；仍平手选 n 大者</td><td></td></tr>
+<tr><td>探索比例</td><td>5–10% 的任务，在桶内随机选<b>未达门槛但在矩阵允许范围内</b>的模型</td><td>随机用 <code>task.id</code> 的哈希，保证可复现；高风险步骤（SPEC、REVIEW、ACCEPT）探索比例为 0</td></tr>
+<tr><td>收回资格</td><td>该模型最近 10 个样本的通过率低于桶内最优 −10 个百分点，或连续 3 次失败 → <code>status=PROBATION</code>（只给探索流量）；PROBATION 后再有 10 个样本仍低 → <code>REVOKED</code></td><td>对应 glm-5.3 的 0/7</td></tr>
+<tr><td>恢复</td><td>PROBATION 模型在探索流量里最近 10 个样本达标 → <code>ACTIVE</code></td><td></td></tr>
+<tr><td>刷新</td><td>定时任务每小时对每个公司在 <code>TenantContext.run(companyId, …)</code> 里重算，写 <code>model_bucket_stat</code>；新 <code>model_outcome</code> 行到达时不即时重算</td><td>路由读物化表，避免热路径扫表</td></tr>
+<tr><td>判难度校准</td><td>统计「判 easy 但实际返工 ≥ 2 轮或升档」的比例；&gt; 30% 时判难度改用中档以上</td><td>校准 C02 的降档</td></tr>
+</tbody></table>
+<p>数据不足时的行为（当前就是这种情况）：全部走矩阵，探索关闭；统计表照常积累。这是阶段 4 才打开的原因。</p>
+<h4>3.3.3 与 <code>ModelPriceService</code> 衔接【改】</h4>
+<ul>
+<li><code>Candidate.blended()</code> 目前 = (3×输入+输出)/4，没有缓存价。改为按实际 token 构成加权：输入 3%、输出 13%、缓存读 22%、缓存写 62%（本公司实测占比，来自 #57 6.4，可由 <code>token_usage</code> 按公司重算），缓存价缺失的模型回退到原公式。</li>
+<li>注意：缓存读倍率不是统一的：Anthropic Opus 5.5 / Sonnet 5.5 读 0.05×，Opus 5 / Sonnet 5 读 0.1×；OpenAI GPT-6.2 Astra/Sol、GPT-6.1 Sol/Terra 读 0.05×，其余 0.1×（第 6 节）。<code>Candidate</code> 已有 <code>cacheRead</code>、<code>cacheWrite</code> 字段，直接用。</li>
+<li>这会改变「强 = 最贵」的排序，要先做回归测试（见阶段 3 验证）。</li>
+</ul>
+<h4>3.3.4 <code>CostGuardService</code>【新增】（实现 core <code>CostGuard</code>）</h4>
+<table><thead><tr><th>范围</th><th>默认阈值（按公司设置）</th><th>触发动作</th></tr></thead><tbody>
+<tr><td>单任务</td><td>软限 $15、硬限 $40（现 coding 均值 $17.81、中位附近；超过 $20 的 7 个任务占 53%）</td><td>软限：写 <code>cost_guard_event(WARN)</code> + 任务页提示；硬限：停下问用户（沿用 <code>ReviewLoop.stop</code> 的「问用户」形态，所有 harness 通用）</td></tr>
+<tr><td>单对话会话</td><td>软限 $20（现最大会话 $2,538 为重复计费所致，修复后仍有 61+ 轮 $4.6/轮）</td><td>软限：提示并自动轮换会话（3.6 节）；硬限不阻断对话，只提示</td></tr>
+<tr><td>公司日</td><td>可选，默认关闭</td><td>超限只告警</td></tr>
+<tr><td>编码审查循环</td><td>沿用 <code>codingReviewMaxRounds=8</code>、<code>codingReviewMaxSpend=$30</code></td><td>已有；扩展到普通/复杂/字幕任务</td></tr>
+</tbody></table>
+<ul>
+<li>用法：<code>TaskService.settle(...)</code> 每次累加 <code>turnCost</code> 后调 <code>guard.check(TASK, id, spent)</code>；<code>ChatService</code> 在每轮结束后调 <code>guard.check(CHAT, sessionId, …)</code>。</li>
+<li>预留再结算（reserve/settle）：业界 LiteLLM 是调用前预占、结算时替换（第 6 节）。<b>本方案第一版不做预占</b>——CLI 一次运行的花费无法预知，也拿不到 max_tokens 之类上限；做「运行后累加 + 下一步前检查」，护栏是「最多超一步」的软约束。要硬约束，用 <code>--max-budget-usd</code>（3.5 节）。</li>
+</ul>
+<h4>3.3.5 <code>OutcomeService</code>【新增】</h4>
+<p>把 harness 每个步骤结束时的信号写成 <code>model_outcome</code>；返工原因（需求理解 / 实现 / 交付说明 / 环境）由便宜档模型一次分类（输入只有审查意见，约几百 token）。</p>
+<h3>3.4 task（L3）：harness 与重试</h3>
+<table><thead><tr><th>位置</th><th>改动</th></tr></thead><tbody>
+<tr><td>【改】<code>CodingHarness</code></td><td>①spec/develop/fix 经 <code>StepModelSelector</code>；②每个步骤结束写 <code>OutcomeService</code>（passedFirst、rounds）；③<code>develop</code> 提示词已含自查与工具约束（4690cebc，已完成）</td></tr>
+<tr><td>【改】<code>ReviewLoop.stop</code></td><td>同一问题 <code>STUCK=2</code> 轮未修好时，现在直接返回「停下问用户」。改为：先返回新的结果 <code>ESCALATE_FIX</code>（让 <code>CodingHarness.fix</code> 用更强一档修一次），升档后仍未修好才停。升档只在<b>平台可核验的信号</b>下发生：同一审查问题编号跨轮重复（<code>identify</code> 已有）、验证命令失败、验收标准未满足；<b>不用模型自评</b></td></tr>
+<tr><td>【改】<code>GeneralHarness.check</code></td><td>检查退回第 2 次时，执行模型升一档；检查模型换厂商（<code>TaskModelRouter.reviewer(CHECK)</code> 现取最便宜、不看厂商）</td></tr>
+<tr><td>【改】<code>TaskService.recover</code></td><td>重试前先分类错误：认证失败、额度耗尽、模型不存在、配置缺失、<code>NeedsUserException</code>（771d839 已引入）归「确定性错误」，直接转等人，不重试 10 次（<code>MAX_ATTEMPTS</code>）、不新开会话（<code>ROTATE_AFTER=1</code>）；其余错误保持现状。分类表放在 core 的 <code>error</code> 包，便于 harness 共用</td></tr>
+<tr><td>【改】<code>TaskService.settle</code></td><td>累加 spend 后调 <code>CostGuard.check</code>，STOP 时走与「审查超限」一致的停下问用户路径</td></tr>
+<tr><td>【改】<code>TaskSessionPool</code></td><td>步骤边界压缩（审查→修复之间用摘要而非整段历史）；空闲超过缓存 TTL 时比较「续用旧会话重写缓存」与「新开会话 + 摘要」的预估成本（用 <code>ModelPriceService</code> 的缓存价与会话累计 token）。<b>依赖 token_usage 的 session_id</b>，所以排在阶段 1 之后</td></tr>
+<tr><td>【已有】<code>ClaudeWarmSessions</code>（runtime）</td><td>保活 CLI 避免冷启动；遇到模型/Key/提示词/工具变化就关闭。步骤分档会增加「换模型」，要确认不会让保活池频繁重建（阶段 3 验证项）</td></tr>
+</tbody></table>
+<h3>3.5 runtime（L1）：CLI 开关</h3>
+<p>依据第 6 节的调研和本机 <code>claude --help</code>（2.1.318）实测：</p>
+<table><thead><tr><th>能力</th><th>Claude Code</th><th>Codex CLI</th><th>平台怎么接</th></tr></thead><tbody>
+<tr><td>推理强度</td><td>`--effort &lt;low\</td><td>medium\</td><td>high\</td><td>xhigh\</td><td>max&gt;<code>（本机实测）；也可 </code>CLAUDE_CODE_EFFORT_LEVEL`</td><td><code>-c model_reasoning_effort="..."</code>（官方配置字段；取值取决于模型）</td><td><code>ClaudeCliAgentRunner</code> 命令构造处（<code>--model</code> 附近）按 <code>request.tuning().effort()</code> 加 <code>--effort</code>；<code>CodexCliAgentRunner</code> 在现有 <code>-c</code> 序列里加</td></tr>
+<tr><td>花费上限</td><td><code>--max-budget-usd &lt;amount&gt;</code>（本机实测，<b>只在 <code>--print</code> 模式</b>；平台用 <code>-p</code>）。对 <code>--input-format stream-json</code> 的保活会话是否按会话累计：<b>未验证</b></td><td>未查到等价 CLI 参数（Codex Goals 有 <code>token_budget</code>，不是 exec 参数）</td><td>任务运行加 <code>--max-budget-usd</code>（值 = 单任务硬限 − 已花），作为最后一道护栏；Codex 靠平台累加检查</td></tr>
+<tr><td>缓存 TTL</td><td><code>CLAUDE_CODE_PROMPT_CACHE_TTL=1h</code>（主会话）、<code>CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h</code>、<code>ENABLE_PROMPT_CACHING_1H=1</code>；订阅计划主会话默认 1 小时，<b>API key 场景主会话默认 5 分钟</b>。平台用 provider key，所以默认 5 分钟（与库里 1h 写入 0.001% 相符）</td><td>官方文档：GPT-5.6+ 最小 30 分钟，可选 12 小时；Codex 是否暴露该选项：<b>未查到</b></td><td><code>ClaudeCliAgentRunner</code> 的 <code>pb.environment()</code> 里按公司设置 <code>cost.cache.ttl</code> 注入。1 小时写入价 2× 对 1.25×，只对「间隔 5–60 分钟还会续聊」的会话划算</td></tr>
+<tr><td>自动压缩</td><td><code>/compact</code> 手动；自动压缩阈值官方文档<b>未查到固定百分比</b>；<code>CLAUDE_AUTOCOMPACT_PCT_OVERRIDE</code> 官方只在云端会话文档里出现，本地 CLI 是否可用：<b>未验证</b></td><td><code>model_auto_compact_token_limit</code>、<code>model_post_turn_compact_threshold_percent</code> 官方配置项存在</td><td><b>不依赖 CLI 的自动压缩</b>；平台层轮换（3.6 节）。Codex 可用 <code>-c model_auto_compact_token_limit=…</code> 作为补充</td></tr>
+<tr><td>最大轮数</td><td><code>--max-turns</code>：官方环境变量文档有 <code>CLAUDE_CODE_MAX_TURNS</code>；本机 <code>--help</code> 未列该 flag</td><td>未查到</td><td>暂不接，用 harness 层的轮次上限</td></tr>
+</tbody></table>
+<p>接入方式：<code>AgentRunRequest</code> 加 <code>RunTuning</code>（3.1 节）；runner 只翻译，不做决策；决策在 cost 的 <code>StepPolicyService</code>。<code>ClaudeUsageLedger</code>（6d28c29）不动。</p>
+<h3>3.6 agent（L3）：长对话轮换</h3>
+<p>【改】<code>ChatService</code>：</p>
+<ul>
+<li>触发：发送前判断会话轮数 &gt; <code>cost.chat.rotate-turns</code>（默认 30）或累计输入 token &gt; <code>cost.chat.rotate-tokens</code>（默认 300k），或距上一轮间隔 &gt; 60 分钟且轮数 &gt; 10（缓存必然已冷，续旧对话要整段重写）。</li>
+<li>动作：调用已有 <code>rotateSession(agent)</code>（原本只在连续失败时用，理由 <code>ChatSession.FAILURES</code>），新增理由常量 <code>ChatSession.LONG</code>；新会话首轮用「记忆 + 最近若干条」（<code>ChatService</code> 里首轮已有 <code>memory.context(...)</code> 路径）。</li>
+<li>用户感知：对话页提示一次「已为你开启新会话，之前的内容通过记忆带入」；不是无声切换。</li>
+<li>依赖：不依赖其他阶段，<b>阶段 2 的头号项</b>。</li>
+<li>风险：摘要丢关键状态。缓解：轮换前先触发一次 <code>AgentMemoryService</code> 的记忆更新；保留最近 N 条原文。</li>
+</ul>
+<h3>3.7 platform（L2）与 ui（L5）：按公司的设置</h3>
+<p><code>SettingsService</code> 新增读写方法，键与默认值：</p>
+<table><thead><tr><th>键</th><th>默认</th><th>含义</th></tr></thead><tbody>
+<tr><td><code>cost.step-tier.&lt;flow&gt;.&lt;step&gt;</code></td><td>见 3.3.1 矩阵</td><td>档位：strong/mid/cheap</td></tr>
+<tr><td>`cost.tier.&lt;strong\</td><td>mid\</td><td>cheap&gt;.models`</td><td>空（空时用价格排序自动取）</td><td>各档模型清单（按公司，不写死）</td></tr>
+<tr><td><code>cost.effort.&lt;step&gt;</code></td><td>空（不传）</td><td>各步骤推理强度</td></tr>
+<tr><td><code>cost.route.min-samples</code> / <code>margin-pp</code> / <code>explore-pct</code></td><td>20 / 5 / 5</td><td>分桶规则</td></tr>
+<tr><td><code>cost.chat.rotate-turns</code> / <code>rotate-tokens</code></td><td>30 / 300000</td><td>对话轮换</td></tr>
+<tr><td><code>cost.cache.ttl</code></td><td><code>5m</code></td><td>可选 <code>1h</code></td></tr>
+<tr><td><code>cost.guard.task-soft-usd</code> / <code>task-hard-usd</code> / <code>chat-soft-usd</code> / <code>company-day-usd</code></td><td>15 / 40 / 20 / 关</td><td>护栏</td></tr>
+<tr><td><code>cost.guard.on</code></td><td>开</td><td>总开关（回退用）</td></tr>
+</tbody></table>
+<p>ui：设置页加「成本」标签；用量页加「模型表现」表（桶、模型、n、一次通过率、每次成功花费、状态）和「护栏记录」表。多语言文案进 <code>i18n.js</code>。</p>
+<h3>3.8 接口（REST，均在 web（L5）的控制器里，只做 HTTP 映射，逻辑在 cost/platform）</h3>
+<table><thead><tr><th>接口</th><th>作用</th><th>权限</th><th>说明</th></tr></thead><tbody>
+<tr><td>【新增】<code>GET /api/v1/cost/buckets?flow=&amp;step=&amp;difficulty=</code></td><td>分桶统计表：模型、n、一次通过率、每次成功花费、状态</td><td>公司管理员</td><td>读 <code>model_bucket_stat</code>；查询过 <code>TenantContext.require()</code></td></tr>
+<tr><td>【新增】<code>GET /api/v1/cost/outcomes?taskId=&amp;from=&amp;to=</code></td><td>某任务/时间段的 <code>model_outcome</code> 明细</td><td>管理员；发起人只看自己的任务</td><td>用于用量页下钻</td></tr>
+<tr><td>【新增】<code>GET /api/v1/cost/guard-events?from=&amp;to=&amp;kind=</code></td><td>护栏事件</td><td>公司管理员</td><td>读 <code>cost_guard_event</code></td></tr>
+<tr><td>【新增】<code>PUT /api/v1/cost/models/{model}/status</code></td><td>人工把某模型在某桶设为 ACTIVE/PROBATION/REVOKED</td><td>公司管理员</td><td>人工覆盖优先于自动规则，写审计事件</td></tr>
+<tr><td>【改】系统设置接口（<code>SettingsController</code> → <code>SettingsService.get/update</code>，DTO <code>SystemSettingsDto</code>）</td><td>增加 <code>cost.*</code> 键的读写</td><td>公司管理员</td><td>沿用现有设置接口，不另开端点</td></tr>
+<tr><td>【已有】<code>UsageController</code>（<code>web/usage</code>）：<code>ApiPaths.USAGE</code>、<code>ApiPaths.ADMIN_USAGE</code>、<code>ApiPaths.TASKS + "/{id}/usage"</code>（背后是 <code>cost/usage/TokenUsageService</code>）</td><td>用量页，增加 <code>step</code> 维度</td><td>沿用</td><td>路径常量在 api 模块 <code>ApiPaths</code>，新增接口也加到那里</td></tr>
+<tr><td>【已有】<code>SettingsController</code>（<code>web/settings</code>）<code>ApiPaths.SETTINGS</code> 的 GET/PUT</td><td>读写设置</td><td>沿用</td><td>DTO 在 api 模块 <code>SystemSettingsDto</code></td></tr>
+</tbody></table>
+<p>错误：越权或不属于本公司返回 404（沿用 <code>NotFoundException</code>）；非法设置值返回 422（沿用现有校验）；护栏 STOP 在后台线程里不是 HTTP 错误，走 harness 终态「停下问用户」。</p>
+<hr>
+<h2>4. 分阶段实施</h2>
+<blockquote>节省百分比均为「占总花费」，口径与叠加规则见 1.6 节。每个阶段可以直接拆成编码任务（括号里是建议的任务拆分）。</blockquote>
+<h3>阶段 0：不改代码就能做的措施（立刻）</h3>
+<table><thead><tr><th>#</th><th>做法</th><th>在哪设置 / 怎么做</th><th>节省依据</th><th>预计节省（占总额）</th><th>与其他叠加</th></tr></thead><tbody>
+<tr><td>0.1</td><td>对话超约 30 轮或换话题时开新对话</td><td>使用习惯（记忆自动带入）</td><td>61+ 轮每轮 $3.76–4.64，1–5 轮 $0.21</td><td>6.5–11.5%（习惯只按 50% 捕获）</td><td><b>与阶段 2 的 C09 是同一杠杆，不叠加</b></td></tr>
+<tr><td>0.2</td><td>空闲超过 5 分钟再续旧对话，会整段重写缓存（Anthropic 缓存 5 分钟，API key 场景下 Claude Code 默认 5 分钟）</td><td>使用习惯；或阶段 2 的 TTL 开关</td><td>官方 TTL 说明（第 6 节）；库里间隔 &gt; 5 分钟的轮次占 47%</td><td>含在 0.1</td><td>同上</td></tr>
+<tr><td>0.3</td><td>关掉 glm-5.3 的「用于任务」</td><td>「模型价格」页（<code>ModelPriceService.setForTasks</code>）</td><td>被首选 7 次全部失败，升档后每个任务多花约 $4–5</td><td>消除这类浪费，量级小于 1%</td><td>独立</td></tr>
+<tr><td>0.4</td><td>固定模型设为「Sonnet 5.5 + Opus 5.5」</td><td>系统设置 → 固定模型（<code>SettingsService.taskFixedModels</code>，代码已支持）</td><td>开发起步用 Sonnet，审查排除开发模型自然落到 Opus；Sonnet 价是 Opus 一半；一次通过 8/10</td><td>8–11%</td><td>与阶段 3 的 C01 是同一杠杆，不叠加。风险：规格这一步也从 Sonnet 起步，观察两周审查与验收通过率</td></tr>
+<tr><td>0.5</td><td>小改动建任务时直接指定 Sonnet</td><td>建任务时选模型</td><td><code>8d2c0469</code> 前端小改全程 Opus $7.33，Sonnet 约 $3.7</td><td>单任务约一半，总量小</td><td>与 0.4 部分重叠</td></tr>
+<tr><td>0.6</td><td>任务说明写清交付要求（怎么验证、要贴哪些证据）</td><td>使用习惯；建任务模板</td><td>#53 返工链占 35%；4690cebc 已让「只缺说明」走低成本补说明</td><td>无法量化（只有 3 个返工任务样本）</td><td>独立</td></tr>
+<tr><td>0.7</td><td>把 Claude Code 的缓存 TTL 调到 1 小时（部署层）</td><td>在跑服务的进程环境里设 <code>CLAUDE_CODE_PROMPT_CACHE_TTL=1h</code>（<code>ClaudeCliAgentRunner</code> 启动子进程时会继承环境；阶段 2 才做成按公司设置）。<b>需先小范围试：2× 的写入价对短间隔会话是亏的</b></td><td>官方：命中刷新 TTL；1 小时写入 2×、读取 0.05×–0.1×（第 6 节）。本平台实测：间隔 5–60 分钟的轮次约 32%（58/179）</td><td>3–9%，<b>低把握，必须 A/B</b></td><td>与 0.1 在 chat 池里连乘，不相加</td></tr>
+</tbody></table>
+<p>阶段 0 累计：<b>14–23%</b>（1.6 节算法）。</p>
+<h3>阶段 1：记账地基与最小护栏（C06 + 护栏 + 部署修复）</h3>
+<table><thead><tr><th>项</th><th>内容</th></tr></thead><tbody>
+<tr><td>改动范围</td><td>①<b>先把带 6d28c29 的版本部署重启</b>（运维动作，不是代码改动，由用户执行）；②<code>UsageContext</code> 加 <code>step</code>；<code>TaskService</code> 约 1815 行附近构造 <code>UsageContext</code> 时传 session id 与步骤标签；<code>JdbcUsageStore</code> 加列 <code>step</code>、<code>turn_no</code>（含 ClickHouse DDL）；③新表 <code>cost_guard_event</code> + <code>CostGuardService</code> 最小版（单任务软/硬限 + 事件记录）；④<code>ClaudeCliAgentRunner</code> 加 <code>--max-budget-usd</code></td></tr>
+<tr><td>拆成编码任务</td><td>任务 1.1：记账加列 + 传 step/session（storage+core+task）；任务 1.2：CostGuard + 事件表 + 设置键 + runner 参数（core+cost+platform+runtime）</td></tr>
+<tr><td>预计节省</td><td>记账准确性本身 0。护栏降低<b>长尾</b>：超过 $20 的 7 个任务占 task.spend 的 53%，护栏不改变均值，只防失控；<b>无法量化</b>（没有「失控任务被拦下」的反事实数据）</td></tr>
+<tr><td>风险</td><td>多租户隔离要测；列变更对 ClickHouse 要同步；<code>--max-budget-usd</code> 对保活会话是否按会话累计未验证，先只用在任务运行（非保活）</td></tr>
+<tr><td>验证指标</td><td>各步骤花费之和与任务 spend 误差 &lt; 5%；重启后新行的 cost 不再出现「单轮 cost 远高于其 token 可解释值」；护栏触发数与事件表一致</td></tr>
+<tr><td>依赖</td><td>无。是阶段 2、3、4 的前提</td></tr>
+</tbody></table>
+<h3>阶段 2：会话与缓存（C09 + TTL + 比价含缓存价）</h3>
+<table><thead><tr><th>项</th><th>内容</th></tr></thead><tbody>
+<tr><td>改动范围</td><td>①<code>ChatService</code> 自动轮换（3.6 节）；②<code>ClaudeCliAgentRunner</code> 注入 <code>CLAUDE_CODE_PROMPT_CACHE_TTL</code>（按公司设置 <code>cost.cache.ttl</code>）；③<code>ModelPriceService.Candidate.blended()</code> 含缓存价；④<code>TaskSessionPool</code> 空闲 TTL 判断（可拆到后续）</td></tr>
+<tr><td>拆成编码任务</td><td>任务 2.1：ChatService 轮换 + 设置键 + 页面提示；任务 2.2：TTL 开关 + blended 含缓存价（runtime+cost）；任务 2.3：TaskSessionPool 步骤边界压缩（大，依赖阶段 1 的 session_id）</td></tr>
+<tr><td>预计节省</td><td>轮换 13–23%（系统默认捕获；池 = 第 31 轮之后占 chat 的 69–74%，约总额 33–38%，捕获其中 40–60%）；TTL 3–9%（低把握）；阶段 2 完成后累计 <b>24–42%</b>。与阶段 0 的 0.1/0.2 <b>不叠加</b>（已在累计里按同一杠杆处理）</td></tr>
+<tr><td>风险</td><td>摘要丢状态；1h TTL 的写入溢价；比价排序变化影响「强=最贵」</td></tr>
+<tr><td>验证指标</td><td>30 轮以上对话每轮花费 ≤ $1（现 61+ 轮 $4.6）；<code>cache_write</code> 占比下降、<code>cache_read</code> 占比上升；「忘记前文」类反馈；TTL A/B：同类会话随机分 5m / 1h 两组，比较每轮花费</td></tr>
+<tr><td>依赖</td><td>轮换不依赖别的；任务侧压缩依赖阶段 1</td></tr>
+</tbody></table>
+<h3>阶段 3：步骤分档与流程（C01–C05）</h3>
+<table><thead><tr><th>项</th><th>内容</th></tr></thead><tbody>
+<tr><td>改动范围</td><td><code>StepModelSelector</code>/<code>StepPolicyService</code>；<code>CodingHarness</code>/<code>GeneralHarness</code> 按步骤取档；判难度改中档（<code>TaskModelRouter.judges</code>）；<code>ReviewLoop.stop</code> 升档；检查换厂商；<code>TaskService.recover</code> 确定性错误短路；任务级预算扩到普通/复杂/字幕；推理强度 <code>RunTuning.effort</code>（先核实本机 CLI 参数，3.5 节）</td></tr>
+<tr><td>拆成编码任务</td><td>任务 3.1：StepPolicy + CodingHarness 分档（含 <code>RunTuning</code> 加入 <code>AgentRunRequest</code>）；任务 3.2：ReviewLoop 升档 + GeneralHarness 检查换厂商；任务 3.3：recover 短路 + 预算扩展；任务 3.4：判难度降档（小）</td></tr>
+<tr><td>预计节省</td><td>分档 8–11%（与阶段 0.4 同一杠杆，<b>不叠加</b>；阶段 0 没做才算增量）；判难度 0.5–1%；升档与短路：<b>无法量化</b>（#57 只有 3 个返工任务；无重试次数数据，task 表没有失败状态）。阶段 3 完成累计 <b>25–42%</b></td></tr>
+<tr><td>风险</td><td>中档执行复杂改动，返工增加；升档过早更贵；<code>blended</code> 变化影响审查模型选择；保活池因换模型频繁重建</td></tr>
+<tr><td>验证指标</td><td>编码任务均值从 $7.3（#57 口径）降到 $5 以下；一次通过率 ≥ 基线 −5pp；返工轮次 ≤ 基线；<code>model_outcome</code> 行数与步骤数一致</td></tr>
+<tr><td>依赖</td><td>阶段 1（step 标签）；阶段 0.4 先行以观察两周</td></tr>
+</tbody></table>
+<h3>阶段 4：度量闭环与数据驱动选型（C07 + C08）</h3>
+<table><thead><tr><th>项</th><th>内容</th></tr></thead><tbody>
+<tr><td>改动范围</td><td><code>model_outcome</code>、<code>model_bucket_stat</code> 写入与定时刷新；<code>BucketRouter</code>（3.3.2 算法）；探索流量；评测集 6–10 个桶 × 20–30 题；用量页「模型表现」表；判难度校准</td></tr>
+<tr><td>拆成编码任务</td><td>任务 4.1：OutcomeService + 两张表 + harness 写入；任务 4.2：BucketRouter + 刷新任务 + 设置键（探索默认关闭）；任务 4.3：评测集脚本与 UI 表</td></tr>
+<tr><td>预计节省</td><td>2–6%（低把握，#57 估 5–15% 但业界级联数字不能外推，且 RouteLLM 3.66x 未查到）；是该杠杆在 task 残余上的比例，累计 <b>26–47%</b></td></tr>
+<tr><td>风险</td><td>样本少统计不稳；探索流量拉低质量；多租户隔离</td></tr>
+<tr><td>验证指标</td><td>桶覆盖率（有 ≥ 20 样本的桶占比）；按任务随机分组 A/B：BucketRouter 组与矩阵组比较每个验收通过任务花费，质量不劣于对照组才算数</td></tr>
+<tr><td>依赖</td><td>阶段 1、3；至少两周干净数据</td></tr>
+</tbody></table>
+<h3>阶段 5：对话分档（C12）</h3>
+<table><thead><tr><th>项</th><th>内容</th></tr></thead><tbody>
+<tr><td>改动范围</td><td><code>ChatService.resolveModel</code>：默认中档，规划/设计/决策类请求升强档；页面一键切换</td></tr>
+<tr><td>预计节省</td><td>对话残余（轮换之后）10–25% ≈ 总额 3–8%（#57 的「30–40%」是未扣重叠的值，见 1.6 节）；累计 <b>30–52%</b></td></tr>
+<tr><td>风险</td><td>直接影响体验</td></tr>
+<tr><td>验证指标</td><td>灰度；追问率、切换模型率、用户驳回率</td></tr>
+<tr><td>依赖</td><td>阶段 2</td></tr>
+</tbody></table>
+<h3>不建议或暂缓（理由）</h3>
+<table><thead><tr><th>项</th><th>判断</th><th>理由</th></tr></thead><tbody>
+<tr><td>训练学习型路由器、接商用路由（RouteLLM、Not Diamond、Martian、OpenRouter Auto）</td><td>暂不做</td><td>样本不足；厂商自报数字未验证；RouteLLM 官方仓库表述为「MT-Bench 保留 95% GPT-4 表现，成本最多降 85%」，3.66x 未查到</td></tr>
+<tr><td>自一致性、Mixture-of-Thought 多次采样</td><td>不建议</td><td>多次采样成本成倍增加</td></tr>
+<tr><td>模型自评置信度作升档依据</td><td>不建议</td><td>调研：置信度过度自信、分布外校准差；本方案只认平台可核验信号</td></tr>
+<tr><td>logprob 路由</td><td>不建议</td><td>CLI 拿不到</td></tr>
+<tr><td>API 级 context editing / programmatic tool calling</td><td>暂不做</td><td>这是 API 特性，CLI 下平台不可控；且 84% 不是它的官方效果数字（第 6 节）</td></tr>
+<tr><td>收紧 <code>max_tokens</code> 做截断</td><td>不建议</td><td>官方：它是硬上限，打满会中断生成；截断后这次尝试白做</td></tr>
+<tr><td>Batch API 半价</td><td>暂不做</td><td>CLI 会话用不了；离线批量（打标签、记忆）只占 0.6% 左右</td></tr>
+<tr><td>ReWOO 式规划/执行/汇总拆分、多 Agent 并行</td><td>暂不做</td><td>官方原文：多 Agent 约 15× token</td></tr>
+<tr><td>SuperAgent 后台分档</td><td>暂不做</td><td>后台花费 $2.37（0.4–0.6%），收益小于风险</td></tr>
+<tr><td>保活池之外再造「自建摘要器」</td><td>暂不做</td><td>先用记忆 + 最近若干条，观察「忘记前文」反馈再说</td></tr>
+</tbody></table>
+<hr>
+<h2>5. 度量方案</h2>
+<h3>5.1 指标</h3>
+<table><thead><tr><th>指标</th><th>定义</th><th>数据来源（表.字段）</th><th>判定</th></tr></thead><tbody>
+<tr><td><b>每个验收通过任务的平均花费</b>（主指标）</td><td>Σ 任务总花费 / 验收通过的任务数；按 flow 分层；花费含失败、重试、升档</td><td><code>token_usage.cost_usd</code>（按 <code>task_id</code> 汇总）+ <code>task.status</code>、<code>harness 审阅状态</code>（<code>task_phase.phases_json</code>；阶段 4 起用 <code>model_outcome</code>）</td><td>实施后 4 周 vs 前 4 周，下降 ≥ 30% 为达标</td></tr>
+<tr><td>任务一次通过率</td><td>无升档、无审查退回、无人工驳回的任务占比</td><td>阶段 1–3：<code>task_model_choice.decided_by='escalation'</code> 的任务数 + <code>task_phase</code>；阶段 4 起 <code>model_outcome.passed_first</code></td><td>≥ 基线 −5pp（coding 基线 73.7%，general 84.6%）；滚动最近 20 个任务低于基线 −10pp 触发回退</td></tr>
+<tr><td>返工轮次</td><td>每个任务的审查/验收退回次数</td><td><code>task_phase.phases_json</code>（审查轮、验收轮）→ <code>model_outcome.rounds</code></td><td>平均 ≤ 基线；P90 不高于基线 +1</td></tr>
+<tr><td>用户驳回/重开率</td><td>交付确认被驳回、任务被重开的比例</td><td><b>现在没有记录</b>：阶段 1 起在 <code>cost_guard_event</code> 之外新增事件类型 <code>REJECTED</code>（写 <code>model_outcome</code> 的 <code>passed_first=0</code> 并标注人工），数据从任务页「重开/要求修改」动作取</td><td>≤ 基线（基线从阶段 1 上线后 4 周测）</td></tr>
+<tr><td>每步成本占比</td><td>step 维度的花费占比</td><td><code>token_usage.step</code>（新列）</td><td>各步骤之和与任务 spend 误差 &lt; 5%</td></tr>
+<tr><td>缓存读写比</td><td>cache_read / cache_write</td><td><code>token_usage.cache_read</code>、<code>cache_write</code>、<code>cache_write_1h</code></td><td>阶段 2 后读写比上升；1h 写入占比 &gt; 0 才说明 TTL 开关生效</td></tr>
+<tr><td>长对话每轮花费</td><td>第 31 轮之后每轮均值</td><td><code>token_usage</code>（chat，按 <code>session_id</code> 排序取行序号）+ 阶段 1 的 <code>turn_no</code></td><td>≤ $1（现 $2.6–4.6）</td></tr>
+<tr><td>升档率、重试次数</td><td>每任务升档/重试次数</td><td><code>task_model_choice</code>、<code>task_run_state.attempt_count</code></td><td>确定性错误的重试次数应为 0</td></tr>
+<tr><td>护栏触发</td><td>软限、硬限、轮换次数</td><td><code>cost_guard_event</code></td><td>每周复盘；硬限触发后的任务最终结果</td></tr>
+<tr><td>判难度准确度</td><td>判 easy 但返工 ≥ 2 轮或升档的比例</td><td><code>task_model_choice.difficulty</code> + <code>model_outcome</code></td><td>&lt; 30%</td></tr>
+</tbody></table>
+<h3>5.2 怎样判断降本没有拖累质量</h3>
+<ol>
+<li><b>先看护栏指标，再看节省</b>：任一分层一次通过率、返工轮次、驳回率不满足 1.5 节底线，当天的节省不计入。</li>
+<li><b>分层对照</b>：按 flow（coding/general/complex）和难度分层比较，不看总平均（总平均会被大任务扰动，如 $102.58 的一个任务）。</li>
+<li><b>A/B</b>：阶段 2 的 TTL、阶段 4 的分桶路由，用 <code>task.id</code> 哈希随机分组；对话轮换按会话分组。</li>
+<li><b>回退开关</b>：<code>cost.guard.on</code>、各步骤档位设置、<code>cost.chat.rotate-turns</code> 都是按公司设置，一键回退到阶段 0 的行为，不需要发版。</li>
+<li><b>样本不足的诚实声明</b>：现有 coding 19、general 39 个任务，统计功效不足以证明「5pp 以内无差异」。因此质量底线靠<b>滚动窗口护栏 + 人工抽检</b>（每周抽 5 个降档后的任务读交付物），而不是显著性检验。</li>
+<li><b>成本口径固定</b>：全部用修正后的 <code>token_usage</code>（阶段 1 之后的行不需要修正）；阶段 1 之前的数据只做趋势参考。</li>
+</ol>
+<hr>
+<h2>6. 补充调研（联网，2026-11-20）</h2>
+<p>方法：用 Codex CLI（<code>codex exec -s read-only</code>）分 3 组联网检索，官方文档优先；关键 CLI 参数另在本机用 <code>claude --help</code>（2.1.318）实测。表中「已核对」= 官方页面查到原文；「未验证」= 查到线索但不能确认；「未查到」= 没找到官方依据。<b>调研工具转述的内容，未逐条打开复核的，在「状态」列标明。</b></p>
+<h3>6.1 prompt 缓存（Anthropic / Claude Code）</h3>
+<table><thead><tr><th>结论</th><th>状态</th><th>来源</th></tr></thead><tbody>
+<tr><td>缓存的是到断点的完整前缀，顺序 tools → system → messages；稳定内容放前，变化内容放后</td><td>已核对（Codex 转述）</td><td><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">https://platform.claude.com/docs/en/build-with-claude/prompt-caching</a></td></tr>
+<tr><td>最小可缓存长度因模型而异：Opus 5/5.5、Sonnet 5.5 为 512 token；Sonnet 5 为 1,024；Opus 4.5/4.6 为 4,096</td><td>已核对（Codex 转述，未逐条打开）</td><td><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching#cache-limitations">https://platform.claude.com/docs/en/build-with-claude/prompt-caching#cache-limitations</a></td></tr>
+<tr><td>每个请求最多 4 个 <code>cache_control</code> 断点</td><td>已核对（Codex 转述）</td><td><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching#explicit-cache-breakpoints">https://platform.claude.com/docs/en/build-with-claude/prompt-caching#explicit-cache-breakpoints</a></td></tr>
+<tr><td>改工具名/描述/schema 使整个缓存失效；改 system 使 system 与 messages 层失效；切换模型各用各的缓存；改 thinking 参数或 effort 可能使缓存失效</td><td>已核对（Codex 转述）</td><td><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching#what-invalidates-the-cache">https://platform.claude.com/docs/en/build-with-claude/prompt-caching#what-invalidates-the-cache</a></td></tr>
+<tr><td>TTL 默认 5 分钟，可选 1 小时；每次命中刷新 TTL 且不额外收费</td><td>已核对</td><td><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching#what-is-the-cache-lifetime">https://platform.claude.com/docs/en/build-with-claude/prompt-caching#what-is-the-cache-lifetime</a></td></tr>
+<tr><td>价格：5 分钟写入 1.25×、1 小时写入 2×、读取一般 0.1×；<b>Opus 5.5 与 Sonnet 5.5 读取 0.05×</b>，Opus 5、Sonnet 5 读取 0.1×</td><td>已核对（Codex 转述；与调研文档一致）</td><td><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching#pricing">https://platform.claude.com/docs/en/build-with-claude/prompt-caching#pricing</a></td></tr>
+<tr><td>Claude Code：编辑 <code>CLAUDE.md</code> 本身不会立刻使当前缓存失效，但 <code>/clear</code>、<code>/compact</code>、重启会改变前缀；连接/移除 MCP 服务器、动态增减工具会使缓存失效；<code>--resume</code> 可命中缓存（前缀不变且在 TTL 内），系统提示不同或 Claude Code 升级会破坏命中</td><td>已核对（Codex 转述）</td><td><a href="https://code.claude.com/docs/en/prompt-caching">https://code.claude.com/docs/en/prompt-caching</a></td></tr>
+<tr><td><code>CLAUDE_CODE_PROMPT_CACHE_TTL=1h</code>（主会话）、<code>CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h</code>、<code>ENABLE_PROMPT_CACHING_1H=1</code> 存在；订阅计划主会话默认 1 小时，API key / 云厂商场景主会话默认 5 分钟</td><td>已核对（Codex 转述）</td><td><a href="https://code.claude.com/docs/en/prompt-caching#choose-the-ttl-yourself">https://code.claude.com/docs/en/prompt-caching#choose-the-ttl-yourself</a></td></tr>
+<tr><td>本平台：<code>cache_write_1h</code> 合计 4,974 token / 缓存写入 543M，说明实际在用 5 分钟缓存</td><td>本次 SELECT</td><td>本地数据库</td></tr>
+</tbody></table>
+<p>对 SuperAgent 的含义：①保活会话（<code>ClaudeWarmSessions</code>）在会话内保持前缀稳定，换模型/Key/提示词/工具就失效，所以步骤分档要控制换模型次数；②任务运行如要换模型，应在步骤边界一次性换，不要在步骤内换；③API key 场景下 TTL 只有 5 分钟，是对话成本高的结构性原因之一，TTL 开关值得试（阶段 2）。</p>
+<h3>6.2 prompt 缓存（OpenAI / Codex CLI）</h3>
+<table><thead><tr><th>结论</th><th>状态</th><th>来源</th></tr></thead><tbody>
+<tr><td>GPT-5.6+：可缓存前缀最小 1,024 token；默认最小 TTL 30 分钟，可选 12 小时；30 分钟写入 1.25×，12 小时写入 2.5×，读取一般 0.1×，GPT-6.2 Astra/Sol、GPT-6.1 Sol/Terra 读取 0.05×</td><td>已核对（Codex 转述）</td><td><a href="https://developers.openai.com/api/docs/guides/prompt-caching">https://developers.openai.com/api/docs/guides/prompt-caching</a></td></tr>
+<tr><td>命中需完整前缀匹配；模型、工具/schema/顺序、<code>reasoning.effort</code>、verbosity 等前断点变化会破坏复用</td><td>已核对（Codex 转述）</td><td>同上</td></tr>
+<tr><td><code>prompt_cache_key</code>：GPT-5.6+ 为可选分组/计费归因键；较早模型用于路由到同一缓存机器</td><td>已核对（Codex 转述）</td><td>同上</td></tr>
+<tr><td>较早模型 TTL 约 5–10 分钟、最长 1 小时（<code>24h</code> 可选）</td><td>已核对（Codex 转述）</td><td>同上</td></tr>
+<tr><td>Codex CLI 是否暴露缓存开关/<code>prompt_cache_key</code>：<b>未查到</b></td><td>未查到</td><td>—</td></tr>
+<tr><td><code>codex exec resume</code> 是否保持缓存：<b>未验证</b>（官方只确认可恢复 session）</td><td>未验证</td><td><a href="https://developers.openai.com/codex/developer-commands">https://developers.openai.com/codex/developer-commands</a></td></tr>
+</tbody></table>
+<blockquote>注：以上 OpenAI 模型名和版本号来自调研工具转述的官方页面，我没有逐条打开；与 #57 调研文档里「GPT-5 缓存 0.1×、5.6 以后支持显式断点」一致。</blockquote>
+<h3>6.3 上下文压缩与摘要</h3>
+<table><thead><tr><th>结论</th><th>状态</th><th>来源</th></tr></thead><tbody>
+<tr><td>Claude Code <code>/compact</code> 手动压缩，可附保留重点；接近上限时自动压缩；<b>固定的触发百分比官方未查到</b></td><td>已核对 /未查到</td><td><a href="https://code.claude.com/docs/en/costs">https://code.claude.com/docs/en/costs</a></td></tr>
+<tr><td><code>CLAUDE_AUTOCOMPACT_PCT_OVERRIDE</code>、<code>CLAUDE_CODE_AUTO_COMPACT_WINDOW</code>、<code>/autocompact</code> 官方只在云端会话文档里描述；本地 CLI 能否稳定使用：<b>未验证</b></td><td>未验证</td><td><a href="https://code.claude.com/docs/en/claude-code-on-the-web">https://code.claude.com/docs/en/claude-code-on-the-web</a></td></tr>
+<tr><td>Codex：<code>model_auto_compact_token_limit</code>（token 阈值，未设用模型默认）、<code>model_post_turn_compact_threshold_percent</code>（0–100）</td><td>已核对（Codex 转述）</td><td><a href="https://developers.openai.com/codex/config-reference">https://developers.openai.com/codex/config-reference</a></td></tr>
+<tr><td>Anthropic API context editing：清除旧工具结果，默认 100,000 input token 触发、保留最近 3 个工具使用；compaction 是服务端摘要，旧式 client-side 默认阈值 100,000 token</td><td>已核对（Codex 转述）</td><td><a href="https://platform.claude.com/docs/en/build-with-claude/context-editing">https://platform.claude.com/docs/en/build-with-claude/context-editing</a></td></tr>
+<tr><td><b>「100 轮评测 token 降 84%」不成立</b>：原文是「agent loops 输入 token 中位数 84% 来自 prompt cache」，不是 context editing 效果；context editing 官方示例是 70,000 → 25,000（约 35.7%）；「约 1/3」未查到官方通用声明</td><td>已核对 / 未查到</td><td><a href="https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence">https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence</a> 与上一行 context-editing 页</td></tr>
+</tbody></table>
+<h3>6.4 推理强度</h3>
+<table><thead><tr><th>CLI</th><th>有无与用法</th><th>成本影响</th><th>状态 / 来源</th></tr></thead><tbody>
+<tr><td>Claude Code</td><td>`--effort &lt;low\</td><td>medium\</td><td>high\</td><td>xhigh\</td><td>max&gt;<code>（本机 2.1.318 </code>claude --help<code> 实测列出）；</code>/effort<code>；settings </code>effortLevel<code>；</code>CLAUDE_CODE_EFFORT_LEVEL<code>；</code>MAX_THINKING_TOKENS=0<code> 可关 thinking；</code>think<code>/</code>ultrathink` 关键词官方未定义为稳定接口</td><td>官方：更高 effort 产生更多 thinking token、延迟更高；<b>各档节省百分比未查到</b></td><td><code>--effort</code> 已实测；其余已核对（Codex 转述）<a href="https://code.claude.com/docs/en/settings">https://code.claude.com/docs/en/settings</a> 、<a href="https://code.claude.com/docs/ko/env-vars">https://code.claude.com/docs/ko/env-vars</a></td></tr>
+<tr><td>Claude API（5.x）</td><td><code>thinking: {type:"adaptive"}</code> + <code>output_config.effort</code>；旧 <code>budget_tokens</code> 在较新模型报错或废弃</td><td>thinking 按输出 token 计费（官方概述）</td><td>已核对（Codex 转述）</td></tr>
+<tr><td>Codex CLI</td><td><code>-c model_reasoning_effort="high"</code>；枚举含 minimal/low/medium/high/xhigh，是否接受取决于模型；<code>model_reasoning_summary</code> 只控制摘要，不影响思考量</td><td>官方：低 effort 倾向更少 token、更快；跨档固定节省比例<b>未给出</b></td><td>已核对（源码）<a href="https://github.com/openai/codex/blob/main/codex-rs/core/src/config/mod.rs">https://github.com/openai/codex/blob/main/codex-rs/core/src/config/mod.rs</a> 、<a href="https://developers.openai.com/api/docs/guides/reasoning">https://developers.openai.com/api/docs/guides/reasoning</a></td></tr>
+<tr><td>Gemini</td><td>API 有 <code>thinkingConfig.thinkingLevel</code>；CLI 是否暴露：<b>未查到</b></td><td>output 价包含 thinking token</td><td><a href="https://ai.google.dev/gemini-api/docs/pricing">https://ai.google.dev/gemini-api/docs/pricing</a></td></tr>
+<tr><td>Qwen Code</td><td>`/effort low\</td><td>medium\</td><td>high\</td><td>xhigh\</td><td>max`，按 provider 映射</td><td>未查到量化</td><td><a href="https://github.com/QwenLM/qwen-code/blob/main/docs/users/features/commands.md">https://github.com/QwenLM/qwen-code/blob/main/docs/users/features/commands.md</a></td></tr>
+<tr><td>Kimi CLI</td><td><code>--thinking</code> / <code>--no-thinking</code>，配置 <code>default_thinking</code>；无 low/high 分档</td><td>未查到量化</td><td><a href="https://github.com/MoonshotAI/kimi-cli/blob/main/docs/en/configuration/providers.md">https://github.com/MoonshotAI/kimi-cli/blob/main/docs/en/configuration/providers.md</a></td></tr>
+<tr><td>DeepSeek</td><td><code>thinking: enabled/disabled</code>，<code>reasoning_effort: low/high/max</code>，默认开、默认 high；thinking token 计入输出</td><td>未查到逐档节省量化</td><td><a href="https://api-docs.deepseek.com/guides/thinking_mode/">https://api-docs.deepseek.com/guides/thinking_mode/</a></td></tr>
+<tr><td>GLM</td><td>官方文档未查到可稳定引用的开关</td><td>未查到</td><td>—</td></tr>
+</tbody></table>
+<p><b>关键纠正</b>：#57 调研 S42（「先用低 effort 全部跑一遍，失败的再用高档重跑，通过率接近全程高档，成本约为一半多」，来源写 Anthropic thinking 文档）——<b>官方原文未查到</b>，官方建议是在代表性评测上逐档 sweep、一次只改一个变量，按「每个成功任务成本」选。因此本方案<b>不把「低 effort 先跑」作为有数据支撑的节省来源</b>；推理强度只作为阶段 3 的可选项，且先在评测集上做 sweep（<code>RunTuning.effort</code>）。</p>
+<h3>6.5 预算控制与成本护栏</h3>
+<table><thead><tr><th>做法</th><th>状态</th><th>来源</th></tr></thead><tbody>
+<tr><td>LiteLLM：按 key/user/team 的 <code>max_budget</code> + <code>budget_duration</code>，另有 RPM/TPM/并发限制；默认预算预留（调用前按 max_tokens 或模型估算预占，响应后换实际成本）；无 DB 时可能 fail-open</td><td>已核对（Codex 转述）</td><td><a href="https://docs.litellm.ai/docs/proxy/users">https://docs.litellm.ai/docs/proxy/users</a></td></tr>
+<tr><td>OpenRouter：key 级 credit limit 与周期 reset</td><td>已核对（Codex 转述）</td><td><a href="https://openrouter.ai/docs/api/api-reference/api-keys/create-keys">https://openrouter.ai/docs/api/api-reference/api-keys/create-keys</a></td></tr>
+<tr><td>Anthropic Console：workspace 月度 spend limit 与 rate limit，受组织总额约束</td><td>已核对（Codex 转述）</td><td><a href="https://platform.claude.com/docs/en/manage-claude/rate-limits-api">https://platform.claude.com/docs/en/manage-claude/rate-limits-api</a></td></tr>
+<tr><td>OpenAI：项目/组织月度 spend limit、告警阈值，开启 hard limit 后达到额度会失败，记录消费可能略超限</td><td>已核对（Codex 转述）</td><td><a href="https://developers.openai.com/api/docs/guides/spend-limits">https://developers.openai.com/api/docs/guides/spend-limits</a></td></tr>
+<tr><td>Portkey：virtual key/workspace 预算、告警阈值，达到预算后 key 过期</td><td>已核对（Codex 转述）</td><td><a href="https://new.portkey.ai/announcements/control-your-spending-set-budget-limits-on-virtual-keys">https://new.portkey.ai/announcements/control-your-spending-set-budget-limits-on-virtual-keys</a></td></tr>
+<tr><td>Helicone：有告警；硬限制语义<b>未验证</b></td><td>未验证</td><td><a href="https://www.helicone.ai/pricing">https://www.helicone.ai/pricing</a></td></tr>
+<tr><td>Claude Code：<code>--max-budget-usd</code>（本机 <code>--help</code> 实测，<b>只在 <code>--print</code> 模式</b>）；<code>--max-turns</code> 官方环境变量文档有 <code>CLAUDE_CODE_MAX_TURNS</code>，本机 <code>--help</code> 未列</td><td>前者已实测，后者未验证</td><td>本机 <code>claude --help</code>；<a href="https://code.claude.com/docs/en/env-vars">https://code.claude.com/docs/en/env-vars</a></td></tr>
+<tr><td>Codex：有 Goals 的 <code>token_budget</code>，未查到等价 <code>--max-turns</code>/<code>--max-budget-usd</code> 的 CLI 参数</td><td>未查到</td><td><a href="https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex">https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex</a></td></tr>
+<tr><td>OpenHands：<code>max_iterations</code>、<code>max_budget_per_task</code>；SWE-agent：<code>total_cost_limit</code>、<code>per_instance_cost_limit</code>，超限抛 <code>CostLimitExceededError</code></td><td>已核对（Codex 转述）</td><td><a href="https://docs.openhands.dev/api-reference/store-settings">https://docs.openhands.dev/api-reference/store-settings</a> 、<a href="https://swe-agent.com/0.7/reference/models/">https://swe-agent.com/0.7/reference/models/</a></td></tr>
+</tbody></table>
+<h3>6.6 方案依赖的「未验证」数字复核</h3>
+<table><thead><tr><th>#57 调研里的数字</th><th>复核结果</th><th>来源</th></tr></thead><tbody>
+<tr><td>FrugalGPT 省 59–98%</td><td>摘要写「最高 98%」；三个数据集约 98.3%、73.3%、59.2%（第三方解读），59–98% 是概括</td><td><a href="https://arxiv.org/abs/2305.05176">https://arxiv.org/abs/2305.05176</a></td></tr>
+<tr><td>RouteLLM 2 倍以上</td><td>论文摘要「某些情形成本降低超过 2 倍」，已核对</td><td><a href="https://arxiv.org/abs/2406.18665">https://arxiv.org/abs/2406.18665</a></td></tr>
+<tr><td>RouteLLM MT-Bench 3.66 倍</td><td><b>未查到</b>；官方仓库表述为 MT-Bench 保留 95% GPT-4 表现、成本最多降 85%</td><td><a href="https://github.com/lm-sys/RouteLLM">https://github.com/lm-sys/RouteLLM</a></td></tr>
+<tr><td>Hybrid LLM 40%</td><td>原文是「对大模型的调用最多减少 40%」，不是总成本降 40%</td><td><a href="https://proceedings.iclr.cc/paper_files/paper/2024/file/b47d93c99fa22ac0b377578af0a1f63a-Paper-Conference.pdf">https://proceedings.iclr.cc/paper_files/paper/2024/file/b47d93c99fa22ac0b377578af0a1f63a-Paper-Conference.pdf</a></td></tr>
+<tr><td>AutoMix 50%</td><td>原文「可比性能下计算成本降低 over 50%」，已核对</td><td><a href="https://arxiv.org/abs/2310.12963">https://arxiv.org/abs/2310.12963</a></td></tr>
+<tr><td>Aider R1+Sonnet $13.29 / 64.0%；o1 $186.50 / 61.7%</td><td>与 Aider 官方结果表一致</td><td><a href="https://aider.chat/2025/01/24/r1-sonnet.html">https://aider.chat/2025/01/24/r1-sonnet.html</a></td></tr>
+<tr><td>Agent token 约 4 倍、多 Agent 约 15 倍</td><td>原文存在（描述经验值，不是计费倍率）</td><td><a href="https://www.anthropic.com/research/multi-agent-research-system">https://www.anthropic.com/research/multi-agent-research-system</a></td></tr>
+<tr><td>「弱模型先试、测试通过即停」在 SWE-bench 上的公开结果</td><td><b>未查到</b>；最接近的是 SWE-Router（预测廉价路由，具体数字未能抽取）与一篇统一 routing/cascading 研究（cascade routing 在 SWE-bench 相对基线最高提升 14%，同时称即使有完美后验质量估计，朴素 cascade 在 SWE-bench 表现不佳）</td><td><a href="https://openreview.net/pdf/5dddb41624aa40faed655bcd2deaf8151437173a.pdf">https://openreview.net/pdf/5dddb41624aa40faed655bcd2deaf8151437173a.pdf</a> 、<a href="https://openreview.net/pdf/f730d2d3f94a1410963cc7ce0a794023a94df9b2.pdf">https://openreview.net/pdf/f730d2d3f94a1410963cc7ce0a794023a94df9b2.pdf</a></td></tr>
+</tbody></table>
+<p><b>对方案的影响</b>：「低档先跑、验证失败再升档」在 SWE-bench 上没有可靠公开数据支持，朴素 cascade 在该基准上表现不佳。所以本方案的级联只做<b>有平台验证器的、按信号升档</b>，且不把级联研究的 40–60% 外推到本平台（阶段 4 只估 2–6%）。</p>
+<hr>
+<h2>7. 代码现状与分支核实</h2>
+<h3>7.1 分支</h3>
+<table><thead><tr><th>项</th><th>核实结果（<code>git branch -vv</code>、<code>git log</code>、<code>git merge-base --is-ancestor</code>、<code>git diff --name-status</code>）</th></tr></thead><tbody>
+<tr><td>本机当前检出</td><td><code>dev-3</code>（HEAD <code>d329963e</code> fix(runtime): address PR #20 review…）</td></tr>
+<tr><td><code>f3582ed</code>、<code>4680c7c</code></td><td>只在 <code>main</code> 上，<b>不是</b> <code>dev-1/2/3</code> 的祖先（证实 #68）</td></tr>
+<tr><td><code>61146fa6</code></td><td>在 <code>dev-1</code>、<code>dev-2</code>、<code>dev-3</code> 上；dev-2 里「跨模型审查与验收」「普通任务独立检查」「<code>TaskModelRouter.reviewer</code>」「<code>GeneralHarness</code>」首次出现在它（<code>git log -S</code>）</td></tr>
+<tr><td><code>6d28c29</code>、<code>4690ceb</code>、<code>771d839</code>、<code>075f0db</code></td><td>只在 <code>dev-2</code> 上（祖先关系）</td></tr>
+<tr><td>dev-2 与 dev-3 的关系</td><td>两者从 <code>0615951a</code> 分叉：dev-2 有 8 个独有提交（含上面四个 + 写作 harness + <code>761f574e</code>）；dev-3 有 3 个独有提交（<code>ee0a3848</code> 导入服务器 API Key 进 key pool、<code>b0825811</code> #27 kernel code、<code>d329963e</code> PR #20 修复）。<b>但 <code>git diff dev-2 dev-3</code> 只有 18 个文件不同，且全是 dev-3 多出的 provider / CodeBuddy / Gemini / MiniMax 相关改动</b>（<code>CredentialImportDto</code>、<code>CredentialService</code>、<code>CodeBuddyCliAgentRunner</code>、<code>GeminiCliAgentRunner</code>、<code>ProviderController</code>、ui 的 models/i18n 等 18 个文件，+583 / −121）；<code>ClaudeUsageLedger</code>、<code>VerifyCommands</code>、<code>ArticleHarness</code> 等 dev-2 的内容在 dev-3 里都存在（#27 把它们一并带入）。即 <b>dev-3 在内容上是 dev-2 的超集</b></td></tr>
+<tr><td>基准分支</td><td><b>选定 <code>dev-3</code>（<code>d329963e</code>）</b>：包含 dev-2 的全部降本相关内容（按文件树核对，不是按提交号）+ 额外的 provider 改动；是本机当前检出、最新。本文所有代码位置均在 dev-3 读到（<code>git archive dev-3</code> 导出到临时目录后读取；仓库未改动）</td></tr>
+<tr><td>注意</td><td><code>git diff dev-2 dev-3</code> 没有任何 cost/task/agent 降本文件的差异，所以 #68 里按 dev-2 写的位置在 dev-3 上同样成立</td></tr>
+</tbody></table>
+<h3>7.2 已完成项（核对代码位置，dev-3）</h3>
+<table><thead><tr><th>项</th><th>状态</th><th>代码位置</th></tr></thead><tbody>
+<tr><td>按轮记账</td><td>已完成（提交 <code>6d28c29</code>，仅 dev-2 提交号；内容在 dev-3）</td><td><code>superagent-runtime/.../runtime/cli/ClaudeUsageLedger.java</code>；<code>ClaudeStreamParser</code>、<code>CodexRollouts</code>、<code>CodexStreamParser</code>；测试 <code>ClaudeUsageLedgerTest</code>、<code>RecordedUsageTest</code>。<b>未部署（库里 11-20 的行仍是累计值，见 1.2 节）</b></td></tr>
+<tr><td>缺说明只补说明、自查、工具输出约束、合并验证命令</td><td>已完成（提交 <code>4690ceb</code>）</td><td><code>superagent-task/.../harness/coding/CodingPrompts.java</code>（<code>TOOL_USE</code>、<code>develop</code>、<code>LOG_CHARS=1500</code>）、<code>VerifyCommands.merge</code>、<code>CodingHarness</code></td></tr>
+<tr><td>字幕/普通任务确定性错误不升档不重试</td><td>已完成（提交 <code>771d839</code>）</td><td><code>HarnessHost.settle(..., escalate)</code>、<code>TaskService.settle</code>、<code>SubtitleHarness</code> 与 <code>GeneralHarness</code> 捕获 <code>NeedsUserException</code>（<code>core/error/NeedsUserException.java</code>）。<b>只覆盖这两类 harness</b></td></tr>
+<tr><td>跨模型审查与验收、循环到通过、安全阀</td><td>已完成（dev-2 上来自 <code>61146fa6</code>；任务说明里的 <code>f3582ed</code> 不在 dev-2/3）</td><td><code>superagent-task/.../harness/coding/ReviewLoop.java</code>（<code>stop</code>、<code>identify</code>）、<code>CodingHarness</code>（<code>reviewer(run)</code>）、<code>TaskModelRouter.reviewer(REVIEW)</code>、<code>SettingsService.codingReviewMaxRounds/MaxSpend</code>（默认 8 轮 / $30）</td></tr>
+<tr><td>普通任务独立检查</td><td>已完成（来自 <code>61146fa6</code>；<code>4680c7c</code> 不在 dev-2/3）</td><td><code>harness/general/GeneralHarness.java</code>、<code>OutputChecks.java</code>、<code>checkerModel</code></td></tr>
+<tr><td><code>TaskModelRouter</code> reviewer(CHECK)</td><td>已完成（<code>61146fa6</code>）</td><td><code>superagent-cost/.../routing/TaskModelRouter.java</code> 的 <code>reviewer(...)</code>：CHECK 分支取排除执行模型后最便宜的，<b>不看厂商</b> → 阶段 3 改</td></tr>
+<tr><td>Agent 主动沉淀</td><td>已完成（提交 <code>075f0db</code>），<b>与降本关系弱，不计节省</b></td><td><code>agent/AgentMemoryMcpTools</code>、<code>memory/MemorySections</code></td></tr>
+<tr><td>小工具用最便宜模型</td><td>已完成（<code>52a7a00d</code>）</td><td><code>AgentMemoryService</code>、<code>FileTagger</code> 调 <code>modelRouter.cheapest()</code></td></tr>
+<tr><td>按错误升档，起步按难度选便宜的</td><td>已完成（<code>52a7a00d</code> 的 <code>TaskModelRouter.choose/escalate</code>）</td><td><code>superagent-cost/.../routing/TaskModelRouter.java</code></td></tr>
+<tr><td>固定模型</td><td>已完成</td><td><code>TaskModelRouter.fixedStart/fixedNext</code>、<code>SettingsService.taskFixedModels</code></td></tr>
+</tbody></table>
+<h3>7.3 本方案涉及的既有代码位置（均已在 dev-3 导出副本中确认存在）</h3>
+<p><code>TaskModelRouter</code>（cost）· <code>ModelPriceService.Candidate</code>、<code>candidates()</code>、<code>chatModels()</code>、<code>setForTasks</code>（cost）· <code>ModelCapabilityService.calibrators</code>（cost）· <code>TokenUsageService</code>（cost/usage）· <code>CodingHarness</code>、<code>CodingPrompts</code>、<code>ReviewLoop</code>、<code>VerifyCommands</code>（task/harness/coding）· <code>GeneralHarness</code>、<code>OutputChecks</code>（task/harness/general）· <code>SubtitleHarness</code>（task/harness/subtitle）· <code>HarnessHost</code>（含 <code>turn</code>、<code>turnOn</code>、<code>reviewer</code>、<code>checkerModel</code>、<code>recordChoice</code>、<code>reviewLimits</code>）、<code>HarnessRun.turnOn</code>（task/harness）· <code>TaskService</code>（<code>recover</code>、<code>settle</code>、<code>escalate</code>、<code>MAX_ATTEMPTS=10</code>、<code>ROTATE_AFTER=1</code>）、<code>TaskSessionPool</code>、<code>TaskWatchdog</code>、<code>TaskScheduler</code>（task）· <code>ChatService</code>（<code>resolveModel</code>、<code>rotateSession</code>）（agent）· <code>ClaudeCliAgentRunner</code>、<code>CodexCliAgentRunner</code>、<code>ClaudeWarmSessions</code>、<code>ClaudeUsageLedger</code>（runtime/cli）· <code>JdbcUsageStore</code>、<code>JdbcTaskModelChoiceStore</code>、<code>TenantSchema</code>（storage/jdbc）· <code>UsageContext</code>、<code>UsageRecorder</code>、<code>UsageStore</code>、<code>TaskModelSelector</code>、<code>ModelRouter</code>、<code>TenantContext</code>、<code>AgentRunRequest</code>、<code>ChatSession</code>（core）· <code>SettingsService</code>（platform/settings）。</p>
+<p><b>新增（现在没有）</b>：core：<code>StepModelSelector</code>、<code>RunTuning</code>、<code>CostGuard</code>、<code>ModelOutcome</code>、<code>ModelOutcomeStore</code>；cost：<code>StepPolicyService</code>、<code>BucketRouter</code>、<code>CostGuardService</code>、<code>OutcomeService</code>；storage：<code>JdbcModelOutcomeStore</code>、<code>JdbcBucketStatStore</code>、<code>JdbcCostGuardEventStore</code>；表 <code>model_outcome</code>、<code>model_bucket_stat</code>、<code>cost_guard_event</code>；<code>token_usage</code> 列 <code>step</code>、<code>turn_no</code>；设置键 <code>cost.*</code>；<code>ChatSession.LONG</code> 常量。</p>
+<hr>
+<h2>8. 不确定之处与未验证项</h2>
+<table><thead><tr><th>项</th><th>说明</th><th>出处</th></tr></thead><tbody>
+<tr><td>修正后的花费</td><td>我的复现 $520 与 #57 的 $427（$374–$494）差 22%，两种方法都是近似；库里没有 6d28c29 之后的干净数据；11-20 的行显示服务仍在重复记账（推断）</td><td>1.2 节</td></tr>
+<tr><td>11-20 重复记账推断</td><td>只看了行的数值形态，没有去服务器核对是否已重启</td><td>1.2 节</td></tr>
+<tr><td>$4.09 的精确来源</td><td>当时的 34 条无法精确还原，只能由现库 Opus 35 行 $4.20 推断</td><td>1.6 节</td></tr>
+<tr><td>阶段节省数字</td><td>池占比取 #57 与本次复现的中间值；各杠杆比例是我的假设（已写明），不是实测；TTL、数据驱动、对话分档为低把握</td><td>1.6 节</td></tr>
+<tr><td>缓存 TTL 1h 是否划算</td><td>无本平台实测，需 A/B；2× 写入价对短间隔会话是亏的</td><td>3.5、4 节阶段 0.7/2</td></tr>
+<tr><td><code>--max-budget-usd</code> 对保活（stream-json）会话</td><td>是否按会话累计未验证；本机 <code>--help</code> 注明仅 <code>--print</code></td><td>3.5 节</td></tr>
+<tr><td>本地 CLI 能否使用 <code>CLAUDE_AUTOCOMPACT_PCT_OVERRIDE</code></td><td>官方只在云端会话文档出现</td><td>6.3 节</td></tr>
+<tr><td>Codex 缓存开关、<code>codex exec resume</code> 缓存保持</td><td>未查到 / 未验证</td><td>6.2 节</td></tr>
+<tr><td>各 CLI 推理强度各档的节省</td><td>官方均未量化</td><td>6.4 节</td></tr>
+<tr><td>补充调研的 Codex 转述</td><td>大部分官方链接是检索工具给出的，我只实测了 <code>claude --help</code>，没有逐条打开网页复核</td><td>第 6 节</td></tr>
+<tr><td>价格倍率与模型名</td><td>带 5.x/6.x 版本号的价格、模型名来自检索转述，以平台价格表为准</td><td>6.1、6.2 节</td></tr>
+<tr><td>数据量</td><td>库里只有 69 个任务、11 天；质量底线用滚动窗口护栏而非显著性检验</td><td>1.5、5.2 节</td></tr>
+<tr><td>本机分支</td><td>本机检出 dev-3；未检查 <code>origin/*</code> 与本地分支的差异（不做 fetch）</td><td>7.1 节</td></tr>
+<tr><td>docs 目录约定</td><td>记忆里「技术架构 HTML 放 docs 根目录」，而现有 <code>docs/prd/</code> 下才有 HTML；本次按任务说明放 <code>docs/superagent-cost-reduction.html</code>（文件已新增，未 commit）</td><td>—</td></tr>
+</tbody></table>
+
+</div></body></html>

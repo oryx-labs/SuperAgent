@@ -434,6 +434,11 @@ public class ArticleHarness implements TaskHarness {
             approveOutline(run, step, "自动确认（任务独立运行）");
             return;
         }
+        if (run.host().proxyConfirm(task, com.superagent.core.proxyconfirm.ConfirmType.WRITING_OUTLINE,
+                java.util.Map.of("sections", a.sections.size(), "problems", problems.size()))) {
+            approveOutline(run, step, "SuperAgent 按你的规则代确认了提纲");
+            return;
+        }
         wait(run, step, "outline", ArticlePrompts.outlineAsk(a, problems, again));
     }
 
@@ -544,7 +549,7 @@ public class ArticleHarness implements TaskHarness {
         Path ws = task.workspaceDir() == null ? null : Path.of(task.workspaceDir());
         ArticleChecks.Tech tech = a.pack == null ? null : new ArticleChecks.Tech(a.pack, a.evidence, repoRoot(run));
         ArticleChecks.Result r = ArticleChecks.run(new ArticleChecks.Input(a.brief, a.sections, file.text(), sourceTexts(task),
-                extraText(task), p -> ws != null && Files.exists(ws.resolve(p).normalize()), probe, tech));
+                extraText(task), p -> ws != null && Files.exists(ws.resolve(p).normalize()), probe, tech, packs.lexicon()));
         a.untraced = r.untraced();
         a.checks = append(a.checks, new Article.CheckRound(round, Instant.now(), r.passed(), r.items()));
         r.items().stream().filter(i -> !ArticleChecks.PASS.equals(i.level()))

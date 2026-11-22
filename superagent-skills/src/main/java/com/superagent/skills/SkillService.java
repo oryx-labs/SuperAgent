@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import com.superagent.core.writing.StyleLexicon;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -54,7 +55,7 @@ public class SkillService {
     private static final Logger log = LoggerFactory.getLogger(SkillService.class);
     private static final Pattern ID = Pattern.compile("[0-9a-fA-F-]{36}");
     private static final int MAX_CONTENT_CHARS = 200_000;
-    private static final String SEEDED = "skill.seeded", GENRES_SEEDED = "skill.genres.seeded";
+    private static final String SEEDED = "skill.seeded", GENRES_SEEDED = "skill.genres.seeded", LEXICON_SEEDED = "skill.lexicon.seeded";
 
     private final SkillStore store;
     private final SystemSettingStore settings;
@@ -475,6 +476,22 @@ public class SkillService {
         Set<String> have = live().filter(s -> ownerOf(s) == null).map(Skill::name).collect(Collectors.toSet());
         GenreSeeds.ALL.stream().filter(seed -> !have.contains(seed.name())).forEach(seed -> insert(seed, COMPANY, "system"));
         settings.put(GENRES_SEEDED, "true");
+    }
+
+    /**
+     * Companies that had the plain-writing standard before it carried a word list: append the list once, only to a skill
+     * that has none, so what the company changed is never replaced.
+     */
+    @EventListener(CompanyStarted.class)
+    void seedLexiconOnce() {
+        if (settings.all().containsKey(LEXICON_SEEDED)) {
+            return;
+        }
+        live().filter(s -> ownerOf(s) == null && s.name().strip().equals(StyleLexicon.SKILL_NAME)
+                && !StyleLexicon.hasBlock(s.content())).forEach(s -> store.save(new Skill(s.id(), s.name(), s.description(),
+                s.category(), s.content() + GenreSeeds.LEXICON, s.space(), s.enabled(), false, s.createdBy(), s.updatedBy(),
+                s.createdAt(), Instant.now())));
+        settings.put(LEXICON_SEEDED, "true");
     }
 
     /** The company's enabled skills (not anyone's personal ones): where the writing flow finds its genre packs. */

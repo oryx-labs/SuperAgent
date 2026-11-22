@@ -51,6 +51,11 @@ public final class ApiPaths {
     public static final String ANALYTICS = V1 + "/admin/analytics";
     /** The caller's own token usage. */
     public static final String USAGE = V1 + "/usage";
+    /** "Confirm for me": the caller's rules and records. */
+    public static final String PROXY_CONFIRM = V1 + "/proxy-confirm";
+    /** Every proxy confirmation in the company (admins, read-only). */
+    public static final String ADMIN_PROXY_CONFIRM = V1 + "/admin/proxy-confirm";
+
     /** Everyone's token usage (admins). */
     public static final String ADMIN_USAGE = V1 + "/admin/usage";
 

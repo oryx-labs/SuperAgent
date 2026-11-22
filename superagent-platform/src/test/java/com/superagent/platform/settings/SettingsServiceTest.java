@@ -115,9 +115,30 @@ class SettingsServiceTest {
         assertThat(service.get().subtitleMaxCalibrators()).isEqualTo(5);
         assertThatThrownBy(() -> service.update(new SystemSettingsDto(null, "OKG", null, null, null, null, null, null, null,
                 null, null, null, 11))).hasMessageContaining("字幕校准模型数上限");
+
+        assertThat(service.chatSessionMaxTokens()).isEqualTo(300_000);
+        assertThat(service.chatSessionMaxTurns()).isEqualTo(40);
+        service.update(new SystemSettingsDto(null, "OKG", null, null, null, null, null, null, null, null, null, null, null,
+                null, 500_000, 25));
+        assertThat(service.chatSessionMaxTokens()).isEqualTo(500_000);
+        assertThat(service.get().chatSessionMaxTurns()).isEqualTo(25);
+        assertThatThrownBy(() -> service.update(new SystemSettingsDto(null, "OKG", null, null, null, null, null, null, null,
+                null, null, null, null, null, 10, null))).hasMessageContaining("token 阈值");
     }
 
     private static SystemSettingsDto limits(String company, int rounds, double spend) {
         return new SystemSettingsDto(null, company, null, null, null, null, null, null, null, null, rounds, spend);
+    }
+
+    @Test
+    void theDocumentStandardIsOnByDefaultAndCanBeSwitchedOffOrPointedAtAnotherSkill() {
+        assertThat(service.get().docStyleOn()).isTrue();
+        assertThat(service.get().docStyleSkill()).isNull();
+        service.update(new SystemSettingsDto(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                false, "另一套规范"));
+        assertThat(service.get().docStyleOn()).isFalse();
+        assertThat(service.get().docStyleSkill()).isEqualTo("另一套规范");
+        service.update(new SystemSettingsDto("claude-opus-5-5", null, null)); // a save without the fields keeps them
+        assertThat(service.get().docStyleOn()).isFalse();
     }
 }

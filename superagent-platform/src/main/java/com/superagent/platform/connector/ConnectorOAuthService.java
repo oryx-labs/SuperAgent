@@ -73,7 +73,10 @@ public class ConnectorOAuthService {
 
     /** The provider slug if this connector uses an OAuth handshake, else {@code null}. */
     public String providerFor(String connectorId) {
-        return providers.containsKey(connectorId) ? connectorId : null;
+        if (providers.containsKey(connectorId)) {
+            return connectorId;
+        }
+        return JiraSite.CLOUD.equals(JiraSite.productOf(connectorId)) ? AtlassianOAuthClient.KEY : null;
     }
 
     /**

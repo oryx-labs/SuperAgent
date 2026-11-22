@@ -24,7 +24,7 @@ class ProviderCredentialStoreTest {
     @Test
     void listsAPoolInPriorityOrderAndForgetsDeletedEntries() {
         MysqlProviderCredentialStore store = new MysqlProviderCredentialStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:cred-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:cred-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         store.save(cred("backup", "claude", 2));
         store.save(cred("main", "claude", 1));
         store.save(cred("other", "codex", 1));

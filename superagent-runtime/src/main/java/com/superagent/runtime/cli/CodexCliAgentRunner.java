@@ -114,6 +114,9 @@ public class CodexCliAgentRunner implements AgentRunner {
             if (request.credential() != null) {
                 // Codex's documented per-run key for exec mode; it never appears in argv.
                 pb.environment().put("CODEX_API_KEY", request.credential().apiKey());
+            } else {
+                pb.environment().remove("CODEX_API_KEY");
+                pb.environment().remove("OPENAI_API_KEY");
             }
             // MCP bearer tokens go through the environment, never argv (visible in ps / logs).
             for (McpServer server : mcpServers(request)) {
@@ -169,7 +172,11 @@ public class CodexCliAgentRunner implements AgentRunner {
             emit(sink, request, seq, AgentEventType.ERROR, "Codex run interrupted");
         } finally {
             if (threadId == null || before != null) {
-                Tokens.emit(sink, request.sessionId(), seq + 1, parser.tokens(request.model(), before));
+                // The per-request figure the thread's rollout now ends with is this run's last, largest context.
+                String thread = parser.threadId() != null ? parser.threadId() : threadId;
+                long context = CodexRollouts.lastRequestInput(codexHome, thread).orElse(0L);
+                Tokens.emit(sink, request.sessionId(), seq + 1,
+                        Tokens.withContext(parser.tokens(request.model(), before), context));
             }
         }
     }

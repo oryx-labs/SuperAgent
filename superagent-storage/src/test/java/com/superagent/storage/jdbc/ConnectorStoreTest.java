@@ -21,7 +21,7 @@ class ConnectorStoreTest {
 
     private static JdbcTemplate h2() {
         return new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:connector-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+                "jdbc:h2:mem:connector-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
     }
 
     private static Connector github(String name) {

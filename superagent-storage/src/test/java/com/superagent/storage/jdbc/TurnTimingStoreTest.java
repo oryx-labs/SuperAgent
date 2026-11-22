@@ -49,6 +49,6 @@ class TurnTimingStoreTest {
 
     private static MysqlTurnTimingStore store() {
         return new MysqlTurnTimingStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:timing-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:timing-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
     }
 }

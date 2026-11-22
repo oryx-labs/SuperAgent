@@ -119,7 +119,11 @@ public record HarnessDto(
     public record Deliverable(String name, String type) {
     }
 
-    public record PlatformCheck(String name, boolean passed, String detail) {
+    /** {@code warning}: passed, but with something to look at. */
+    public record PlatformCheck(String name, boolean passed, String detail, boolean warning) {
+        public PlatformCheck(String name, boolean passed, String detail) {
+            this(name, passed, detail, false);
+        }
     }
 
     /** {@code verdict}: PASS | FAIL from the independent checker; null when the platform's checks failed first. */

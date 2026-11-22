@@ -31,6 +31,15 @@ public final class Tokens {
         }
     }
 
+    /** The run's usage stamped with the largest context a single request read, when the CLI told it. */
+    static List<TokenUsage> withContext(List<TokenUsage> usage, long contextTokens) {
+        if (contextTokens <= 0) {
+            return usage;
+        }
+        return usage.stream().map(u -> new TokenUsage(u.model(), u.input(), u.cacheRead(), u.cacheWrite(),
+                u.cacheWrite1h(), u.output(), u.reasoning(), u.cliCostUsd(), contextTokens)).toList();
+    }
+
     public static List<TokenUsage> parse(String json) {
         try {
             return List.of(JSON.readValue(json, TokenUsage[].class));

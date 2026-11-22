@@ -213,6 +213,11 @@ function todoActions(n) {
     case "done":
       return [[L("todo.viewResult"), async () => { await api.noticeAction(n.id, "done"); openTaskFromTodo(n.linkId); }, true], read];
     default:
+      if (n.linkType === "proxyconfirm") {
+        return [[L("pc.revoke"), async () => {
+          try { await api.proxyRevoke(n.linkId); } catch (e) { showToast(e.message, true); return; }
+        }, true], read];
+      }
       return n.linkType === "agent"
         ? [[L("todo.open"), async () => { await api.noticeAction(n.id, "done"); await openAgentFromTodo(n.linkId); }, true], read]
         : [read];

@@ -84,6 +84,11 @@ public class GenrePacks {
         return Optional.empty();
     }
 
+    /** The company's plain-writing word list (the same one general checks use); a wrong block throws. */
+    public com.superagent.core.writing.StyleLexicon lexicon() {
+        return com.superagent.core.writing.StyleLexicon.of(skills.get(), null);
+    }
+
     /** The fallback when no genre was chosen or it doesn't exist; empty when the company has no packs at all. */
     public Optional<Loaded> fallback() {
         return find(FALLBACK);

@@ -24,7 +24,7 @@ class ChatStoreTest {
     @Test
     void anotherCompanyNeitherSeesNorChangesAConversation() {
         MysqlChatStore store = new MysqlChatStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:chat-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:chat-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant now = Instant.now();
         ChatSession session = new ChatSession("s1", "mine", AgentType.CLAUDE, null, "/w", "a1", SessionStatus.ACTIVE, now, now);
         store.createSession(session);
@@ -49,7 +49,7 @@ class ChatStoreTest {
     @Test
     void aSessionKeepsItsModelReasonAndRestarts() {
         MysqlChatStore store = new MysqlChatStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:chat-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:chat-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant now = Instant.now();
         store.createSession(new ChatSession("s1", "t", AgentType.CLAUDE, "c1", "/w", "a1", SessionStatus.ACTIVE, now, now,
                 "opus", ChatSession.MODEL_DOWN, 0));

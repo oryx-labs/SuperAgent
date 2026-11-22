@@ -49,7 +49,7 @@ class ProjectServiceTest {
     void setUp() {
         TenantContext.set("acme"); // the JDBC stores scope every query to a company
         JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:projsvc-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+                "jdbc:h2:mem:projsvc-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
         UserStore users = mock(UserStore.class);
         when(users.findByUsername(anyString())).thenAnswer(inv -> {
             String u = inv.getArgument(0);

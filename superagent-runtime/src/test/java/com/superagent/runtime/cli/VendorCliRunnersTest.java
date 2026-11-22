@@ -13,6 +13,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** The DeepSeek / Kimi / Qwen runners against output captured from the real CLIs (dsh 0.x, kimi 2.5.2). */
 class VendorCliRunnersTest {
 
+    @Test
+    void kimiHomesAreScopedToSessionAndCredentialFilesAreCleaned(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        KimiCliAgentRunner runner = new KimiCliAgentRunner("/usr/bin/true", 5);
+        AgentRunRequest first = new AgentRunRequest("one", null, dir.toString(), "hi", "kimi-k2", List.of(), false,
+                MCP, null, List.of(), null, new RunCredential("c1", null, "test-key", false));
+        AgentRunRequest second = new AgentRunRequest("two", null, dir.toString(), "hi", "kimi-k2", List.of(), false,
+                MCP, null, List.of(), null, new RunCredential("c2", null, "other-key", false));
+        assertThat(runner.environment(first)).isNotEqualTo(runner.environment(second));
+        runner.run(first, event -> {}, new com.superagent.core.chat.Cancellation());
+        java.nio.file.Path home = java.nio.file.Path.of(runner.environment(first).get("KIMI_CODE_HOME"));
+        assertThat(home).isDirectory();
+        assertThat(home.resolve("config.toml")).doesNotExist();
+        assertThat(home.resolve("mcp.json")).doesNotExist();
+    }
+
     private static final String MCP = "{\"mcpServers\":{\"superagent\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:18080/mcp\","
             + "\"headers\":{\"Authorization\":\"Bearer turn-token\"}}}}";
 
@@ -188,7 +203,7 @@ class VendorCliRunnersTest {
         assertThat(MinimaxCliAgentRunner.configYaml("sk-test", "minimax/MiniMax-M2.1"))
                 .contains("apiKey: \"sk-test\"").contains("defaultModel: \"minimax/MiniMax-M2.1\"");
 
-        List<String> cmd = new MinimaxCliAgentRunner("mcode", 60).buildCommand(req, null, List.of());
+        List<String> cmd = new MinimaxCliAgentRunner("mcode", 60).buildCommand(req, null, new ArrayList<>());
         assertThat(cmd).containsSequence("exec", "--output-format", "stream-json")
                 .containsSequence("--permission", "off")
                 .containsSequence("--model", "minimax/MiniMax-M2.1")

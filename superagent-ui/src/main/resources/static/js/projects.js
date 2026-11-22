@@ -243,6 +243,10 @@ async function renderProjectTab() {
     ]);
     if (projOpen !== p) return;
     renderProjectBrief(p, brief || {});
+    const pcBox = document.createElement("div");
+    pcBox.className = "proxy-confirm";
+    pjel.brief.append(pcBox);
+    if (p.mine !== false) renderProxyConfirmPanel(pcBox, p.id);
     pjel.rowsHead.textContent = L("proj.memoryTitle");
     pjel.rowsHead.hidden = false;
     if (!projArchived(p)) projTabButtons([[L("proj.addMemory"), () => editProjectMemory(null)]]);

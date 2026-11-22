@@ -32,6 +32,7 @@ public class JdbcUsageStore implements UsageStore {
               cache_write_1h BIGINT NOT NULL,
               output_tokens  BIGINT NOT NULL,
               reasoning      BIGINT NOT NULL,
+              context_tokens BIGINT,
               cost_usd       DOUBLE,
               cli_cost_usd   DOUBLE,
               PRIMARY KEY (company_id, id),
@@ -46,32 +47,54 @@ public class JdbcUsageStore implements UsageStore {
               company_id String, id String, at DateTime64(3, 'UTC'), user_name Nullable(String), source String, agent_id Nullable(String),
               task_id Nullable(String), session_id Nullable(String), cli Nullable(String), model Nullable(String),
               input_tokens Int64, cache_read Int64, cache_write Int64, cache_write_1h Int64, output_tokens Int64,
-              reasoning Int64, cost_usd Nullable(Float64), cli_cost_usd Nullable(Float64)
+              reasoning Int64, context_tokens Nullable(Int64), cost_usd Nullable(Float64), cli_cost_usd Nullable(Float64)
             ) ENGINE = MergeTree ORDER BY (company_id, at, id)
             """;
 
     private static final String COLUMNS = "id, at, user_name, source, agent_id, task_id, session_id, cli, model, input_tokens, "
-            + "cache_read, cache_write, cache_write_1h, output_tokens, reasoning, cost_usd, cli_cost_usd";
+            + "cache_read, cache_write, cache_write_1h, output_tokens, reasoning, context_tokens, cost_usd, cli_cost_usd";
 
     private static final RowMapper<UsageRecord> MAPPER = (rs, i) -> new UsageRecord(rs.getString(1),
             rs.getObject(2, LocalDateTime.class).toInstant(ZoneOffset.UTC), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
             rs.getString(7), rs.getString(8), rs.getString(9), rs.getLong(10), rs.getLong(11), rs.getLong(12),
-            rs.getLong(13), rs.getLong(14), rs.getLong(15), (Double) rs.getObject(16, Double.class),
-            (Double) rs.getObject(17, Double.class));
+            rs.getLong(13), rs.getLong(14), rs.getLong(15), rs.getLong(16), (Double) rs.getObject(17, Double.class),
+            (Double) rs.getObject(18, Double.class));
 
     private final JdbcTemplate jdbc;
 
     public JdbcUsageStore(JdbcTemplate jdbc, String ddl) {
         this.jdbc = jdbc;
         TenantSchema.create(jdbc, ddl);
+        ensureContextColumn(ddl.contains("MergeTree"));
+    }
+
+    /**
+     * Adds the single-request context column to a table made before it (CREATE TABLE IF NOT EXISTS won't); the rows
+     * already there stay empty, which reads as 0: unknown, so only the turn count decides for them.
+     */
+    private void ensureContextColumn(boolean clickHouse) {
+        try {
+            jdbc.queryForList("SELECT context_tokens FROM token_usage WHERE 1 = 0");
+            return;
+        } catch (org.springframework.dao.DataAccessException missing) {
+            // the table predates the column
+        }
+        jdbc.execute("ALTER TABLE token_usage ADD COLUMN context_tokens " + (clickHouse ? "Nullable(Int64)" : "BIGINT"));
     }
 
     @Override
     public void save(UsageRecord r) {
-        jdbc.update("INSERT INTO token_usage (company_id, " + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        jdbc.update("INSERT INTO token_usage (company_id, " + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 TenantSchema.company(), r.id(), utc(r.at()), r.user(), r.source(), r.agentId(), r.taskId(), r.sessionId(), r.cli(),
                 r.model(), r.input(), r.cacheRead(), r.cacheWrite(), r.cacheWrite1h(), r.output(), r.reasoning(),
-                r.costUsd(), r.cliCostUsd());
+                r.contextTokens(), r.costUsd(), r.cliCostUsd());
+    }
+
+    @Override
+    public UsageRecord latestChatTurn(String sessionId) {
+        List<UsageRecord> found = jdbc.query("SELECT " + COLUMNS + " FROM token_usage WHERE company_id = ? AND session_id = ? "
+                + "AND source IN ('chat', 'superagent') ORDER BY at DESC LIMIT 1", MAPPER, TenantSchema.company(), sessionId);
+        return found.isEmpty() ? null : found.get(0);
     }
 
     @Override

@@ -1,5 +1,7 @@
 package com.superagent.task.harness.article;
 
+import com.superagent.core.writing.StyleLexicon;
+import com.superagent.core.writing.TextChecks;
 import com.superagent.task.harness.HarnessState.Article.Brief;
 import com.superagent.task.harness.HarnessState.Article.Issue;
 import com.superagent.task.harness.HarnessState.Article.Section;
@@ -38,11 +40,6 @@ public final class ArticleChecks {
     static final int WECHAT_TITLE_FAIL = 64, WECHAT_TITLE_WARN = 30;
     private static final int COPY_GRAM = 8, COPY_SEED = 20, POOL_CHARS = 500_000;
 
-    /** Stock phrases and 「AI 腔」, plus words a company style guide usually bans: a hint only, never a fail. */
-    static final List<String> FILLER = List.of("值得注意的是", "不难发现", "众所周知", "总而言之", "综上所述", "总的来说",
-            "首先，", "其次，", "最后，", "在当今", "随着时代的发展", "日新月异", "毋庸置疑", "不可否认", "让我们一起",
-            "深入探讨", "至关重要", "扮演着重要的角色", "发挥着重要作用", "具有重要意义", "一方面", "另一方面",
-            "赋能", "抓手", "闭环", "颗粒度", "底层逻辑", "打通", "全方位", "多维度", "助力", "织就", "画卷", "璀璨");
     /** A small built-in list: high-risk terms fail, the rest (advertising-law absolutes and the like) warn. */
     static final Map<String, List<String>> SENSITIVE = Map.of(
             "high", List.of("炸弹制作", "制作炸药", "制毒", "贩毒", "枪支出售", "代开发票", "办假证", "洗钱教程", "赌博网站"),
@@ -72,10 +69,15 @@ public final class ArticleChecks {
      * draw on; {@code fileExists}: whether a local image path is there; {@code probe}: what a link answers.
      */
     public record Input(Brief brief, List<Section> outline, String draft, Map<String, String> sources, String extra,
-                        Predicate<String> fileExists, Function<String, LinkStatus> probe, Tech tech) {
+                        Predicate<String> fileExists, Function<String, LinkStatus> probe, Tech tech, StyleLexicon lexicon) {
+        public Input(Brief brief, List<Section> outline, String draft, Map<String, String> sources, String extra,
+                     Predicate<String> fileExists, Function<String, LinkStatus> probe, Tech tech) {
+            this(brief, outline, draft, sources, extra, fileExists, probe, tech, null);
+        }
+
         public Input(Brief brief, List<Section> outline, String draft, Map<String, String> sources, String extra,
                      Predicate<String> fileExists, Function<String, LinkStatus> probe) {
-            this(brief, outline, draft, sources, extra, fileExists, probe, null);
+            this(brief, outline, draft, sources, extra, fileExists, probe, null, null);
         }
     }
 
@@ -102,6 +104,7 @@ public final class ArticleChecks {
         List<Issue> out = new ArrayList<>();
         out.addAll(words(doc, in.brief()));
         out.addAll(headings(doc));
+        StyleLexicon lex = in.lexicon() == null ? StyleLexicon.FALLBACK : in.lexicon();
         out.addAll(coverage(doc, in.outline()));
         out.addAll(placeholders(doc, in.fileExists()));
         if (pack == null || pack.has(GenrePack.LINKS)) {
@@ -118,7 +121,7 @@ public final class ArticleChecks {
         out.addAll(duplicates(doc));
         out.addAll(lengths(doc, wechat));
         if (pack == null || !pack.has(GenrePack.BANNED)) {
-            out.addAll(filler(doc));
+            out.addAll(filler(doc, lex));
         }
         out.addAll(sensitive(doc));
         out.addAll(wechat(doc, wechat));
@@ -135,10 +138,10 @@ public final class ArticleChecks {
                 out.addAll(MermaidCheck.check(in.draft()));
             }
             if (pack.has(GenrePack.CONCRETENESS)) {
-                out.addAll(TechChecks.concreteness(in.draft()));
+                out.addAll(TechChecks.concreteness(in.draft(), lex));
             }
             if (pack.has(GenrePack.BANNED)) {
-                out.addAll(TechChecks.bannedPhrases(doc, pack.bannedPhrases()));
+                out.addAll(TechChecks.bannedPhrases(doc, pack.bannedPhrases(), lex));
             }
         }
         return new Result(out, untraced);
@@ -157,19 +160,11 @@ public final class ArticleChecks {
     }
 
     static List<Issue> headings(Doc doc) {
-        List<Issue> out = new ArrayList<>();
-        long h1 = doc.headings.stream().filter(h -> h.level == 1).count();
-        if (h1 > 1) {
-            out.add(new Issue("标题层级", FAIL, null, "一级标题有 " + h1 + " 个，最多一个"));
-        }
-        int prev = 0;
-        for (Heading h : doc.headings) {
-            if (prev > 0 && h.level > prev + 1) {
-                out.add(new Issue("标题层级", FAIL, h.text, "从 " + "#".repeat(prev) + " 跳到了 " + "#".repeat(h.level)));
-            }
-            prev = h.level;
-        }
-        return out.isEmpty() ? List.of(new Issue("标题层级", PASS, null, "层级连续")) : out;
+        return issues(TextChecks.headings(doc.text, FAIL));
+    }
+
+    static List<Issue> issues(List<TextChecks.Finding> found) {
+        return found.stream().map(f -> new Issue(f.check(), f.level(), f.where(), f.note())).toList();
     }
 
     static List<Issue> coverage(Doc doc, List<Section> outline) {
@@ -394,27 +389,11 @@ public final class ArticleChecks {
     }
 
     static List<Issue> filler(Doc doc) {
-        String prose = String.join("\n", doc.proseLines());
-        int chars = Math.max(1, squash(prose).length());
-        Map<String, Integer> hits = new LinkedHashMap<>();
-        for (String w : FILLER) {
-            int n = occurrences(prose, w);
-            if (n > 0) {
-                hits.put(w.replace("，", ""), n);
-            }
-        }
-        int total = hits.values().stream().mapToInt(Integer::intValue).sum();
-        double perK = total * 1000.0 / chars;
-        double dashes = occurrences(prose, "——") * 1000.0 / chars;
-        List<Issue> out = new ArrayList<>();
-        if (perK > FILLER_WARN) {
-            out.add(new Issue("套话和 AI 腔", WARN, null, String.format(Locale.ROOT, "每千字 %.1f 次：", perK)
-                    + String.join("、", hits.entrySet().stream().map(e -> e.getKey() + "×" + e.getValue()).toList())));
-        }
-        if (dashes > DASH_WARN) {
-            out.add(new Issue("套话和 AI 腔", WARN, null, String.format(Locale.ROOT, "破折号每千字 %.1f 个", dashes)));
-        }
-        return out.isEmpty() ? List.of(new Issue("套话和 AI 腔", PASS, null, "套话不多")) : out;
+        return filler(doc, StyleLexicon.FALLBACK);
+    }
+
+    static List<Issue> filler(Doc doc, StyleLexicon lex) {
+        return issues(TextChecks.filler(String.join("\n", doc.proseLines()), lex));
     }
 
     static List<Issue> sensitive(Doc doc) {

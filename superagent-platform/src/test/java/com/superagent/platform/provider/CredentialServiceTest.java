@@ -78,6 +78,23 @@ class CredentialServiceTest {
     Path tmp;
 
     @Test
+    void codexMachineLoginIsOptInAndCompanyKeyTakesPriority() {
+        InMemoryPool pool = new InMemoryPool();
+        ModelProviderStore providers = mock(ModelProviderStore.class);
+        when(providers.findByKey(anyString())).thenReturn(Optional.empty());
+        CredentialService svc = new CredentialService(pool, providers,
+                new SecretCipher("", tmp.resolve("secret.key").toString()), new FakeProbe(tmp), null);
+        assertThatThrownBy(() -> svc.current("codex")).isInstanceOf(CredentialService.NoCompanyKeyException.class);
+        assertThat(svc.canChoose("codex")).isFalse();
+        org.springframework.test.util.ReflectionTestUtils.setField(svc, "codexCliLogin", true);
+        assertThat(svc.canChoose("codex")).isTrue();
+        assertThat(svc.current("codex").credential()).isNull();
+        assertThatThrownBy(() -> svc.current("claude")).isInstanceOf(CredentialService.NoCompanyKeyException.class);
+        svc.add("codex", new CredentialRequests.Save("company", "", "test-company-key", false, null));
+        assertThat(svc.current("codex").credential().apiKey()).isEqualTo("test-company-key");
+    }
+
+    @Test
     void runsUseTheBestHealthyKeyFailOverOnAnEndpointErrorAndReturnOnceItRecovers() {
         InMemoryPool pool = new InMemoryPool();
         ModelProviderStore providers = mock(ModelProviderStore.class);

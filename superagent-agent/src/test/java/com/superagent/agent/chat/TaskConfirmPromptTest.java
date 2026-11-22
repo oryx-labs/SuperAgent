@@ -30,4 +30,29 @@ class TaskConfirmPromptTest {
         // The SuperAgent's own tool has neither the lookup nor the field.
         assertThat(TaskConfirmPrompt.rules("start_task", "")).doesNotContain("| 文体 |").doesNotContain("article_genres");
     }
+
+    @Test
+    void aTechnicalResearchOrDesignDeliverableIsRecommendedAsAWritingTask() {
+        assertThat(TaskConfirmPrompt.rules("create_task", "")).contains("技术调研或技术方案", "推荐「写作」");
+        assertThat(TaskConfirmPrompt.rules("create_task", "")).doesNotContain("%5$s");
+    }
+
+    @Test
+    void theCompactStandardIsInTheChatPromptOnlyWhileItIsOnAndFollowsTheSkill() {
+        java.util.concurrent.atomic.AtomicReference<String> guide = new java.util.concurrent.atomic.AtomicReference<>("规范A");
+        com.superagent.core.writing.StyleGuideSource source = new com.superagent.core.writing.StyleGuideSource() {
+            @Override public java.util.Optional<String> compactGuide(boolean technical) {
+                return java.util.Optional.ofNullable(guide.get()).map(g -> technical ? g + "+技术" : g);
+            }
+            @Override public com.superagent.core.writing.StyleLexicon lexicon() { return com.superagent.core.writing.StyleLexicon.FALLBACK; }
+        };
+        assertThat(ChatService.styleGuide(source, "助手", "你好")).isEqualTo("规范A");
+        assertThat(ChatService.styleGuide(source, "助手", "写一份技术方案")).isEqualTo("规范A+技术");
+        guide.set("规范B");
+        assertThat(ChatService.styleGuide(source, "助手", "你好")).isEqualTo("规范B");
+        guide.set(null);
+        assertThat(ChatService.styleGuide(source, "助手", "你好")).isNull();
+        assertThat(ChatService.styleGuide(null, "助手", "你好")).isNull();
+    }
+
 }

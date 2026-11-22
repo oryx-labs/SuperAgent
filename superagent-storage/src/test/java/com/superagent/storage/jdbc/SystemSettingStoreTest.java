@@ -16,7 +16,7 @@ class SystemSettingStoreTest {
     @Test
     void eachCompanyHasItsOwnValueForAKey() {
         MysqlSystemSettingStore store = new MysqlSystemSettingStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:setting-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:setting-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         store.put("company.name", "Acme");
         TenantContext.run(InCompany.OTHER, () -> {
             assertThat(store.all()).isEmpty();

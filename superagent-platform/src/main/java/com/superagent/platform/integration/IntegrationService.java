@@ -36,6 +36,8 @@ public class IntegrationService {
     public static final String GITEE = "gitee";
     public static final String DINGTALK = "dingtalk";
     public static final String NOTION = "notion";
+    /** The OAuth app employees authorize Jira Cloud connectors through. */
+    public static final String ATLASSIAN = "atlassian";
     /** The company's Confluence site: no app to make, only where it is (self-hosted or Cloud). */
     public static final String CONFLUENCE = "confluence";
 
@@ -77,6 +79,9 @@ public class IntegrationService {
             new Definition(NOTION, "Notion", "/api/v1/oauth/notion/callback", List.of(
                     new FieldDef("clientId", "OAuth Client ID", false),
                     new FieldDef("clientSecret", "OAuth Client Secret", true))),
+            new Definition(ATLASSIAN, "Atlassian（Jira Cloud）", "/api/v1/oauth/atlassian/callback", List.of(
+                    new FieldDef("clientId", "Client ID", false),
+                    new FieldDef("clientSecret", "Client Secret", true))),
             new Definition(CONFLUENCE, "Confluence", null, List.of(
                     new FieldDef("url", "站点地址", false))));
 

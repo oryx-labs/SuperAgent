@@ -15,15 +15,20 @@ SuperAgent is an AI collaborative work system for companies, not a personal assi
 Maven multi-module build on **Java 21** / Spring Boot 3.5.3. There is no Maven wrapper — use a locally installed `mvn`.
 
 ```bash
-mvn clean install              # build + test every module (run from repo root)
-mvn clean install -DskipTests  # build without tests
-mvn test                       # test all modules
+mvn -T 1C clean install        # build + test every module (run from repo root), modules in parallel
+mvn -T 1C clean install -DskipTests  # build without tests
+mvn -T 1C test                 # test all modules
 
 # Scope to one module (-am also builds the modules it depends on):
 mvn -pl superagent-task -am test
 mvn -pl superagent-core test -Dtest=SomeClassTest        # single test class
 mvn -pl superagent-core test -Dtest=SomeClassTest#method # single test method
 ```
+
+Tests run in parallel (JUnit parallel execution, set in the parent pom), test classes and methods side by side. So a
+test must not share anything process-wide with others: name in-memory databases and temp paths uniquely (a UUID, not
+`System.nanoTime()`), bind servers to port 0. A test that asserts on JVM-wide state (all tracked CLI processes, all merges
+in progress) marks itself `@Isolated`, or takes a `@ResourceLock` that the tests touching the same state also take.
 
 Run the application (superagent-server is the one executable Spring Boot jar):
 

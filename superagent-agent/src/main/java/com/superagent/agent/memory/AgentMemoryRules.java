@@ -110,6 +110,25 @@ final class AgentMemoryRules {
         return String.join("\n\n", lines);
     }
 
+    /** The brief for the cheap model that condenses a long session into a handoff for the next one. */
+    static String handoffPrompt(String agentName, String transcript) {
+        return """
+                Agent「%s」的当前会话太长，要换到一个新会话继续。请把下面的对话浓缩成一份交接摘要，新会话只靠它和最近几轮原文接上。
+
+                按这四段输出，没有内容的段写「无」：
+                ## 正在做什么
+                ## 已定下的决定和约定
+                ## 还没完成的事
+                ## 关键文件、任务 id 和代码位置
+
+                要求：写结论不写过程；保留名称、数字、任务 id、文件名和路径原样；不编造对话里没有的内容；全文不超过 1500 字；
+                不要前言、解释或代码块标记。
+
+                ## 对话
+                %s
+                """.formatted(agentName, transcript);
+    }
+
     static String prompt(String agentName, String currentMemory, String transcript) {
         return prompt(agentName, currentMemory, List.of(), transcript);
     }

@@ -193,8 +193,9 @@ public class GeneralHarness implements TaskHarness {
         Task task = run.task();
         run.begin(step, step.name + (s.round > 1 ? " · 第 " + s.round + " 轮" : ""));
         List<HarnessHost.Produced> produced = run.host().produced(task);
-        List<HarnessState.PlatformCheck> platform = OutputChecks.run(s.deliverables, produced, run.host().materials(task), s.reply);
-        platform.forEach(p -> run.note((p.passed() ? "✓ " : "✕ ") + p.name() + "：" + p.detail()));
+        List<HarnessState.PlatformCheck> platform = OutputChecks.run(s.deliverables, produced, run.host().materials(task), s.reply,
+                run.host().styleLexicon());
+        platform.forEach(p -> run.note((!p.passed() ? "✕ " : p.warning() ? "⚠ " : "✓ ") + p.name() + "：" + p.detail()));
         List<String> issues = new ArrayList<>(platform.stream().filter(p -> !p.passed()).map(p -> p.name() + "：" + p.detail()).toList());
         String verdict = null;
         String checker = null;

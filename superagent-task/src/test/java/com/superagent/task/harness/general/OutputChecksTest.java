@@ -61,4 +61,19 @@ class OutputChecksTest {
     private static List<String> failing(List<PlatformCheck> checks) {
         return checks.stream().filter(c -> !c.passed()).map(PlatformCheck::name).toList();
     }
+
+    @Test
+    void aiSoundingMarkdownGetsAWarningThatNeverFailsTheCheck() {
+        String heavy = "# 方案\n\n## 现状\n\n" + "值得注意的是，赋能业务，综上所述，全方位助力闭环。".repeat(10);
+        List<PlatformCheck> checks = OutputChecks.run(List.of(new Deliverable("方案", "md")), List.of(text("方案.md", heavy)), NONE, null,
+                com.superagent.core.writing.StyleLexicon.FALLBACK);
+        assertThat(failing(checks)).isEmpty();
+        assertThat(checks).anySatisfy(c -> assertThat(c).matches(PlatformCheck::warning).matches(PlatformCheck::passed)
+                .matches(x -> x.name().startsWith(OutputChecks.WRITING) && x.detail().contains("套话")));
+        String clean = "# 方案\n\n## 现状\n\n用 `Cache` 缓存 60 秒，P95 从 420 ms 到 85 ms。\n";
+        assertThat(OutputChecks.run(List.of(), List.of(text("方案.md", clean)), NONE, "好", com.superagent.core.writing.StyleLexicon.FALLBACK))
+                .noneMatch(PlatformCheck::warning);
+        assertThat(OutputChecks.run(List.of(), List.of(text("方案.md", heavy)), NONE, "好")).noneMatch(PlatformCheck::warning); // no list: no text check
+    }
+
 }

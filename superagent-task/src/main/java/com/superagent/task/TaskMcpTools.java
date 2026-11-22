@@ -55,7 +55,8 @@ public class TaskMcpTools implements McpToolProvider {
                                 opt("delivery", "string", "编码任务做完怎么交付：merge = 合并回本地分支（本地仓库默认）；pr = 推送新分支并开 PR/MR（远程仓库默认）"),
                                 req("kind", "string", TaskKinds.DESCRIPTION),
                                 opt("genre", "string", TaskKinds.GENRE_DESCRIPTION),
-                                opt("continues_from", "string", "接着哪个任务做（任务 id，用 list_tasks 查）：新任务会等它完成，拿到它的结论，在它的基础上继续，而不是从头来"),
+                                opt("proxy_confirm_id", "string", "proxy_confirm_params 返回已代确认时给的记录 id；其他情况不填"),
+                        opt("continues_from", "string", "接着哪个任务做（任务 id，用 list_tasks 查）：新任务会等它完成，拿到它的结论，在它的基础上继续，而不是从头来"),
                                 opt("after", "string", TaskWaits.DESCRIPTION),
                                 opt("materials", "string", "要读的外部资料链接（参数表「资料」那一行里的链接），多个用换行分开；"
                                         + "建任务前会逐个读，读不到就不建任务并说明原因。只是要操作的网址（比如要发布到的后台）不要放这里。不填则检查说明里的所有链接")),
@@ -73,8 +74,21 @@ public class TaskMcpTools implements McpToolProvider {
                         props(req("id", "string", "任务 id")), "id"),
                 tool("send_task_message", "给任务发送消息：回答确认、或变更/指挥其执行（任务非运行中时）。",
                         props(req("id", "string", "任务 id"), req("content", "string", "要发送的内容")), "id", "content"),
+                tool("proxy_confirm_params", "列好任务参数表、还没问用户之前调用：看用户有没有开「代我确认」让 SuperAgent 代他确认这张表。"
+                                + "返回「已代确认」就直接调用 create_task，并在回复里说明是按用户的规则代确认的；返回别的就照常把表给用户、等用户确认。",
+                        props(req("title", "string", "任务标题"), req("open_params", "number", "表格里还标着 ❓ 的参数个数，没有就填 0"),
+                                opt("kind", "string", "表格里的任务类型（和 create_task 的 kind 一致）"),
+                                opt("continues_from", "string", "接着哪个任务做；和 create_task 的 continues_from 一致")),
+                        "title", "open_params"),
                 tool("stop_task", "停止正在运行的任务。", props(req("id", "string", "任务 id")), "id"),
                 tool("delete_task", "删除一个任务。", props(req("id", "string", "任务 id")), "id"));
+    }
+
+    /** What creating with these arguments is: carrying on a task, a complex task that splits, or an ordinary task. */
+    private static com.superagent.core.proxyconfirm.ConfirmType confirmType(JsonNode args) {
+        return strOrNull(args, "continues_from") != null ? com.superagent.core.proxyconfirm.ConfirmType.CONTINUATION
+                : "complex".equals(strOrNull(args, "kind")) ? com.superagent.core.proxyconfirm.ConfirmType.SUBTASK_SPLIT
+                : com.superagent.core.proxyconfirm.ConfirmType.TASK_PARAMS;
     }
 
     @Override
@@ -82,6 +96,10 @@ public class TaskMcpTools implements McpToolProvider {
         String text = switch (name) {
             case "create_task" -> {
                 String materials = strOrNull(args, "materials");
+                String proxyId = strOrNull(args, "proxy_confirm_id");
+                if (proxyId != null && !tasks.proxyClaimable(grant.owner(), proxyId, confirmType(args), str(args, "title"))) {
+                    throw new McpToolException("这次创建和代确认的内容对不上（类型或标题不同）：任务没有创建。把参数表给用户，等用户确认后不带 proxy_confirm_id 再创建。");
+                }
                 TaskDto t;
                 try {
                     t = tasks.create(new CreateTaskRequest(
@@ -91,6 +109,7 @@ public class TaskMcpTools implements McpToolProvider {
                             TaskWaits.parse(args), TaskKinds.genre(args)),
                             grant.owner(), grant.agentId(), grant.sessionId(), grant.messageId(),
                             materials == null ? null : List.of(materials));
+                    tasks.proxyConfirmCreated(grant.owner(), strOrNull(args, "proxy_confirm_id"), t.id());
                 } catch (UnreadableMaterialsException e) {
                     throw new McpToolException(e.getMessage() + "\n把读不到的资料、原因和解决办法照实告诉用户，等用户处理好（授权、改成公开或直接发文件）再重新确认建任务；"
                             + "不要说任务已创建。");
@@ -106,6 +125,14 @@ public class TaskMcpTools implements McpToolProvider {
                 String how = "complex".equals(t.flow()) ? "它会先拆成子任务同时执行，全部完成后自动汇总。" : "";
                 yield "已创建" + TaskKinds.label(t.flow()) + "任务 " + t.id() + "（" + t.title() + "），状态 " + t.status() + "。" + how
                         + "结果出来后会自动发到这个对话里。现在用一两句话告诉用户任务名和要做什么，然后结束这一轮，不要在对话里接着做。";
+            }
+            case "proxy_confirm_params" -> {
+                int open = args.path("open_params").asInt(1);
+                var type = confirmType(args);
+                String record = tasks.proxyConfirmed(grant.owner(), tasks.projectOfAgent(grant.agentId()), type, str(args, "title"),
+                        java.util.Map.of("openParams", open, "clear", open == 0, "why", "参数表里没有待确认项，按你的规则确认"));
+                yield record != null ? "已代确认：按用户的规则，这张参数表不用再问用户。现在调用 create_task 创建任务，并带上 proxy_confirm_id=" + record
+                        : "没有代确认：照常把参数表给用户，等用户确认。";
             }
             case "coding_targets" -> tasks.codingTargets(grant.owner(), grant.agentId());
             case "article_genres" -> {

@@ -2,6 +2,9 @@ package com.superagent.task.harness.coding;
 
 import com.superagent.task.harness.HarnessState;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
@@ -15,7 +18,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** What a restart in the middle of a local delivery leaves behind, and what is (and isn't) undone on the next start. */
+// MergeGuard counts every merge in this JVM, and these tests assert on that count: they run one at a time,
+// and never alongside another class that merges.
+@ResourceLock(MergeRecoveryTest.MERGES)
+@Execution(ExecutionMode.SAME_THREAD)
 class MergeRecoveryTest {
+
+    static final String MERGES = "MergeGuard";
 
     @TempDir
     Path tmp;

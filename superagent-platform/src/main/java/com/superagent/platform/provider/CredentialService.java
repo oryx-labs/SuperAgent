@@ -63,6 +63,8 @@ public class CredentialService {
     private final SecretCipher cipher;
     private final ProviderInferenceProbe probe;
     private final MachineCredentials machine; // null in tests: nothing to import
+    @org.springframework.beans.factory.annotation.Value("${superagent.provider.codex.use-cli-login:false}")
+    private boolean codexCliLogin;
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
     private final ExecutorService checker = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "credential-check");
@@ -174,7 +176,12 @@ public class CredentialService {
         if (used.credential() != null) {
             store.find(used.id()).ifPresent(c -> store.save(c.withHealth(ProviderCredential.ERROR, tail(error))));
         }
-        Choice next = choose(providerKey, used.id());
+        Choice next;
+        try {
+            next = choose(providerKey, used.id());
+        } catch (NoCompanyKeyException e) {
+            return Optional.empty();
+        }
         if (next.id().equals(used.id())) {
             return Optional.empty();
         }
@@ -186,6 +193,14 @@ public class CredentialService {
     /** Whether this company has a key of its own for this CLI (an enabled pool entry); never throws. */
     public boolean hasOwnKey(String providerKey) {
         return POOLED.contains(providerKey) && store.list(providerKey).stream().anyMatch(ProviderCredential::enabled);
+    }
+
+    boolean allowsCliLogin(String providerKey) {
+        return codexCliLogin && "codex".equals(providerKey);
+    }
+
+    boolean canChoose(String providerKey) {
+        return hasOwnKey(providerKey) || allowsCliLogin(providerKey);
     }
 
     private Choice choose(String providerKey, String excluding) {
@@ -201,6 +216,9 @@ public class CredentialService {
         // Every company runs on its own keys only: never on the machine's environment or CLI logins, which are no
         // company's (each will have a runtime of its own; for now they share one machine).
         if (pool.isEmpty()) {
+            if (allowsCliLogin(providerKey) && !hasOwnKey(providerKey) && !ENV_ID.equals(excluding)) {
+                return new Choice(null);
+            }
             throw new NoCompanyKeyException(providerKey);
         }
         return new Choice(toRun(pool.get(0)));

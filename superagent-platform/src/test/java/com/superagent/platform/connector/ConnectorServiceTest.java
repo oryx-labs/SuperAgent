@@ -49,6 +49,7 @@ class ConnectorServiceTest {
     private IntegrationService integrations;
     private ConnectorService service;
     private final FakeGitee gitee = new FakeGitee();
+    private final FakeAtlassian atlassian = new FakeAtlassian();
     private SecretCipher cipher;
 
     /** Gitee as far as the refresh goes: hands out a new token, or refuses, or can't be reached. */
@@ -67,6 +68,21 @@ class ConnectorServiceTest {
             };
         }
         @Override public String fetchLogin(String accessToken) { return "ada-gitee"; }
+    }
+
+    /** Atlassian as far as the refresh goes: a new token (with the next refresh token), or a refusal. */
+    private static final class FakeAtlassian implements OAuthProvider {
+        boolean reject;
+        int refreshes;
+        @Override public String key() { return "atlassian"; }
+        @Override public String authorizeUrl(String clientId, String redirectUri, String state) { return "https://auth.test/authorize"; }
+        @Override public Tokens exchange(String id, String secret, String code, String redirect) { return new Tokens("a0", "ar0", Instant.now().plusSeconds(3600)); }
+        @Override public Tokens refresh(String id, String secret, String refreshToken) throws IOException {
+            refreshes++;
+            if (reject) throw new TokenRejectedException("invalid_grant");
+            return new Tokens("atl-fresh", "ar-" + refreshes, Instant.now().plusSeconds(3600));
+        }
+        @Override public String fetchLogin(String accessToken) { return "ada@acme.com"; }
     }
 
     @BeforeEach
@@ -103,10 +119,10 @@ class ConnectorServiceTest {
         };
         cipher = new SecretCipher("", tmp.resolve("secret.key").toString());
         integrations = new IntegrationService(settingStore, cipher, published::add);
-        ConnectorOAuthService oauth = new ConnectorOAuthService(store, creds, List.of(new GitHubOAuthClient(), gitee),
+        ConnectorOAuthService oauth = new ConnectorOAuthService(store, creds, List.of(new GitHubOAuthClient(), gitee, atlassian),
                 cipher, integrations);
         service = new ConnectorService(store, creds, sources, oauth, cipher,
-                new McpGrants("http://127.0.0.1:18080/mcp"), integrations, settingStore, new ConfluenceSite());
+                new McpGrants("http://127.0.0.1:18080/mcp"), integrations, settingStore, new ConfluenceSite(), new JiraSite());
         service.seedDefaults(); // what each company's start does
     }
 
@@ -324,5 +340,94 @@ class ConnectorServiceTest {
                 .doesNotContainKey("CONFLUENCE_PERSONAL_TOKEN");
         assertThatThrownBy(() -> new ConfluenceSite().verify("https://acme.atlassian.net", "", "api-t"))
                 .hasMessageContaining("邮箱");
+    }
+
+    private static JiraConnectorRequest jira(String name, String product, String site) {
+        return new JiraConnectorRequest(name, null, product, site, true);
+    }
+
+    private static SaveConnectorRequest jiraEdit(String name, String site) {
+        // transport / authMethod in an edit must be ignored for a Jira connector; the endpoint carries the site
+        return new SaveConnectorRequest(name, null, "none", "stdio", site, "X", null, true);
+    }
+
+    @Test
+    void jiraCloudRunsOnTheOfficialMcpWithEachEmployeesOwnRenewedToken() {
+        integrations.update("atlassian", new SaveIntegrationRequest(true, Map.of("clientId", "cid", "clientSecret", "csecret")), "http://sa");
+        ConnectorDto one = service.createJira(jira("Jira A", "jira-cloud", null), "admin");
+        ConnectorDto two = service.createJira(jira("Jira B", "jira-cloud", null), "admin");
+        assertThat(one.authMethod()).isEqualTo("oauth");
+        assertThat(one.endpoint()).isEqualTo("https://mcp.atlassian.com/v2/mcp");
+        assertThat(one.oauthConfigured()).isTrue();
+
+        // Not authorized: nothing is handed to the run. Ada's token goes only to Ada's runs, and is renewed when about to expire.
+        assertThat(service.mcpServersFor("ada")).noneMatch(s -> s.url() != null && s.url().contains("atlassian"));
+        credentials.put(one.id() + "/ada", new ConnectorCredential(one.id(), "ada", cipher.encrypt("old"), "ada@acme.com",
+                Instant.now(), cipher.encrypt("ar0"), Instant.now().plusSeconds(60)));
+        credentials.put(two.id() + "/bob", new ConnectorCredential(two.id(), "bob", cipher.encrypt("bob-token"), "bob@acme.com",
+                Instant.now(), cipher.encrypt("br0"), Instant.now().plusSeconds(3600)));
+        assertThat(service.mcpServersFor("ada")).singleElement().satisfies(s -> {
+            assertThat(s.url()).isEqualTo("https://mcp.atlassian.com/v2/mcp");
+            assertThat(s.headers()).containsEntry("Authorization", "Bearer atl-fresh");
+        });
+        assertThat(cipher.decrypt(credentials.get(one.id() + "/ada").refreshCipher())).isEqualTo("ar-1");
+        assertThat(service.mcpServersFor("bob")).singleElement()
+                .satisfies(s -> assertThat(s.headers()).containsEntry("Authorization", "Bearer bob-token"));
+        assertThat(service.list("ada", false).toString()).doesNotContain("atl-fresh").doesNotContain("bob-token");
+
+        // Atlassian refuses the refresh token: Ada authorizes again. Revoking leaves Bob alone.
+        credentials.put(one.id() + "/ada", new ConnectorCredential(one.id(), "ada", cipher.encrypt("old"), "ada@acme.com",
+                Instant.now(), cipher.encrypt("ar-1"), Instant.now().plusSeconds(60)));
+        atlassian.reject = true;
+        assertThat(service.mcpServersFor("ada")).isEmpty();
+        assertThat(credentials).doesNotContainKey(one.id() + "/ada");
+        service.revoke(two.id(), "bob", false);
+        assertThat(service.mcpServersFor("bob")).isEmpty();
+    }
+
+    @Test
+    void atlassianAuthorizeUrlAsksForTheScopesTheSignInAndRefreshNeed() {
+        String url = new AtlassianOAuthClient("https://auth.atlassian.com", "https://api.atlassian.com")
+                .authorizeUrl("cid", "http://sa/cb", "st");
+        assertThat(url).contains("audience=api.atlassian.com").contains("offline_access").contains("read%3Ame");
+    }
+
+    @Test
+    void jiraDataCenterChecksThePatAgainstTheSiteAndPassesItOnlyThroughTheEnvironment() throws IOException {
+        HttpServer site = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        site.createContext("/rest/api/2/myself", ex -> {
+            boolean ok = "Bearer good-pat".equals(ex.getRequestHeaders().getFirst("Authorization"));
+            byte[] body = "{\"name\":\"ada.l\"}".getBytes(StandardCharsets.UTF_8);
+            ex.sendResponseHeaders(ok ? 200 : 401, ok ? body.length : -1);
+            if (ok) {
+                ex.getResponseBody().write(body);
+            }
+            ex.close();
+        });
+        site.start();
+        try {
+            String url = "http://127.0.0.1:" + site.getAddress().getPort();
+            assertThatThrownBy(() -> service.createJira(jira("Jira", "jira-dc", "jira.example.com"), "admin"))
+                    .hasMessageContaining("http");
+            ConnectorDto created = service.createJira(jira("Jira DC", "jira-dc", url + "/"), "admin");
+            assertThat(created.site()).isEqualTo(url);
+            assertThat(created.authMethod()).isEqualTo("personal_token");
+
+            assertThatThrownBy(() -> service.authorize(created.id(), "ada", "stale", null, false)).hasMessageContaining("无效");
+            assertThat(service.authorize(created.id(), "ada", "good-pat", null, false).account()).isEqualTo("ada.l");
+            assertThat(service.mcpServersFor("ada")).singleElement().satisfies(s -> {
+                assertThat(s.command()).isEqualTo("uvx");
+                assertThat(s.args()).containsExactly("mcp-atlassian@0.23.1");
+                assertThat(s.env()).containsEntry("JIRA_URL", url).containsEntry("JIRA_PERSONAL_TOKEN", "good-pat");
+            });
+            assertThat(service.mcpServersFor("bob")).isEmpty();
+            assertThat(service.list("ada", true).toString()).doesNotContain("good-pat");
+
+            // Another site means the old tokens no longer apply.
+            service.update(created.id(), jiraEdit("Jira DC", "https://jira2.example.com"), "admin");
+            assertThat(service.mcpServersFor("ada")).isEmpty();
+        } finally {
+            site.stop(0);
+        }
     }
 }

@@ -23,6 +23,9 @@ public class SettingsService {
     static final String CODE_ROOTS = "task.coding.local-roots";
     static final String REVIEW_MAX_ROUNDS = "task.coding.review-max-rounds";
     static final String REVIEW_MAX_SPEND = "task.coding.review-max-spend";
+    static final String CHAT_MAX_TOKENS = "chat.session.max-tokens";
+    static final String CHAT_MAX_TURNS = "chat.session.max-turns";
+    static final String DOC_STYLE_ON = "doc-style.on", DOC_STYLE_SKILL = "doc-style.skill";
     static final String SUBTITLE_CALIBRATORS = "task.subtitle.max-calibrators";
     /** The same key the CodeBuddy runner and probe read. */
     static final String CODEBUDDY_INTERNET_ENV = "codebuddy.internet-environment";
@@ -33,6 +36,8 @@ public class SettingsService {
     public static final int DEFAULT_MAX_SUBTASKS = 10;
     public static final int DEFAULT_MAX_PARALLEL = 5;
     public static final int DEFAULT_SUBTITLE_CALIBRATORS = 3;
+    public static final int DEFAULT_CHAT_MAX_TOKENS = 300_000;
+    public static final int DEFAULT_CHAT_MAX_TURNS = 40;
 
     private final SystemSettingStore store;
     private final ProviderService providerService;
@@ -67,7 +72,9 @@ public class SettingsService {
                 "true".equals(all.get(TASK_FIXED_ON)), list(all, TASK_FIXED_MODELS), lines(all, CODE_ROOTS),
                 number(all, REVIEW_MAX_ROUNDS, DEFAULT_REVIEW_MAX_ROUNDS), decimal(all, REVIEW_MAX_SPEND, DEFAULT_REVIEW_MAX_SPEND),
                 number(all, SUBTITLE_CALIBRATORS, DEFAULT_SUBTITLE_CALIBRATORS),
-                trimToNull(all.get(CODEBUDDY_INTERNET_ENV)) == null ? "internal" : all.get(CODEBUDDY_INTERNET_ENV).strip());
+                trimToNull(all.get(CODEBUDDY_INTERNET_ENV)) == null ? "internal" : all.get(CODEBUDDY_INTERNET_ENV).strip(),
+                number(all, CHAT_MAX_TOKENS, DEFAULT_CHAT_MAX_TOKENS), number(all, CHAT_MAX_TURNS, DEFAULT_CHAT_MAX_TURNS),
+                !"false".equals(all.get(DOC_STYLE_ON)), trimToNull(all.get(DOC_STYLE_SKILL)));
     }
 
     /** One of CodeBuddy's regions, lower-cased; anything else is refused. */
@@ -109,6 +116,10 @@ public class SettingsService {
         Double spend = request.codingReviewMaxSpend() == null ? null : spend(request.codingReviewMaxSpend());
         Integer calibrators = request.subtitleMaxCalibrators() == null ? null
                 : bounded(request.subtitleMaxCalibrators(), 1, 10, "字幕校准模型数上限");
+        Integer chatTokens = request.chatSessionMaxTokens() == null ? null
+                : bounded(request.chatSessionMaxTokens(), 20_000, 5_000_000, "会话切换的 token 阈值");
+        Integer chatTurns = request.chatSessionMaxTurns() == null ? null
+                : bounded(request.chatSessionMaxTurns(), 5, 1000, "会话切换的轮数阈值");
         String companyName = name(request.companyName(), 100);
         String shortName = name(request.companyShortName(), 20);
 
@@ -140,6 +151,18 @@ public class SettingsService {
         }
         if (calibrators != null) {
             store.put(SUBTITLE_CALIBRATORS, String.valueOf(calibrators));
+        }
+        if (chatTokens != null) {
+            store.put(CHAT_MAX_TOKENS, String.valueOf(chatTokens));
+        }
+        if (chatTurns != null) {
+            store.put(CHAT_MAX_TURNS, String.valueOf(chatTurns));
+        }
+        if (request.docStyleOn() != null) {
+            store.put(DOC_STYLE_ON, String.valueOf(request.docStyleOn()));
+        }
+        if (request.docStyleSkill() != null) {
+            store.put(DOC_STYLE_SKILL, request.docStyleSkill().strip());
         }
         if (request.codebuddyInternetEnvironment() != null) {
             store.put(CODEBUDDY_INTERNET_ENV, requireCodebuddyInternetEnvironment(request.codebuddyInternetEnvironment()));
@@ -188,6 +211,16 @@ public class SettingsService {
     /** …or once the task has spent this much (USD). */
     public double codingReviewMaxSpend() {
         return decimal(store.all(), REVIEW_MAX_SPEND, DEFAULT_REVIEW_MAX_SPEND);
+    }
+
+    /** A chat session moves to a new one once its last turn read this many tokens. */
+    public int chatSessionMaxTokens() {
+        return number(store.all(), CHAT_MAX_TOKENS, DEFAULT_CHAT_MAX_TOKENS);
+    }
+
+    /** …or once it has had this many turns. */
+    public int chatSessionMaxTurns() {
+        return number(store.all(), CHAT_MAX_TURNS, DEFAULT_CHAT_MAX_TURNS);
     }
 
     /** A subtitle task's disputed spans go to at most this many text models. */

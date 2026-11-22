@@ -20,7 +20,7 @@ class SuperAgentWorkStoreTest {
     @Test
     void keepsOneRowPerTaskScopedToItsOwnerAndEventsInOrder() {
         MysqlSuperAgentWorkStore store = new MysqlSuperAgentWorkStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:sawork-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:sawork-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant t = Instant.now().truncatedTo(ChronoUnit.MILLIS);
         SuperAgentWork w = new SuperAgentWork("t1", "alice", "p1", "Tidy the docs", "a1", "Writer",
                 SuperAgentWork.RUNNING, null, t, null, t);

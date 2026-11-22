@@ -17,7 +17,7 @@ class TaskDependencyStoreTest {
 
     private static JdbcTaskDependencyStore store() {
         return new JdbcTaskDependencyStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:dep-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")),
+                "jdbc:h2:mem:dep-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")),
                 JdbcTaskDependencyStore.MYSQL_DDL);
     }
 

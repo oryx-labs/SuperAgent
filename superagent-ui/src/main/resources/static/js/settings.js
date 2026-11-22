@@ -25,6 +25,10 @@ const sel = {
   reviewMaxRounds: document.getElementById("sfReviewMaxRounds"),
   reviewMaxSpend: document.getElementById("sfReviewMaxSpend"),
   subtitleMaxCalibrators: document.getElementById("sfSubtitleMaxCalibrators"),
+  chatMaxTokens: document.getElementById("sfChatMaxTokens"),
+  chatMaxTurns: document.getElementById("sfChatMaxTurns"),
+  docStyleOn: document.getElementById("sfDocStyleOn"),
+  docStyleSkill: document.getElementById("sfDocStyleSkill"),
   missing: document.getElementById("sfAgentModelMissing"),
   filtered: document.getElementById("sfAgentModelFiltered"),
   status: document.getElementById("sfStatus"),
@@ -49,6 +53,10 @@ async function loadSettingsForm() {
   sel.reviewMaxRounds.value = systemSettings.codingReviewMaxRounds || 8;
   sel.reviewMaxSpend.value = systemSettings.codingReviewMaxSpend || 30;
   sel.subtitleMaxCalibrators.value = systemSettings.subtitleMaxCalibrators || 3;
+  sel.chatMaxTokens.value = systemSettings.chatSessionMaxTokens || 300000;
+  sel.chatMaxTurns.value = systemSettings.chatSessionMaxTurns || 40;
+  sel.docStyleOn.checked = systemSettings.docStyleOn !== false;
+  fillDocStyleSkills(systemSettings.docStyleSkill || "");
 
   sel.agentModel.innerHTML = "";
   const def = document.createElement("option");
@@ -263,6 +271,10 @@ sel.form.addEventListener("submit", async e => {
       codingReviewMaxRounds: Number(sel.reviewMaxRounds.value) || null,
       codingReviewMaxSpend: Number(sel.reviewMaxSpend.value) || null,
       subtitleMaxCalibrators: Number(sel.subtitleMaxCalibrators.value) || null,
+      chatSessionMaxTokens: Number(sel.chatMaxTokens.value) || null,
+      chatSessionMaxTurns: Number(sel.chatMaxTurns.value) || null,
+      docStyleOn: sel.docStyleOn.checked,
+      docStyleSkill: sel.docStyleSkill.value,
     });
     if (!res || !res.data) throw new Error((res && res.message) || "no data");
     systemSettings = res.data;
@@ -270,6 +282,10 @@ sel.form.addEventListener("submit", async e => {
     sel.reviewMaxRounds.value = systemSettings.codingReviewMaxRounds || 8;
     sel.reviewMaxSpend.value = systemSettings.codingReviewMaxSpend || 30;
     sel.subtitleMaxCalibrators.value = systemSettings.subtitleMaxCalibrators || 3;
+  sel.chatMaxTokens.value = systemSettings.chatSessionMaxTokens || 300000;
+  sel.chatMaxTurns.value = systemSettings.chatSessionMaxTurns || 40;
+    sel.docStyleOn.checked = systemSettings.docStyleOn !== false;
+    fillDocStyleSkills(systemSettings.docStyleSkill || "");
     backupModels = (systemSettings.backupModels || []).slice();
     renderBackupModels();
     fixedModels = (systemSettings.taskFixedModels || []).slice();
@@ -319,3 +335,22 @@ sel.logoReset.addEventListener("click", async () => {
   try { await api.resetLogo(); await refreshLogo(); showToast(L("settings.logoResetDone"), false); }
   catch (e) { showToast(e.message, true); }
 });
+
+/** The select lists the company's skills; an empty value is the default standard (去 AI 味写作规范). */
+function fillDocStyleSkills(current) {
+  const select = sel.docStyleSkill;
+  select.innerHTML = "";
+  const def = document.createElement("option");
+  def.value = "";
+  def.textContent = "去 AI 味写作规范";
+  select.appendChild(def);
+  fetch("/api/v1/skills").then(r => r.json()).then(res => {
+    ((res && res.data) || []).filter(s => s.space === "company" && s.name !== "去 AI 味写作规范").forEach(s => {
+      const o = document.createElement("option");
+      o.value = s.id;
+      o.textContent = s.name;
+      select.appendChild(o);
+    });
+    select.value = current;
+  }).catch(() => { select.value = ""; });
+}

@@ -35,10 +35,10 @@ public final class HarnessViews {
                 !GENERAL.equals(s.harness) && !COMPLEX.equals(s.harness) ? null : new HarnessDto.General(s.round, s.roundLimit,
                         s.deliverables.stream().map(d -> new HarnessDto.Deliverable(d.name(), d.type())).toList(),
                         s.checks.stream().map(c -> new HarnessDto.CheckRound(c.round(), c.at(), c.passed(),
-                                c.platform().stream().map(p -> new HarnessDto.PlatformCheck(p.name(), p.passed(), p.detail())).toList(),
+                                c.platform().stream().map(p -> new HarnessDto.PlatformCheck(p.name(), p.passed(), p.detail(), p.warning())).toList(),
                                 c.verdict(), c.checker(), c.issues())).toList(), s.reply),
                 s.conflicts.stream().map(c -> new HarnessDto.ConflictRound(c.round(), c.at(), c.model(), c.commit(), c.files(),
-                        c.summary(), c.checks().stream().map(p -> new HarnessDto.PlatformCheck(p.name(), p.passed(), p.detail()))
+                        c.summary(), c.checks().stream().map(p -> new HarnessDto.PlatformCheck(p.name(), p.passed(), p.detail(), p.warning()))
                                 .toList(), c.verdict(), c.passed(), c.reason())).toList(),
                 s.article == null ? null : article(s.article));
     }

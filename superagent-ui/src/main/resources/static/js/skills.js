@@ -81,12 +81,53 @@ const skPerson = username => skPeople[username] || username || "—";
 /** The layer a new skill starts in: the one the source filter shows, else the user's own. */
 const skNewLayer = () => skel.source.value === "company" ? "company" : "personal";
 
+// ---------- category side panel: categories come from the skills themselves, with counts ----------
+const SK_UNCATEGORIZED = "\u0000";
+let skCategory = "";
+const SK_CAT_ICONS = {
+  "写作": '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+  "设计": '<circle cx="12" cy="12" r="8.5"/><circle cx="8.5" cy="10" r="1.2"/><circle cx="12" cy="7.5" r="1.2"/><circle cx="15.5" cy="10" r="1.2"/><path d="M12 20.5c-1.5 0-2-1.2-1.4-2.3.7-1.3-.2-2.7-1.7-2.7H6"/>',
+  "编码": '<path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>',
+  "运营": '<path d="M4 10v4h3l6 4V6L7 10z"/><path d="M16.5 9a4 4 0 0 1 0 6"/>',
+  all: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  other: '<path d="M4 7.5 12 4l8 3.5v9L12 20l-8-3.5z"/><path d="M4 7.5 12 11l8-3.5M12 11v9"/>',
+};
+
+function renderSkillSide() {
+  const side = document.getElementById("skSide");
+  const counts = new Map();
+  skills.forEach(s => { const c = (s.category || "").trim() || SK_UNCATEGORIZED; counts.set(c, (counts.get(c) || 0) + 1); });
+  if (skCategory && !counts.has(skCategory)) skCategory = ""; // the chosen category was emptied
+  const cats = [...counts.keys()].filter(c => c !== SK_UNCATEGORIZED).sort((a, b) => counts.get(b) - counts.get(a) || a.localeCompare(b));
+  if (counts.has(SK_UNCATEGORIZED)) cats.push(SK_UNCATEGORIZED);
+  side.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "ws-head";
+  head.textContent = L("sk.categories");
+  side.appendChild(head);
+  const item = (key, label, n) => {
+    const b = wsItem(label, key === "" ? "all" : SK_CAT_ICONS[key] ? key : "other", skCategory === key, () => {
+      skCategory = key;
+      renderSkillGrid();
+    });
+    const c = document.createElement("span");
+    c.className = "ws-item__count";
+    c.textContent = n;
+    b.appendChild(c);
+    side.appendChild(b);
+  };
+  item("", L("sk.catAll"), skills.length);
+  cats.forEach(c => item(c, c === SK_UNCATEGORIZED ? L("sk.uncategorized") : c, counts.get(c)));
+}
+
 function renderSkillGrid() {
   renderSkillOwners();
+  renderSkillSide();
   const q = skel.search.value.trim().toLowerCase();
   const source = skel.source.value, owner = skel.owner.value, state = skel.state.value;
   const shown = skills.filter(s =>
-    (!q || [s.name, s.description, s.category].some(v => (v || "").toLowerCase().includes(q)))
+    (!skCategory || ((s.category || "").trim() || SK_UNCATEGORIZED) === skCategory)
+    && (!q || [s.name, s.description, s.category].some(v => (v || "").toLowerCase().includes(q)))
     && (!source || skLayerOf(s) === source)
     && (!owner || s.createdBy === owner)
     && (!state || (state === "on") === s.enabled)
@@ -96,7 +137,7 @@ function renderSkillGrid() {
   skel.mine.classList.toggle("is-active", skMineOnly);
   skel.mine.setAttribute("aria-pressed", String(skMineOnly));
   skel.grid.replaceChildren(...shown.map(skillCard));
-  const filtered = q || source || owner || state || skMineOnly;
+  const filtered = q || source || owner || state || skMineOnly || skCategory;
   skel.count.textContent = L("sk.count", { n: shown.length });
   skel.count.hidden = !skills.length;
   skel.empty.hidden = shown.length > 0;

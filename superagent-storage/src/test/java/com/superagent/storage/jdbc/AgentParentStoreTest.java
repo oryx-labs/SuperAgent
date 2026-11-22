@@ -17,7 +17,7 @@ class AgentParentStoreTest {
     @Test
     void anotherCompanyNeitherSeesNorOverwritesAParent() {
         JdbcAgentParentStore store = new JdbcAgentParentStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:parent-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")),
+                "jdbc:h2:mem:parent-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")),
                 JdbcAgentParentStore.MYSQL_DDL);
         store.set("a1", "p1");
 

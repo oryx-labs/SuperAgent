@@ -46,6 +46,6 @@ class TaskAgentStoreTest {
 
     private static MysqlTaskAgentStore store() {
         return new MysqlTaskAgentStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:taskagent-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:taskagent-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
     }
 }

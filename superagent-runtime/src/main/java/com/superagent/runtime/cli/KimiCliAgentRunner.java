@@ -27,13 +27,21 @@ public class KimiCliAgentRunner extends JsonLineCliRunner {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final long MAX_CONTEXT = 262144;
 
-    private final Path home;
-
     public KimiCliAgentRunner(@Value("${superagent.agent.kimi.command:kimi}") String command,
-                              @Value("${superagent.agent.kimi.timeout-seconds:600}") long timeoutSeconds,
-                              @Value("${superagent.agent.kimi.home:./data/runtime/kimi}") String home) {
+                              @Value("${superagent.agent.kimi.timeout-seconds:600}") long timeoutSeconds) {
         super(command, timeoutSeconds);
-        this.home = Path.of(home).toAbsolutePath().normalize();
+    }
+
+    private static Path home(AgentRunRequest request) {
+        return Path.of(request.workspaceDir(), ".superagent", "kimi-home", request.sessionId()).toAbsolutePath().normalize();
+    }
+
+    @Override
+    public void run(AgentRunRequest request, com.superagent.core.chat.AgentEventSink sink,
+                                 com.superagent.core.chat.Cancellation cancellation) {
+        synchronized (sessionLock(request)) {
+            super.run(request, sink, cancellation);
+        }
     }
 
     @Override
@@ -50,7 +58,11 @@ public class KimiCliAgentRunner extends JsonLineCliRunner {
 
     @Override
     protected List<String> buildCommand(AgentRunRequest request, String resumeId, List<Path> cleanup) throws IOException {
-        writeHome(request);
+        Path home = home(request);
+        Files.createDirectories(home);
+        cleanup.add(home.resolve("config.toml"));
+        cleanup.add(home.resolve("mcp.json"));
+        writeHome(request, home);
         List<String> cmd = new ArrayList<>(List.of(command(), "-p", prompt(request, resumeId), "--output-format", "stream-json"));
         if (resumeId != null) {
             cmd.addAll(List.of("-S", resumeId));
@@ -63,7 +75,7 @@ public class KimiCliAgentRunner extends JsonLineCliRunner {
         return null; // -p
     }
 
-    private synchronized void writeHome(AgentRunRequest request) throws IOException {
+    private void writeHome(AgentRunRequest request, Path home) throws IOException {
         Files.createDirectories(home);
         writePrivate(home.resolve("config.toml"), config(request.model(), request.credential().baseUrl(), request.credential().apiKey()));
         List<CodexCliAgentRunner.McpServer> servers = CodexCliAgentRunner.mcpServers(request);
@@ -100,7 +112,7 @@ public class KimiCliAgentRunner extends JsonLineCliRunner {
 
     @Override
     protected Map<String, String> environment(AgentRunRequest request) {
-        return Map.of("KIMI_CODE_HOME", home.toString());
+        return Map.of("KIMI_CODE_HOME", home(request).toString());
     }
 
     @Override
@@ -116,7 +128,7 @@ public class KimiCliAgentRunner extends JsonLineCliRunner {
 
     @Override
     protected Object beforeRun(AgentRunRequest request) {
-        return wireSizes(home);
+        return wireSizes(home(request));
     }
 
     @Override
@@ -126,7 +138,7 @@ public class KimiCliAgentRunner extends JsonLineCliRunner {
         if (session == null || !(before instanceof Map<?, ?> sizes)) {
             return List.of();
         }
-        return List.of(appendedUsage(home, session, (Map<Path, Long>) sizes, modelOf(request)));
+        return List.of(appendedUsage(home(request), session, (Map<Path, Long>) sizes, modelOf(request)));
     }
 
     static Map<Path, Long> wireSizes(Path home) {

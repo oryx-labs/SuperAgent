@@ -21,7 +21,7 @@ class AutomationStoreTest {
 
     private static JdbcTemplate h2() {
         DriverManagerDataSource ds = new DriverManagerDataSource(
-                "jdbc:h2:mem:automation-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
+                "jdbc:h2:mem:automation-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
         return new JdbcTemplate(ds);
     }
 

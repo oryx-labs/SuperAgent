@@ -81,6 +81,18 @@ class ChatTaskResultsTest {
     }
 
     @Test
+    void aFailureThatWillBeRetriedIsNotReportedButTheFinalOneIs() {
+        when(taskAgents.origin("t4")).thenReturn(Optional.of(new TaskOrigin("t4", "dev", "s", "m1")));
+        when(agents.find("dev")).thenReturn(Optional.of(agent("dev", AgentKind.STANDARD)));
+        when(chats.listSessionsByAgent("dev")).thenReturn(List.of(session("s", 1)));
+
+        results.onTaskStatus(new NoticeEvents.TaskStatusChanged("t4", "ada", "x", "web_chat", "error", "boom", null, null, false, true));
+        verify(chats, never()).appendMessage(any());
+        results.onTaskStatus(new NoticeEvents.TaskStatusChanged("t4", "ada", "x", "web_chat", "error", "模型 m，已重试 9 次；最后错误：boom", null, null));
+        verify(chats).appendMessage(any());
+    }
+
+    @Test
     void theSuperAgentsTasksReportThroughItsBackgroundNotHere() {
         when(taskAgents.origin("t2")).thenReturn(Optional.of(new TaskOrigin("t2", "sa", "s", "m")));
         when(agents.find("sa")).thenReturn(Optional.of(agent("sa", AgentKind.SUPER)));

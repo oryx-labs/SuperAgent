@@ -142,6 +142,11 @@ public class AgentMemoryService {
      * them. Messages in {@code exclude} (the one being sent now) are left out. Null when there is nothing at all.
      */
     public String context(Agent agent, Collection<String> exclude, String user) {
+        return context(agent, exclude, user, null);
+    }
+
+    /** As above, with {@code handoff} (a summary of the session just left) ahead of the recent messages. */
+    public String context(Agent agent, Collection<String> exclude, String user, String handoff) {
         String memory = read(agent);
         List<ChatMessage> all = messages(agent.id()).stream()
                 .filter(m -> exclude == null || !exclude.contains(m.id())).toList();
@@ -150,6 +155,9 @@ public class AgentMemoryService {
         java.util.List<String> parts = new java.util.ArrayList<>();
         if (memory != null && !memory.isBlank()) {
             parts.add(memory.strip());
+        }
+        if (handoff != null && !handoff.isBlank()) {
+            parts.add("## 上一个会话的交接摘要（会话太长，已换到新会话；以此接着做）\n" + handoff.strip());
         }
         if (!transcript.isBlank()) {
             parts.add("## 最近的对话（原文，从较早到最新；更早的对话用 chat_history_search / chat_history_read 查）\n" + transcript);
@@ -461,8 +469,52 @@ public class AgentMemoryService {
     }
 
 
+    /** Handoff summaries are only worth waiting for so long: the turn that triggers one is held up by it. */
+    public static final Duration HANDOFF_TIMEOUT = Duration.ofSeconds(90);
+
     /** One run of the cheapest model that can run (else the default), no tools, in a scratch directory; returns its final text. */
     String summarize(Agent agent, String prompt) {
+        return runCheap(agent, prompt, com.superagent.core.usage.UsageContext.SOURCE_MEMORY, new Cancellation());
+    }
+
+    /**
+     * A handoff summary of an old session for the next one, within {@code timeout}; null when it can't be made
+     * (the new session then starts from memory and recent messages alone). The reason is returned in {@code why}.
+     */
+    public String handoff(Agent agent, List<ChatMessage> session, Duration timeout, java.util.function.Consumer<String> why) {
+        String transcript = AgentMemoryRules.carryOver(session, zone, recentMessages);
+        if (transcript.isBlank()) {
+            why.accept("旧会话没有内容");
+            return null;
+        }
+        Cancellation cancel = new Cancellation();
+        java.util.concurrent.FutureTask<String> run = new java.util.concurrent.FutureTask<>(() ->
+                runCheap(agent, AgentMemoryRules.handoffPrompt(agent.name(), transcript),
+                        com.superagent.core.usage.UsageContext.SOURCE_SESSION_HANDOFF, cancel));
+        Thread worker = new Thread(TenantContext.wrap(run), "session-handoff");
+        worker.setDaemon(true);
+        worker.start();
+        try {
+            String out = run.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (out == null || out.isBlank()) {
+                why.accept("模型没有返回摘要");
+                return null;
+            }
+            return out.strip();
+        } catch (java.util.concurrent.TimeoutException e) {
+            cancel.cancel();
+            why.accept("生成超时（" + timeout.toSeconds() + " 秒）");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            cancel.cancel();
+            why.accept("被中断");
+        } catch (java.util.concurrent.ExecutionException e) {
+            why.accept(String.valueOf(e.getCause() == null ? e.getMessage() : e.getCause().getMessage()));
+        }
+        return null;
+    }
+
+    private String runCheap(Agent agent, String prompt, String source, Cancellation cancellation) {
         String model = (modelRouter == null ? java.util.Optional.<com.superagent.core.provider.ModelRouter.ModelChoice>empty()
                 : modelRouter.cheapest()).map(com.superagent.core.provider.ModelRouter.ModelChoice::model)
                 .orElseGet(settings::agentDefaultModel);
@@ -495,8 +547,8 @@ public class AgentMemoryService {
                     credentials == null ? null : credentials.current(type.cliName()).credential()),
                     // Keeping an agent's memory is part of using it: on its owner.
                     com.superagent.core.usage.UsageRecorder.tap(usage, new com.superagent.core.usage.UsageContext(agent.owner(),
-                            com.superagent.core.usage.UsageContext.SOURCE_MEMORY, agent.id(), null, null, type.cliName()), sink),
-                    new Cancellation());
+                            source, agent.id(), null, null, type.cliName()), sink),
+                    cancellation);
         } finally {
             deleteQuietly(scratch);
         }

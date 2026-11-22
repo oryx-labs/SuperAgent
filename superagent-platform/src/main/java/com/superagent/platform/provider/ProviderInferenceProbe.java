@@ -518,7 +518,7 @@ public class ProviderInferenceProbe {
         // Read-only sandbox, prompt on stdin: the probe can't touch anything even if the model tried.
         List<String> argv = new java.util.ArrayList<>(List.of(codex.toString(), "exec", "--json", "--skip-git-repo-check",
                 "-s", "read-only", "-m", modelId, "-"));
-        String out = run(argv, PROMPT, java.util.Map.of());
+        String out = run(argv, PROMPT, java.util.Map.of(), true);
         long in = 0, cached = 0, outTokens = 0, reasoning = 0;
         for (String line : out.split("\\R")) {
             if (line.contains("turn.completed")) {
@@ -541,11 +541,20 @@ public class ProviderInferenceProbe {
     /** Runs argv (no shell) in a scratch dir; non-zero exit or timeout is a failed check. */
     private String run(List<String> argv, String stdin, java.util.Map<String, String> extraEnv)
             throws IOException, InterruptedException {
+        return run(argv, stdin, extraEnv, false);
+    }
+
+    private String run(List<String> argv, String stdin, java.util.Map<String, String> extraEnv, boolean codexLogin)
+            throws IOException, InterruptedException {
         Path dir = Files.createTempDirectory("sa-infer-");
         try {
             ProcessBuilder pb = new ProcessBuilder(argv).directory(dir.toFile()).redirectErrorStream(true);
             pb.environment().put("PATH", String.join(File.pathSeparator, probe.searchPath()));
             pb.environment().putAll(extraEnv);
+            if (codexLogin) {
+                pb.environment().remove("CODEX_API_KEY");
+                pb.environment().remove("OPENAI_API_KEY");
+            }
             Process p = pb.start();
             try (OutputStream in = p.getOutputStream()) {
                 if (stdin != null) {

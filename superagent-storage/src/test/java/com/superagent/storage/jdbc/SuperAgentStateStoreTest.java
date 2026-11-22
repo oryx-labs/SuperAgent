@@ -18,7 +18,7 @@ class SuperAgentStateStoreTest {
     @Test
     void keepsOneStatePerOwnerWithinEachCompany() {
         MysqlSuperAgentStateStore store = new MysqlSuperAgentStateStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:sastate-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:sastate-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant now = Instant.now();
         SuperAgentState s = new SuperAgentState("ada", "sa1", null, null, null, null, null, now);
         store.save(s);

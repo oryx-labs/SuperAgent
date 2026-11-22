@@ -172,5 +172,27 @@
         </plugin>
       </plugins>
     </pluginManagement>
+    <plugins>
+      <!--
+        Test methods and classes run side by side. Many tests wait on child processes (git, scripted CLIs), and on a
+        machine where starting a process is slow that waiting is most of the run. A test that can't share the JVM with
+        others marks itself @Isolated (or @Execution(SAME_THREAD) for its own methods).
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <properties>
+            <configurationParameters>
+              junit.jupiter.execution.parallel.enabled = true
+              junit.jupiter.execution.parallel.mode.default = concurrent
+              junit.jupiter.execution.parallel.mode.classes.default = concurrent
+              junit.jupiter.execution.parallel.config.strategy = fixed
+              junit.jupiter.execution.parallel.config.fixed.parallelism = 8
+            </configurationParameters>
+          </properties>
+        </configuration>
+      </plugin>
+    </plugins>
   </build>
 </project>

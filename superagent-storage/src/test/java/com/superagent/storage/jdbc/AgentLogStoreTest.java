@@ -20,7 +20,7 @@ class AgentLogStoreTest {
     @Test
     void listsNewestFirstAndPrunesByAgeAndPerAgentCap() {
         MysqlAgentLogStore store = new MysqlAgentLogStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:agentlog-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:agentlog-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
         store.append(new AgentLogEntry("old", "a1", "alice", now.minus(Duration.ofDays(40)), "info", "turn", "ancient", null));
         for (int i = 0; i < 5; i++) {

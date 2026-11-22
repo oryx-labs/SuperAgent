@@ -47,7 +47,8 @@ class RecordedUsageTest {
 
     /** The same result as an older CLI would report it, without the per-turn figure. */
     private static ClaudeStreamParser.ResultUsage withoutSinceLast(ClaudeStreamParser.ResultUsage u) {
-        return new ClaudeStreamParser.ResultUsage(u.sessionId(), null, null, u.cumulative(), u.totalCostUsd(), u.calls());
+        return new ClaudeStreamParser.ResultUsage(u.sessionId(), null, null, u.cumulative(), u.totalCostUsd(), u.calls(),
+                u.contextTokens());
     }
 
     private static TokenUsage only(ClaudeUsageLedger.Turn turn) {
@@ -106,6 +107,8 @@ class RecordedUsageTest {
         assertThat(lines("claude-repeated-message.jsonl")).filteredOn(l -> l.contains("eFGZuum1")).hasSize(2);
         assertThat(result.calls()).singleElement().extracting(TokenUsage::output).isEqualTo(94L); // 91 + 3, not 91 + 91 + 3
         assertThat(result.calls().get(0).output()).isEqualTo(result.sinceLast().get(0).output());
+        // The repeated message carries the same request once; its context is that request, not the sum of both.
+        assertThat(result.contextTokens()).isEqualTo(28_557); // 2 + 28457 + 98, the second request's context
     }
 
     /** The recordings through the runner itself: a fake {@code claude} replays turn 1, then turn 2 on --resume. */

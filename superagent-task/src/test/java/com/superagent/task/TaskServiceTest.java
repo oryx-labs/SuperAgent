@@ -613,6 +613,37 @@ class TaskServiceTest {
         assertThat(tasks.findTask(id).orElseThrow().error()).contains("boom: cli crashed");
     }
 
+    @Test
+    void aFailureTheWatchdogWillRetryIsNotNewsAndTheLastOneIsToldOnceWithModelAndRetries() {
+        InMemoryTaskStore tasks = new InMemoryTaskStore();
+        AgentRunner failing = new AgentRunner() {
+            @Override public AgentType type() { return AgentType.CLAUDE; }
+            @Override public void run(AgentRunRequest req, AgentEventSink sink, Cancellation c) {
+                sink.emit(new AgentEvent(req.sessionId(), null, 0, AgentEventType.ERROR, "boom: cli crashed", Instant.now()));
+            }
+        };
+        List<com.superagent.core.notice.NoticeEvents.TaskStatusChanged> errors = Collections.synchronizedList(new ArrayList<>());
+        TaskService service = new TaskService(tasks, new InMemoryTaskPhaseStore(), new InMemoryTaskRunStateStore(),
+                new InMemoryRunStore(), List.of(failing), IMAGES, System.getProperty("java.io.tmpdir") + "/sa-test-" + UUID.randomUUID(),
+                "", "", false, 50, "tester", null, null, null,
+                e -> { if (e instanceof com.superagent.core.notice.NoticeEvents.TaskStatusChanged t && t.status().equals("error")) errors.add(t); },
+                null);
+        String id = service.create(coding("写点代码")).id();
+        for (int n = 1; n <= 10; n++) {
+            int expected = n;
+            await().atMost(Duration.ofSeconds(5)).until(() -> errors.size() == expected);
+            if (n < 10) {
+                service.recover(id);
+            }
+        }
+        assertThat(errors.subList(0, 9)).allMatch(e -> e.retrying());
+        var last = errors.get(9);
+        assertThat(last.retrying()).isFalse();
+        assertThat(last.error()).contains("已重试 9 次", "boom: cli crashed", "模型");
+        service.recover(id); // budget used up: nothing more is published
+        assertThat(errors).hasSize(10);
+    }
+
     /** The user's case: A's session was later taken by B, which now waits for a confirmation. */
     @Test
     void steeringRunsInASessionReservedByAnotherWaitingTaskAndHandsTheReservationBack() {

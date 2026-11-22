@@ -224,7 +224,7 @@ public class ProviderModelFetcher {
             // Like a run: a hand-set provider in the machine's config.toml (or a broken one) mustn't decide the list.
             argv.addAll(List.of("-c", "model_provider=\"openai\""));
         }
-        JsonNode root = mapper.readTree(run(argv, 60));
+        JsonNode root = mapper.readTree(run(argv, 60, credential == null));
         List<ProviderModelDto> out = new ArrayList<>();
         for (JsonNode m : root.path("models")) {
             if ("hide".equals(m.path("visibility").asText())) {
@@ -356,8 +356,16 @@ public class ProviderModelFetcher {
      * because a large output (codex's catalogue is ~600KB) would otherwise fill the pipe and hang.
      */
     private String run(List<String> argv, int timeoutSeconds) throws IOException, InterruptedException {
+        return run(argv, timeoutSeconds, false);
+    }
+
+    private String run(List<String> argv, int timeoutSeconds, boolean codexLogin) throws IOException, InterruptedException {
         ProcessBuilder pb = new ProcessBuilder(argv).redirectError(ProcessBuilder.Redirect.DISCARD);
         pb.environment().put("PATH", String.join(File.pathSeparator, probe.searchPath()));
+        if (codexLogin) {
+            pb.environment().remove("CODEX_API_KEY");
+            pb.environment().remove("OPENAI_API_KEY");
+        }
         Process p = pb.start();
         CompletableFuture<byte[]> stdout = CompletableFuture.supplyAsync(() -> readAll(p.getInputStream()));
         if (!p.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {

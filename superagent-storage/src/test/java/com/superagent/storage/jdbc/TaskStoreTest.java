@@ -25,7 +25,7 @@ class TaskStoreTest {
 
     private static JdbcTemplate h2() {
         return new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:task-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+                "jdbc:h2:mem:task-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
     }
 
     private static Task task(String id, String title) {

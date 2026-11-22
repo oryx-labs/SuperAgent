@@ -1,5 +1,7 @@
 package com.superagent.task.harness.article;
 
+import com.superagent.core.writing.StyleLexicon;
+import com.superagent.core.writing.TextChecks;
 import com.superagent.task.harness.HarnessState.Article.Evidence;
 import com.superagent.task.harness.HarnessState.Article.Issue;
 
@@ -31,8 +33,6 @@ import static com.superagent.task.harness.article.ArticleChecks.WARN;
 public final class TechChecks {
 
     static final double UNTRACED_FAIL = 0.20;
-    static final double BANNED_FAIL_PER_1000 = 3;
-    static final int BANNED_FAIL_MIN = 3;
     private static final String CODE_EXT = "java|js|ts|tsx|jsx|py|go|rs|kt|xml|yml|yaml|json|md|sql|sh|css|html|properties|toml|gradle|c|h|cpp|rb|php|swift|cs|vue";
 
     private static final Pattern URL = Pattern.compile("https?://[^\\s)\\]>\"'，。、；）】]+");
@@ -42,20 +42,6 @@ public final class TechChecks {
     private static final Pattern EVIDENCE_ID = Pattern.compile("E\\d+");
     private static final Pattern FENCE = Pattern.compile("(?s)```.*?```");
     private static final Pattern SENTENCE_END = Pattern.compile("(?<=[。！？!?；;])");
-
-    /** Phrases a reader takes as filler or as the voice of a machine; platform list, a pack may add to it. */
-    static final List<String> BANNED = List.of("值得注意的是", "需要指出的是", "不难发现", "众所周知", "总而言之", "综上所述", "总的来说",
-            "在当今", "随着时代的发展", "日新月异", "毋庸置疑", "不可否认", "让我们一起", "深入探讨", "至关重要", "扮演着重要的角色",
-            "发挥着重要作用", "具有重要意义", "赋能", "抓手", "闭环", "颗粒度", "底层逻辑", "打通", "全方位", "多维度", "助力", "一站式",
-            "无缝衔接", "织就", "画卷", "璀璨");
-    private static final List<Pattern> BANNED_PATTERNS = List.of(Pattern.compile("不仅(?:仅)?[^，。；\\n]{0,24}[，,]?(?:更是|而且更|还是)"),
-            Pattern.compile("不仅仅是[^，。；\\n]{0,24}[，,]?(?:更是|而是)"));
-    /** Claims nobody can check unless they come with a number or something to compare to. */
-    static final List<String> VAGUE = List.of("提升性能", "提高性能", "提升效率", "提高效率", "增强可扩展性", "提升可扩展性", "提高可扩展性",
-            "优化体验", "提升体验", "降低成本", "显著提升", "大幅提升", "大幅降低", "显著降低", "极大提升", "增强稳定性", "提升稳定性",
-            "增强可靠性", "提高可维护性", "提升可维护性", "增强灵活性");
-    private static final Pattern CONCRETE = Pattern.compile("`[^`\\n]+`|(?<![\\w.])\\d{2,}|\\d+\\.\\d+|\\d+\\s*(?:ms|%|个|条|行|次|倍|秒|天|MB|GB|KB)"
-            + "|[\\w.\\-]+/[\\w./\\-]+|\\bv\\d+\\b|\\[E\\d+\\]|\\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\\b|\\b[a-z]+_[a-z_]+\\b");
 
     private TechChecks() {
     }
@@ -201,83 +187,23 @@ public final class TechChecks {
 
     // --- concreteness ---
 
-    /** Each top-level section needs something checkable; a vague claim without a number in its sentence fails. */
     static List<Issue> concreteness(String draft) {
-        List<Issue> out = new ArrayList<>();
-        for (Map.Entry<String, String> s : sections(draft).entrySet()) {
-            if (!CONCRETE.matcher(s.getValue()).find()) {
-                out.add(new Issue("具体度", FAIL, s.getKey(), "这一节没有任何可核对的具体内容（数字、标识符、路径、版本、命令）"));
-            }
-        }
-        String prose = FENCE.matcher(draft == null ? "" : draft).replaceAll("");
-        for (String sentence : SENTENCE_END.split(prose)) {
-            for (String v : VAGUE) {
-                if (sentence.contains(v) && !sentence.matches("(?s).*\\d.*")) {
-                    out.add(new Issue("具体度", FAIL, ArticleChecks.clip(sentence.strip()), "「" + v + "」没有数字或比较对象，读者没法核对"));
-                    break;
-                }
-            }
-        }
-        return out.isEmpty() ? List.of(new Issue("具体度", PASS, null, "每一节都有可核对的内容，没有无数字的空话")) : out;
+        return concreteness(draft, StyleLexicon.FALLBACK);
     }
 
-    /** Top-level sections by title with their text (code blocks kept: a command is concrete). */
-    static Map<String, String> sections(String draft) {
-        List<String[]> heads = new ArrayList<>(); // level, title
-        List<StringBuilder> bodies = new ArrayList<>();
-        boolean fenced = false;
-        Pattern h = Pattern.compile("^(#{1,6})\\s+(.+?)\\s*#*\\s*$");
-        List<int[]> at = new ArrayList<>();
-        List<String> lines = (draft == null ? "" : draft).lines().toList();
-        for (int i = 0; i < lines.size(); i++) {
-            String l = lines.get(i);
-            if (l.stripLeading().startsWith("```")) {
-                fenced = !fenced;
-            }
-            Matcher m = h.matcher(l);
-            if (!fenced && m.matches()) {
-                heads.add(new String[]{String.valueOf(m.group(1).length()), m.group(2).strip()});
-                at.add(new int[]{i});
-            }
-        }
-        long h1 = heads.stream().filter(x -> x[0].equals("1")).count();
-        int top = heads.stream().filter(x -> h1 != 1 || !x[0].equals("1")).mapToInt(x -> Integer.parseInt(x[0])).min().orElse(2);
-        Map<String, String> out = new LinkedHashMap<>();
-        for (int i = 0; i < heads.size(); i++) {
-            if (Integer.parseInt(heads.get(i)[0]) != top) {
-                continue;
-            }
-            int from = at.get(i)[0] + 1, to = lines.size();
-            for (int j = i + 1; j < heads.size(); j++) {
-                if (Integer.parseInt(heads.get(j)[0]) <= top) {
-                    to = at.get(j)[0];
-                    break;
-                }
-            }
-            out.put(heads.get(i)[1], String.join("\n", lines.subList(from, to)));
-        }
-        return out;
+    /** Each top-level section needs something checkable; a vague claim without a number in its sentence fails. */
+    static List<Issue> concreteness(String draft, StyleLexicon lex) {
+        return ArticleChecks.issues(TextChecks.concreteness(draft, lex, FAIL));
     }
 
     // --- banned phrases ---
 
-    /** Hits with the sentence they sit in; three or more at three per thousand characters fail, any hit warns. */
     static List<Issue> bannedPhrases(ArticleChecks.Doc doc, List<String> extra) {
-        List<String> words = new ArrayList<>(BANNED);
-        words.addAll(extra);
-        List<Issue> hits = new ArrayList<>();
-        for (String sentence : SENTENCE_END.split(doc.prose())) {
-            String hit = words.stream().filter(sentence::contains).findFirst()
-                    .orElseGet(() -> BANNED_PATTERNS.stream().map(p -> p.matcher(sentence)).filter(Matcher::find).map(Matcher::group).findFirst().orElse(null));
-            if (hit != null) {
-                hits.add(new Issue("禁用语", WARN, ArticleChecks.clip(sentence.strip()), "出现「" + hit + "」：删掉，直接写那件事"));
-            }
-        }
-        int chars = Math.max(1, ArticleChecks.count(doc.prose()));
-        double per1000 = hits.size() * 1000.0 / chars;
-        if (hits.size() >= BANNED_FAIL_MIN && per1000 >= BANNED_FAIL_PER_1000) {
-            return hits.stream().map(i -> new Issue(i.check(), FAIL, i.where(), i.note() + "（全文 " + hits.size() + " 处，密度太高）")).toList();
-        }
-        return hits.isEmpty() ? List.of(new Issue("禁用语", PASS, null, "没有禁用语")) : hits;
+        return bannedPhrases(doc, extra, StyleLexicon.FALLBACK);
+    }
+
+    /** Hits with the sentence they sit in; three or more at three per thousand characters fail, any hit warns. */
+    static List<Issue> bannedPhrases(ArticleChecks.Doc doc, List<String> extra, StyleLexicon lex) {
+        return ArticleChecks.issues(TextChecks.bannedPhrases(doc.prose(), lex, extra, true));
     }
 }

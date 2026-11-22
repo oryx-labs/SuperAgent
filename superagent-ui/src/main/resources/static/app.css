@@ -200,7 +200,8 @@ img { max-width: 100%; }
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: 256px 1fr 300px;
+  grid-template-columns: var(--threads-w, 256px) 1fr 300px;
+  position: relative;
 }
 
 .layout > * { min-width: 0; border-right: 1px solid var(--line); overflow-y: auto; }
@@ -352,6 +353,8 @@ img { max-width: 100%; }
 /* Tabs per layer with search and "new" on the right; the table opens a skill in the drawer. */
 /* Tabs on the left, search and the main action on the right — with room to breathe above and below. */
 /* Skills: a card grid under one toolbar (search, filters; mine and new on the right). */
+.sk-layout { flex: 1 1 auto; display: flex; min-height: 0; }
+.sk-layout > .sk-page { min-width: 0; }
 .sk-page { display: flex; flex-direction: column; gap: 14px; }
 .sk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line);
   border-radius: 12px; background: var(--paper); }
@@ -558,6 +561,16 @@ img { max-width: 100%; }
 .thread-sep { list-style: none; height: 1px; background: var(--line); margin: 8px 4px 6px; }
 .thread__name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thread__time { color: var(--muted-2); font-size: 11.5px; flex: 0 0 auto; }
+/* Reply state: a blue spinner while the agent answers, a green dot once a reply came in unseen. Stays on hover. */
+.thread__reply { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; margin-left: auto; }
+.thread__reply[hidden] { display: none; }
+.thread__reply.is-running {
+  border: 2px solid rgba(37, 99, 235, .22); border-top-color: var(--accent);
+  animation: ev-spin 1.6s linear infinite;
+}
+.thread__reply.is-done { width: 8px; height: 8px; background: #16a34a; box-shadow: 0 0 0 2px rgba(22, 163, 74, .18); }
+.thread:not(.thread--super).is-active .thread__reply.is-running { border-color: rgba(255, 255, 255, .3); border-top-color: #fff; }
+.thread__reply + .thread__time { margin-left: 0; }
 .thread__actions { display: none; gap: 2px; flex: 0 0 auto; }
 .thread:hover .thread__actions { display: flex; }
 .thread:hover .thread__time { display: none; }
@@ -1651,7 +1664,7 @@ button.stat-card:hover { border-color: var(--line-strong); }
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {
-  .layout { grid-template-columns: 240px 1fr; }
+  .layout { grid-template-columns: var(--threads-w, 240px) 1fr; }
   .panel { display: none; }
   .field-row { flex-direction: column; }
   .task-detail__body { flex-direction: column; }
@@ -3081,3 +3094,26 @@ body {
 .mermaid-diagram svg { max-width: 100%; height: auto; }
 .mermaid-error { border-left: 3px solid #a1a1aa; }
 .mermaid-error__note { margin: 14px 0 4px; font-size: 13px; color: #b91c1c; }
+
+/* Chat sidebar width: dragged by the user, kept per browser (views.js). */
+.layout > .threads-resizer {
+  position: absolute; top: 0; bottom: 0; left: calc(var(--threads-w, 256px) - 3px); width: 6px;
+  border: 0; overflow: visible; cursor: col-resize; z-index: 5; background: transparent; transition: background .12s;
+}
+.layout > .threads-resizer:hover, .layout > .threads-resizer.is-dragging { background: rgba(36, 87, 245, .35); }
+body.is-resizing-threads { cursor: col-resize; user-select: none; }
+@media (max-width: 720px) { .layout > .threads-resizer { display: none; } }
+
+/* Dragging agents in the sidebar: the row fades, a brand-blue line shows where it will land. */
+.thread.is-dragging { opacity: .4; }
+.thread--drop-before { box-shadow: 0 -2px 0 0 #2457f5; }
+.thread--drop-after { box-shadow: 0 2px 0 0 #2457f5; }
+
+/* Confirm for me */
+.proxy-confirm { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 10px 14px; margin: 0 0 12px; }
+.proxy-confirm > summary { cursor: pointer; font-weight: 600; }
+.proxy-confirm input[type="checkbox"] { accent-color: var(--accent); margin-right: 8px; }
+.proxy-confirm .field--inline { display: flex; align-items: center; margin: 4px 0; }
+.proxy-tier { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.proxy-tier h4 { margin: 0 0 4px; font-size: 13px; color: var(--ink); }
+.proxy-tier--3 { color: var(--muted); }

@@ -23,7 +23,7 @@ class AgentMemberStoreTest {
     @Test
     void membersCanJoinAndLeaveAndMessagesKeepTheirAuthor() {
         JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:member-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+                "jdbc:h2:mem:member-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
         MysqlAgentMemberStore members = new MysqlAgentMemberStore(jdbc);
         Instant now = Instant.now();
         members.save(new AgentMember("a1", "bob", "ada", true, now, now));

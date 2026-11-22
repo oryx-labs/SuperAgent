@@ -22,7 +22,7 @@ class ModelProviderStoreTest {
     @Test
     void theSameProviderIsKeptPerCompany() {
         MysqlModelProviderStore store = new MysqlModelProviderStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:provider-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:provider-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         store.save(provider("READY"));
         TenantContext.run(InCompany.OTHER, () -> {
             assertThat(store.list()).isEmpty();

@@ -143,6 +143,39 @@ public class TaskService implements TaskRecovery {
         this.credentials = credentials;
     }
 
+    private com.superagent.core.proxyconfirm.ProxyConfirmGate proxyConfirmGate; // null in tests: nothing is confirmed for anyone
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setProxyConfirmGate(com.superagent.core.proxyconfirm.ProxyConfirmGate gate) {
+        this.proxyConfirmGate = gate;
+    }
+
+    /** The project an agent sits in, if any (rules for "confirm for me" can be set per project). */
+    String projectOfAgent(String agentId) {
+        return projects == null ? null : projects.projectOfAgent(agentId).orElse(null);
+    }
+
+    /** What an agent asks before it makes a task without the user's reply (see {@link TaskMcpTools}): the record id, or null. */
+    public String proxyConfirmed(String owner, String projectId, com.superagent.core.proxyconfirm.ConfirmType type,
+                                 String object, java.util.Map<String, Object> facts) {
+        if (proxyConfirmGate == null) {
+            return null;
+        }
+        var d = proxyConfirmGate.decide(owner, projectId, type, "task", object, facts);
+        return d.confirmed() ? d.recordId() : null;
+    }
+
+    /** Whether {@code recordId} is a live confirmation of exactly this type for a task titled {@code title}. */
+    boolean proxyClaimable(String owner, String recordId, com.superagent.core.proxyconfirm.ConfirmType type, String title) {
+        return proxyConfirmGate != null && proxyConfirmGate.claimable(owner, recordId, title).filter(type::equals).isPresent();
+    }
+
+    void proxyConfirmCreated(String owner, String recordId, String taskId) {
+        if (proxyConfirmGate != null && recordId != null) {
+            proxyConfirmGate.attach(owner, recordId, taskId);
+        }
+    }
+
     private com.superagent.platform.connector.ConnectorService connectors; // null in tests: no company connectors
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -238,6 +271,13 @@ public class TaskService implements TaskRecovery {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setSettings(com.superagent.platform.settings.SettingsService settings) {
         this.settings = settings;
+    }
+
+    private com.superagent.core.writing.StyleGuideSource styleGuide; // null = no document standard (tests)
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setStyleGuide(com.superagent.core.writing.StyleGuideSource styleGuide) {
+        this.styleGuide = styleGuide;
     }
 
     private final ApplicationEventPublisher events;   // null = no to-do items (tests)
@@ -1374,6 +1414,19 @@ public class TaskService implements TaskRecovery {
     /** {@code fileIds}: files the user uploaded for this message (see FileService#upload); they go into the workspace. */
     public void sendMessage(String id, String owner, String text, List<ImageUploadDto> uploads, List<String> fileIds) {
         Task task = require(id, owner);
+        if (task.status() == TaskStatus.NEEDS_CONFIRMATION && task.workspaceDir() == null) {
+            // Held before it started (a confirmation taken back): the owner's yes lets it go.
+            Task pending = task.withStatus(TaskStatus.PENDING);
+            tasks.save(pending);
+            publish(pending, null);
+            Runnable wake = wakeScheduler;
+            if (wake != null) {
+                wake.run();
+            } else {
+                admit(pending);
+            }
+            return;
+        }
         if (task.status() == TaskStatus.RUNNING || task.workspaceDir() == null) {
             throw new TaskBusyException(id); // running, or queued and never started
         }
@@ -1490,6 +1543,26 @@ public class TaskService implements TaskRecovery {
         if (cancellation != null) {
             cancellation.cancel();
         }
+    }
+
+    /**
+     * Takes a task that has not started back to waiting for its owner (NEEDS_CONFIRMATION); the owner's next
+     * confirmation (any message) lets it start, see {@link #sendMessage}. Refused once it has started.
+     */
+    public void holdForConfirmation(String id, String owner) {
+        Task task = require(id, owner);
+        if (task.status() != TaskStatus.PENDING || task.workspaceDir() != null) {
+            throw new TaskBusyException(id);
+        }
+        synchronized (schedulerLock) {
+            Deque<QueuedRun> q = queues.get(task.createdBy());
+            if (q != null) {
+                q.removeIf(r -> r.taskId().equals(id));
+            }
+        }
+        Task held = task.withStatus(TaskStatus.NEEDS_CONFIRMATION);
+        tasks.save(held);
+        publish(held, null);
     }
 
     /** Soft delete: marks the task DELETED so it drops out of the list; the row is kept. */
@@ -2145,6 +2218,18 @@ public class TaskService implements TaskRecovery {
         }
 
         @Override
+        public com.superagent.core.proxyconfirm.ProxyConfirmGate.Decision proxyDecide(Task task,
+                com.superagent.core.proxyconfirm.ConfirmType type, java.util.Map<String, Object> facts) {
+            return proxyConfirmGate == null ? com.superagent.core.proxyconfirm.ProxyConfirmGate.Decision.refer(null)
+                    : proxyConfirmGate.decide(task.createdBy(), projectOf(task).orElse(null), type, "task", task.id(), facts);
+        }
+
+        @Override
+        public com.superagent.core.writing.StyleLexicon styleLexicon() {
+            return styleGuide == null ? null : styleGuide.lexicon();
+        }
+
+        @Override
         public List<Produced> produced(Task task) {
             return producedFiles(task);
         }
@@ -2408,7 +2493,8 @@ public class TaskService implements TaskRecovery {
         log.error("task {} failed", task.id(), e);
         String detail = e.getMessage() != null ? e.getMessage() : "task run failed";
         runStore.appendEvent(AgentEvent.of(task.id(), Long.MAX_VALUE, AgentEventType.ERROR, detail));
-        settle(task, TaskStatus.ERROR, progress, detail, BigDecimal.ZERO);
+        // An API client error repeats on any model; the next try already gets a fresh session (see recover).
+        settle(task, TaskStatus.ERROR, progress, detail, BigDecimal.ZERO, false, !ApiErrors.isClientError(detail));
     }
 
     private void persistProgress(String taskId, int progress) {
@@ -2467,7 +2553,12 @@ public class TaskService implements TaskRecovery {
                 .add(turnCost == null ? BigDecimal.ZERO : turnCost);
         tasks.save(next.withSpend(spend));
         log.info("task {} -> {} ({}%), spend={}{}", task.id(), status, next.progress(), spend, repeated ? " (same question)" : "");
-        publish(next, null, repeated);
+        int attempts = runStates.find(task.id()).map(TaskRunState::attemptCount).orElse(1);
+        boolean retrying = status == TaskStatus.ERROR && attempts < MAX_ATTEMPTS;
+        String told = status == TaskStatus.ERROR && !retrying
+                ? "模型 " + next.model() + "，已重试 " + (attempts - 1) + " 次；最后错误：" + (error == null ? "未知" : error)
+                : next.error();
+        publish(next, null, repeated, retrying, told);
 
         synchronized (schedulerLock) {
             TaskSessionPool.Session session = pool.sessionForTask(task.id());
@@ -2500,6 +2591,11 @@ public class TaskService implements TaskRecovery {
     }
 
     private void publish(Task t, String agentId, boolean repeated) {
+        publish(t, agentId, repeated, false, t.error());
+    }
+
+    /** {@code retrying}: a failure the watchdog will retry; the chat hears of it only when the retries run out. */
+    private void publish(Task t, String agentId, boolean repeated, boolean retrying, String error) {
         if (events != null && !isSubtask(t.id())) {
             boolean settled = t.status() != TaskStatus.PENDING && t.status() != TaskStatus.RUNNING;
             // Done: its answer; waiting on the user: its question.
@@ -2509,8 +2605,8 @@ public class TaskService implements TaskRecovery {
                 lastReply.remove(t.id());
             }
             events.publishEvent(new NoticeEvents.TaskStatusChanged(t.id(), t.createdBy(), t.title(),
-                    t.source().name().toLowerCase(Locale.ROOT), t.status().name().toLowerCase(Locale.ROOT), t.error(),
-                    agentId, result, repeated));
+                    t.source().name().toLowerCase(Locale.ROOT), t.status().name().toLowerCase(Locale.ROOT), error,
+                    agentId, result, repeated, retrying));
         }
     }
 
@@ -2531,7 +2627,20 @@ public class TaskService implements TaskRecovery {
     private String taskSystemPrompt(Task task, boolean withTools) {
         String index = skills == null ? null : skills.install(task.workspaceDir(), skills.forTask(task.id(), task.createdBy()), withTools);
         String prompt = join(join(doerPrompt(task), projectPrompt(task)), index);
-        return withToolRules(prompt, withTools);
+        return withToolRules(join(prompt, styleGuidePrompt(task)), withTools);
+    }
+
+    /** The company's document standard, for every kind but writing (whose flow already carries its standards). */
+    String styleGuidePrompt(Task task) {
+        return styleGuide(styleGuide, task.flow(), task.title(), task.brief());
+    }
+
+    static String styleGuide(com.superagent.core.writing.StyleGuideSource source, String flow, String title, String brief) {
+        if (source == null || TaskKind.fromStorage(flow) == TaskKind.ARTICLE) {
+            return null;
+        }
+        boolean technical = com.superagent.core.writing.StyleGuideSource.looksTechnical(title + " " + brief);
+        return source.compactGuide(technical).orElse(null);
     }
 
     /** With the platform tools a run also learns how to hand results over and to settle what it learns. */

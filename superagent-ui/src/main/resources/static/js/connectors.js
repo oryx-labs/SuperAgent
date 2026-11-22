@@ -12,6 +12,7 @@ const connSend = (method, url, body) => fetch(url, {
 Object.assign(api, {
   listConnectors: () => fetch("/api/v1/connectors").then(kbJson),
   createConnector: body => connSend("POST", "/api/v1/connectors", body),
+  createJiraConnector: body => connSend("POST", "/api/v1/connectors/jira", body),
   updateConnector: (id, body) => connSend("PUT", "/api/v1/connectors/" + id, body),
   deleteConnector: id => connSend("DELETE", "/api/v1/connectors/" + id),
   setConnectorEnabled: (id, enabled) => connSend("PUT", "/api/v1/connectors/" + id + "/enabled", { enabled }),
@@ -38,6 +39,11 @@ const cel = {
   tokenEnv: document.getElementById("cfTokenEnv"),
   tokenEnvField: document.getElementById("cfTokenEnvField"),
   secretKept: document.getElementById("cfSecretKept"),
+  product: document.getElementById("cfProduct"),
+  productField: document.getElementById("cfProductField"),
+  site: document.getElementById("cfSite"),
+  siteField: document.getElementById("cfSiteField"),
+  mcpSection: document.getElementById("cfMcpSection"),
   enabled: document.getElementById("cfEnabled"),
   error: document.getElementById("cfError"),
   submit: document.getElementById("cfSubmit"),
@@ -87,7 +93,7 @@ const CONNECTOR_MARKS = [
   { test: c => c.kind === "dingtalk" || /dingtalk|钉钉/i.test(c.name), cls: "dingtalk", text: "钉" },
   { test: c => /gitlab/i.test(c.name + " " + (c.endpoint || "")), cls: "gitlab", text: "GL" },
   { test: c => /confluence/i.test(c.name), cls: "atlassian", text: "C" },
-  { test: c => /jira|atlassian|confluence/i.test(c.name + " " + (c.endpoint || "")), cls: "atlassian", text: "J" },
+  { test: c => c.id.startsWith("jira-") || /jira|atlassian|confluence/i.test(c.name + " " + (c.endpoint || "")), cls: "atlassian", text: "J" },
   { test: c => /notion/i.test(c.name + " " + (c.endpoint || "")), cls: "notion", text: "N" },
   { test: c => /slack/i.test(c.name + " " + (c.endpoint || "")), cls: "slack", text: "#" },
   { test: c => /postgres|mysql|sqlite|database|数据库/i.test(c.name + " " + (c.endpoint || "")), cls: "db", text: "DB" },
@@ -472,6 +478,10 @@ function openConnectorModal(c) {
   cel.token.value = "";
   cel.secretKept.hidden = !(c && c.companySecretSet);
   cel.enabled.checked = c ? c.enabled : true;
+  const jiraType = c ? (c.id.startsWith("jira-cloud-") ? "jira-cloud" : c.id.startsWith("jira-dc-") ? "jira-dc" : "") : "";
+  cel.product.value = jiraType;
+  cel.product.disabled = !!c; // the type is fixed once created
+  cel.site.value = jiraType === "jira-dc" && c.site ? c.site : "";
   cel.error.hidden = true;
   syncConnectorForm();
   cel.modal.hidden = false;
@@ -480,23 +490,33 @@ function openConnectorModal(c) {
 
 /** Shows the fields that apply to the chosen transport and authorization. */
 function syncConnectorForm() {
+  const jira = !!cel.product.value;
+  cel.mcpSection.hidden = jira; // a Jira connector runs one fixed way: nothing to fill in but the site
+  cel.siteField.hidden = cel.product.value !== "jira-dc";
   const auth = cel.authMethod.value;
   cel.tokenField.hidden = auth !== "shared_token";
   cel.tokenEnvField.hidden = cel.transport.value !== "stdio" || auth === "none";
 }
-[cel.transport, cel.authMethod].forEach(s => s.addEventListener("change", syncConnectorForm));
+[cel.transport, cel.authMethod, cel.product].forEach(s => s.addEventListener("change", syncConnectorForm));
 
 function closeConnectorModal() { cel.modal.hidden = true; }
+
+/** A Jira connector's edit takes the site as its endpoint; the rest of the form doesn't apply to it. */
+function jiraEdit(body) {
+  return body.product ? { name: body.name, description: body.description, enabled: body.enabled, endpoint: body.siteUrl } : body;
+}
 
 cel.form.addEventListener("submit", async e => {
   e.preventDefault();
   const body = { name: cel.name.value.trim(), description: cel.description.value.trim(), transport: cel.transport.value,
     authMethod: cel.authMethod.value, endpoint: cel.endpoint.value.trim(), tokenEnv: cel.tokenEnv.value.trim(),
-    secret: cel.token.value, enabled: cel.enabled.checked };
+    secret: cel.token.value, enabled: cel.enabled.checked, product: cel.product.value || null };
+  if (cel.product.value === "jira-dc") body.siteUrl = cel.site.value.trim();
   cel.submit.disabled = true;
   cel.error.hidden = true;
   try {
-    if (editing) await api.updateConnector(editing.id, body);
+    if (editing) await api.updateConnector(editing.id, jiraEdit(body));
+    else if (body.product) await api.createJiraConnector(body);
     else await api.createConnector(body);
     closeConnectorModal();
     showToast(L("conn.saved"), false);
@@ -519,14 +539,15 @@ function openTokenModal(c) {
   cel.tokenInput.value = "";
   cel.tokenError.hidden = true;
   // Confluence: Cloud signs in with the email and an API token, a self-hosted site with a personal access token.
+  const jiraDc = c.id.startsWith("jira-dc-");
   const site = c.site;
-  cel.tokenHint.textContent = L(site ? (c.needsAccount ? "conn.confluenceHintCloud" : "conn.confluenceHintServer") : "conn.tokenHint",
+  cel.tokenHint.textContent = L(jiraDc ? "conn.jiraHint" : site ? (c.needsAccount ? "conn.confluenceHintCloud" : "conn.confluenceHintServer") : "conn.tokenHint",
     { site: site || "" });
   cel.tokenWhere.hidden = !site;
   if (site) {
     cel.tokenLink.href = c.needsAccount ? "https://id.atlassian.com/manage-profile/security/api-tokens"
       : site + "/plugins/personalaccesstokens/usertokens.action";
-    cel.tokenLink.textContent = L(c.needsAccount ? "conn.confluenceLinkCloud" : "conn.confluenceLinkServer");
+    cel.tokenLink.textContent = L(jiraDc ? "conn.jiraLink" : c.needsAccount ? "conn.confluenceLinkCloud" : "conn.confluenceLinkServer");
   }
   // GitLab: the address of the GitLab the token was made on (empty = gitlab.com); the token is only ever sent there.
   const gitlab = c.id === "gitlab";
@@ -569,7 +590,7 @@ function oauthConnect(c) {
     showToast(L("conn.oauthNotConfigured", { name: c.name }), true);
     return;
   }
-  window.location.href = "/api/v1/oauth/" + encodeURIComponent(c.id) + "/authorize?connectorId=" + encodeURIComponent(c.id);
+  window.location.href = "/api/v1/oauth/" + encodeURIComponent(c.id.startsWith("jira-cloud-") ? "atlassian" : c.id) + "/authorize?connectorId=" + encodeURIComponent(c.id);
 }
 
 // ---------- toast + OAuth return ----------

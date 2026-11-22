@@ -23,6 +23,7 @@ import com.superagent.runtime.cli.CliProcesses;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Isolated;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -39,6 +40,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 /** A server shutdown lets running turns finish, cuts short the rest without wasting retries, and the next start resumes them. */
+// Ends every tracked CLI process in this JVM: nothing else may run alongside it.
+@Isolated
 class TaskShutdownTest {
 
     private static final ImageAttachmentStore IMAGES =

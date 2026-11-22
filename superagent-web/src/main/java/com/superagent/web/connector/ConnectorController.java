@@ -7,6 +7,7 @@ import com.superagent.api.connector.ConnectorToolsDto;
 import com.superagent.api.connector.SaveConnectorRequest;
 import com.superagent.platform.connector.ConnectorService;
 import com.superagent.platform.connector.ConnectorToolsService;
+import com.superagent.platform.connector.JiraConnectorRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -50,6 +51,12 @@ public class ConnectorController {
     @PostMapping(ApiPaths.CONNECTORS)
     public ApiResponse<ConnectorDto> create(@RequestBody SaveConnectorRequest request, Authentication auth) {
         return ApiResponse.ok(connectorService.create(request, auth.getName()));
+    }
+
+    /** A Jira connector (Cloud or Data Center); edited and removed through the ordinary connector endpoints. */
+    @PostMapping(ApiPaths.CONNECTORS + "/jira")
+    public ApiResponse<ConnectorDto> createJira(@RequestBody JiraConnectorRequest request, Authentication auth) {
+        return ApiResponse.ok(connectorService.createJira(request, auth.getName()));
     }
 
     @PutMapping(ApiPaths.CONNECTORS + "/{id}")

@@ -500,7 +500,7 @@ interface SandboxRuntime {
           <tr><td>模型检测、Key 检测、模型列表</td><td><code>ProviderInferenceProbe</code>、<code>ProviderModelFetcher</code>、<code>ProviderProbe</code></td><td>公司的系统沙箱（用的是公司的 Key）</td></tr>
           <tr><td>连接的「能力」列表（stdio 连接）</td><td><code>McpClient</code> 在控制面本机起管理员配置的命令</td><td>查看的员工；HTTP 连接仍由控制面直接请求，但同样过出网检查</td></tr>
           <tr><td>安装、升级 CLI 和 Node</td><td><code>ProviderService</code>、<code>NodeRuntimeService</code></td><td>沙箱运行时下关闭（版本跟镜像走），本机进程运行时保留</td></tr>
-          <tr><td>CLI 配置写入</td><td><code>CliConfigWriter</code> 写宿主机 HOME</td><td>沙箱运行时下不写宿主机；需要的配置写进员工沙箱的 HOME</td></tr>
+          <tr><td>CLI 配置写入</td><td>公司凭据按次传入运行进程，不写宿主机 CLI 配置</td><td>需要的配置写进员工沙箱的 HOME</td></tr>
         </tbody>
       </table>
     </div>
@@ -531,7 +531,7 @@ interface SandboxRuntime {
       <li><span class="ph">S3</span><div><b>沙箱镜像</b><span>在 <code>docker/Dockerfile</code> 里加 <code>sandbox</code> 阶段（基于 <code>cli-base</code>），预装工具和 MCP 包缓存；发布流水线一起出镜像。验收：镜像里各 CLI <code>--version</code> 都能跑，非 root。</span></div></li>
       <li><span class="ph">S4</span><div><b>Docker 和 gVisor 插件</b><span>通过 Docker Engine API 建容器、加资源限制和安全选项、执行命令、回收、按标签认领；gVisor 只是换运行时名。验收：两家公司同时对话，各自在自己的容器里，互相看不到工作区和进程。</span></div></li>
       <li><span class="ph">S5</span><div><b>网络与出口代理</b><span>每公司内部网络；控制面内的出口代理和拦截规则；MCP 入口经代理；拦截记录进运行日志。验收：沙箱里访问 MySQL 端口、169.254.169.254、内网地址都被拒，公网和模型 API 正常。</span></div></li>
-      <li><span class="ph">S6</span><div><b>其余调用搬进沙箱</b><span>模型检测、Key 检测、模型列表、记忆整理、打标签、选模型、连接能力列表都走系统沙箱或员工沙箱；沙箱运行时下关闭 CLI 安装、<code>CliConfigWriter</code> 不写宿主机。验收：沙箱模式下控制面本机不再起任何 CLI 进程（进程审计）。</span></div></li>
+      <li><span class="ph">S6</span><div><b>其余调用搬进沙箱</b><span>模型检测、Key 检测、模型列表、记忆整理、打标签、选模型、连接能力列表都走系统沙箱或员工沙箱；沙箱运行时下关闭 CLI 安装。验收：沙箱模式下控制面本机不再起任何 CLI 进程（进程审计）。</span></div></li>
       <li><span class="ph">S7</span><div><b>工作区防护与隔离测试</b><span>第 9 节的符号链接、特殊文件、大小、属主处理；第 11 节的隔离测试套件。验收：测试套件在 docker 和 gvisor 上都通过。</span></div></li>
       <li><span class="ph">S8</span><div><b>上 117</b><span>装 runsc 并注册到 Docker；拉镜像；配置 <code>runtime=gvisor</code>、容量 5；先只开给自己的组织跑一段，看内存、启动耗时、gVisor 兼容性。</span></div></li>
       <li><span class="ph">S9</span><div><b>microVM（Kata）插件</b><span>参数和自检，测试在有 KVM 的机器上跑。117 用不上，给私有化和以后的物理机节点准备。Kubernetes 插件放到第二步 b 之后。</span></div></li>

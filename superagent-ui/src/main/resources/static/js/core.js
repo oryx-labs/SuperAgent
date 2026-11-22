@@ -52,6 +52,12 @@ const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then(r => { if (!r.ok) throw new Error("update failed"); return r.json(); }),
+  reorderAgents: ids =>
+    fetch("/api/v1/agents/order", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentIds: ids }),
+    }).then(r => { if (!r.ok) throw new Error("reorder failed"); return r.json(); }),
   deleteAgent: id => fetch("/api/v1/agents/" + id, { method: "DELETE" }),
 };
 

@@ -305,7 +305,8 @@ public class ClaudeCliAgentRunner implements AgentRunner {
             sink.emit(new AgentEvent(request.sessionId(), null, seq.getAndIncrement(),
                     AgentEventType.USAGE, String.valueOf(turn.costUsd()), Instant.now()));
         }
-        Tokens.emit(sink, request.sessionId(), seq.getAndIncrement(), withModel(turn.tokens(), request.model()));
+        Tokens.emit(sink, request.sessionId(), seq.getAndIncrement(),
+                Tokens.withContext(withModel(turn.tokens(), request.model()), usage.contextTokens()));
     }
 
     /** Stopped, timed out or crashed before its result: what the calls so far used is still billed. */
@@ -314,7 +315,8 @@ public class ClaudeCliAgentRunner implements AgentRunner {
         List<com.superagent.core.usage.TokenUsage> used = parser.unreportedTokens();
         if (!used.isEmpty()) {
             ledger.forget(conversation);
-            Tokens.emit(sink, request.sessionId(), seq.getAndIncrement(), withModel(used, request.model()));
+            Tokens.emit(sink, request.sessionId(), seq.getAndIncrement(),
+                    Tokens.withContext(withModel(used, request.model()), parser.contextTokens()));
         }
     }
 

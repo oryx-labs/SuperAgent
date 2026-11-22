@@ -14,7 +14,7 @@ class CompanyStoreTest {
     @Test
     void savesAndReplacesCompanies() {
         JdbcCompanyStore store = new JdbcCompanyStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:company-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")),
+                "jdbc:h2:mem:company-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")),
                 JdbcCompanyStore.MYSQL_DDL);
         Company acme = store.save(new Company("acme", "Acme", true, null, null, null));
         store.save(new Company("beta", "Beta", true, null, null, null));
@@ -32,7 +32,7 @@ class CompanyStoreTest {
     @Test
     void aCompanyTableFromBeforeLimitsGetsTheirColumnsAndKeepsItsRows() {
         JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:company-old-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+                "jdbc:h2:mem:company-old-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
         jdbc.execute("CREATE TABLE company (id VARCHAR(64) NOT NULL PRIMARY KEY, name VARCHAR(255) NOT NULL, "
                 + "enabled BOOLEAN NOT NULL, data_key_cipher TEXT, created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL)");
         jdbc.update("INSERT INTO company VALUES ('default', 'Default', TRUE, 'v1:key', NOW(), NOW())");

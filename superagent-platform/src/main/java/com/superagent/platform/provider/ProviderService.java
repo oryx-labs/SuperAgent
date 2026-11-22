@@ -102,7 +102,7 @@ public class ProviderService {
             // a model check is one inference per model.
             Map<String, String> seen = new java.util.concurrent.ConcurrentHashMap<>(); // company + "/" + CLI key
             credentials.onSwitch("models", key -> {
-                if (!credentials.hasOwnKey(key)) {
+                if (!credentials.canChoose(key)) {
                     return; // its last key was removed: nothing to check models with
                 }
                 String now = credentials.current(key).id();
@@ -131,6 +131,9 @@ public class ProviderService {
 
     /** Without a key store (tests), the machine's own CLI login stands in. */
     private boolean machineLogin(ProviderCatalog.Entry entry) {
+        if (credentials != null && credentials.allowsCliLogin(entry.key())) {
+            return probe.codexLoggedIn();
+        }
         return credentials == null && probe.looksAuthenticated(entry);
     }
 
@@ -473,7 +476,7 @@ public class ProviderService {
             return p;
         }
         // A company with no key of its own (and no right to the machine's login) has nothing to list models with yet.
-        if (credentials != null && !credentials.hasOwnKey(entry.key())) {
+        if (credentials != null && !credentials.canChoose(entry.key())) {
             return p;
         }
         String json;
@@ -553,7 +556,7 @@ public class ProviderService {
     }
 
     private boolean sweep(ModelProvider p, ProviderCatalog.Entry entry, java.time.Duration freshEnough, Instant started) {
-        if (credentials != null && !credentials.hasOwnKey(entry.key())) {
+        if (credentials != null && !credentials.canChoose(entry.key())) {
             return true; // no key of the company's own: nothing to test its models with (never the machine's login)
         }
         if (speechProbes != null) {

@@ -24,7 +24,7 @@ class WorkFileStoreTest {
     @Test
     void listsByOwnerOrAgentAndKeepsTheRepliesThatProducedAFile() {
         MysqlWorkFileStore store = new MysqlWorkFileStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:workfile-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:workfile-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         Instant t = Instant.parse("2026-11-06T00:00:00Z");
         store.save(file("a", "ada", null, null, WorkFile.ORIGIN_CHAT, t));
         store.save(file("b", "bob", "shared", null, WorkFile.ORIGIN_CHAT, t.plusSeconds(1)));

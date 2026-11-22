@@ -45,6 +45,13 @@ public class AgentController {
         return ApiResponse.ok(agentService.create(request, auth.getName()));
     }
 
+    /** Saves one sidebar group's order for the caller. */
+    @PutMapping(ApiPaths.AGENTS + "/order")
+    public ApiResponse<Void> reorder(@RequestBody com.superagent.api.agent.AgentOrderRequest request, Authentication auth) {
+        agentService.reorder(auth.getName(), request.agentIds());
+        return ApiResponse.ok(null);
+    }
+
     @GetMapping(ApiPaths.AGENTS + "/avatars")
     public ApiResponse<List<String>> avatars() {
         return ApiResponse.ok(AgentService.AVATARS);

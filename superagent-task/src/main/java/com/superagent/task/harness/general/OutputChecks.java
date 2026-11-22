@@ -1,6 +1,8 @@
 package com.superagent.task.harness.general;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.superagent.core.writing.StyleLexicon;
+import com.superagent.core.writing.TextChecks;
 import com.superagent.task.harness.HarnessHost.Materials;
 import com.superagent.task.harness.HarnessHost.Produced;
 import com.superagent.task.harness.HarnessState.Deliverable;
@@ -22,7 +24,7 @@ import java.util.regex.Pattern;
 public final class OutputChecks {
 
     static final String FILES = "交付的文件存在且不是空文件", TYPES = "文件类型和交付物要求一致",
-            MATERIALS = "资料都读到了", FORMATS = "固定格式的文件能被解析", REPLY = "最终回复不为空";
+            WRITING = "文字规范（只提醒，不拦交付）", MATERIALS = "资料都读到了", FORMATS = "固定格式的文件能被解析", REPLY = "最终回复不为空";
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Pattern EXT = Pattern.compile("[a-z0-9]{1,5}");
@@ -37,6 +39,12 @@ public final class OutputChecks {
 
     public static List<PlatformCheck> run(List<Deliverable> deliverables, List<Produced> produced, Materials materials,
                                           String reply) {
+        return run(deliverables, produced, materials, reply, null);
+    }
+
+    /** {@code lexicon}: the company's word list for the Markdown text check; null = no text check. */
+    public static List<PlatformCheck> run(List<Deliverable> deliverables, List<Produced> produced, Materials materials,
+                                          String reply, StyleLexicon lexicon) {
         List<PlatformCheck> out = new ArrayList<>();
         List<String> wanted = deliverables.stream().map(Deliverable::type).filter(OutputChecks::isFileType)
                 .map(OutputChecks::canonical).distinct().toList();
@@ -68,6 +76,25 @@ public final class OutputChecks {
         if (parsed > 0) {
             out.add(new PlatformCheck(FORMATS, problems.isEmpty(),
                     problems.isEmpty() ? parsed + " 个文件格式正确" : String.join("；", problems)));
+        }
+        if (lexicon != null) {
+            out.addAll(writing(produced, lexicon));
+        }
+        return out;
+    }
+
+    /** Markdown files read for stock phrases, vague claims and heading jumps: warnings only, they never fail the work. */
+    static List<PlatformCheck> writing(List<Produced> produced, StyleLexicon lexicon) {
+        List<PlatformCheck> out = new ArrayList<>();
+        for (Produced p : produced) {
+            if (p.text() == null || !"md".equals(ext(p.name()))) {
+                continue;
+            }
+            List<String> notes = TextChecks.warnings(p.text(), lexicon).stream()
+                    .map(f -> f.check() + (f.where() == null ? "" : "（" + f.where() + "）") + "：" + f.note()).toList();
+            if (!notes.isEmpty()) {
+                out.add(new PlatformCheck(WRITING + " " + p.name(), true, String.join("；", notes.stream().limit(6).toList()), true));
+            }
         }
         return out;
     }

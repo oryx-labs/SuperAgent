@@ -44,7 +44,36 @@ public record SystemSettingsDto(String agentDefaultModel, String companyName, St
                                 Double codingReviewMaxSpend,
                                 /** A subtitle task: the most text models that correct its disputed spans (null on a save keeps it). */
                                 Integer subtitleMaxCalibrators,
-                                String codebuddyInternetEnvironment) {
+                                String codebuddyInternetEnvironment,
+                                /** A chat session moves to a new one once its last turn read this many tokens (null on a save keeps it). */
+                                Integer chatSessionMaxTokens,
+                                /** …or once it has had this many turns (null on a save keeps it). */
+                                Integer chatSessionMaxTurns,
+                                /** Document standard in every system prompt and file check (null on a save keeps it; default on). */
+                                Boolean docStyleOn,
+                                /** The skill (id or name) the standard is made from; blank = 去 AI 味写作规范 (null on a save keeps it). */
+                                String docStyleSkill) {
+
+    public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl,
+                             java.util.List<String> backupModels, Integer complexMaxSubtasks, Integer complexMaxParallel,
+                             Boolean taskFixedModelsOn, java.util.List<String> taskFixedModels, java.util.List<String> codeRoots,
+                             Integer codingReviewMaxRounds, Double codingReviewMaxSpend, Integer subtitleMaxCalibrators,
+                             String codebuddyInternetEnvironment, Integer chatSessionMaxTokens, Integer chatSessionMaxTurns) {
+        this(agentDefaultModel, companyName, companyShortName, publicUrl, backupModels, complexMaxSubtasks,
+                complexMaxParallel, taskFixedModelsOn, taskFixedModels, codeRoots, codingReviewMaxRounds,
+                codingReviewMaxSpend, subtitleMaxCalibrators, codebuddyInternetEnvironment, chatSessionMaxTokens,
+                chatSessionMaxTurns, null, null);
+    }
+
+    public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl,
+                             java.util.List<String> backupModels, Integer complexMaxSubtasks, Integer complexMaxParallel,
+                             Boolean taskFixedModelsOn, java.util.List<String> taskFixedModels, java.util.List<String> codeRoots,
+                             Integer codingReviewMaxRounds, Double codingReviewMaxSpend, Integer subtitleMaxCalibrators,
+                             String codebuddyInternetEnvironment) {
+        this(agentDefaultModel, companyName, companyShortName, publicUrl, backupModels, complexMaxSubtasks,
+                complexMaxParallel, taskFixedModelsOn, taskFixedModels, codeRoots, codingReviewMaxRounds,
+                codingReviewMaxSpend, subtitleMaxCalibrators, codebuddyInternetEnvironment, null, null);
+    }
 
     public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl,
                              java.util.List<String> backupModels, Integer complexMaxSubtasks, Integer complexMaxParallel,
@@ -52,7 +81,7 @@ public record SystemSettingsDto(String agentDefaultModel, String companyName, St
                              Integer codingReviewMaxRounds, Double codingReviewMaxSpend, Integer subtitleMaxCalibrators) {
         this(agentDefaultModel, companyName, companyShortName, publicUrl, backupModels, complexMaxSubtasks,
                 complexMaxParallel, taskFixedModelsOn, taskFixedModels, codeRoots, codingReviewMaxRounds,
-                codingReviewMaxSpend, subtitleMaxCalibrators, null);
+                codingReviewMaxSpend, subtitleMaxCalibrators, null, null, null);
     }
 
     public SystemSettingsDto(String agentDefaultModel, String companyName, String companyShortName, String publicUrl,

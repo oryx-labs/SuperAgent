@@ -94,6 +94,12 @@ public class ChatController {
         return ApiResponse.ok(chatService.live(id));
     }
 
+    /** Ids of the caller's agents with a reply under way: polled by the sidebar. */
+    @GetMapping(ApiPaths.AGENTS + "/replying")
+    public ApiResponse<List<String>> replying(Authentication auth) {
+        return ApiResponse.ok(chatService.replyingAgents(auth.getName()));
+    }
+
     /** The running turn as it happens, for every viewer: the same events the sender's stream carries, replayed from the start. */
     @GetMapping(value = ApiPaths.SESSIONS + "/{id}/live/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter watchLive(@PathVariable String id, Authentication auth) {

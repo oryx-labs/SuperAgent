@@ -107,6 +107,32 @@ public class ProviderProbe {
         return false;
     }
 
+    /** Ask Codex itself, so its configured home and OS credential store are handled by the CLI. */
+    public boolean codexLoggedIn() {
+        Optional<Path> binary = findBinary("codex");
+        if (binary.isEmpty()) {
+            return false;
+        }
+        try {
+            ProcessBuilder pb = new ProcessBuilder(binary.get().toString(), "login", "status")
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD);
+            pb.environment().put("PATH", String.join(File.pathSeparator, searchPath()));
+            pb.environment().remove("CODEX_API_KEY");
+            pb.environment().remove("OPENAI_API_KEY");
+            Process process = pb.start();
+            if (!process.waitFor(8, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
+        } catch (IOException e) {
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
     /**
      * Latest published version via {@code npm view}, empty on any failure. Asks npm rather than
      * calling the registry over HTTP: it uses the same registry/proxy/CA config as the install

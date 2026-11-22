@@ -26,7 +26,7 @@ class UserStoreTest {
     @Test
     void usersStayInTheirCompanyAndUsernamesAreGloballyUnique() {
         MysqlUserStore store = new MysqlUserStore(new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:user-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
+                "jdbc:h2:mem:user-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")));
         store.save(user("u1", "ada", "Ada"));
         store.save(user("u1", "ada", "Ada L.")); // update in place
         assertThat(store.findById("u1")).hasValueSatisfying(u -> assertThat(u.displayName()).isEqualTo("Ada L."));

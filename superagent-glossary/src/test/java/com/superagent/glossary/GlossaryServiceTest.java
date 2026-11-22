@@ -30,7 +30,7 @@ class GlossaryServiceTest {
     void setUp() {
         TenantContext.set("acme");
         JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:glossary-" + System.nanoTime() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+                "jdbc:h2:mem:glossary-" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
         service = new GlossaryService(new MysqlGlossaryStore(jdbc));
         service.setProjects(projects);
     }

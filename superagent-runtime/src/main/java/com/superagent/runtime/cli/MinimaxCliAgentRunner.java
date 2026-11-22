@@ -39,9 +39,19 @@ public class MinimaxCliAgentRunner extends JsonLineCliRunner {
     }
 
     @Override
+    public void run(AgentRunRequest request, com.superagent.core.chat.AgentEventSink sink,
+                                 com.superagent.core.chat.Cancellation cancellation) {
+        synchronized (sessionLock(request)) {
+            super.run(request, sink, cancellation);
+        }
+    }
+
+    @Override
     protected List<String> buildCommand(AgentRunRequest request, String resumeId, List<Path> cleanup) throws IOException {
         Path dataDir = dataDir(request);
         Files.createDirectories(dataDir);
+        cleanup.add(dataDir.resolve("config.yaml"));
+        cleanup.add(dataDir.resolve("mcp.json"));
         writeHome(dataDir, request);
         List<String> cmd = new ArrayList<>(List.of(command(), "exec",
                 "--output-format", "stream-json",

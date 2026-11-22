@@ -644,7 +644,7 @@ function renderGeneralChecks(h) {
       L(c.passed ? "hn.g.roundPassed" : "hn.g.roundFailed", { n: c.round, time: formatDateTime(c.at).slice(11, 16) }) + verdict));
     c.platform.forEach(p => {
       const row = hnEl2("div", "hn-check");
-      row.append(hnEl2("span", "hn-exit " + (p.passed ? "is-ok" : "is-bad"), p.passed ? "✅" : "❌"),
+      row.append(hnEl2("span", "hn-exit " + (p.passed ? "is-ok" : "is-bad"), p.passed ? (p.warning ? "⚠️" : "✅") : "❌"),
         hnEl2("b", null, p.name), hnEl2("span", "hn-check__time", p.detail));
       round.appendChild(row);
     });

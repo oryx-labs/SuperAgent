@@ -36,6 +36,10 @@ logging:
     com.superagent: DEBUG
 
 superagent:
+  provider:
+    codex:
+      # Allow companies without a Codex key to use the server user's CLI login (shared across those companies).
+      use-cli-login: true
   registration:
     # Whether the sign-in page lets anyone register an organization. Turn it off once the organizations you want exist.
     enabled: ${SUPERAGENT_REGISTRATION_ENABLED:true}

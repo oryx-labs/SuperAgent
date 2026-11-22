@@ -13,18 +13,24 @@ public final class NoticeEvents {
      * A task changed status. {@code agentId} is set when an agent created it (only at creation);
      * {@code status} is the lower-case task status; {@code result} is the agent's final reply when it finished.
      * {@code repeated}: it waits again on the same question the owner was already told about (no news to tell).
+     * {@code retrying}: it failed but will be tried again, so the chat that set it off hears nothing yet.
      */
     public record TaskStatusChanged(String taskId, String owner, String title, String source, String status,
-                                    String error, String agentId, String result, boolean repeated) {
+                                    String error, String agentId, String result, boolean repeated, boolean retrying) {
+
+        public TaskStatusChanged(String taskId, String owner, String title, String source, String status,
+                                 String error, String agentId, String result, boolean repeated) {
+            this(taskId, owner, title, source, status, error, agentId, result, repeated, false);
+        }
 
         public TaskStatusChanged(String taskId, String owner, String title, String source, String status,
                                  String error, String agentId, String result) {
-            this(taskId, owner, title, source, status, error, agentId, result, false);
+            this(taskId, owner, title, source, status, error, agentId, result, false, false);
         }
 
         public TaskStatusChanged(String taskId, String owner, String title, String source, String status,
                                  String error, String agentId) {
-            this(taskId, owner, title, source, status, error, agentId, null, false);
+            this(taskId, owner, title, source, status, error, agentId, null, false, false);
         }
     }
 
@@ -54,5 +60,10 @@ public final class NoticeEvents {
 
     /** The user ignored an item; the module that owns what it is about may react (e.g. dismiss the to-do). */
     public record NoticeIgnored(String owner, String linkType, String linkId) {
+    }
+
+    /** SuperAgent confirmed something for {@code owner}; {@code revoked}: the owner took it back. */
+    public record ProxyConfirmed(String recordId, String owner, String type, String objectType, String objectId, String reason,
+                                 boolean revocable, boolean revoked) {
     }
 }

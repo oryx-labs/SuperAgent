@@ -203,6 +203,16 @@ public class NoticeService {
                 "agent", e.agentId()));
     }
 
+    @EventListener
+    public void onProxyConfirmed(NoticeEvents.ProxyConfirmed e) {
+        guard(() -> {
+            String what = e.revoked() ? "你撤回了 SuperAgent 的代确认：" : "SuperAgent 已代你确认：";
+            String trace = e.revoked() ? "已撤回。" + e.reason() : e.reason() + (e.revocable() ? "" : "\n不可撤回");
+            upsert(e.owner(), "proxyconfirm:" + e.recordId(), e.revoked() ? Notice.Kind.CONFIRM : Notice.Kind.NOTICE, what + e.type() + "（" + e.objectType() + " " + e.objectId() + "）",
+                    trace, "SuperAgent", e.revocable() && !e.revoked() ? "proxyconfirm" : e.objectType(), e.revocable() && !e.revoked() ? e.recordId() : e.objectId());
+        });
+    }
+
     private com.superagent.core.user.UserStore users; // null in tests: no one to tell
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)

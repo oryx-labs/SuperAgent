@@ -53,10 +53,12 @@ public class ClaudeStreamParser {
      * {@code modelUsage} and
      * {@code total_cost_usd} are running totals for the whole conversation, across {@code --resume} and kept
      * processes alike; {@code model_usage_since_last_result} (newer CLIs only) is this turn's, per model, the CLI's own
-     * side calls included. {@code calls} is the sum of this turn's API calls as the assistant messages carried them.
+     * side calls included. {@code calls} is the sum of this turn's API calls as the assistant messages carried them;
+     * {@code contextTokens} the largest one of those calls (input + cache read + cache write), 0 when none was seen.
      */
     public record ResultUsage(String sessionId, List<TokenUsage> sinceLast, Double sinceLastCostUsd,
-                              List<TokenUsage> cumulative, Double totalCostUsd, List<TokenUsage> calls) {
+                              List<TokenUsage> cumulative, Double totalCostUsd, List<TokenUsage> calls,
+                              long contextTokens) {
     }
 
     public Optional<ParsedEvent> parse(String line) {
@@ -224,12 +226,14 @@ public class ClaudeStreamParser {
         List<TokenUsage> cumulative = byModel(root.path("modelUsage"));
         Double total = root.path("total_cost_usd").isNumber() ? root.path("total_cost_usd").asDouble() : null;
         List<TokenUsage> calls = callTokens();
+        long context = messageContextTokens();
         JsonNode u = root.path("usage");
         if (calls.isEmpty() && u.isObject()) {
             // No assistant message seen (e.g. the CLI failed before streaming): the result's usage is this turn's main loop.
             calls = List.of(new TokenUsage(null, Tokens.n(u, "input_tokens"), Tokens.n(u, "cache_read_input_tokens"),
                     Tokens.n(u, "cache_creation_input_tokens"), Tokens.n(u.path("cache_creation"), "ephemeral_1h_input_tokens"),
                     Tokens.n(u, "output_tokens"), Tokens.n(u.path("output_tokens_details"), "thinking_tokens"), null));
+            context = requestContext(u);
         }
         if (cumulative != null && cumulative.size() == 1) {
             // Through a relay a message may name the model its own way (seen: "MaaS_Cl_Sonnet_5.5_…" for
@@ -241,7 +245,29 @@ public class ClaudeStreamParser {
         }
         String session = root.path("session_id").asText("");
         return new ResultUsage(session.isEmpty() ? null : session, sinceLast, sinceLastCost,
-                cumulative == null ? List.of() : cumulative, total, calls);
+                cumulative == null ? List.of() : cumulative, total, calls, context);
+    }
+
+    /**
+     * The largest context a single request of this run read so far: each assistant message carries its request's
+     * usage, and a turn that calls tools re-reads the whole conversation on every call.
+     */
+    public long contextTokens() {
+        return messageContextTokens();
+    }
+
+    private long messageContextTokens() {
+        long max = 0;
+        for (JsonNode u : messageUsage.values()) {
+            max = Math.max(max, requestContext(u));
+        }
+        return max;
+    }
+
+    /** Input a single request read: at full price, from the cache, and written to it. */
+    private static long requestContext(JsonNode usage) {
+        return Tokens.n(usage, "input_tokens") + Tokens.n(usage, "cache_read_input_tokens")
+                + Tokens.n(usage, "cache_creation_input_tokens");
     }
 
     private Optional<ParsedEvent> parseResult(JsonNode root) {

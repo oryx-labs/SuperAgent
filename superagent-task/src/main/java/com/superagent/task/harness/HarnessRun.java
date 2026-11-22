@@ -111,6 +111,7 @@ public final class HarnessRun {
 
     public void done(HarnessState.Step step, String note) {
         release(true);
+        state.rerunStep = null;
         state.askedKey = null; // past it: a later stop is news again
         step.status = HarnessState.Status.DONE;
         step.finishedAt = Instant.now();

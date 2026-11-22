@@ -73,7 +73,11 @@ public final class HarnessState {
     }
 
     /** One of the platform's own checks on the work (no model involved). */
-    public record PlatformCheck(String name, boolean passed, String detail) {
+    /** {@code warning}: passed, but with something to look at (a warning never fails the check). Absent in older records. */
+    public record PlatformCheck(String name, boolean passed, String detail, boolean warning) {
+        public PlatformCheck(String name, boolean passed, String detail) {
+            this(name, passed, detail, false);
+        }
     }
 
     /**
@@ -146,6 +150,8 @@ public final class HarnessState {
     public String waitingOn;
     /** The step and question the user was last asked about: asking the same again doesn't notify them again. */
     public String askedKey;
+    /** The step that already got a fresh conversation after an API client error (a second one asks the user). */
+    public String rerunStep;
 
     // --- the coding flow's record ---
     public String mode;          // local | remote

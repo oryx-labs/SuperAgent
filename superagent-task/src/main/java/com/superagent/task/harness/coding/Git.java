@@ -25,6 +25,13 @@ final class Git {
 
     private final Map<String, String> env;
 
+    /**
+     * The git program to start, per PATH: the binary itself from its exec path rather than whatever "git" is first on
+     * the PATH. On macOS that is /usr/bin/git, a shim that looks the real one up through xcrun on every call, which
+     * about doubles the cost of each of the many short git commands a coding task runs.
+     */
+    private static final Map<String, String> PROGRAM = new java.util.concurrent.ConcurrentHashMap<>();
+
     /** {@code env}: added to every process (PATH, and git's auth header when pushing). */
     Git(Map<String, String> env) {
         this.env = env;
@@ -36,11 +43,25 @@ final class Git {
 
     Result git(Path dir, int timeoutSeconds, Map<String, String> extraEnv, String... args) {
         List<String> cmd = new ArrayList<>();
-        cmd.add("git");
+        cmd.add(program(dir));
         cmd.add("-c");
         cmd.add("core.quotepath=false");
         cmd.addAll(List.of(args));
         return run(cmd, dir, timeoutSeconds, extraEnv, false);
+    }
+
+    private String program(Path dir) {
+        String path = env.getOrDefault("PATH", System.getenv("PATH"));
+        return PROGRAM.computeIfAbsent(path == null ? "" : path, p -> {
+            Result r = run(List.of("git", "--exec-path"), dir, 30, Map.of(), false);
+            if (r.ok()) {
+                Path real = Path.of(r.out().strip(), "git");
+                if (java.nio.file.Files.isExecutable(real)) {
+                    return real.toString();
+                }
+            }
+            return "git";
+        });
     }
 
     /** A check, through the shell, as a person would type it. */

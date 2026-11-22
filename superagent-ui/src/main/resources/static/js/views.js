@@ -28,9 +28,9 @@ let modelDetailId = null;
 // back/forward restores the same view. Admin-only views fall back to the default
 // for non-admins. See initialView().
 const KNOWN_VIEWS = new Set(["todo", "chat", "files", "tasks", "messages", "projects", "skills", "automation", "connectors", "models",
-  "users", "settings", "integrations", "file-storage", "analytics", "usage", "company-usage", "model-prices"]);
+  "users", "settings", "integrations", "file-storage", "analytics", "usage", "company-usage", "model-prices", "proxy-confirm"]);
 // The "Workspace" dropdown's pages, and the admin pages (shown with the admin sidebar).
-const WORKSPACE_VIEWS = new Set(["files", "skills", "projects", "connectors", "usage"]);
+const WORKSPACE_VIEWS = new Set(["files", "skills", "projects", "connectors", "usage", "proxy-confirm"]);
 const ADMIN_VIEWS = new Set(["settings", "integrations", "file-storage", "analytics", "company-usage", "models", "model-prices", "users"]);
 const DEFAULT_VIEW = "todo"; // the to-do list is home: the first thing to look at each day
 let isAdmin = false;
@@ -91,6 +91,9 @@ function setView(view) {
   chatPanes.forEach(p => { p.hidden = !isChat; });
   analyticsPane.hidden = !isAnalytics;
   document.querySelector('[data-pane="usage"]').hidden = !isUsage;
+  const isProxy = view === "proxy-confirm";
+  document.querySelector('[data-pane="proxy-confirm"]').hidden = !isProxy;
+  if (isProxy) renderProxyConfirmPanel(document.getElementById("proxyConfirmBody"), "");
   automationPane.hidden = !isAutomation;
   connectorsPane.hidden = !isConnectors;
   tasksPane.hidden = !isTasks;
@@ -104,7 +107,7 @@ function setView(view) {
   projPane.hidden = !isProjects;
   if (!isSkills && !skel.drawer.hidden) closeSkillDrawer();
   placeholderPane.hidden = isChat || isConnectors || isTasks || isUsers || isModels || isModelPrices || isSettings || isIntegrations
-    || isFileStorage || isAutomation || isSkills || isProjects || isAnalytics || isTodo || isFiles || isUsage;
+    || isFileStorage || isAutomation || isSkills || isProjects || isAnalytics || isTodo || isFiles || isUsage || isProxy;
   if (!placeholderPane.hidden) placeholderText.textContent = L(placeholderLabels[view] || "placeholder.default");
   if (isConnectors) loadConnectors();
   if (isUsers) loadUsers();
@@ -221,3 +224,36 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") { closeUserM
 
 // Back/forward (and manual hash edits) re-drive the view from the URL.
 window.addEventListener("hashchange", () => setView(initialView()));
+
+// ---------- chat sidebar width (drag the right edge; double-click resets) ----------
+(function threadsResizer() {
+  const handle = document.getElementById("threadsResizer");
+  const layout = handle && handle.parentElement;
+  if (!layout) return;
+  const KEY = "sa.threadsWidth", MIN = 200, MAX = 420;
+  const clamp = w => Math.min(MAX, Math.max(MIN, Math.round(w)));
+  const apply = w => {
+    if (w) layout.style.setProperty("--threads-w", clamp(w) + "px");
+    else layout.style.removeProperty("--threads-w");
+  };
+  apply(Number(localStorage.getItem(KEY)) || 0);
+
+  handle.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add("is-dragging");
+    document.body.classList.add("is-resizing-threads");
+    const left = layout.getBoundingClientRect().left;
+    const move = ev => apply(ev.clientX - left);
+    const up = ev => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.classList.remove("is-dragging");
+      document.body.classList.remove("is-resizing-threads");
+      localStorage.setItem(KEY, String(clamp(ev.clientX - left)));
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+  });
+  handle.addEventListener("dblclick", () => { localStorage.removeItem(KEY); apply(0); });
+})();

@@ -1,12 +1,15 @@
 package com.superagent.runtime.cli;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Isolated;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+// Ends every tracked CLI process in this JVM: nothing else may run alongside it.
+@Isolated
 class CliProcessesTest {
 
     @Test

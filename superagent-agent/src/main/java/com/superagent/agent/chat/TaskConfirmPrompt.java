@@ -19,6 +19,12 @@ public final class TaskConfirmPrompt {
             它的 ffmpeg 那一行也填进表格：服务器没有 ffmpeg 时标 ⚠️，写明音频的大小和格式限制，超出的先转成单声道 mp3 并压到限额以内，或请管理员在「模型」页安装 ffmpeg。
             """;
 
+    // The user may have turned on "confirm for me": the tool says so; any answer but "已代确认" means asking as usual.
+    private static final String PROXY = """
+            列好参数表、发给用户之前，先调用 proxy_confirm_params（标题，表格里还标 ❓ 的个数）。返回「已代确认」就不用问用户，
+            直接调用 create_task，收尾时写明是按用户的「代我确认」规则代确认的；返回别的，或调用失败，照常等用户确认。
+            """;
+
     // The writing task's table. The genre row and the article_genres tool exist only for an agent's own chat (create_task).
     private static String article(boolean genre) {
         return """
@@ -70,6 +76,8 @@ public final class TaskConfirmPrompt {
                 | 验收标准 | … | 怎样算做完 |
                 | 依赖 | … | 要等哪个任务完成才开始（任务名和 id）、为什么等；不用等就写「无」 |
 
+                交付物是技术调研或技术方案（一篇要读代码、查资料的文档）时，任务类型推荐「写作」，不要选普通：写作任务有提纲确认、证据核对和独立评审。
+
                 任务类型是编码时，表格换成下面这样（不列「交付物」「验收标准」：任务建好后会先写一份规格，验收标准和验证命令在那里请用户确认）：
                 | 任务标题 | … | … |
                 | 任务类型 | ✅ 已确定 | 编码 |
@@ -118,7 +126,7 @@ public final class TaskConfirmPrompt {
                 再用一两句话概括这个任务会做什么。最后写：「当前已成功提交，**不代表已经完成**。结果出来后会发到这个对话里。」
                 如果创建失败，照实说明原因和用户可以怎么做，不要说已创建。
                 """.formatted(tool, extraRows == null || extraRows.isBlank() ? "" : extraRows.strip() + "\n",
-                        "create_task".equals(tool) ? CODING_TARGETS : "", DEPENDENCIES, article("create_task".equals(tool)));
+                        "create_task".equals(tool) ? CODING_TARGETS + PROXY : "", DEPENDENCIES, article("create_task".equals(tool)));
     }
 
     /** The per-turn reminder, next to the user's words. */

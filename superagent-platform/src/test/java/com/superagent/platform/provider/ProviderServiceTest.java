@@ -59,6 +59,7 @@ class ProviderServiceTest {
         }
         @Override public Optional<String> version(Path binary, List<String> args) { return Optional.of("1.2.3"); }
         @Override public boolean looksAuthenticated(ProviderCatalog.Entry e) { return authed; }
+        @Override public boolean codexLoggedIn() { return authed; }
         @Override public Optional<String> latestNpmVersion(String pkg) { return Optional.of("1.3.0"); }
     }
 
@@ -166,6 +167,27 @@ class ProviderServiceTest {
         ModelProvider after = authed.refreshLocal(row);
         assertThat(after.latestVersion()).isEqualTo("1.3.0");
         assertThat(after.status()).isEqualTo("needs_upgrade");
+    }
+
+    @Test
+    void enabledCodexLoginUpdatesStatusAndAllowsModelChecksWithoutCompanyKey() {
+        InMemoryStore store = new InMemoryStore();
+        FakeProbe probe = new FakeProbe(true, true);
+        FakeInference inference = new FakeInference();
+        CredentialService credentials = org.mockito.Mockito.mock(CredentialService.class);
+        org.mockito.Mockito.when(credentials.allowsCliLogin("codex")).thenReturn(true);
+        org.mockito.Mockito.when(credentials.canChoose("codex")).thenReturn(true);
+        org.mockito.Mockito.when(credentials.current("codex")).thenReturn(new CredentialService.Choice(null));
+        ProviderService service = new ProviderService(store, probe, new FakeFetcher(), inference,
+                new FakeNode(probe, "v24.11.0"), credentials);
+        ModelProvider p = new ModelProvider("codex-test", "codex", false, false, null, null,
+                "no_auth", null, null, null, null, java.time.Instant.now(), java.time.Instant.now());
+        store.save(p);
+        assertThat(service.refreshLocal(p).canInfer()).isTrue();
+        ModelProvider fetched = service.refreshModels(p);
+        assertThat(fetched.modelsJson()).contains("gpt-6-sol");
+        service.refreshInference(fetched, true);
+        assertThat(inference.calls).isGreaterThan(0);
     }
 
     @Test

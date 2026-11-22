@@ -15,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
+import com.superagent.core.writing.StyleGuideSource;
+import com.superagent.core.writing.StyleLexicon;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -159,6 +161,51 @@ class SkillServiceTest {
         svc.seedGenresOnce();
         assertThat(svc.list("ada")).extracting(SkillDto::name).doesNotContain("技术方案");
         assertThat(svc.list("ada")).hasSize(SkillSeeds.ALL.size() + GenreSeeds.ALL.size() - 1);
+    }
+
+    @Test
+    void theWordListIsAddedToAnExistingStandardOnlyWhenItHasNone() {
+        InMemorySkills store = new InMemorySkills();
+        InMemorySettings settings = new InMemorySettings();
+        SkillService svc = service(store, settings, tmp.resolve("skills"));
+        svc.seedGenresOnce();
+        String id = svc.list("root").stream().filter(x -> x.name().equals("去 AI 味写作规范")).findFirst().orElseThrow().id();
+        assertThat(svc.get(id, "root").content()).contains("```lexicon"); // a new company gets it with the seed
+
+        // An old company's standard (no list) gets the list once, after its own text; one the company edited keeps its edit.
+        svc.update(id, new SkillRequest(null, null, null, "公司改过的规范", null, null), "root");
+        svc.seedLexiconOnce();
+        assertThat(svc.get(id, "root").content()).startsWith("公司改过的规范").contains("```lexicon");
+        String withList = svc.get(id, "root").content();
+        svc.update(id, new SkillRequest(null, null, null, withList.replace("赋能", "自家词"), null, null), "root");
+        InMemorySettings again = new InMemorySettings();
+        SkillService second = new SkillService(store, again, new Users(), tmp.resolve("skills2").toString());
+        second.seedLexiconOnce();
+        assertThat(second.get(id, "root").content()).contains("自家词").doesNotContain("赋能");
+        assertThat(second.get(id, "root").content().split("```lexicon", -1)).hasSize(2); // not added twice
+    }
+
+    @Test
+    void theCompactGuideFollowsTheSettingsAndStaysShort() {
+        InMemorySkills store = new InMemorySkills();
+        InMemorySettings settings = new InMemorySettings();
+        SkillService svc = service(store, settings, tmp.resolve("skills"));
+        svc.seedGenresOnce();
+        StyleGuideService guide = new StyleGuideService(svc, settings);
+
+        String plain = guide.compactGuide(false).orElseThrow();
+        assertThat(plain).contains("禁用词", "结论先行").doesNotContain("```lexicon").hasSizeLessThanOrEqualTo(StyleGuideSource.MAX_CHARS);
+        String technical = guide.compactGuide(true).orElseThrow();
+        assertThat(technical).contains("证据", "画图").hasSizeLessThanOrEqualTo(StyleGuideSource.MAX_CHARS);
+        assertThat(guide.lexicon().banned()).contains("赋能");
+
+        svc.create(new SkillRequest("另一套规范", "x", null, "只写人话，别写套话。", true, "company"), "root");
+        settings.put(StyleGuideSource.SKILL_KEY, "另一套规范");
+        assertThat(guide.compactGuide(false).orElseThrow()).contains("只写人话").doesNotContain("结论先行");
+        assertThat(guide.lexicon()).isEqualTo(StyleLexicon.FALLBACK); // that skill has no list
+
+        settings.put(StyleGuideSource.ON_KEY, "false");
+        assertThat(guide.compactGuide(false)).isEmpty();
     }
 
     @Test

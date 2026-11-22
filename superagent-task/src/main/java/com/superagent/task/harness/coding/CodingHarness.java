@@ -129,6 +129,20 @@ public class CodingHarness implements TaskHarness {
                 run.waitFor(step, e.getMessage()); // something the user can fix (a path, a branch, a token)
             } catch (RuntimeException | IOException e) {
                 log.warn("task {}: coding step {} failed", run.task().id(), step.key, e);
+                if (com.superagent.task.ApiErrors.isClientError(e.getMessage())) {
+                    // The API refuses this conversation, so resuming it (or a dearer model) fails the same way.
+                    if (!step.key.equals(s.rerunStep)) {
+                        s.rerunStep = step.key;
+                        s.conversation = UUID.randomUUID().toString();
+                        s.conversationStarted = false;
+                        run.note(step.name + "这一步被 API 拒绝（400），在新会话里重跑一次：" + e.getMessage());
+                        run.save();
+                        continue;
+                    }
+                    run.waitFor(step, step.name + "这一步被 API 拒绝（400），换新会话重跑后仍是同样的错误：" + e.getMessage()
+                            + "\n\n重试不会改变结果。可以在设置里换一个模型，或检查任务说明后回复「继续」再试");
+                    continue;
+                }
                 run.fail(step, step.name + "这一步出错：" + e.getMessage());
             }
         }
@@ -239,7 +253,29 @@ public class CodingHarness implements TaskHarness {
             s.spec = s.spec + "\n\n已合并：" + String.join("；", merged.dropped());
         }
         s.specApproved = false;
+        boolean settled = !s.spec.contains("待定") && !s.spec.contains("❓") && !s.spec.contains("不确定");
+        // The model check costs a call, so the gate runs it only once everything else is in order.
+        java.util.function.Supplier<Boolean> aligned = () -> settled && specMatchesPrd(run);
+        if (run.host().proxyConfirm(run.task(), com.superagent.core.proxyconfirm.ConfirmType.CODING_SPEC,
+                Map.of("criteria", s.criteria.size(), "commands", s.verifyCommands.size(), "prdAligned", aligned))) {
+            s.specApproved = true;
+            run.note("规格已由 SuperAgent 按你的规则代确认，开始开发");
+            run.done(step, "已代确认");
+            return;
+        }
         run.waitFor(step, specSummary(s));
+    }
+
+    /** A cheaper, independent model reads the task's PRD (its brief) and the spec; anything but a clear "ALIGNED" counts as unsure. */
+    private static boolean specMatchesPrd(HarnessRun run) {
+        try {
+            HarnessHost.Turn t = run.reviewTurn(reviewer(run), "对照下面的 PRD（任务说明）和规格，判断规格的验收标准是否覆盖 PRD 的全部要求、没有与 PRD 矛盾或自己添加的范围。"
+                    + "只回答一行：VERDICT: ALIGNED（完全对得上），或 VERDICT: UNSURE（有缺口、矛盾或拿不准）。\n\n## PRD\n" + run.task().brief()
+                    + "\n\n## 规格\n" + run.state().spec, UUID.randomUUID().toString(), "规格核对");
+            return !t.cancelled() && t.text() != null && t.text().contains("VERDICT: ALIGNED") && !t.text().contains("UNSURE");
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private void develop(HarnessRun run, HarnessState.Step step, Workspace ws, String answer) {
@@ -582,6 +618,16 @@ public class CodingHarness implements TaskHarness {
         }
         if (answer != null) {
             s.resolveTimes = 0; // the user said go on: the count starts over
+        }
+        if (answer == null && s.delivery.equals("merge") && s.mode.equals("local")) {
+            boolean clear = !s.criteria.isEmpty() && s.criteria.stream().allMatch(HarnessState.Criterion::met)
+                    && !s.reviews.isEmpty() && s.reviews.get(s.reviews.size() - 1).passed();
+            var d = run.host().proxyDecide(run.task(), com.superagent.core.proxyconfirm.ConfirmType.MERGE_LOCAL,
+                    Map.of("clear", clear, "why", "验证、审查和验收都已通过，合并回 " + s.baseBranch));
+            if (!d.confirmed() && d.reason() != null) { // asked to confirm merges and unsure: the person decides
+                run.waitFor(step, "SuperAgent 没有代你确认合并：" + d.reason() + "\n\n👉 下一步：回复「继续」合并");
+                return;
+            }
         }
         run.begin(step);
         String message = commitMessage(run.task(), s);

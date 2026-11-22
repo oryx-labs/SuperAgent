@@ -11,9 +11,17 @@ package com.superagent.core.usage;
  * @param output       output tokens, thinking included
  * @param reasoning    of {@code output}, the thinking / reasoning tokens (already counted there)
  * @param cliCostUsd   what the CLI itself says the run cost, when it says (Claude Code); null otherwise
+ * @param contextTokens the largest context a single request of the run read (input + cache read + cache write), 0 when
+ *                      the CLI doesn't say; a turn that calls tools re-reads its whole context each time, so summing
+ *                      the requests would overstate it many times over
  */
 public record TokenUsage(String model, long input, long cacheRead, long cacheWrite, long cacheWrite1h, long output,
-                         long reasoning, Double cliCostUsd) {
+                         long reasoning, Double cliCostUsd, long contextTokens) {
+
+    public TokenUsage(String model, long input, long cacheRead, long cacheWrite, long cacheWrite1h, long output,
+                      long reasoning, Double cliCostUsd) {
+        this(model, input, cacheRead, cacheWrite, cacheWrite1h, output, reasoning, cliCostUsd, 0);
+    }
 
     public long total() {
         return input + cacheRead + cacheWrite + output;

@@ -31,6 +31,7 @@ public record ChatSession(
     public static final String MODEL_CHANGED = "model";    // conversations moved to another model
     public static final String MODEL_DOWN = "model_down";  // its model couldn't run, so the turn moved to another
     public static final String FAILURES = "failures";      // the session kept failing
+    public static final String TOO_LONG = "too_long";      // the session grew too long (context size or turns)
 
     /** A session outside an agent's history (ad-hoc chats, detached runs): no model or reason kept. */
     public ChatSession(String id, String title, AgentType agentType, String agentSessionId, String workspaceDir,
