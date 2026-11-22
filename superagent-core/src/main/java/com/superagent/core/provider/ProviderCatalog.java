@@ -91,7 +91,15 @@ public final class ProviderCatalog {
                     List.of(), new Access(OTHER, null, "GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL")),
             // MiniMax Code: headless mcode exec; key via MCODE_PROVIDER_API_KEY into an isolated MINIMAX_DATA_DIR.
             npmEntry("minimax", "MiniMax Code", "mcode", true, "@minimax-ai/code", "22.19.0", false,
-                    List.of(), new Access(OTHER, null, "MCODE_PROVIDER_API_KEY", "MCODE_API_BASE_URL")));
+                    List.of(), new Access(OTHER, null, "MCODE_PROVIDER_API_KEY", "MCODE_API_BASE_URL")),
+            // Qoder CN (Alibaba): subscription coding CLI, its own CN distribution (config dir ~/.qoder-cn,
+            // endpoints *.qoder.com.cn). Headless auth is a personal access token in QODERCN_PERSONAL_ACCESS_TOKEN;
+            // the CLI is Claude Code-shaped (stream-json, --mcp-config, --allowed-tools) but spells its flags the
+            // CN way (--allowed-tools with commas, --yolo for a full pass). The executable is the CLI bundle
+            // (qoderclicn), not the documented qodercn dispatcher: that one hands the command to the Qoder IDE
+            // when it finds one, which is no use for a headless run.
+            npmEntry("qoder", "Qoder CN（阿里）", "qoderclicn", true, "@qodercn-ai/qoderclicn", "20.18.1", true,
+                    List.of(), new Access(OTHER, null, "QODERCN_PERSONAL_ACCESS_TOKEN", null)));
 
     public static List<Entry> all() {
         return ENTRIES;

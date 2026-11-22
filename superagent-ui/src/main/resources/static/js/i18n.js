@@ -1024,6 +1024,8 @@
       "models.note.codebuddy": "Tencent's terminal coding agent. Install, set a key, pick a model — chat and tasks run on it. Region is under Settings → CodeBuddy.",
       "models.note.minimax": "MiniMax's terminal coding agent. Install, set a key, pick a model — chat and tasks run on it.",
       "models.note.gemini": "Google's terminal coding agent. Install, set a key, pick a model — chat and tasks run on it.",
+      "models.note.qoder": "Alibaba's terminal coding agent (CN site, subscription). Install it, add your personal access token as a key, pick a model — chat and tasks run on it.",
+
       "ffmpeg.title": "ffmpeg",
       "ffmpeg.missing": "Not installed",
       "ffmpeg.installed": "Installed",
@@ -2876,6 +2878,8 @@
       "models.note.codebuddy": "腾讯的终端编程 Agent。安装并配置 Key 后可选模型跑对话与任务。网络环境在「设置 → CodeBuddy」。",
       "models.note.minimax": "MiniMax 的终端编程 Agent。安装并配置 Key 后可选模型跑对话与任务。",
       "models.note.gemini": "Google 的终端编程 Agent。安装并配置 Key 后可选模型跑对话与任务。",
+      "models.note.qoder": "阿里的终端编程 Agent（CN 站，订阅制）。安装后把个人访问令牌（PAT）作为 Key 加入，即可选模型跑对话与任务。",
+
       "ffmpeg.title": "ffmpeg",
       "ffmpeg.missing": "未安装",
       "ffmpeg.installed": "已安装",

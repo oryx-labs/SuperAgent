@@ -213,6 +213,36 @@ class VendorCliRunnersTest {
                 .contains("http://127.0.0.1:18080/mcp");
     }
 
+    @Test
+    void qoderUsesClaudeShapedFlagsAndKeepsTheTokenInTheEnvironment() throws Exception {
+        AgentRunRequest req = request("qwen3-coder");
+        List<java.nio.file.Path> cleanup = new java.util.ArrayList<>();
+        List<String> cmd = new QoderCliAgentRunner("qodercn", 60).buildCommand(req, null, cleanup);
+        assertThat(cmd).contains("-p", "--output-format", "stream-json", "--include-partial-messages",
+                "--model", "qwen3-coder", "--strict-mcp-config", "--mcp-config");
+        assertThat(cmd).contains("hi");   // the prompt travels in argv
+        String mcpFile = cmd.get(cmd.indexOf("--mcp-config") + 1);
+        assertThat(java.nio.file.Files.readString(java.nio.file.Path.of(mcpFile)))
+                .contains("\"type\":\"http\"").contains("Bearer turn-token");
+        for (java.nio.file.Path f : cleanup) {
+            java.nio.file.Files.deleteIfExists(f);
+        }
+
+        // The CN site and the personal access token travel in the environment, never in argv.
+        java.util.Map<String, String> env = new QoderCliAgentRunner("qodercn", 60).environment(req);
+        assertThat(env).containsEntry(QoderCliAgentRunner.PAT_ENV, "sk-test")
+                .containsEntry("NO_BROWSER", "1");
+        assertThat(String.join(" ", cmd)).doesNotContain("sk-test");
+
+        // A resumed turn keeps the CLI's own session; a tool allowlist is the CLI's --allowed-tools (comma-separated).
+        AgentRunRequest next = new AgentRunRequest("s1", "cli-sess", "/tmp", "hi", "m",
+                List.of("Read", "Edit"), false, null, "be brief", List.of(), null,
+                new RunCredential("c1", null, "sk-test", false));
+        List<String> resumed = new QoderCliAgentRunner("qodercn", 60).buildCommand(next, "cli-sess", List.of());
+        assertThat(resumed).containsSequence("--resume", "cli-sess").containsSequence("--allowed-tools", "Read,Edit");
+        assertThat(resumed).doesNotContain("--yolo", "--mcp-config");
+    }
+
     private static AgentRunRequest request(String model) {
         return new AgentRunRequest("s1", null, "/tmp", "hi", model, List.of(), false, MCP, null, List.of(), null,
                 new RunCredential("c1", "http://127.0.0.1:1", "sk-test", false));

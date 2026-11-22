@@ -46,7 +46,7 @@ public class ProviderInferenceProbe {
     private static final int CLI_TIMEOUT_SECONDS = 90;
 
     private final ProviderProbe probe;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
     /** Who background checks are booked to in the usage records. */
@@ -102,7 +102,7 @@ public class ProviderInferenceProbe {
                 return;
             }
             if (resp.statusCode() == 401 || resp.statusCode() == 403) {
-                throw new IOException(cause(resp.statusCode()) + "（HTTP " + resp.statusCode() + errorDetail(resp.body()) + "）");
+                throw new IOException(cause(resp.statusCode(), resp.body()) + "（HTTP " + resp.statusCode() + errorDetail(resp.body()) + "）");
             }
             // No model list there (some relays): fall through to one tiny inference.
         }
@@ -113,7 +113,7 @@ public class ProviderInferenceProbe {
     }
 
     private static final java.util.Set<String> VENDORS = java.util.Set.of("deepseek", "glm", "kimi", "qwen", "grok",
-            "codebuddy", "gemini", "minimax");
+            "codebuddy", "gemini", "minimax", "qoder");
 
     private SystemSettingStore settings; // null in tests: CodeBuddy region defaults to internal
 
@@ -140,6 +140,7 @@ public class ProviderInferenceProbe {
             case "codebuddy" -> checkCodeBuddy(modelId, credential);
             case "gemini" -> checkGemini(modelId, credential);
             case "minimax" -> checkMinimax(modelId, credential);
+            case "qoder" -> checkQoder(modelId, credential);
             case "deepseek", "glm", "kimi", "qwen", "grok" -> checkVendor(providerKey, modelId, credential);
             default -> throw new IOException("Inference check is not available for " + providerKey + " yet");
         };
@@ -387,8 +388,52 @@ public class ProviderInferenceProbe {
         return last;
     }
 
-    // --- claude ---
+    /**
+     * Qoder CN: the personal access token is the key. {@code --list-models} proves it — the CLI exits non-zero when
+     * it is not authenticated — and costs no quota; a model check is one short {@code -p} turn.
+     */
+    private com.superagent.core.usage.TokenUsage checkQoder(String modelId, RunCredential credential)
+            throws IOException, InterruptedException {
+        if (credential == null) {
+            throw new IOException("还没有配置 API Key");
+        }
+        Path bin = probe.findBinary("qoderclicn").orElseThrow(() -> new IOException("qoderclicn is not installed"));
+        java.util.Map<String, String> env = ProviderModelFetcher.qoderEnv(credential);
+        run(List.of(bin.toString(), "--list-models"), null, env);   // the token: a non-zero exit means it is not accepted
+        if (modelId == null) {
+            return null;
+        }
+        String out = run(List.of(bin.toString(), "-p", "--output-format", "json", "--model", modelId, PROMPT), null, env);
+        try {
+            JsonNode root = mapper.readTree(out);
+            if (!root.isObject()) {
+                JsonNode last = null;
+                for (String line : out.split("\\R")) {
+                    if (line.strip().startsWith("{")) {
+                        last = mapper.readTree(line);
+                    }
+                }
+                root = last == null ? root : last;
+            }
+            if (root.path("is_error").asBoolean(false)) {
+                throw new IOException(tail(root.path("result").asText("qoder reported an error")));
+            }
+            JsonNode u = root.path("usage");
+            if (u.isObject()) {
+                return new com.superagent.core.usage.TokenUsage(modelId, u.path("input_tokens").asLong(0),
+                        u.path("cache_read_input_tokens").asLong(0), u.path("cache_creation_input_tokens").asLong(0),
+                        0, u.path("output_tokens").asLong(0), 0, null);
+            }
+        } catch (IOException e) {
+            if (e.getMessage() != null && e.getMessage().contains("qoder reported")) {
+                throw e;
+            }
+            // non-JSON success still counts: the process exited 0
+        }
+        return new com.superagent.core.usage.TokenUsage(modelId, 0, 0, 0, 0, 0, 0, null);
+    }
 
+    // --- claude ---
     private com.superagent.core.usage.TokenUsage checkClaude(String modelId, RunCredential credential) throws IOException, InterruptedException {
         java.util.Optional<ApiAccess> access = ApiAccess.anthropic(credential);
         if (access.isEmpty()) {
@@ -415,7 +460,7 @@ public class ProviderInferenceProbe {
             body.put("model", modelId);
             body.put("max_tokens", 8);
             body.putArray("messages").addObject().put("role", "user").put("content", PROMPT);
-            HttpResponse<String> resp = send(access.base(), access.authorizeBearer(HttpRequest.newBuilder(URI.create(access.base() + "/chat/completions"))
+            HttpResponse<String> resp = sendInference(access.base(), access.authorizeBearer(HttpRequest.newBuilder(URI.create(access.base() + "/chat/completions"))
                     .timeout(Duration.ofSeconds(60)).header("content-type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))));
             JsonNode u = mapper.readTree(resp.body()).path("usage");
@@ -439,7 +484,7 @@ public class ProviderInferenceProbe {
                 .header("content-type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)));
         access.authorize(req);
-        HttpResponse<String> resp = send(base, req);
+        HttpResponse<String> resp = sendInference(base, req);
         JsonNode root = mapper.readTree(resp.body());
         if (!root.path("content").isArray()) {
             throw new IOException("response has no content");
@@ -453,7 +498,39 @@ public class ProviderInferenceProbe {
     private HttpResponse<String> send(String base, HttpRequest.Builder req) throws IOException, InterruptedException {
         HttpResponse<String> resp = sendRaw(base, req);
         if (resp.statusCode() != 200) {
-            throw new IOException(cause(resp.statusCode()) + "（HTTP " + resp.statusCode() + errorDetail(resp.body()) + "）");
+            throw new IOException(cause(resp.statusCode(), resp.body()) + "（HTTP " + resp.statusCode() + errorDetail(resp.body()) + "）");
+        }
+        return resp;
+    }
+
+    /**
+     * The endpoint says the model itself is gone (retired, renamed, or never existed there) — not the key.
+     * The caller may try another model instead of failing the key over one dead name.
+     */
+    public static class ModelGoneException extends IOException {
+        public ModelGoneException(String message) {
+            super(message);
+        }
+    }
+
+    /** Whether a failed inference says the model is gone rather than the key being wrong. */
+    static boolean modelGone(int status, String body) {
+        String raw = body == null ? "" : body.toLowerCase(java.util.Locale.ROOT);
+        String m = (errorMessage(body) + " " + raw).toLowerCase(java.util.Locale.ROOT);
+        return m.contains("model not exist") || m.contains("no longer available") || m.contains("model_not_found")
+                || m.contains("model not found") || m.contains("invalid model") || m.contains("unknown model")
+                || (status == 404 && m.contains("model"));
+    }
+
+    /** One inference: a model that is gone says so, so the caller can try another one. */
+    private HttpResponse<String> sendInference(String base, HttpRequest.Builder req) throws IOException, InterruptedException {
+        HttpResponse<String> resp = sendRaw(base, req);
+        if (resp.statusCode() != 200) {
+            String reason = cause(resp.statusCode(), resp.body()) + "（HTTP " + resp.statusCode() + errorDetail(resp.body()) + "）";
+            if (modelGone(resp.statusCode(), resp.body())) {
+                throw new ModelGoneException(reason);
+            }
+            throw new IOException(reason);
         }
         return resp;
     }
@@ -506,7 +583,7 @@ public class ProviderInferenceProbe {
             body.put("model", modelId);
             body.put("input", PROMPT);
             body.put("max_output_tokens", 16);
-            HttpResponse<String> resp = send(access.base(), access.authorizeBearer(HttpRequest.newBuilder(URI.create(access.base() + "/responses"))
+            HttpResponse<String> resp = sendInference(access.base(), access.authorizeBearer(HttpRequest.newBuilder(URI.create(access.base() + "/responses"))
                     .timeout(Duration.ofSeconds(60)).header("content-type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))));
             JsonNode u = mapper.readTree(resp.body()).path("usage");
@@ -640,7 +717,6 @@ public class ProviderInferenceProbe {
         }
     }
 
-    /** The API's own error message when the body is an Anthropic-style error, else a short raw tail. */
     /** What an HTTP failure most likely means, in words an administrator can act on. */
     static String cause(int status) {
         return switch (status) {
@@ -653,15 +729,42 @@ public class ProviderInferenceProbe {
         };
     }
 
-    private String errorDetail(String body) {
+    /**
+     * A 403 on an inference can mean the key authenticated but the account may not run the one model probed
+     * (DashScope's "Access to model denied") — a different problem with a different fix than a restricted key.
+     */
+    static String cause(int status, String body) {
+        if (status == 403 && modelDenied(body)) {
+            return "Key 已通过验证，但账号无权使用测试的模型（请在服务商控制台开通该模型，或换模型检查）";
+        }
+        return cause(status);
+    }
+
+    private static boolean modelDenied(String body) {
+        String m = errorMessage(body).toLowerCase(java.util.Locale.ROOT);
+        return m.contains("model")
+                && (m.contains("denied") || m.contains("eligible") || m.contains("access") || m.contains("permission") || m.contains("not allowed"));
+    }
+
+    /** The API's own error message: Anthropic/OpenAI wrap it in {@code error}, DashScope-style bodies carry it at the top level. */
+    static String errorDetail(String body) {
+        if (blank(body)) {
+            return "";
+        }
+        String msg = errorMessage(body);
+        return ": " + (msg.isBlank() ? tail(body) : tail(msg));
+    }
+
+    private static String errorMessage(String body) {
         if (blank(body)) {
             return "";
         }
         try {
-            String msg = mapper.readTree(body).path("error").path("message").asText("");
-            return ": " + (msg.isBlank() ? tail(body) : tail(msg));
+            JsonNode root = mapper.readTree(body);
+            String msg = root.path("error").path("message").asText("");
+            return msg.isBlank() ? root.path("message").asText("") : msg;
         } catch (IOException e) {
-            return ": " + tail(body);
+            return "";
         }
     }
 

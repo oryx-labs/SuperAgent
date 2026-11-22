@@ -3,6 +3,7 @@ package com.superagent.platform.provider;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.superagent.api.provider.ProviderModelDto;
+import com.superagent.runtime.cli.QoderCliAgentRunner;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
@@ -53,11 +54,13 @@ public class ProviderModelFetcher {
     }
 
     private final ProviderProbe probe;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final MachineCredentials machine;
+    private static final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
-    public ProviderModelFetcher(ProviderProbe probe) {
+    public ProviderModelFetcher(ProviderProbe probe, MachineCredentials machine) {
         this.probe = probe;
+        this.machine = machine;
     }
 
     /** Fetches the model list for a catalogue key; throws with a readable message on failure. */
@@ -75,6 +78,7 @@ public class ProviderModelFetcher {
             case "codebuddy" -> fetchCodeBuddy(credential);
             case "gemini" -> fetchGemini(credential);
             case "minimax" -> fetchMinimax(credential);
+            case "qoder" -> fetchQoder(credential);
             default -> throw new IOException("Model listing is not available for " + providerKey + " yet");
         };
     }
@@ -192,6 +196,93 @@ public class ProviderModelFetcher {
         return new Result(out, "MiniMax Code built-in catalogue");
     }
 
+    /**
+     * Qoder CN: the account's own model list — {@code qoderclicn --list-models}. The CLI exits non-zero when it is
+     * not authenticated, so this doubles as the key check. The list is per subscription, so there is no built-in
+     * catalogue to fall back on.
+     */
+    private Result fetchQoder(com.superagent.core.chat.RunCredential credential) throws IOException, InterruptedException {
+        if (credential == null) {
+            throw new IOException("请先在 API Key 页配置 Key");
+        }
+        Path bin = probe.findBinary("qoderclicn").orElseThrow(() -> new IOException("qoderclicn is not installed"));
+        java.util.Map<String, String> env = qoderEnv(credential);
+        String out = run(List.of(bin.toString(), "--list-models"), 60, env);
+        return new Result(qoderModels(out), "qoderclicn --list-models");
+    }
+
+    /** The CN CLI's variables: the personal access token is the key; without it the CLI waits for a browser. */
+    static java.util.Map<String, String> qoderEnv(com.superagent.core.chat.RunCredential credential) {
+        java.util.Map<String, String> env = new java.util.HashMap<>();
+        env.put("NO_BROWSER", "1");
+        if (credential != null) {
+            env.put(QoderCliAgentRunner.PAT_ENV, credential.apiKey());
+        }
+        return env;
+    }
+
+    /**
+     * Model ids from {@code --list-models}: a JSON list when the CLI prints one, else the first cell of every
+     * table row. Tolerant on purpose — the table's shape is the CLI's own, and a row that isn't an id is skipped
+     * rather than offered as a model.
+     */
+    static List<ProviderModelDto> qoderModels(String out) {
+        List<ProviderModelDto> models = new ArrayList<>();
+        String text = out == null ? "" : out.strip();
+        if (text.startsWith("{") || text.startsWith("[")) {
+            try {
+                JsonNode root = mapper.readTree(text);
+                JsonNode list = root.isArray() ? root
+                        : root.path("data").isArray() ? root.path("data")
+                        : root.path("models").isArray() ? root.path("models") : null;
+                if (list != null) {
+                    for (JsonNode m : list) {
+                        String id = m.isTextual() ? m.asText() : m.path("id").asText("");
+                        if (!id.isBlank()) {
+                            models.add(new ProviderModelDto(id, null, List.of(), null, "none", null, false));
+                        }
+                    }
+                    return models;
+                }
+            } catch (Exception ignored) {
+                // not JSON after all: fall through to the table
+            }
+        }
+        java.util.Set<String> seen = new LinkedHashSet<>();
+        for (String line : text.split("\\R")) {
+            String id = firstCell(line.strip());
+            if (id == null || !id.matches("[A-Za-z0-9][A-Za-z0-9._:/@+-]*")) {
+                continue;
+            }
+            if (id.equalsIgnoreCase("model") || id.equalsIgnoreCase("models") || id.equalsIgnoreCase("模型")) {
+                continue;   // the table's header
+            }
+            if (seen.add(id)) {
+                models.add(new ProviderModelDto(id, null, List.of(), null, "none", null, false));
+            }
+        }
+        return models;
+    }
+
+    /** The first cell of a table row: box-drawing borders, pipes or runs of spaces separate the columns. */
+    private static String firstCell(String line) {
+        if (line.isEmpty() || line.chars().anyMatch(c -> c == '─' || c == '━' || c == '┌' || c == '└' || c == '├')) {
+            return null;   // a border row
+        }
+        String first = null;
+        for (String cell : line.split("\\|")) {
+            String c = cell.strip();
+            if (!c.isEmpty() && !c.equals("-") && !c.equals("—")) {
+                first = c;
+                break;
+            }
+        }
+        if (first == null) {
+            first = line.strip().split("\\s{2,}", 2)[0].strip();   // columns separated by spaces
+        }
+        return first.isEmpty() ? null : first;
+    }
+
     // --- the vendors reached by key: their OpenAI-style model list ---
 
     private Result fetchVendor(String providerKey, com.superagent.core.chat.RunCredential credential)
@@ -280,6 +371,13 @@ public class ProviderModelFetcher {
             access.get().authorize(req);
             HttpResponse<String> resp = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
+                // Many relays don't serve a model list at all. The model Claude Code itself is configured to
+                // run works by definition, so offer that one instead of leaving the provider with no models.
+                Result fallback = cliModelFallback(cliEfforts,
+                        "端点没有模型列表（GET /v1/models 返回 HTTP " + resp.statusCode() + "）");
+                if (fallback != null) {
+                    return fallback;
+                }
                 throw new IOException("GET /v1/models returned HTTP " + resp.statusCode());
             }
             JsonNode root = mapper.readTree(resp.body());
@@ -311,7 +409,27 @@ public class ProviderModelFetcher {
             afterId = root.get("last_id").asText();
         }
         out.sort(Comparator.comparing((ProviderModelDto m) -> !m.nativeModel()).thenComparing(ProviderModelDto::id));
+        if (out.isEmpty()) {
+            Result fallback = cliModelFallback(cliEfforts, "端点的模型列表是空的");
+            if (fallback != null) {
+                return fallback;
+            }
+        }
         return new Result(out, viaGateway ? "GET /v1/models (ANTHROPIC_BASE_URL gateway)" : "GET /v1/models");
+    }
+
+    /**
+     * The model Claude Code is configured to run, as the one model the endpoint is known to serve. Null when
+     * nothing names a model — then the provider really has no models to offer.
+     */
+    private Result cliModelFallback(List<String> cliEfforts, String why) {
+        String model = machine.claudeModel();
+        if (model == null) {
+            return null;
+        }
+        ProviderModelDto dto = new ProviderModelDto(model, model, cliEfforts, null,
+                cliEfforts.isEmpty() ? "none" : "cli", null, false);
+        return new Result(List.of(dto), "CLI 配置的模型 " + model + "（" + why + "）");
     }
 
     private static List<String> effortsFromCapabilities(JsonNode effort) {
@@ -356,24 +474,40 @@ public class ProviderModelFetcher {
      * because a large output (codex's catalogue is ~600KB) would otherwise fill the pipe and hang.
      */
     private String run(List<String> argv, int timeoutSeconds) throws IOException, InterruptedException {
-        return run(argv, timeoutSeconds, false);
+        return run(argv, timeoutSeconds, java.util.Map.of(), false);
     }
 
-    private String run(List<String> argv, int timeoutSeconds, boolean codexLogin) throws IOException, InterruptedException {
-        ProcessBuilder pb = new ProcessBuilder(argv).redirectError(ProcessBuilder.Redirect.DISCARD);
+    private String run(List<String> argv, int timeoutSeconds, boolean codexLogin)
+            throws IOException, InterruptedException {
+        return run(argv, timeoutSeconds, java.util.Map.of(), codexLogin);
+    }
+
+    /** Child environment supports CLIs such as Qoder that authenticate through their personal access token. */
+    private String run(List<String> argv, int timeoutSeconds, java.util.Map<String, String> env)
+            throws IOException, InterruptedException {
+        return run(argv, timeoutSeconds, env, false);
+    }
+
+    private String run(List<String> argv, int timeoutSeconds, java.util.Map<String, String> env, boolean codexLogin)
+            throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder(argv).redirectError(ProcessBuilder.Redirect.PIPE);
         pb.environment().put("PATH", String.join(File.pathSeparator, probe.searchPath()));
+        pb.environment().putAll(env);
         if (codexLogin) {
             pb.environment().remove("CODEX_API_KEY");
             pb.environment().remove("OPENAI_API_KEY");
         }
         Process p = pb.start();
         CompletableFuture<byte[]> stdout = CompletableFuture.supplyAsync(() -> readAll(p.getInputStream()));
+        CompletableFuture<byte[]> stderr = CompletableFuture.supplyAsync(() -> readAll(p.getErrorStream()));
         if (!p.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             p.destroyForcibly();
             throw new IOException(argv.get(0) + " timed out after " + timeoutSeconds + "s");
         }
         if (p.exitValue() != 0) {
-            throw new IOException(String.join(" ", argv.subList(1, argv.size())) + " exited with " + p.exitValue());
+            String why = new String(stderr.join(), StandardCharsets.UTF_8).strip();
+            throw new IOException(String.join(" ", argv.subList(1, argv.size())) + " exited with " + p.exitValue()
+                    + (why.isEmpty() ? "" : ": " + (why.length() > 300 ? why.substring(0, 300) : why)));
         }
         return new String(stdout.join(), StandardCharsets.UTF_8);
     }
