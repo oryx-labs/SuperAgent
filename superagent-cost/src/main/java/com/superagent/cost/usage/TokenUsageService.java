@@ -56,6 +56,13 @@ public class TokenUsageService implements UsageRecorder {
     private com.superagent.core.project.ProjectAccess projects; // null in tests / when projects aren't wired
     private com.superagent.core.project.ProjectStore projectStore;
 
+    private com.superagent.platform.provider.ProviderService providers; // null in tests: no model status to keep
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setProviders(com.superagent.platform.provider.ProviderService providers) {
+        this.providers = providers;
+    }
+
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setLinks(com.superagent.core.task.TaskLinkStore links) {
         this.links = links;
@@ -144,6 +151,10 @@ public class TokenUsageService implements UsageRecorder {
                     u.contextTokens(), usd, u.cliCostUsd()));
             if (usd != null) {
                 total = (total == null ? 0 : total) + usd;
+            }
+            // A real run's answer is the model check, for free (the background's own checks record their result).
+            if (providers != null && !SYSTEM.equals(context.user())) {
+                providers.answered(context.cli(), u.model());
             }
         }
         return total;

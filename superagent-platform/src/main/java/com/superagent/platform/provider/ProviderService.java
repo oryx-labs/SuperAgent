@@ -105,7 +105,7 @@ public class ProviderService {
                 if (!credentials.canChoose(key)) {
                     return; // its last key was removed: nothing to check models with
                 }
-                String now = credentials.current(key).id();
+                String now = endpointOf(credentials.current(key));
                 String before = seen.put(TenantContext.require() + "/" + key, now);
                 // The first event per CLI is usually startup, except a CLI's first key: its list is still empty.
                 boolean firstKey = before == null && store.findByKey(key)
@@ -119,6 +119,17 @@ public class ProviderService {
                 })));
             });
         }
+    }
+
+    /**
+     * What a run on this choice reaches: the entry, and its address and key. Editing the entry in use (a fixed
+     * address, a new token) keeps its id but can change every model's answer, so it counts as a switch.
+     */
+    private static String endpointOf(CredentialService.Choice choice) {
+        var c = choice.credential();
+        return c == null ? choice.id()
+                : choice.id() + "|" + c.baseUrl() + "|"
+                        + (c.apiKey() == null ? "" : com.superagent.core.provider.ProviderCredential.hash(c.apiKey()));
     }
 
     /**
@@ -446,6 +457,14 @@ public class ProviderService {
         String version = bin.flatMap(b -> probe.version(b, entry)).orElse(null);
         boolean auth = installed && entry.supported() && (hasKey(entry.key()) || machineLogin(entry));
         return update(p, cur -> {
+            if (entry.supported() && version != null && cur.currentVersion() != null
+                    && !version.equals(cur.currentVersion())) {
+                // Another CLI version may run what the last one couldn't: its failing models get checked now,
+                // not at their backed-off time. The ones that answered keep their result.
+                log.info("provider {}: {} -> {}, re-checking its failing models", entry.key(), cur.currentVersion(), version);
+                lookup.execute(TenantContext.wrap(() -> store.findById(cur.id())
+                        .ifPresent(x -> sweepDue(x, m -> !m.canInfer(), null, null))));
+            }
             boolean outdated = ProviderProbe.isNewer(cur.latestVersion(), version);
             String status = !installed ? NOT_INSTALLED
                     : !entry.supported() ? (outdated ? NEEDS_UPGRADE : INSTALLED)
@@ -499,8 +518,61 @@ public class ProviderService {
         }
         List<ProviderModelDto> newList = fetched;
         String newError = error;
-        return update(p, cur -> cur.withModels(
-                newList == null ? null : toJson(keepInference(newList, parseModels(cur.modelsJson()))), newError));
+        java.util.concurrent.atomic.AtomicBoolean added = new java.util.concurrent.atomic.AtomicBoolean();
+        ModelProvider saved = update(p, cur -> {
+            List<ProviderModelDto> before = parseModels(cur.modelsJson());
+            if (newList != null && !before.isEmpty()) {
+                Set<String> known = new java.util.HashSet<>();
+                before.forEach(m -> known.add(m.id()));
+                added.set(newList.stream().anyMatch(m -> !known.contains(m.id())));
+            }
+            return cur.withModels(newList == null ? null : toJson(keepInference(newList, before)), newError);
+        });
+        if (added.get()) {
+            // A model that appeared is offered to routing only once checked: now, not at the next hourly sweep.
+            // (An empty list before is a first listing, which the add / key-switch paths check in full.)
+            lookup.execute(TenantContext.wrap(() -> store.findById(p.id()).ifPresent(this::refreshInference)));
+        }
+        return saved;
+    }
+
+    /** A model that answered a real run within this long isn't written again: a turn mustn't cost a write each. */
+    private static final java.time.Duration ANSWERED_REWRITE = java.time.Duration.ofHours(1);
+    /** A real-run failure re-checks the model only if its last check is older than this: failures come in bursts. */
+    private static final java.time.Duration FAILURE_RECHECK_GAP = java.time.Duration.ofMinutes(10);
+
+    /**
+     * A real run on {@code cli} got an answer from {@code model}: that is the check, done for free, so the sweep
+     * leaves the model alone for another day. A model the list doesn't carry under that id is left as it is.
+     */
+    public void answered(String cli, String model) {
+        if (cli == null || model == null) {
+            return;
+        }
+        Instant now = Instant.now();
+        store.findByKey(cli).ifPresent(p -> {
+            boolean stale = parseModels(p.modelsJson()).stream().anyMatch(m -> m.id().equals(model)
+                    && (!m.canInfer() || m.inferCheckedAt() == null || m.inferCheckedAt().plus(ANSWERED_REWRITE).isBefore(now)));
+            if (stale) {
+                update(p, cur -> cur.withModelsJson(toJson(parseModels(cur.modelsJson()).stream()
+                        .map(m -> m.id().equals(model) ? m.checked(true, null, now) : m).toList())));
+            }
+        });
+    }
+
+    /**
+     * A real run on {@code model} failed. One failed turn may be the prompt or a timeout, not the model, so this
+     * doesn't mark it failing: it checks that model soon, and the check decides.
+     */
+    public void verifySoon(String cli, String model) {
+        if (cli == null || model == null) {
+            return;
+        }
+        lookup.execute(TenantContext.wrap(() -> store.findByKey(cli).ifPresent(p -> {
+            Instant now = Instant.now();
+            sweepDue(p, m -> m.id().equals(model)
+                    && (m.inferCheckedAt() == null || m.inferCheckedAt().plus(FAILURE_RECHECK_GAP).isBefore(now)), null, null);
+        })));
     }
 
     /**
@@ -512,21 +584,43 @@ public class ProviderService {
      * keeps its last status: one network blip must not mark every model failed (and block chat) for an hour.
      * Returns false when some checks were unreachable, so the caller can retry soon.
      */
-    /** The scheduled sweep: models checked within the last {@link #RECHECK_AFTER} keep their result. */
+    /** The scheduled sweep (a restart included): only the models {@link #dueForSweep} says are due. */
     boolean refreshInference(ModelProvider p) {
-        return refreshInference(p, RECHECK_AFTER);
+        return sweepDue(p, m -> dueForSweep(m, Instant.now()),
+                HEALTHY_RECHECK.minus(SWEEP_SLACK), FAILING_RECHECK.minus(SWEEP_SLACK));
     }
 
     /** {@code all}: every model (another endpoint, a new CLI); else as the scheduled sweep. */
     boolean refreshInference(ModelProvider p, boolean all) {
-        return refreshInference(p, all ? java.time.Duration.ZERO : RECHECK_AFTER);
+        return all ? refreshInference(p, java.time.Duration.ZERO) : refreshInference(p);
     }
 
     /** The Refresh button: a model checked in the last minute keeps its result, so clicking again re-checks nothing. */
     static final java.time.Duration MANUAL_RECHECK_AFTER = java.time.Duration.ofMinutes(1);
 
-    /** A model checked this recently isn't checked again by the scheduled sweep (a restart included). */
-    static final java.time.Duration RECHECK_AFTER = java.time.Duration.ofMinutes(50);
+    /** A model that answered is checked again this long after: every check is a paid inference. */
+    static final java.time.Duration HEALTHY_RECHECK = java.time.Duration.ofHours(24);
+    /** A failing model's first retry; each further failure doubles it, up to {@link #HEALTHY_RECHECK}. */
+    static final java.time.Duration FAILING_RECHECK = java.time.Duration.ofHours(1);
+    /** The sweep runs hourly, so a model due a little after one sweep is taken by it rather than an hour late. */
+    private static final java.time.Duration SWEEP_SLACK = java.time.Duration.ofMinutes(10);
+
+    /**
+     * Whether the scheduled sweep checks this model now: never checked, at once (a model nobody has checked isn't
+     * offered to routing); one that answered, daily; a failing one backing off 1h, 2h, 4h … to daily.
+     */
+    static boolean dueForSweep(ProviderModelDto m, Instant now) {
+        if (m.inferCheckedAt() == null || m.inferStatus() == null) {
+            return true;
+        }
+        java.time.Duration wait = HEALTHY_RECHECK;
+        if (!m.canInfer()) {
+            int doublings = Math.min(Math.max(m.inferFailures(), 1) - 1, 5); // 2^5 h > 24 h: capped below
+            java.time.Duration backoff = FAILING_RECHECK.multipliedBy(1L << doublings);
+            wait = backoff.compareTo(HEALTHY_RECHECK) < 0 ? backoff : HEALTHY_RECHECK;
+        }
+        return !m.inferCheckedAt().plus(wait.minus(SWEEP_SLACK)).isAfter(now);
+    }
     private static final int PARALLEL_CHECKS = 6;
     /** Rounds running now, by provider id, and since when: one at a time per CLI, however they're asked for. */
     private final Map<String, Instant> checking = new java.util.concurrent.ConcurrentHashMap<>();
@@ -541,6 +635,17 @@ public class ProviderService {
      * already running for this CLI isn't started twice.
      */
     boolean refreshInference(ModelProvider p, java.time.Duration freshEnough) {
+        Instant now = Instant.now();
+        return sweepDue(p, m -> m.inferCheckedAt() == null || !m.inferCheckedAt().plus(freshEnough).isAfter(now),
+                freshEnough, freshEnough);
+    }
+
+    /**
+     * {@code speechOk} / {@code speechFailing}: how long the speech engines' results on this key stay fresh; null
+     * leaves them out (a round about particular models).
+     */
+    private boolean sweepDue(ModelProvider p, java.util.function.Predicate<ProviderModelDto> due,
+                             java.time.Duration speechOk, java.time.Duration speechFailing) {
         ProviderCatalog.Entry entry = entryOf(p);
         if (!entry.supported()) {
             return true;
@@ -551,40 +656,40 @@ public class ProviderService {
             return true;
         }
         try {
-            return sweep(p, entry, freshEnough, started);
+            return sweep(p, entry, due, speechOk, speechFailing);
         } finally {
             checking.remove(p.id());
         }
     }
 
-    private boolean sweep(ModelProvider p, ProviderCatalog.Entry entry, java.time.Duration freshEnough, Instant started) {
+    private boolean sweep(ModelProvider p, ProviderCatalog.Entry entry, java.util.function.Predicate<ProviderModelDto> due,
+                          java.time.Duration speechOk, java.time.Duration speechFailing) {
         if (credentials != null && !credentials.canChoose(entry.key())) {
             return true; // no key of the company's own: nothing to test its models with (never the machine's login)
         }
-        if (speechProbes != null) {
-            speechProbes.check(entry.key(), freshEnough); // the speech models on this key: subtitle tasks use what answers
+        if (speechProbes != null && speechOk != null) {
+            speechProbes.check(entry.key(), speechOk, speechFailing); // the speech models on this key: subtitle tasks use what answers
         }
         Map<String, ProviderModelDto> results = new java.util.concurrent.ConcurrentHashMap<>();
         com.superagent.core.chat.RunCredential credential = currentCredential(entry.key());
         java.util.concurrent.atomic.AtomicInteger unreachableCount = new java.util.concurrent.atomic.AtomicInteger();
         java.util.concurrent.atomic.AtomicReference<String> lastUnreachableRef = new java.util.concurrent.atomic.AtomicReference<>();
-        List<ProviderModelDto> due = parseModels(p.modelsJson()).stream().filter(m -> m.inferCheckedAt() == null
-                || !m.inferCheckedAt().plus(freshEnough).isAfter(started)).toList();
-        if (due.isEmpty()) {
+        List<ProviderModelDto> dueModels = parseModels(p.modelsJson()).stream().filter(due).toList();
+        if (dueModels.isEmpty()) {
             return true;
         }
-        log.info("provider {}: checking {} model(s)", entry.key(), due.size());
+        log.info("provider {}: checking {} model(s)", entry.key(), dueModels.size());
         String company = TenantContext.require(); // the checks book their tokens to this company
-        List<java.util.concurrent.Callable<Void>> jobs = due.stream().<java.util.concurrent.Callable<Void>>map(m -> () -> TenantContext.callChecked(company, () -> {
+        List<java.util.concurrent.Callable<Void>> jobs = dueModels.stream().<java.util.concurrent.Callable<Void>>map(m -> () -> TenantContext.callChecked(company, () -> {
             try {
                 inferenceProbe.check(entry.key(), m.id(), credential);
-                results.put(m.id(), m.withInference(ProviderModelDto.INFER_OK, null, Instant.now()));
+                results.put(m.id(), m.checked(true, null, Instant.now()));
             } catch (ProbeUnreachableException e) {
                 unreachableCount.incrementAndGet();
                 lastUnreachableRef.set(e.getMessage());
             } catch (IOException e) {
                 String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                results.put(m.id(), m.withInference(ProviderModelDto.INFER_ERROR, reason, Instant.now()));
+                results.put(m.id(), m.checked(false, reason, Instant.now()));
             }
             return null;
         })).toList();
@@ -647,7 +752,7 @@ public class ProviderService {
         previous.forEach(m -> byId.put(m.id(), m));
         return models.stream().map(m -> {
             ProviderModelDto old = byId.get(m.id());
-            return old == null ? m : m.withInference(old.inferStatus(), old.inferError(), old.inferCheckedAt());
+            return old == null ? m : m.withInferenceOf(old);
         }).toList();
     }
 

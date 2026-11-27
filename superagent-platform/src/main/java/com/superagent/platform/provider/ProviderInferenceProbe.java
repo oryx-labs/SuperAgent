@@ -42,7 +42,8 @@ import com.superagent.core.settings.SystemSettingStore;
 public class ProviderInferenceProbe {
 
     // Any reply counts as success — the content is never inspected.
-    private static final String PROMPT = "你好";
+    /** Asks for one character: a CLI with no cap on the reply would otherwise answer a greeting at length. */
+    private static final String PROMPT = "只回复数字 1";
     private static final int CLI_TIMEOUT_SECONDS = 90;
 
     private final ProviderProbe probe;
@@ -391,8 +392,10 @@ public class ProviderInferenceProbe {
     }
 
     /**
-     * Qoder CN: the personal access token is the key. {@code --list-models} proves it — the CLI exits non-zero when
-     * it is not authenticated — and costs no quota; a model check is one short {@code -p} turn.
+     * Qoder CN: {@code --list-models} is the whole check, and costs no quota. It proves the token (the CLI exits
+     * non-zero when it isn't accepted), and the list is the account's own subscription, so a model on it is one the
+     * account may run. A real turn per model would be a full agent call — the CLI's whole system prompt and tools —
+     * every time, for nothing the list doesn't already say.
      */
     private com.superagent.core.usage.TokenUsage checkQoder(String modelId, RunCredential credential)
             throws IOException, InterruptedException {
@@ -400,43 +403,16 @@ public class ProviderInferenceProbe {
             throw new IOException("还没有配置 API Key");
         }
         Path bin = probe.findBinary("qoderclicn").orElseThrow(() -> new IOException("qoderclicn is not installed"));
-        java.util.Map<String, String> env = ProviderModelFetcher.qoderEnv(credential);
+        String out;
         try {
-            run(List.of(bin.toString(), "--list-models"), null, env);   // the token: a non-zero exit means it is not accepted
+            out = run(List.of(bin.toString(), "--list-models"), null, ProviderModelFetcher.qoderEnv(credential));
         } catch (IOException e) {
             throw ProviderModelFetcher.qoderFailure(e);
         }
-        if (modelId == null) {
-            return null;
+        if (modelId != null && ProviderModelFetcher.qoderModels(out).stream().noneMatch(m -> m.id().equals(modelId))) {
+            throw new IOException("这个令牌的账号不能用 " + modelId + "（不在 Qoder 返回的模型列表里）");
         }
-        String out = run(List.of(bin.toString(), "-p", "--output-format", "json", "--model", modelId, PROMPT), null, env);
-        try {
-            JsonNode root = mapper.readTree(out);
-            if (!root.isObject()) {
-                JsonNode last = null;
-                for (String line : out.split("\\R")) {
-                    if (line.strip().startsWith("{")) {
-                        last = mapper.readTree(line);
-                    }
-                }
-                root = last == null ? root : last;
-            }
-            if (root.path("is_error").asBoolean(false)) {
-                throw new IOException(tail(root.path("result").asText("qoder reported an error")));
-            }
-            JsonNode u = root.path("usage");
-            if (u.isObject()) {
-                return new com.superagent.core.usage.TokenUsage(modelId, u.path("input_tokens").asLong(0),
-                        u.path("cache_read_input_tokens").asLong(0), u.path("cache_creation_input_tokens").asLong(0),
-                        0, u.path("output_tokens").asLong(0), 0, null);
-            }
-        } catch (IOException e) {
-            if (e.getMessage() != null && e.getMessage().contains("qoder reported")) {
-                throw e;
-            }
-            // non-JSON success still counts: the process exited 0
-        }
-        return new com.superagent.core.usage.TokenUsage(modelId, 0, 0, 0, 0, 0, 0, null);
+        return null;
     }
 
     // --- claude ---

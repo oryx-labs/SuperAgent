@@ -232,6 +232,7 @@ public class ModelPriceService implements ModelRouter {
         failedUntil.put(failureKey(model), Instant.now().plus(COOL_DOWN));
         failedWhy.put(failureKey(model), error == null ? "" : error.length() > 300 ? error.substring(0, 300) + "…" : error);
         log.warn("model {} failed, passed over for {} min: {}", model, COOL_DOWN.toMinutes(), error);
+        providers.cliFor(model).ifPresent(cli -> providers.verifySoon(cli, model)); // the check decides whether it's down
     }
 
     private static String failureKey(String model) {

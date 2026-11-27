@@ -40,6 +40,11 @@ public class SpeechProbes {
 
     /** Probes the engines on {@code providerKey}'s key (and key-less ones) unless their results are fresh enough. */
     public void check(String providerKey, Duration freshEnough) {
+        check(providerKey, freshEnough, freshEnough);
+    }
+
+    /** As {@link #check(String, Duration)}, an engine whose models answered staying fresh longer than a failing one. */
+    public void check(String providerKey, Duration okFreshFor, Duration failingFreshFor) {
         List<Result> saved = results();
         Instant now = Instant.now();
         List<Result> out = new ArrayList<>(saved);
@@ -49,7 +54,7 @@ public class SpeechProbes {
                 continue;
             }
             boolean fresh = saved.stream().anyMatch(r -> r.engine().equals(e.id())
-                    && r.checkedAt() != null && r.checkedAt().plus(freshEnough).isAfter(now));
+                    && r.checkedAt() != null && r.checkedAt().plus(r.ok() ? okFreshFor : failingFreshFor).isAfter(now));
             if (fresh) {
                 continue;
             }

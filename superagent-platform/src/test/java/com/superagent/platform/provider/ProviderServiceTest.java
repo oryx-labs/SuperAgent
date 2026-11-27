@@ -24,6 +24,31 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ProviderServiceTest {
 
+    @Test
+    void theSweepChecksAWorkingModelDailyAndBacksOffAFailingOne() {
+        java.time.Instant t = java.time.Instant.parse("2026-11-27T00:00:00Z");
+        ProviderModelDto fresh = new ProviderModelDto("m", "m", List.of(), null, "none", null, true);
+        assertThat(ProviderService.dueForSweep(fresh, t)).isTrue();               // never checked: at once
+
+        ProviderModelDto ok = fresh.checked(true, null, t);
+        assertThat(ProviderService.dueForSweep(ok, t.plus(java.time.Duration.ofHours(12)))).isFalse();
+        assertThat(ProviderService.dueForSweep(ok, t.plus(java.time.Duration.ofHours(24)))).isTrue();
+
+        ProviderModelDto failed = fresh.checked(false, "boom", t);                  // 1st failure: an hour
+        assertThat(ProviderService.dueForSweep(failed, t.plus(java.time.Duration.ofHours(1)))).isTrue();
+        ProviderModelDto thrice = failed.checked(false, "boom", t).checked(false, "boom", t);   // 3rd: four hours
+        assertThat(thrice.inferFailures()).isEqualTo(3);
+        assertThat(ProviderService.dueForSweep(thrice, t.plus(java.time.Duration.ofHours(2)))).isFalse();
+        assertThat(ProviderService.dueForSweep(thrice, t.plus(java.time.Duration.ofHours(4)))).isTrue();
+        ProviderModelDto many = fresh;
+        for (int i = 0; i < 20; i++) {
+            many = many.checked(false, "boom", t);
+        }
+        assertThat(ProviderService.dueForSweep(many, t.plus(java.time.Duration.ofHours(24)))).isTrue();   // capped at a day
+
+        assertThat(thrice.checked(true, null, t).inferFailures()).isZero();       // one success clears the count
+    }
+
     @org.junit.jupiter.api.BeforeEach
     void inCompany() {
         com.superagent.core.tenant.TenantContext.set("acme"); // work handed to other threads carries the company
@@ -272,6 +297,41 @@ class ProviderServiceTest {
         int calls = inference.calls;
         assertThat(service.refreshInference(store.findById(id).orElseThrow())).isTrue();
         assertThat(inference.calls).isEqualTo(calls);
+    }
+
+    @Test
+    void realRunsAndNewModelsDecideChecksInsteadOfTheClock() {
+        InMemoryStore store = new InMemoryStore();
+        FakeFetcher fetcher = new FakeFetcher();
+        fetcher.models = List.of(new ProviderModelDto("claude-a", null, List.of(), null, "none", null, true));
+        FakeInference inference = new FakeInference();
+        inference.failing.add("claude-a");
+        ProviderService service = service(store, new FakeProbe(true, true), fetcher, inference);
+        String id = service.add("claude").id();
+        service.refreshModelsNow(id);
+        idle(service, id);
+        assertThat(service.canInfer("claude", "claude-a")).isFalse();
+
+        // A real run that got an answer is the check: the model can run again, without a probe.
+        int calls = inference.calls;
+        service.answered("claude", "claude-a");
+        assertThat(service.canInfer("claude", "claude-a")).isTrue();
+        assertThat(inference.calls).isEqualTo(calls);
+
+        // A failed real run doesn't mark it down by itself; it checks the model, and a model checked moments ago
+        // isn't checked again (failures come in bursts).
+        service.verifySoon("claude", "claude-a");
+        idle(service, id);
+        assertThat(inference.calls).isEqualTo(calls);
+        assertThat(service.canInfer("claude", "claude-a")).isTrue();
+
+        // A model that appears on the list is checked right away, the others are left alone.
+        fetcher.models = List.of(new ProviderModelDto("claude-a", null, List.of(), null, "none", null, true),
+                new ProviderModelDto("claude-b", null, List.of(), null, "none", null, true));
+        service.refreshModelsNow(id);
+        idle(service, id);
+        assertThat(service.canInfer("claude", "claude-b")).isTrue();
+        assertThat(inference.calls).isEqualTo(calls + 1);
     }
 
     @Test
